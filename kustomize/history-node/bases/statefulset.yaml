@@ -1,0 +1,59 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: l2geth-history
+spec:
+  replicas: 1
+  serviceName: l2geth-history
+  template:
+    spec:
+      containers:
+      - name: l2geth
+        command:
+          - geth
+          - --datadir=$(DATADIR)
+          - --password=$(DATADIR)/password
+          - --allow-insecure-unlock
+          - --unlock=$(BLOCK_SIGNER_ADDRESS)
+        envFrom:
+          - configMapRef:
+              name: l2geth-history
+        image: ethereumoptimism/l2geth
+        livenessProbe:
+          initialDelaySeconds: 120
+          tcpSocket:
+            port: rpc
+        ports:
+          - containerPort: 8545
+            name: rpc
+            protocol: TCP
+        readinessProbe:
+          initialDelaySeconds: 120
+          tcpSocket:
+            port: rpc
+        resources:
+          limits:
+            cpu: "2"
+            memory: 6Gi
+          requests:
+            cpu: "1"
+            memory: 3Gi
+        volumeMounts:
+          - mountPath: /geth
+            name: l2geth-history-data
+      volumes:
+        - name: l2geth-history-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l2geth-history
+spec:
+  type: NodePort
+  ports:
+    - name: rpc
+      port: 8545
+      protocol: TCP
+      targetPort: 8545

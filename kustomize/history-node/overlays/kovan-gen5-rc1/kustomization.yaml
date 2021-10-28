@@ -1,0 +1,31 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kovan-gen5-rc1
+commonLabels:
+  app: l2geth-history
+  network: kovan
+
+bases:
+  - ../../bases
+
+resources:
+  - ./ingress.yaml
+
+images:
+  - name: ethereumoptimism/l2geth
+    newName: ethereumoptimism/l2geth
+    newTag: prerelease-0.5.0-rc-1-7c05692
+
+configMapGenerator:
+  - name: l2geth-history
+    envs:
+      - ./kovan-gen5-rc1.env
+
+patches:
+  - path: ./l2geth-volume.yaml
+    target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: l2geth-history

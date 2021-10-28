@@ -1,0 +1,6 @@
+- op: replace
+  path: /spec/template/spec/volumes/0
+  value:
+    name: l2geth-history-data
+    gcePersistentDisk:
+      pdName: kovan-end-regenesis-5-rc1-2021-10-27
