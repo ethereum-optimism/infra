@@ -11,15 +11,15 @@ commonLabels:
 bases:
   - ../../bases
 
-# resources:
-#   - ./ingress.yaml
+resources:
+  - ./ingress.yaml
 
-# images:
-#   - name: ethereumoptimism/l2geth
-#     newName: ethereumoptimism/l2geth
-#     newTag: 0.4.7
+images:
+  - name: ethereumoptimism/l2geth
+    newName: ethereumoptimism/l2geth
+    newTag: 0.4.7
 
-# configMapGenerator:
-#   - name: l2geth-history
-#     envs:
-#       - ./kovan-gen4.env
+configMapGenerator:
+  - name: l2geth-history
+    envs:
+      - ./kovan-gen4.env
