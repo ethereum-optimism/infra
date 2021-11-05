@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: kovan-gen4-history
+    networking.gke.io/managed-certificates: kovan-gen4-history
+  labels:
+    generation: "4"
+    network: kovan
+  name: kovan-gen4-history
+  namespace: kovan-gen4
+spec:
+  rules:
+    - host: kovan-gen4-history.optimism.io
+      http:
+        paths:
+          - backend:
+              service:
+                name: kovan-gen4-l2geth
+                port:
+                  name: rpc
+            path: /
+            pathType: ImplementationSpecific

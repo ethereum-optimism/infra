@@ -1,0 +1,25 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kovan-gen4
+namePrefix: kovan-gen4-
+commonLabels:
+  app: l2geth
+  generation: "4"
+  network: kovan
+
+bases:
+  - ../../bases
+
+resources:
+  - ./ingress.yaml
+
+images:
+  - name: ethereumoptimism/l2geth
+    newName: ethereumoptimism/l2geth
+    newTag: 0.4.7
+
+configMapGenerator:
+  - name: l2geth-history
+    envs:
+      - ./kovan-gen4.env
