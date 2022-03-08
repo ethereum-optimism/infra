@@ -31,7 +31,7 @@ services:
       - .env
     volumes:
       - geth:/geth
-      - ./kustomize/replica/bases/configmaps/:/scripts/
+      - ../../kustomize/replica/bases/configmaps/:/scripts/
     <<: *logging
   replica-healthcheck:
     image: ethereumoptimism/replica-healthcheck:${HC_IMAGE_TAG:-latest}
@@ -40,7 +40,7 @@ services:
       - ${SHARED_ENV_PATH}/replica-healthcheck.env
       - .env
     volumes:
-      - ./kustomize/replica/bases/configmaps/:/scripts/
+      - ../../kustomize/replica/bases/configmaps/:/scripts/
     <<: *logging
 volumes:
   dtl:
