@@ -1,0 +1,40 @@
+name: Project Template
+description: High level issue for tracking a project.
+title: "Project: "
+labels: ["Project"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: High level description of project.
+      value: A breif description of what the project. Why do we have this project, what are its goals.
+    validations:
+      required: true
+  - type: markdown
+    id: dependancies & blockers
+    attributes:
+      value: | 
+        Dependancies and blockers of this project. 
+        @legal needs to sign off by 2 OCT 2023 11:00 UTC.
+        This project is blocked by issue #34 from project #25. 
+    validations:
+      required: true
+  - type: checkboxes
+    id: label-check
+    attributes:
+      label: Label Checks
+      options:
+        - label: I have added the team label for this project (CH, TH, Contributions).
+          required: true
+        - label: I have added the timeline for this project to the issue.
+          required: true
+  - type: markdown
+    id: Tasks
+    attributes:
+      value: | 
+        Tasks for this project
+        #34 Planning & scoping the project.
+        #35 Coordinating with involved teams for sign off. 
+    validations:
+      required: false
+      
