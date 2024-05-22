@@ -1,0 +1,20 @@
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: true
+github_checks:
+    annotations: false
+coverage:
+  status:
+    patch:
+      default:
+        target: auto
+        threshold: 10%
+        base: auto
+flag_management:
+  default_rules:
+    carryforward: true
+    statuses:
+      - type: project
+        target: auto
+        threshold: 10%
