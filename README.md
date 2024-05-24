@@ -1,4 +1,7 @@
-# Community Health Files
-This repository contains our default issue templates & other important community documents.
+# Optimism Infrastructure
 
-See: https://docs.github.com/en/free-pro-team@latest/github/building-a-strong-community/creating-a-default-community-health-file
+This repository is an extension of the [Optimism monorepo](https://github.com/ethereum-optimism/optimism) and contains the infrastructure that supports the Optimism ecosystem.
+
+## Components
+- op-conductor-mon: Monitors multiple op-conductor instances and provides a unified interface for reporting metrics.
+

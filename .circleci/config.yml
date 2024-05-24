@@ -1,0 +1,27 @@
+version: 2.1
+
+# this allows you to use CircleCI's dynamic configuration feature
+setup: true
+
+orbs:
+  path-filtering: circleci/path-filtering@0.1.1
+
+workflows:
+  check-updated-files:
+    jobs:
+      - path-filtering/filter:
+          name: check-updated-files
+          # 3-column, whitespace-delimited mapping. One mapping per
+          # line:
+          # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
+          mapping: |
+            op-conductor-mon/.* run-build-op-conductor-mon true
+            .circleci/.* run-all true
+            .github/.* run-all true
+
+          base-revision: main
+          # this is the path of the configuration we should trigger once
+          # path filtering and pipeline parameter value updates are
+          # complete. In this case, we are using the parent dynamic
+          # configuration itself.
+          config-path: .circleci/continue_config.yml
