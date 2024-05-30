@@ -57,7 +57,7 @@ func resolveAddr(ctx context.Context, client *kms.KeyManagementClient, keyName s
 	}
 	_, err = asn1.Unmarshal(block.Bytes, &info)
 	if err != nil {
-		return common.Address{}, fmt.Errorf("google kms public key %q pem block %q: %v", keyName, block.Type, err)
+		return common.Address{}, fmt.Errorf("google kms public key %q pem block %q: %w", keyName, block.Type, err)
 	}
 
 	return pubKeyAddr(info.Key.Bytes), nil

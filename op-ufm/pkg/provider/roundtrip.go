@@ -37,6 +37,7 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 	p.txPool.ExclusiveSend.Lock()
 	defer p.txPool.ExclusiveSend.Unlock()
 
+	// lint:ignore SA4006 txHash is set and used within tx sending loop
 	txHash := common.Hash{}
 	attempt := 0
 	nonce := uint64(0)
