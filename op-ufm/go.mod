@@ -7,7 +7,7 @@ toolchain go1.21.6
 require (
 	cloud.google.com/go/kms v1.12.1
 	github.com/BurntSushi/toml v1.3.2
-	github.com/ethereum-optimism/optimism v1.6.2-0.20240222202618-f707883038d5
+	github.com/ethereum-optimism/optimism v1.7.7-0.20240529212843-af0999ccc31d
 	github.com/ethereum/go-ethereum v1.13.15
 	github.com/gorilla/mux v1.8.0
 	github.com/pkg/errors v0.9.1
@@ -99,5 +99,3 @@ require (
 )
 
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101315.1-rc.5
-
-replace github.com/ethereum-optimism/optimism => ../.
