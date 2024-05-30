@@ -1,0 +1,10 @@
+linters-settings:
+  staticcheck:
+    checks: ["all"]
+
+issues:
+  exclude-rules:
+    - path: "pkg/provider/roundtrip.go"
+      linters:
+        - staticcheck
+      text: "SA4006"

@@ -6,6 +6,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type HealthzServer struct {
@@ -33,5 +35,8 @@ func (h *HealthzServer) Shutdown() error {
 }
 
 func (h *HealthzServer) Handle(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("OK"))
+	_, err := w.Write([]byte("OK"))
+	if err != nil {
+		log.Error("error handling HealthzServer response")
+	}
 }

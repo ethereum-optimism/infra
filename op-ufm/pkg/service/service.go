@@ -91,11 +91,15 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) Shutdown() {
 	log.Info("service shutting down")
 	if s.Config.Healthz.Enabled {
-		s.Healthz.Shutdown()
+		if err := s.Healthz.Shutdown(); err != nil {
+			log.Error("Error shutting down healthz server", err)
+		}
 		log.Info("healthz stopped")
 	}
 	if s.Config.Metrics.Enabled {
-		s.Metrics.Shutdown()
+		if err := s.Metrics.Shutdown(); err != nil {
+			log.Error("Error shutting down metrics server", err)
+		}
 		log.Info("metrics stopped")
 	}
 	for name, provider := range s.Providers {
