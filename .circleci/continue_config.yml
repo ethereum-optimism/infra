@@ -10,9 +10,6 @@ parameters:
   run-build-op-conductor-mon:
     type: boolean
     default: false
-  run-build-op-ufm:
-    type: boolean
-    default: false
   run-all:
     type: boolean
     default: false
@@ -227,11 +224,7 @@ jobs:
       - run:
           name: run lint
           command: |
-             if [ -f .golangci.yml ]; then
-              golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             else
-              golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             fi
+            golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
           working_directory: <<parameters.module>>
 
   go-test:
@@ -364,27 +357,3 @@ workflows:
             - oplabs-gcr
           requires:
             - op-conductor-mon-docker-build
-  op-ufm:
-    when:
-      or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
-    jobs:
-      - go-lint:
-          name: op-conductor-mon-lint
-          module: op-ufm
-      - go-test:
-          name: op-conductor-mon-tests
-          module: op-ufm
-      - docker-build:
-          name: op-ufm-docker-build
-          docker_file: op-ufm/Dockerfile
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: .
-      - docker-publish:
-          name: op-ufm-docker-publish
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-ufm-docker-build
