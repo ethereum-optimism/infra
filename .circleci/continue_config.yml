@@ -408,6 +408,11 @@ workflows:
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
       - docker-publish:
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
+            branches:
+              ignore: /.*/
           name: proxyd-docker-publish
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
