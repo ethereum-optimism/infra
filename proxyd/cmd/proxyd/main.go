@@ -115,6 +115,7 @@ func StartPProf(hostname string, port int) *http.Server {
 		Addr:    addr,
 	}
 
+	// nolint:errcheck
 	go srv.ListenAndServe()
 
 	return srv
