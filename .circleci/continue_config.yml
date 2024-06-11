@@ -412,7 +412,7 @@ workflows:
             branches:
               ignore: /.*/
       - docker-build:
-          name: op-ufm-docker-release
+          name: op-ufm-docker-build
           filters:
             tags:
               only: /^op-ufm\/v.*/
@@ -435,7 +435,7 @@ workflows:
           requires:
             - op-ufm-docker-build
       - docker-build:
-          name: proxyd-docker-release
+          name: proxyd-docker-build
           filters:
             tags:
               only: /^proxyd\/v.*/
