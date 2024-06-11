@@ -442,6 +442,8 @@ workflows:
               ignore: /.*/
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: op-ufm/Dockerfile
           publish: true
           release: true
           context:
@@ -457,6 +459,8 @@ workflows:
               ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: proxyd/Dockerfile
           publish: true
           release: true
           context:
