@@ -412,6 +412,6 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           context:
-            - oplabs-gcr
+            - oplabs-gcr-release
           requires:
             - proxyd-docker-build
