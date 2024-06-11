@@ -13,6 +13,9 @@ parameters:
   run-build-op-ufm:
     type: boolean
     default: false
+  run-build-proxyd:
+    type: boolean
+    default: false
   run-all:
     type: boolean
     default: false
@@ -388,3 +391,27 @@ workflows:
             - oplabs-gcr
           requires:
             - op-ufm-docker-build
+  op-proxyd:
+    when:
+      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: proxyd-lint
+          module: proxyd
+      - go-test:
+          name: proxyd-tests
+          module: proxyd
+      - docker-build:
+          name: proxyd-docker-build
+          docker_file: proxyd/Dockerfile
+          docker_name: proxyd
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+      - docker-publish:
+          name: proxyd-docker-publish
+          docker_name: proxyd
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          context:
+            - oplabs-gcr
+          requires:
+            - proxyd-docker-build
