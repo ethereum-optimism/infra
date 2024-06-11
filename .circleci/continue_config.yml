@@ -401,8 +401,9 @@ workflows:
           docker_context: .
   release:
     when:
-      not:
-        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
+      # not:
+      #   equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
       - hold:
           type: approval
