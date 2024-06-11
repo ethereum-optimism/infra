@@ -151,7 +151,7 @@ jobs:
       - run: sudo sed -i '13 i \ \ \ \ \ \ \ \ \ \ \ \ nameservers:' /etc/netplan/50-cloud-init.yaml
       - run: sudo sed -i '14 i \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ addresses:' /etc/netplan/50-cloud-init.yaml
       - run: sudo sed -i "s/addresses:/ addresses":" [8.8.8.8, 8.8.4.4] /g" /etc/netplan/50-cloud-init.yaml
-      - run: cat /etc/netplan/50-cloud-init.yaml
+      - run: sudo cat /etc/netplan/50-cloud-init.yaml
       - run: sudo netplan apply
       - run:
           name: Publish
