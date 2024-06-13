@@ -372,10 +372,10 @@ workflows:
       or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
-          name: op-conductor-mon-lint
+          name: op-ufm-lint
           module: op-ufm
       - go-test:
-          name: op-conductor-mon-tests
+          name: op-ufm-tests
           module: op-ufm
       - docker-build:
           name: op-ufm-docker-build
