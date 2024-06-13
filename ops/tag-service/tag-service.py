@@ -10,7 +10,7 @@ import semver
 
 # Minimum version numbers for packages migrating from legacy versioning.
 MIN_VERSIONS = {
-    'proxyd': '3.16.0',
+    'proxyd': '4.6.1',
 }
 
 VALID_BUMPS = ('major', 'minor', 'patch', 'prerelease', 'finalize-prerelease')
