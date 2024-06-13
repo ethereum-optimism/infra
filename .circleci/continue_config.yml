@@ -13,6 +13,9 @@ parameters:
   run-build-op-ufm:
     type: boolean
     default: false
+  run-build-proxyd:
+    type: boolean
+    default: false
   run-all:
     type: boolean
     default: false
@@ -148,7 +151,7 @@ jobs:
       - run: sudo sed -i '13 i \ \ \ \ \ \ \ \ \ \ \ \ nameservers:' /etc/netplan/50-cloud-init.yaml
       - run: sudo sed -i '14 i \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ addresses:' /etc/netplan/50-cloud-init.yaml
       - run: sudo sed -i "s/addresses:/ addresses":" [8.8.8.8, 8.8.4.4] /g" /etc/netplan/50-cloud-init.yaml
-      - run: cat /etc/netplan/50-cloud-init.yaml
+      - run: sudo cat /etc/netplan/50-cloud-init.yaml
       - run: sudo netplan apply
       - run:
           name: Publish
@@ -380,11 +383,82 @@ workflows:
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  op-proxyd:
+    when:
+      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: proxyd-lint
+          module: proxyd
+      - go-test:
+          name: proxyd-tests
+          module: proxyd
+      - docker-build:
+          name: proxyd-docker-build
+          docker_file: proxyd/Dockerfile
+          docker_name: proxyd
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  release:
+    when:
+      not:
+        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+    jobs:
+      - hold:
+          type: approval
+          filters:
+            tags:
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+            branches:
+              ignore: /.*/
+      - docker-build:
+          name: op-ufm-docker-build
+          filters:
+            tags:
+              only: /^op-ufm\/v.*/
+            branches:
+              ignore: /.*/
+          docker_name: op-ufm
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: op-ufm/Dockerfile
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
       - docker-publish:
           name: op-ufm-docker-publish
           docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_tags: <<pipeline.git.revision>>
           context:
             - oplabs-gcr
           requires:
             - op-ufm-docker-build
+      - docker-build:
+          name: proxyd-docker-build
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
+            branches:
+              ignore: /.*/
+          docker_name: proxyd
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: proxyd/Dockerfile
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
+      - docker-publish:
+          name: proxyd-docker-release
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
+            branches:
+              ignore: /.*/
+          docker_name: proxyd
+          docker_tags: <<pipeline.git.revision>>
+          context:
+            - oplabs-gcr-release
+          requires:
+            - proxyd-docker-build
