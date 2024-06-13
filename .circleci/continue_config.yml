@@ -359,23 +359,15 @@ workflows:
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
-      - docker-publish:
-          name: op-conductor-mon-docker-publish
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-conductor-mon-docker-build
   op-ufm:
     when:
       or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
-          name: op-conductor-mon-lint
+          name: op-ufm-lint
           module: op-ufm
       - go-test:
-          name: op-conductor-mon-tests
+          name: op-ufm-tests
           module: op-ufm
       - docker-build:
           name: op-ufm-docker-build
@@ -434,6 +426,7 @@ workflows:
             - oplabs-gcr
           requires:
             - op-ufm-docker-build
+
       - docker-build:
           name: proxyd-docker-build
           filters:
@@ -462,3 +455,18 @@ workflows:
             - oplabs-gcr-release
           requires:
             - proxyd-docker-build
+
+      - docker-build:
+          name: op-conductor-mon-docker-build
+          docker_file: op-conductor-mon/Dockerfile
+          docker_name: op-conductor-mon
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+      - docker-publish:
+          name: op-conductor-mon-docker-publish
+          docker_name: op-conductor-mon
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          context:
+            - oplabs-gcr
+          requires:
+            - op-conductor-mon-docker-build
