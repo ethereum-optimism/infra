@@ -17,6 +17,7 @@ workflows:
           mapping: |
             op-conductor-mon/.* run-build-op-conductor-mon true
             op-ufm/.* run-build-op-ufm true
+            proxyd/.* run-build-proxyd true
             .circleci/.* run-all true
             .github/.* run-all true
 
