@@ -402,9 +402,9 @@ workflows:
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   release:
-    # when:
-    #   not:
-    #     equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+    when:
+      not:
+        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
     jobs:
       - hold:
           type: approval
@@ -424,8 +424,6 @@ workflows:
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
           docker_file: op-ufm/Dockerfile
-          context:
-            - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
@@ -448,8 +446,6 @@ workflows:
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
           docker_file: proxyd/Dockerfile
-          context:
-            - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
