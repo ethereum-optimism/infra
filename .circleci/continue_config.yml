@@ -468,6 +468,11 @@ workflows:
 
       - docker-build:
           name: op-conductor-mon-docker-build
+          filters:
+            tags:
+              only: /^op-conductor-mon\/v.*/
+            branches:
+              ignore: /.*/
           docker_file: op-conductor-mon/Dockerfile
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
