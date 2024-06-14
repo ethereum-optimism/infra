@@ -62,6 +62,7 @@ commands:
             # Configure ADC
             echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
 
+
 jobs:
   docker-build:
     environment:
@@ -162,7 +163,7 @@ jobs:
 
       - when:
           condition:
-            equal: ["main", <<pipeline.git.branch>>]
+            equal: ['main', <<pipeline.git.branch>>]
           steps:
             - gcp-oidc-authenticate:
                 service_account_email: GCP_SERVICE_ATTESTOR_ACCOUNT_EMAIL
@@ -182,6 +183,7 @@ jobs:
                       --image-path="$IMAGE_PATH"\
                       --signer-logging-level="INFO"\
                       --attestor-key-id="//cloudkms.googleapis.com/v1/projects/$ATTESTOR_PROJECT_NAME/locations/global/keyRings/$ATTESTOR_NAME-key-ring/cryptoKeys/$ATTESTOR_NAME-key/cryptoKeyVersions/1"
+
 
   docker-tag-op-stack-release:
     parameters:
@@ -228,11 +230,11 @@ jobs:
       - run:
           name: run lint
           command: |
-            if [ -f .golangci.yml ]; then
-             golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-            else
-             golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-            fi
+             if [ -f .golangci.yml ]; then
+              golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
+             else
+              golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
+             fi
           working_directory: <<parameters.module>>
 
   go-test:
@@ -343,11 +345,7 @@ jobs:
 workflows:
   op-conductor-mon:
     when:
-      or:
-        [
-          << pipeline.parameters.run-build-op-conductor-mon >>,
-          << pipeline.parameters.run-all >>,
-        ]
+      or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-conductor-mon-lint
@@ -363,11 +361,7 @@ workflows:
           docker_context: .
   op-ufm:
     when:
-      or:
-        [
-          << pipeline.parameters.run-build-op-ufm >>,
-          << pipeline.parameters.run-all >>,
-        ]
+      or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-ufm-lint
@@ -383,11 +377,7 @@ workflows:
           docker_context: .
   op-proxyd:
     when:
-      or:
-        [
-          << pipeline.parameters.run-build-proxyd >>,
-          << pipeline.parameters.run-all >>,
-        ]
+      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: proxyd-lint
@@ -404,7 +394,7 @@ workflows:
   release:
     when:
       not:
-        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
       - hold:
           type: approval
@@ -424,6 +414,8 @@ workflows:
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
           docker_file: op-ufm/Dockerfile
+          context:
+            - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
@@ -437,24 +429,26 @@ workflows:
 
       - docker-build:
           name: proxyd-docker-build
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
+          # filters:
+          #   tags:
+          #     only: /^proxyd\/v.*/
+          #   branches:
+          #     ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
           docker_file: proxyd/Dockerfile
+          context:
+            - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
           name: proxyd-docker-release
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
+          # filters:
+          #   tags:
+          #     only: /^proxyd\/v.*/
+          #   branches:
+          #     ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           context:
