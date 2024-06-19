@@ -868,7 +868,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	backendResp := <-ch
 
 	if backendResp.error != nil {
-		log.Error("error serving write request with fanouts enabled",
+		log.Error("error serving requests",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"err", backendResp.error,
@@ -878,7 +878,15 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 
 	// re-apply overridden responses
-	res := backendResp.RPCRes
+	log.Trace("successfuly served request overriding responses",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+	)
+	res := OverrideResponses(backendResp.RPCRes, overriddenResponses)
+	return res, backendResp.ServedBy, backendResp.error
+}
+
+func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*RPCRes {
 	for _, ov := range overriddenResponses {
 		if len(res) > 0 {
 			// insert ov.res at position ov.index
@@ -887,7 +895,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			res = append(res, ov.res)
 		}
 	}
-	return res, backendResp.ServedBy, backendResp.error
+	return res
 }
 
 type BackendGroupRPCResponse struct {
