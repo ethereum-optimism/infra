@@ -839,8 +839,20 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	rpcRequestsTotal.Inc()
 	// Response is 1 to 1
-	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+	ch := make(chan BackendGroupRPCResponse)
+	go func() {
+		defer close(ch)
+		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+		ch <- *backendResp
+	}()
+
+	backendResp := <-ch
 	if backendResp.error != nil {
+		log.Error("error serving write request with fanouts enabled",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"err", backendResp.error,
+		)
 		// return nil, servedBy, err
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
