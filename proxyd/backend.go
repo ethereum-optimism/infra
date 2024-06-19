@@ -820,33 +820,53 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		rpcReqs = rewrittenReqs
 	}
 
-	// // Extract Write Requests and forward to fanout backends
-	writeRpcs := []*RPCReq{}
-	// writeRes := []*RPCRes{}
+	// Forward to fanout backends, Note: Further optimization for forward to all
+	// and cancel once a valid response is returned from a go routine
 	if len(bg.FanoutBackends) > 0 && containsWriteTx(rpcReqs) {
-		// TODO: Check if this is proper way for batch requests, also just override servedByForFannout for now
-		// _, servedByWrite, err := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
-		backendResp := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
-		if backendResp.error != nil {
-			log.Error("error serving write request with fanouts enabled",
-				"req_id", GetReqID(ctx),
-				"auth", GetAuthCtx(ctx),
-				"err", backendResp.error,
-			)
+		var wg sync.WaitGroup
+		fanoutChan := make(chan BackendGroupRPCResponse)
+		for _, backend := range bg.Fanouts() {
+			wg.Add(1)
+			go func(backend *Backend) {
+				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, isBatch)
+				fanoutChan <- *backendResp
+			}(backend)
 		}
-		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
+		// Separately wait in goroutine so we do not block reading from fanoutChan
+		go func() {
+			wg.Wait()
+			close(fanoutChan)
+		}()
+
+		// Read from the channel as values come in
+		for resp := range fanoutChan {
+			if resp.error != nil {
+				log.Error("error serving write request with fanouts enabled",
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"err", resp.error,
+				)
+			} else {
+				log.Info("Received response from fanout chan",
+					"resp", len(resp.RPCRes),
+					"servedBy", resp.ServedBy,
+				)
+				// If valid response return here
+				// return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
+			}
+		}
 	}
 
 	rpcRequestsTotal.Inc()
-	// Response is 1 to 1
+
 	ch := make(chan BackendGroupRPCResponse)
 	go func() {
 		defer close(ch)
 		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
 		ch <- *backendResp
 	}()
-
 	backendResp := <-ch
+
 	if backendResp.error != nil {
 		log.Error("error serving write request with fanouts enabled",
 			"req_id", GetReqID(ctx),
@@ -869,50 +889,6 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 	return res, backendResp.ServedBy, backendResp.error
 }
-
-// func (bg *BackendGroup) RewriteContext(rpcReqs []*RPCReq, rewrittenReqs []*RPCReq, overriddenResponses []*indexedReqRes) {
-// 	// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
-// 	// serving traffic from any backend that agrees in the consensus group
-//
-// 	// We also rewrite block tags to enforce compliance with consensus
-// 	rctx := RewriteContext{
-// 		latest:        bg.Consensus.GetLatestBlockNumber(),
-// 		safe:          bg.Consensus.GetSafeBlockNumber(),
-// 		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-// 		maxBlockRange: bg.Consensus.maxBlockRange,
-// 	}
-//
-// 	for i, req := range rpcReqs {
-// 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
-// 		result, err := RewriteTags(rctx, req, &res)
-// 		switch result {
-// 		case RewriteOverrideError:
-// 			overriddenResponses = append(overriddenResponses, &indexedReqRes{
-// 				index: i,
-// 				req:   req,
-// 				res:   &res,
-// 			})
-// 			if errors.Is(err, ErrRewriteBlockOutOfRange) {
-// 				res.Error = ErrBlockOutOfRange
-// 			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
-// 				res.Error = ErrInvalidParams(
-// 					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
-// 				)
-// 			} else {
-// 				res.Error = ErrParseErr
-// 			}
-// 		case RewriteOverrideResponse:
-// 			overriddenResponses = append(overriddenResponses, &indexedReqRes{
-// 				index: i,
-// 				req:   req,
-// 				res:   &res,
-// 			})
-// 		case RewriteOverrideRequest, RewriteNone:
-// 			rewrittenReqs = append(rewrittenReqs, req)
-// 		}
-// 	}
-// 	rpcReqs = rewrittenReqs
-// }
 
 type BackendGroupRPCResponse struct {
 	RPCRes   []*RPCRes
