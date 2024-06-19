@@ -795,68 +795,70 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 
 	rpcRequestsTotal.Inc()
+	rpcRes, servedBy, err := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch, overriddenResponses)
+	return rpcRes, servedBy, err
 
-	for _, back := range backends {
-		res := make([]*RPCRes, 0)
-		var err error
-
-		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
-
-		if len(rpcReqs) > 0 {
-			res, err = back.Forward(ctx, rpcReqs, isBatch)
-			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
-				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
-				errors.Is(err, ErrMethodNotWhitelisted) {
-				return nil, "", err
-			}
-			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return nil, servedBy, err
-			}
-			if errors.Is(err, ErrBackendOffline) {
-				log.Warn(
-					"skipping offline backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if errors.Is(err, ErrBackendOverCapacity) {
-				log.Warn(
-					"skipping over-capacity backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if err != nil {
-				log.Error(
-					"error forwarding request to backend",
-					"name", back.Name,
-					"req_id", GetReqID(ctx),
-					"auth", GetAuthCtx(ctx),
-					"err", err,
-				)
-				continue
-			}
-		}
-
-		// re-apply overridden responses
-		for _, ov := range overriddenResponses {
-			if len(res) > 0 {
-				// insert ov.res at position ov.index
-				res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)
-			} else {
-				res = append(res, ov.res)
-			}
-		}
-
-		return res, servedBy, nil
-	}
-
-	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
-	return nil, "", ErrNoBackends
+	// for _, back := range backends {
+	// 	res := make([]*RPCRes, 0)
+	// 	var err error
+	//
+	// 	servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
+	//
+	// 	if len(rpcReqs) > 0 {
+	// 		res, err = back.Forward(ctx, rpcReqs, isBatch)
+	// 		if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
+	// 			errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+	// 			errors.Is(err, ErrMethodNotWhitelisted) {
+	// 			return nil, "", err
+	// 		}
+	// 		if errors.Is(err, ErrBackendResponseTooLarge) {
+	// 			return nil, servedBy, err
+	// 		}
+	// 		if errors.Is(err, ErrBackendOffline) {
+	// 			log.Warn(
+	// 				"skipping offline backend",
+	// 				"name", back.Name,
+	// 				"auth", GetAuthCtx(ctx),
+	// 				"req_id", GetReqID(ctx),
+	// 			)
+	// 			continue
+	// 		}
+	// 		if errors.Is(err, ErrBackendOverCapacity) {
+	// 			log.Warn(
+	// 				"skipping over-capacity backend",
+	// 				"name", back.Name,
+	// 				"auth", GetAuthCtx(ctx),
+	// 				"req_id", GetReqID(ctx),
+	// 			)
+	// 			continue
+	// 		}
+	// 		if err != nil {
+	// 			log.Error(
+	// 				"error forwarding request to backend",
+	// 				"name", back.Name,
+	// 				"req_id", GetReqID(ctx),
+	// 				"auth", GetAuthCtx(ctx),
+	// 				"err", err,
+	// 			)
+	// 			continue
+	// 		}
+	// 	}
+	//
+	// 	// re-apply overridden responses
+	// 	for _, ov := range overriddenResponses {
+	// 		if len(res) > 0 {
+	// 			// insert ov.res at position ov.index
+	// 			res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)
+	// 		} else {
+	// 			res = append(res, ov.res)
+	// 		}
+	// 	}
+	//
+	// 	return res, servedBy, nil
+	// }
+	//
+	// RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+	// return nil, "", ErrNoBackends
 }
 
 func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet) (*WSProxier, error) {
@@ -1280,4 +1282,75 @@ func (b *Backend) ClearSlidingWindows() {
 func stripXFF(xff string) string {
 	ipList := strings.Split(xff, ",")
 	return strings.TrimSpace(ipList[0])
+}
+
+func (bg *BackendGroup) ForwardRequestToBackendGroup(
+	rpcReqs []*RPCReq,
+	backends []*Backend,
+	ctx context.Context,
+	isBatch bool,
+	overriddenResponses []*indexedReqRes,
+) ([]*RPCRes, string, error) {
+	for _, back := range backends {
+		res := make([]*RPCRes, 0)
+		var err error
+
+		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
+
+		if len(rpcReqs) > 0 {
+			res, err = back.Forward(ctx, rpcReqs, isBatch)
+			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
+				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+				errors.Is(err, ErrMethodNotWhitelisted) {
+				return nil, "", err
+			}
+			if errors.Is(err, ErrBackendResponseTooLarge) {
+				return nil, servedBy, err
+			}
+			if errors.Is(err, ErrBackendOffline) {
+				log.Warn(
+					"skipping offline backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if errors.Is(err, ErrBackendOverCapacity) {
+				log.Warn(
+					"skipping over-capacity backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if err != nil {
+				log.Error(
+					"error forwarding request to backend",
+					"name", back.Name,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"err", err,
+				)
+				continue
+			}
+		}
+
+		// re-apply overridden responses
+		for _, ov := range overriddenResponses {
+			if len(res) > 0 {
+				// insert ov.res at position ov.index
+				res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)
+			} else {
+				res = append(res, ov.res)
+			}
+		}
+
+		return res, servedBy, nil
+	}
+
+	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+	return nil, "", ErrNoBackends
+
 }
