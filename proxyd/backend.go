@@ -755,6 +755,15 @@ func removeRpcsRequest(rpcs []*RPCReq, s int) []*RPCReq {
 	return append(rpcs[:s], rpcs[s+1:]...)
 }
 
+func containsWriteTx(rpcReqs []*RPCReq) bool {
+	for _, r := range rpcReqs {
+		if r.Method == "eth_sendRawTransaction" {
+			return true
+		}
+	}
+	return false
+}
+
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
 func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
 	if len(rpcReqs) == 0 {
@@ -814,38 +823,30 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// // Extract Write Requests and forward to fanout backends
 	writeRpcs := []*RPCReq{}
 	// writeRes := []*RPCRes{}
-	if len(bg.FanoutBackends) > 0 {
-		for i, r := range rpcReqs {
-			if r.Method == "eth_sendRawTransaction" {
-				log.Trace("detected write request with fanouts enabled",
-					"req_id", r.ID,
-				)
-				// Append to a write group
-				writeRpcs = append(writeRpcs, r)
-				// Delete from other rpcs
-				rpcReqs = removeRpcsRequest(rpcReqs, i)
-			}
-		}
+	if len(bg.FanoutBackends) > 0 && containsWriteTx(rpcReqs) {
 		// TODO: Check if this is proper way for batch requests, also just override servedByForFannout for now
-		_, servedByWrite, err := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
-		if err != nil {
+		// _, servedByWrite, err := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
+		backendResp := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
+		if backendResp.error != nil {
 			log.Error("error serving write request with fanouts enabled",
 				"req_id", GetReqID(ctx),
 				"auth", GetAuthCtx(ctx),
-				"err", err,
+				"err", backendResp.error,
 			)
 		}
-		return nil, servedByWrite, err
+		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	rpcRequestsTotal.Inc()
 	// Response is 1 to 1
-	res, servedBy, err := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
-	if err != nil {
-		return nil, servedBy, err
+	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+	if backendResp.error != nil {
+		// return nil, servedBy, err
+		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	// re-apply overridden responses
+	res := backendResp.RPCRes
 	for _, ov := range overriddenResponses {
 		if len(res) > 0 {
 			// insert ov.res at position ov.index
@@ -854,7 +855,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			res = append(res, ov.res)
 		}
 	}
-	return res, servedBy, err
+	return res, backendResp.ServedBy, backendResp.error
 }
 
 // func (bg *BackendGroup) RewriteContext(rpcReqs []*RPCReq, rewrittenReqs []*RPCReq, overriddenResponses []*indexedReqRes) {
@@ -901,12 +902,18 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 // 	rpcReqs = rewrittenReqs
 // }
 
+type BackendGroupRPCResponse struct {
+	RPCRes   []*RPCRes
+	ServedBy string
+	error    error
+}
+
 func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	rpcReqs []*RPCReq,
 	backends []*Backend,
 	ctx context.Context,
 	isBatch bool,
-) ([]*RPCRes, string, error) {
+) *BackendGroupRPCResponse {
 	for _, back := range backends {
 		res := make([]*RPCRes, 0)
 		var err error
@@ -918,10 +925,18 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
 				errors.Is(err, ErrMethodNotWhitelisted) {
-				return nil, "", err
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
 			}
 			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return nil, servedBy, err
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
 			}
 			if errors.Is(err, ErrBackendOffline) {
 				log.Warn(
@@ -953,11 +968,21 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			}
 		}
 
-		return res, servedBy, nil
+		// return res, servedBy, nil
+		return &BackendGroupRPCResponse{
+			RPCRes:   res,
+			ServedBy: servedBy,
+			error:    nil,
+		}
 	}
 
 	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
-	return nil, "", ErrNoBackends
+	// return nil, "", ErrNoBackends
+	return &BackendGroupRPCResponse{
+		RPCRes:   nil,
+		ServedBy: "",
+		error:    ErrNoBackends,
+	}
 
 }
 
