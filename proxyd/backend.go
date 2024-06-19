@@ -751,6 +751,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
 
 	if bg.Consensus != nil {
+		// bg.RewriteContext(rpcReqs, rewrittenReqs, overriddenResponses)
 		// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
 		// serving traffic from any backend that agrees in the consensus group
 
@@ -794,8 +795,34 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		rpcReqs = rewrittenReqs
 	}
 
+	// // Extract Write Requests and forward to fanout backends
+	// writeRpcs := []*RPCReq{}
+	// writeRes := []*RPCRes{}
+	// if len(bg.FanoutBackends) > 0 {
+	// 	for i, r := range rpcReqs {
+	// 		if r.Method == "eth_sendRawTransaction" {
+	// 			log.Trace("detected write request with fanouts enabled",
+	// 				"req_id", r.ID,
+	// 			)
+	// 			// Append to a write group
+	// 			writeRpcs = append(writeRpcs, r)
+	// 			// Delete from other rpcs
+	// 			rpcReqs = removeRpcsRequest(rpcReqs, i)
+	// 		}
+	// 	}
+	// 	// TODO: Check if this is proper way for batch requests, also just override servedByForFannout for now
+	// 	writeRes, _, err = bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), isBatch, len(writeRpcs) > 0)
+	// 	if err != nil {
+	// 		log.Error("error serving write request with fanouts enabled",
+	// 			"req_id", GetReqID(ctx),
+	// 			"auth", GetAuthCtx(ctx),
+	// 			"err", err,
+	// 		)
+	// 	}
+	// }
+
 	rpcRequestsTotal.Inc()
-	res, servedBy, err := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch, overriddenResponses)
+	res, servedBy, err := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
 	if err != nil {
 		return nil, servedBy, err
 	}
@@ -810,6 +837,110 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		}
 	}
 	return res, servedBy, err
+}
+
+// func (bg *BackendGroup) RewriteContext(rpcReqs []*RPCReq, rewrittenReqs []*RPCReq, overriddenResponses []*indexedReqRes) {
+// 	// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
+// 	// serving traffic from any backend that agrees in the consensus group
+//
+// 	// We also rewrite block tags to enforce compliance with consensus
+// 	rctx := RewriteContext{
+// 		latest:        bg.Consensus.GetLatestBlockNumber(),
+// 		safe:          bg.Consensus.GetSafeBlockNumber(),
+// 		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
+// 		maxBlockRange: bg.Consensus.maxBlockRange,
+// 	}
+//
+// 	for i, req := range rpcReqs {
+// 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
+// 		result, err := RewriteTags(rctx, req, &res)
+// 		switch result {
+// 		case RewriteOverrideError:
+// 			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+// 				index: i,
+// 				req:   req,
+// 				res:   &res,
+// 			})
+// 			if errors.Is(err, ErrRewriteBlockOutOfRange) {
+// 				res.Error = ErrBlockOutOfRange
+// 			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
+// 				res.Error = ErrInvalidParams(
+// 					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
+// 				)
+// 			} else {
+// 				res.Error = ErrParseErr
+// 			}
+// 		case RewriteOverrideResponse:
+// 			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+// 				index: i,
+// 				req:   req,
+// 				res:   &res,
+// 			})
+// 		case RewriteOverrideRequest, RewriteNone:
+// 			rewrittenReqs = append(rewrittenReqs, req)
+// 		}
+// 	}
+// 	rpcReqs = rewrittenReqs
+// }
+
+func (bg *BackendGroup) ForwardRequestToBackendGroup(
+	rpcReqs []*RPCReq,
+	backends []*Backend,
+	ctx context.Context,
+	isBatch bool,
+) ([]*RPCRes, string, error) {
+	for _, back := range backends {
+		res := make([]*RPCRes, 0)
+		var err error
+
+		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
+
+		if len(rpcReqs) > 0 {
+			res, err = back.Forward(ctx, rpcReqs, isBatch)
+			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
+				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+				errors.Is(err, ErrMethodNotWhitelisted) {
+				return nil, "", err
+			}
+			if errors.Is(err, ErrBackendResponseTooLarge) {
+				return nil, servedBy, err
+			}
+			if errors.Is(err, ErrBackendOffline) {
+				log.Warn(
+					"skipping offline backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if errors.Is(err, ErrBackendOverCapacity) {
+				log.Warn(
+					"skipping over-capacity backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if err != nil {
+				log.Error(
+					"error forwarding request to backend",
+					"name", back.Name,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"err", err,
+				)
+				continue
+			}
+		}
+
+		return res, servedBy, nil
+	}
+
+	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+	return nil, "", ErrNoBackends
+
 }
 
 func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet) (*WSProxier, error) {
@@ -1233,65 +1364,4 @@ func (b *Backend) ClearSlidingWindows() {
 func stripXFF(xff string) string {
 	ipList := strings.Split(xff, ",")
 	return strings.TrimSpace(ipList[0])
-}
-
-func (bg *BackendGroup) ForwardRequestToBackendGroup(
-	rpcReqs []*RPCReq,
-	backends []*Backend,
-	ctx context.Context,
-	isBatch bool,
-	overriddenResponses []*indexedReqRes,
-) ([]*RPCRes, string, error) {
-	for _, back := range backends {
-		res := make([]*RPCRes, 0)
-		var err error
-
-		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
-
-		if len(rpcReqs) > 0 {
-			res, err = back.Forward(ctx, rpcReqs, isBatch)
-			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
-				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
-				errors.Is(err, ErrMethodNotWhitelisted) {
-				return nil, "", err
-			}
-			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return nil, servedBy, err
-			}
-			if errors.Is(err, ErrBackendOffline) {
-				log.Warn(
-					"skipping offline backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if errors.Is(err, ErrBackendOverCapacity) {
-				log.Warn(
-					"skipping over-capacity backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if err != nil {
-				log.Error(
-					"error forwarding request to backend",
-					"name", back.Name,
-					"req_id", GetReqID(ctx),
-					"auth", GetAuthCtx(ctx),
-					"err", err,
-				)
-				continue
-			}
-		}
-
-		return res, servedBy, nil
-	}
-
-	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
-	return nil, "", ErrNoBackends
-
 }
