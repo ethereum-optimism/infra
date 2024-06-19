@@ -624,6 +624,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		}
 	}
 
+	// NOTE: We only return 1:1 mappings, interesting
 	if len(rpcReqs) != len(rpcRes) {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
@@ -716,6 +717,7 @@ type BackendGroup struct {
 	WeightedRouting  bool
 	Consensus        *ConsensusPoller
 	FallbackBackends map[string]bool
+	FanoutBackends   map[string]bool
 }
 
 func (bg *BackendGroup) Fallbacks() []*Backend {
@@ -728,6 +730,16 @@ func (bg *BackendGroup) Fallbacks() []*Backend {
 	return fallbacks
 }
 
+func (bg *BackendGroup) Fanouts() []*Backend {
+	fanouts := []*Backend{}
+	for _, a := range bg.Backends {
+		if fallback, ok := bg.FanoutBackends[a.Name]; ok && fallback {
+			fanouts = append(fanouts, a)
+		}
+	}
+	return fanouts
+}
+
 func (bg *BackendGroup) Primaries() []*Backend {
 	primaries := []*Backend{}
 	for _, a := range bg.Backends {
@@ -737,6 +749,10 @@ func (bg *BackendGroup) Primaries() []*Backend {
 		}
 	}
 	return primaries
+}
+
+func removeRpcsRequest(rpcs []*RPCReq, s int) []*RPCReq {
+	return append(rpcs[:s], rpcs[s+1:]...)
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
@@ -796,32 +812,34 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 
 	// // Extract Write Requests and forward to fanout backends
-	// writeRpcs := []*RPCReq{}
+	writeRpcs := []*RPCReq{}
 	// writeRes := []*RPCRes{}
-	// if len(bg.FanoutBackends) > 0 {
-	// 	for i, r := range rpcReqs {
-	// 		if r.Method == "eth_sendRawTransaction" {
-	// 			log.Trace("detected write request with fanouts enabled",
-	// 				"req_id", r.ID,
-	// 			)
-	// 			// Append to a write group
-	// 			writeRpcs = append(writeRpcs, r)
-	// 			// Delete from other rpcs
-	// 			rpcReqs = removeRpcsRequest(rpcReqs, i)
-	// 		}
-	// 	}
-	// 	// TODO: Check if this is proper way for batch requests, also just override servedByForFannout for now
-	// 	writeRes, _, err = bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), isBatch, len(writeRpcs) > 0)
-	// 	if err != nil {
-	// 		log.Error("error serving write request with fanouts enabled",
-	// 			"req_id", GetReqID(ctx),
-	// 			"auth", GetAuthCtx(ctx),
-	// 			"err", err,
-	// 		)
-	// 	}
-	// }
+	if len(bg.FanoutBackends) > 0 {
+		for i, r := range rpcReqs {
+			if r.Method == "eth_sendRawTransaction" {
+				log.Trace("detected write request with fanouts enabled",
+					"req_id", r.ID,
+				)
+				// Append to a write group
+				writeRpcs = append(writeRpcs, r)
+				// Delete from other rpcs
+				rpcReqs = removeRpcsRequest(rpcReqs, i)
+			}
+		}
+		// TODO: Check if this is proper way for batch requests, also just override servedByForFannout for now
+		_, servedByWrite, err := bg.ForwardRequestToBackendGroup(writeRpcs, bg.Fanouts(), ctx, isBatch)
+		if err != nil {
+			log.Error("error serving write request with fanouts enabled",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"err", err,
+			)
+		}
+		return nil, servedByWrite, err
+	}
 
 	rpcRequestsTotal.Inc()
+	// Response is 1 to 1
 	res, servedBy, err := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
 	if err != nil {
 		return nil, servedBy, err
