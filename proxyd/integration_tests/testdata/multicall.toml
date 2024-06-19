@@ -1,8 +1,10 @@
 [server]
 rpc_port = 8545
+enable_served_by_header = true
+timeout_seconds = 7
 
 [backend]
-response_timeout_seconds = 1
+response_timeout_seconds = 4
 max_degraded_latency_threshold = "30ms"
 
 [backends]
@@ -12,19 +14,20 @@ rpc_url = "$NODE1_URL"
 [backends.node2]
 rpc_url = "$NODE2_URL"
 
+[backends.node3]
+rpc_url = "$NODE3_URL"
+
 [backend_groups]
 [backend_groups.node]
-backends = ["node1", "node2"]
-routing_strategy = "consensus_aware"
+backends = ["node1", "node2", "node3"]
+routing_strategy = "multicall"
 consensus_handler = "noop" # allow more control over the consensus poller for tests
 consensus_ban_period = "1m"
 consensus_max_update_threshold = "2m"
 consensus_max_block_lag = 8
 consensus_min_peer_count = 4
+multicall_mode = true
 
 [rpc_method_mappings]
 eth_call = "node"
-eth_chainId = "node"
-eth_blockNumber = "node"
-eth_getBlockByNumber = "node"
-consensus_getReceipts = "node"
+eth_sendRawTransaction = "node"

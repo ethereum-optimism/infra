@@ -1,0 +1,7 @@
+- method: bad_method
+  response: >
+    {
+      "jsonrpc": "2.0",
+      "id": 67,
+      "result": "nope",
+    }
