@@ -775,49 +775,11 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	overriddenResponses := make([]*indexedReqRes, 0)
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
 
+	// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
+	// serving traffic from any backend that agrees in the consensus group
+	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
-		// bg.RewriteContext(rpcReqs, rewrittenReqs, overriddenResponses)
-		// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
-		// serving traffic from any backend that agrees in the consensus group
-
-		// We also rewrite block tags to enforce compliance with consensus
-		rctx := RewriteContext{
-			latest:        bg.Consensus.GetLatestBlockNumber(),
-			safe:          bg.Consensus.GetSafeBlockNumber(),
-			finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-			maxBlockRange: bg.Consensus.maxBlockRange,
-		}
-
-		for i, req := range rpcReqs {
-			res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
-			result, err := RewriteTags(rctx, req, &res)
-			switch result {
-			case RewriteOverrideError:
-				overriddenResponses = append(overriddenResponses, &indexedReqRes{
-					index: i,
-					req:   req,
-					res:   &res,
-				})
-				if errors.Is(err, ErrRewriteBlockOutOfRange) {
-					res.Error = ErrBlockOutOfRange
-				} else if errors.Is(err, ErrRewriteRangeTooLarge) {
-					res.Error = ErrInvalidParams(
-						fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
-					)
-				} else {
-					res.Error = ErrParseErr
-				}
-			case RewriteOverrideResponse:
-				overriddenResponses = append(overriddenResponses, &indexedReqRes{
-					index: i,
-					req:   req,
-					res:   &res,
-				})
-			case RewriteOverrideRequest, RewriteNone:
-				rewrittenReqs = append(rewrittenReqs, req)
-			}
-		}
-		rpcReqs = rewrittenReqs
+		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	}
 
 	// Forward to fanout backends, Note: Further optimization for forward to all
@@ -884,6 +846,47 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	)
 	res := OverrideResponses(backendResp.RPCRes, overriddenResponses)
 	return res, backendResp.ServedBy, backendResp.error
+}
+
+func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+	rctx := RewriteContext{
+		latest:        bg.Consensus.GetLatestBlockNumber(),
+		safe:          bg.Consensus.GetSafeBlockNumber(),
+		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
+		maxBlockRange: bg.Consensus.maxBlockRange,
+	}
+
+	for i, req := range rpcReqs {
+		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
+		result, err := RewriteTags(rctx, req, &res)
+		switch result {
+		case RewriteOverrideError:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			if errors.Is(err, ErrRewriteBlockOutOfRange) {
+				res.Error = ErrBlockOutOfRange
+			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
+				res.Error = ErrInvalidParams(
+					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
+				)
+			} else {
+				res.Error = ErrParseErr
+			}
+		case RewriteOverrideResponse:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+		case RewriteOverrideRequest, RewriteNone:
+			rewrittenReqs = append(rewrittenReqs, req)
+		}
+	}
+	// rpcReqs = rewrittenReqs
+	return rewrittenReqs, overriddenResponses
 }
 
 func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*RPCRes {
