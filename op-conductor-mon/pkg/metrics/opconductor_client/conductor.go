@@ -117,7 +117,7 @@ func (i *InstrumentedOpConductorClient) LeaderWithID(ctx context.Context) (*cons
 	return val, err
 }
 
-func (i *InstrumentedOpConductorClient) ClusterMembership(ctx context.Context) ([]*consensus.ServerInfo, error) {
+func (i *InstrumentedOpConductorClient) ClusterMembership(ctx context.Context) (*consensus.ClusterMembership, error) {
 	m := "conductor.ClusterMembership"
 	start := time.Now()
 	log.Debug(m, "rpc_address", i.rpcUrl)
