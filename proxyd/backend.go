@@ -1266,6 +1266,11 @@ func RecordBatchRPCForward(ctx context.Context, backendName string, reqs []*RPCR
 	}
 }
 
+func (b *Backend) ClearNetworkErrorsSlidingWindows() {
+	b.networkErrorsSlidingWindow.Clear()
+	b.networkRequestsSlidingWindow.Clear()
+}
+
 func stripXFF(xff string) string {
 	ipList := strings.Split(xff, ",")
 	return strings.TrimSpace(ipList[0])

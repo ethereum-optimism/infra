@@ -102,9 +102,11 @@ func TestConsensus(t *testing.T) {
 		for _, node := range nodes {
 			node.handler.ResetOverrides()
 			node.mockBackend.Reset()
+			node.backend.ClearNetworkErrorsSlidingWindows()
 		}
 		bg.Consensus.ClearListeners()
 		bg.Consensus.Reset()
+
 	}
 
 	override := func(node string, method string, block string, response string) {
@@ -311,7 +313,11 @@ func TestConsensus(t *testing.T) {
 
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend),
+			fmt.Sprintf("Expected Node to be banned. \n\tCurrent Time: %s \n\tBanned Until: %s",
+				time.Now().Format("01-02-2006 15:04:05"),
+				bg.Consensus.BannedUntil(nodes["node1"].backend).Format("01-02-2006 15:04:05")),
+		)
 		require.Equal(t, 0, len(consensusGroup))
 	})
 
