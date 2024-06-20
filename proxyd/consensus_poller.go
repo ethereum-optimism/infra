@@ -319,24 +319,22 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
 	if err != nil {
-		log.Warn("error updating backend - latest block", "name", be.Name, "err", err)
-		latestBlockHash = bs.latestBlockHash
+		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
 		latestBlockNumber = bs.latestBlockNumber
 	}
 
 	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")
 	if err != nil {
-		log.Warn("error updating backend - safe block", "name", be.Name, "err", err)
+		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
 		safeBlockNumber = bs.safeBlockNumber
 	}
 
 	finalizedBlockNumber, _, err := cp.fetchBlock(ctx, be, "finalized")
 	if err != nil {
-		log.Warn("error updating backend - finalized block", "name", be.Name, "err", err)
+		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 		finalizedBlockNumber = bs.finalizedBlockNumber
 	}
 
-	// TODO: May need to freeze last update too
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
 
 	changed := cp.setBackendState(be, peerCount, inSync,
@@ -410,7 +408,6 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	var lowestFinalizedBlock hexutil.Uint64
 	var lowestSafeBlock hexutil.Uint64
 	for _, bs := range candidates {
-		// NOTE: This already accounts for reseting the block to the prior state
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
 			lowestLatestBlockHash = bs.latestBlockHash
