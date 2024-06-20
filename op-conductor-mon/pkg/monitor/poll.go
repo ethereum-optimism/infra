@@ -139,7 +139,7 @@ func (p *Poller) reportMetrics(ctx context.Context) {
 			metrics.ReportNodeLeader(nodeName, other, false)
 		}
 		// reset previous leaders from reported state
-		for _, other := range nodeState.clusterMembership {
+		for _, other := range nodeState.clusterMembership.Servers {
 			metrics.ReportNodeLeader(nodeName, other.ID, false)
 		}
 
@@ -168,10 +168,10 @@ func (p *Poller) reportNodeMetrics(ctx context.Context, name string, state *Node
 
 	// raft status
 	metrics.ReportNodeLeader(name, state.leaderWithID.ID, true)
-	metrics.ReportClusterMembershipCount(name, len(state.clusterMembership))
+	metrics.ReportClusterMembershipCount(name, len(state.clusterMembership.Servers))
 
 	voters := 0
-	for _, member := range state.clusterMembership {
+	for _, member := range state.clusterMembership.Servers {
 		if member.Suffrage == consensus.Voter {
 			voters++
 		}

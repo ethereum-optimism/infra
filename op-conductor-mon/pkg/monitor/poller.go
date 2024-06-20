@@ -32,7 +32,7 @@ type NodeState struct {
 
 	// raft status
 	leaderWithID      *consensus.ServerInfo
-	clusterMembership []*consensus.ServerInfo
+	clusterMembership *consensus.ClusterMembership
 
 	updatedAt time.Time
 }
