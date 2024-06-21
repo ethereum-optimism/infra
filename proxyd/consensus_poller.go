@@ -318,7 +318,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	}
 
 	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
-	if err != nil || latestBlockNumber == 0 {
+	if err != nil {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
 		latestBlockNumber = bs.latestBlockNumber
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/proxyd"
 	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -111,124 +112,67 @@ func TestBlockHeightZero(t *testing.T) {
 
 	}
 
-	override := func(node string, method string, block string, response string) {
+	override := func(node string, method string, block string, response string, responseCode int) {
 		if _, ok := nodes[node]; !ok {
 			t.Fatalf("node %s does not exist in the nodes map", node)
 		}
 		nodes[node].handler.AddOverride(&ms.MethodTemplate{
-			Method:   method,
-			Block:    block,
-			Response: response,
+			Method:       method,
+			Block:        block,
+			Response:     response,
+			ResponseCode: responseCode,
 		})
 	}
 
-	overrideBlock := func(node string, blockRequest string, blockResponse string) {
+	overrideBlock := func(node string, blockRequest string, blockResponse string, responseCode int) {
 		override(node,
 			"eth_getBlockByNumber",
 			blockRequest,
 			buildResponse(map[string]string{
 				"number": blockResponse,
 				"hash":   "hash_" + blockResponse,
-			}))
+			}),
+			responseCode,
+		)
 	}
 
-	t.Run("Test that the backend will not change current block height if fetch block gives an error", func(t *testing.T) {
+	overridePeerCount := func(node string, count int, responseCode int) {
+		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()), responseCode)
+	}
+
+	t.Run("Test that the backend will not change current block height if fetch block gives an 429 error", func(t *testing.T) {
 		reset()
 		update()
-		f0 := bg.Consensus.GetFinalizedBlockNumber()
-		l0 := bg.Consensus.GetLatestBlockNumber()
-		s0 := bg.Consensus.GetSafeBlockNumber()
-		overrideBlock("node1", "latest", "0x0")
+		overrideBlock("node1", "latest", "0x0", 429)
 		update()
-		f1 := bg.Consensus.GetFinalizedBlockNumber()
-		l1 := bg.Consensus.GetLatestBlockNumber()
-		s1 := bg.Consensus.GetSafeBlockNumber()
-		require.Equal(t, f0, f1)
-		require.Equal(t, l0, l1)
-		require.Equal(t, s0, s1)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 	})
 
-	// t.Run("Test Backend is banned if above threshold", func(t *testing.T) {
-	// 	reset()
-	// 	overrideBlock("node1", "latest", "0x0")
-	// 	for i := 0; i < 10; i++ {
-	// 		update()
-	// 		if nodes["node1"].backend.BlockHeightZeroAboveThreshold() {
-	// 			require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// 		} else {
-	// 			require.False(t, nodes["node2"].backend.BlockHeightZeroAboveThreshold())
-	// 			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// 		}
-	// 		addTimeToBackend(3 * time.Second)
-	// 	}
-	// 	require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 	require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// })
+	t.Run("Test that the backend will not change current block height if fetch block gives an 500 error", func(t *testing.T) {
+		reset()
+		update()
+		overrideBlock("node1", "latest", "0x0", 500)
+		update()
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
 
-	// t.Run("Test Sliding Window Does not increase on non-zero block", func(t *testing.T) {
-	// 	reset()
-	// 	for i := 1; i < 10; i++ {
-	// 		if i%2 == 0 {
-	// 			overrideBlock("node1", "latest", "0x0")
-	// 		} else {
-	// 			overrideBlock("node1", "latest", "0x101")
-	// 		}
-	// 		update()
-	// 		require.Equal(t, uint(i/2), nodes["node1"].backend.GetBlockHeightZeroSlidingWindow().Count())
-	// 		require.Equal(t, uint(0), nodes["node2"].backend.GetBlockHeightZeroSlidingWindow().Count())
+	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
+		reset()
+		update()
+		overrideBlock("node1", "latest", "0x0", 500)
+		overrideBlock("node1", "safe", "0x0", 429)
+		overrideBlock("node1", "finalized", "0x0", 403)
+		overridePeerCount("node1", 0, 500)
 
-	// 		addTimeToBackend(3 * time.Second)
-	// 	}
-	// })
+		for i := 0; i < 3; i++ {
+			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend), "Execpted node 1 to be not banned on iteration ", i)
+			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend), "Execpted node 2 to be not banned on iteration ", i)
+			update()
+		}
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
 
-	// t.Run("Test Backend is Banned -> not banned as long as good blocks come -> ban", func(t *testing.T) {
-	// 	reset()
-	// 	overrideBlock("node1", "latest", "0x0")
-	// 	// Ban Node 1
-	// 	for i := 0; i < 20; i++ {
-	// 		update()
-	// 		if nodes["node1"].backend.BlockHeightZeroAboveThreshold() {
-	// 			require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 			break
-	// 		}
-	// 		addTimeToBackend(1 * time.Second)
-	// 	}
-
-	// 	// Unban, and start seeing good blocks = no ban
-	// 	bg.Consensus.Unban(nodes["node1"].backend)
-	// 	overrideBlock("node1", "latest", "0x101")
-	// 	for i := 0; i < 5; i++ {
-	// 		update()
-	// 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 		addTimeToBackend(1 * time.Second)
-	// 	}
-
-	// 	// See a bad block, and sliding window above threshold -> ban
-	// 	overrideBlock("node1", "latest", "0x0")
-	// 	update()
-	// 	if nodes["node1"].backend.BlockHeightZeroAboveThreshold() {
-	// 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 	}
-	// })
-
-	// t.Run("Test that sliding window will return below threshold after time passes", func(t *testing.T) {
-	// 	reset()
-	// 	overrideBlock("node1", "latest", "0x0")
-	// 	for i := 0; i < 20; i++ {
-	// 		update()
-	// 		if nodes["node1"].backend.BlockHeightZeroAboveThreshold() {
-	// 			require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// 		}
-	// 		addTimeToBackend(1 * time.Second)
-	// 	}
-	// 	addTimeToBackend(50 * time.Second)
-	// 	bg.Consensus.Unban(nodes["node1"].backend)
-
-	// 	update()
-	// 	require.False(t, nodes["node1"].backend.BlockHeightZeroAboveThreshold())
-	// 	require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// })
 }
