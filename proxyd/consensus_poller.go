@@ -287,7 +287,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 
 // UpdateBackend refreshes the consensus state of a single backend
 func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
-	bs := cp.getBackendState(be)
+	bs := cp.GetBackendState(be)
 	RecordConsensusBackendBanned(be, bs.IsBanned())
 
 	if bs.IsBanned() {
@@ -318,7 +318,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	}
 
 	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
-	if err != nil {
+	if err != nil || latestBlockNumber == 0 {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
 		latestBlockNumber = bs.latestBlockNumber
 	}
@@ -629,8 +629,8 @@ func (cp *ConsensusPoller) isInSync(ctx context.Context, be *Backend) (result bo
 	return res, nil
 }
 
-// getBackendState creates a copy of backend state so that the caller can use it without locking
-func (cp *ConsensusPoller) getBackendState(be *Backend) *backendState {
+// GetBackendState creates a copy of backend state so that the caller can use it without locking
+func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 	bs := cp.backendState[be]
 	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
@@ -702,7 +702,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 
 	for _, be := range backends {
 
-		bs := cp.getBackendState(be)
+		bs := cp.GetBackendState(be)
 		if be.forcedCandidate {
 			candidates[be] = bs
 			continue
