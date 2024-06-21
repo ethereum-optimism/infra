@@ -327,7 +327,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 	if config.Server.RPCPort != 0 {
 		go func() {
-			if err := srv.RPCListenAndServe(config.Server.RPCHost, config.Server.RPCPort); err != nil {
+			if err := srv.RPCListenAndServe(config.Server); err != nil {
 				if errors.Is(err, http.ErrServerClosed) {
 					log.Info("RPC server shut down")
 					return
@@ -347,7 +347,7 @@ func Start(config *Config) (*Server, func(), error) {
 				log.Crit("error starting WS server", "err", err)
 			}
 		}()
-	} else {
+	} else if !config.Server.EnableWS {
 		log.Info("WS server not enabled (ws_port is set to 0)")
 	}
 
