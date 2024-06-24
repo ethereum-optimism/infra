@@ -14,15 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ts is a convenient method that must parse a time.Time from a string in format `"2006-01-02 15:04:05"`
-func ts(s string) time.Time {
-	t, err := time.Parse(time.DateTime, s)
-	if err != nil {
-		panic(err)
-	}
-	return t
-}
-
 func setupBlockHeightZero(t *testing.T) (map[string]*nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func()) {
 	// setup mock servers
 	node1 := NewMockBackend(nil)
