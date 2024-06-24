@@ -158,6 +158,14 @@ func TestBlockHeightZero(t *testing.T) {
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 	})
 
+	t.Run("Test if backend recieved a 200 and block height zero it will not be banned", func(t *testing.T) {
+		reset()
+		update()
+		overrideBlock("node1", "latest", "0x0", 200)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
+
 	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
 		reset()
 		update()
