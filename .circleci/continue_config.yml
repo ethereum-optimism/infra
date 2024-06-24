@@ -398,9 +398,9 @@ workflows:
     jobs:
       - hold:
           type: approval
-      #     filters:
-      #       tags:
-      #         only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+          filters:
+            tags:
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
       - docker-build:
           name: op-ufm-docker-build
           filters:
