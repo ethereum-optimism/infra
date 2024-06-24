@@ -2,16 +2,14 @@ package integration_tests
 
 import (
 	"context"
-	"net/http"
-	"os"
-	"path"
-	"testing"
-	"time"
-
 	"github.com/ethereum-optimism/optimism/proxyd"
 	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/stretchr/testify/require"
+	"net/http"
+	"os"
+	"path"
+	"testing"
 )
 
 func setupBlockHeightZero(t *testing.T) (map[string]*nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func()) {
