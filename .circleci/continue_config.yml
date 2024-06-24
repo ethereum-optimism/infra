@@ -427,10 +427,10 @@ workflows:
 
       - docker-build:
           name: proxyd-docker-build
-          # filters:
-          #   tags:
-          #     only: /^proxyd\/v.*/
-          #   branches:
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
+            # branches:
           #     ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
@@ -442,9 +442,9 @@ workflows:
             - hold
       - docker-publish:
           name: proxyd-docker-release
-          # filters:
-          #   tags:
-          #     only: /^proxyd\/v.*/
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
           #   branches:
           #     ignore: /.*/
           docker_name: proxyd
