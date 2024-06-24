@@ -63,6 +63,24 @@ func (bs *backendState) IsBanned() bool {
 	return time.Now().Before(bs.bannedUntil)
 }
 
+func (bs *backendState) GetLatestBlock() (hexutil.Uint64, string) {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.latestBlockNumber, bs.latestBlockHash
+}
+
+func (bs *backendState) GetSafeBlockNumber() hexutil.Uint64 {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.safeBlockNumber
+}
+
+func (bs *backendState) GetFinalizedBlockNumber() hexutil.Uint64 {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.finalizedBlockNumber
+}
+
 // GetConsensusGroup returns the backend members that are agreeing in a consensus
 func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
 	defer cp.consensusGroupMux.Unlock()
@@ -321,6 +339,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	if err != nil || latestBlockNumber == 0 {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
 		latestBlockNumber = bs.latestBlockNumber
+		latestBlockHash = bs.latestBlockHash
 	}
 
 	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")

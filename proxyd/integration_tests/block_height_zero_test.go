@@ -140,30 +140,77 @@ func TestBlockHeightZero(t *testing.T) {
 		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()), responseCode)
 	}
 
-	t.Run("Test that the backend will not change current block height if fetch block gives an 429 error", func(t *testing.T) {
-		reset()
-		update()
-		overrideBlock("node1", "latest", "0x0", 429)
-		update()
-		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	})
+	type blockHeights struct {
+		latestBlockNumber   hexutil.Uint64
+		latestBlockHash     string
+		safeBlockNumber     hexutil.Uint64
+		finalizeBlockNumber hexutil.Uint64
+	}
 
-	t.Run("Test that the backend will not change current block height if fetch block gives an 500 error", func(t *testing.T) {
-		reset()
-		update()
-		overrideBlock("node1", "latest", "0x0", 500)
-		update()
-		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	})
+	getBlockHeights := func(node string) blockHeights {
+		bs := bg.Consensus.GetBackendState(nodes[node].backend)
+		lB, lHash := bs.GetLatestBlock()
+		sB := bs.GetSafeBlockNumber()
+		fB := bs.GetSafeBlockNumber()
+		return blockHeights{
+			latestBlockNumber:   lB,
+			latestBlockHash:     lHash,
+			safeBlockNumber:     sB,
+			finalizeBlockNumber: fB,
+		}
+	}
 
-	t.Run("Test if backend recieved a 200 and block height zero it will not be banned", func(t *testing.T) {
+	for _, blockState := range []string{"latest", "finalized", "safe"} {
+
+		t.Run("Test that the backend will not be banned if "+blockState+" responds 429", func(t *testing.T) {
+			reset()
+			update()
+			overrideBlock("node1", blockState, "0x0", 429)
+			update()
+			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		})
+
+		t.Run("Test that the backend will not be banned if "+blockState+" responds 500", func(t *testing.T) {
+			reset()
+			update()
+			overrideBlock("node1", blockState, "0x0", 500)
+			update()
+			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		})
+
+	}
+
+	t.Run("Test that the backend will not be banned if latest responds 200 with block height zero", func(t *testing.T) {
 		reset()
 		update()
 		overrideBlock("node1", "latest", "0x0", 200)
+		update()
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
+
+	t.Run("Test that the latest backend state will not latest change on error, but safe and finalized can be updated", func(t *testing.T) {
+
+		update()
+		bh1 := getBlockHeights("node1")
+
+		overrideBlock("node1", "latest", "0x0", 200)
+		overrideBlock("node1", "safe", "0xe3", 200)
+		overrideBlock("node1", "finalized", "0xc3", 200)
+		update()
+
+		bh2 := getBlockHeights("node1")
+		require.Equal(t, bh1.latestBlockNumber, bh2.latestBlockNumber)
+		require.Equal(t, bh1.latestBlockHash, bh2.latestBlockHash)
+
+		require.NotEqual(t, bh1.safeBlockNumber, bh2.safeBlockNumber)
+		require.NotEqual(t, bh1.finalizeBlockNumber, bh2.finalizeBlockNumber)
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
 	})
 
 	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
