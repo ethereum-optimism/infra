@@ -19,7 +19,7 @@ type MethodTemplate struct {
 	Method       string `yaml:"method"`
 	Block        string `yaml:"block"`
 	Response     string `yaml:"response"`
-	ResponseCode int    `yaml:"response_code" default:"200"`
+	ResponseCode int    `yaml:"response_code"`
 }
 
 type MockedHandler struct {
@@ -90,7 +90,6 @@ func (mh *MockedHandler) Handler(w http.ResponseWriter, req *http.Request) {
 					w.WriteHeader(r.ResponseCode)
 				}
 			}
-
 		}
 		if selectedResponse != "" {
 			var rpcRes proxyd.RPCRes
