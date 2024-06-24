@@ -141,22 +141,22 @@ func TestBlockHeightZero(t *testing.T) {
 	}
 
 	type blockHeights struct {
-		latestBlockNumber   hexutil.Uint64
-		latestBlockHash     string
-		safeBlockNumber     hexutil.Uint64
-		finalizeBlockNumber hexutil.Uint64
+		latestBlockNumber    hexutil.Uint64
+		latestBlockHash      string
+		safeBlockNumber      hexutil.Uint64
+		finalizedBlockNumber hexutil.Uint64
 	}
 
 	getBlockHeights := func(node string) blockHeights {
 		bs := bg.Consensus.GetBackendState(nodes[node].backend)
 		lB, lHash := bs.GetLatestBlock()
 		sB := bs.GetSafeBlockNumber()
-		fB := bs.GetSafeBlockNumber()
+		fB := bs.GetFinalizedBlockNumber()
 		return blockHeights{
-			latestBlockNumber:   lB,
-			latestBlockHash:     lHash,
-			safeBlockNumber:     sB,
-			finalizeBlockNumber: fB,
+			latestBlockNumber:    lB,
+			latestBlockHash:      lHash,
+			safeBlockNumber:      sB,
+			finalizedBlockNumber: fB,
 		}
 	}
 
@@ -191,7 +191,7 @@ func TestBlockHeightZero(t *testing.T) {
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 	})
 
-	t.Run("Test that the latest backend state will not latest change on error, but safe and finalized can be updated", func(t *testing.T) {
+	t.Run("Test backend state for latest block will not change on error, but safe and finalized can be updated", func(t *testing.T) {
 
 		update()
 		bh1 := getBlockHeights("node1")
@@ -206,11 +206,17 @@ func TestBlockHeightZero(t *testing.T) {
 		require.Equal(t, bh1.latestBlockHash, bh2.latestBlockHash)
 
 		require.NotEqual(t, bh1.safeBlockNumber, bh2.safeBlockNumber)
-		require.NotEqual(t, bh1.finalizeBlockNumber, bh2.finalizeBlockNumber)
+		require.NotEqual(t, bh1.finalizedBlockNumber, bh2.finalizedBlockNumber)
+
+		require.Equal(t, "0xe3", bh2.safeBlockNumber.String())
+		require.Equal(t, "0xc3", bh2.finalizedBlockNumber.String())
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 	})
 
 	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
