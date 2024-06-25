@@ -131,34 +131,73 @@ func TestBlockHeightZero(t *testing.T) {
 		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()), responseCode)
 	}
 
+	type blockHeights struct {
+		latestBlockNumber    hexutil.Uint64
+		latestBlockHash      string
+		safeBlockNumber      hexutil.Uint64
+		finalizedBlockNumber hexutil.Uint64
+	}
+
+	getBlockHeights := func(node string) blockHeights {
+		bs := bg.Consensus.GetBackendState(nodes[node].backend)
+		lB, lHash := bs.GetLatestBlock()
+		sB := bs.GetSafeBlockNumber()
+		fB := bs.GetFinalizedBlockNumber()
+		return blockHeights{
+			latestBlockNumber:    lB,
+			latestBlockHash:      lHash,
+			safeBlockNumber:      sB,
+			finalizedBlockNumber: fB,
+		}
+	}
+
 	for _, blockState := range []string{"latest", "finalized", "safe"} {
 
 		t.Run("Test that the backend will not be banned if "+blockState+" responds 429", func(t *testing.T) {
 			reset()
 			update()
+			bh1 := getBlockHeights("node1")
 			overrideBlock("node1", blockState, "0x0", 429)
 			update()
+			bh2 := getBlockHeights("node1")
+
 			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 			nodes["node1"].backend.ErrorRate()
+
+			require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+			require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+			require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 		})
 
 		t.Run("Test that the backend will not be banned if "+blockState+" responds 500", func(t *testing.T) {
 			reset()
 			update()
+			bh1 := getBlockHeights("node1")
 			overrideBlock("node1", blockState, "0x0", 500)
 			update()
+			bh2 := getBlockHeights("node1")
 			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+
+			require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+			require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+			require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 		})
 
 		t.Run("Test that the backend will not be banned if "+blockState+" responds 0 and 200", func(t *testing.T) {
 			reset()
 			update()
+			bh1 := getBlockHeights("node1")
 			overrideBlock("node1", blockState, "0x0", 200)
 			update()
+			bh2 := getBlockHeights("node1")
 			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+
+			require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+			require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+			require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 		})
 
 	}
@@ -167,65 +206,61 @@ func TestBlockHeightZero(t *testing.T) {
 		reset()
 		update()
 		overrideBlock("node1", "latest", "0x0", 200)
+		bh1 := getBlockHeights("node1")
 		update()
+		bh2 := getBlockHeights("node1")
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+
+		require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+		require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+		require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 	})
 
 	t.Run("Test that the backend will not be banned if latest responds 5xx for peer count", func(t *testing.T) {
 		reset()
 		update()
 		overridePeerCount("node1", 59, 500)
+		bh1 := getBlockHeights("node1")
 		update()
+		bh2 := getBlockHeights("node1")
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+
+		require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+		require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+		require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 	})
 
 	t.Run("Test that the backend will not be banned if latest responds 4xx for peer count", func(t *testing.T) {
 		reset()
 		update()
 		overridePeerCount("node1", 59, 429)
+		bh1 := getBlockHeights("node1")
 		update()
+		bh2 := getBlockHeights("node1")
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+
+		require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+		require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+		require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
 	})
 
 	t.Run("Test that the backend will not be banned if latest responds 200 and 0 for peer count", func(t *testing.T) {
 		reset()
 		update()
+		bh1 := getBlockHeights("node1")
 		overridePeerCount("node1", 0, 200)
 		update()
+		bh2 := getBlockHeights("node1")
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	})
 
-	// t.Run("Test backend state for latest block will not change on error", func(t *testing.T) {
-	//
-	// 	update()
-	// 	bh1 := getBlockHeights("node1")
-	//
-	// 	overrideBlock("node1", "latest", "0x0", 200)
-	// 	overrideBlock("node1", "safe", "0xe3", 200)
-	// 	overrideBlock("node1", "finalized", "0xc3", 200)
-	// 	update()
-	//
-	// 	bh2 := getBlockHeights("node1")
-	// 	require.Equal(t, bh1.latestBlockNumber, bh2.latestBlockNumber)
-	// 	require.Equal(t, bh1.latestBlockHash, bh2.latestBlockHash)
-	//
-	// 	require.Equal(t, bh1.safeBlockNumber, bh2.safeBlockNumber)
-	// 	require.Eq(t, bh1.finalizedBlockNumber, bh2.finalizedBlockNumber)
-	//
-	// 	require.Equal(t, "0xe3", bh2.safeBlockNumber.String())
-	// 	require.Equal(t, "0xc3", bh2.finalizedBlockNumber.String())
-	//
-	// 	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-	// 	require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
-	// 	require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-	//
-	// 	require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 	require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// })
+		require.Equal(t, bh1.latestBlockNumber.String(), bh2.latestBlockNumber.String())
+		require.Equal(t, bh1.safeBlockNumber.String(), bh2.safeBlockNumber.String())
+		require.Equal(t, bh1.finalizedBlockNumber.String(), bh2.finalizedBlockNumber.String())
+	})
 
 	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
 		reset()
