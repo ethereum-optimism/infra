@@ -2,6 +2,7 @@ package integration_tests
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -246,22 +247,22 @@ func TestBlockHeightZero(t *testing.T) {
 	// 	require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 	// })
 
-	// TODO: Ensure that the block threshold can still be reached
-	// t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
-	// 	reset()
-	// 	update()
-	// 	overrideBlock("node1", "latest", "0x0", 500)
-	// 	overrideBlock("node1", "safe", "0x0", 429)
-	// 	overrideBlock("node1", "finalized", "0x0", 403)
-	// 	overridePeerCount("node1", 0, 500)
-	//
-	// 	for i := 0; i < 1000; i++ {
-	// 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend), "Execpted node 1 to be not banned on iteration ", i)
-	// 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend), "Execpted node 2 to be not banned on iteration ", i)
-	// 		update()
-	// 	}
-	// 	require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-	// 	require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-	// })
+	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
+		reset()
+		update()
+		overrideBlock("node1", "latest", "0x0", 500)
+		overrideBlock("node1", "safe", "0x0", 429)
+		overrideBlock("node1", "finalized", "0x0", 403)
+		overridePeerCount("node1", 0, 500)
+
+		for i := 0; i < 6; i++ {
+			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend), "Execpted node 1 to be not banned on iteration ", i)
+			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend), "Execpted node 2 to be not banned on iteration ", i)
+			fmt.Println("error rate", nodes["node1"].backend.ErrorRate())
+			update()
+		}
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
 
 }
