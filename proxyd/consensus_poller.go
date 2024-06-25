@@ -354,7 +354,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
-		safeBlockNumber = bs.safeBlockNumber
+		return
 	}
 
 	if safeBlockNumber == 0 {
@@ -366,7 +366,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	finalizedBlockNumber, _, err := cp.fetchBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
-		finalizedBlockNumber = bs.finalizedBlockNumber
+		return
 	}
 
 	if finalizedBlockNumber == 0 {
