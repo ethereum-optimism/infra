@@ -712,12 +712,12 @@ func sortBatchRPCResponse(req []*RPCReq, res []*RPCRes) {
 }
 
 type BackendGroup struct {
-	Name             string
-	Backends         []*Backend
-	WeightedRouting  bool
-	Consensus        *ConsensusPoller
-	FallbackBackends map[string]bool
-	FanoutBackends   map[string]bool
+	Name              string
+	Backends          []*Backend
+	WeightedRouting   bool
+	Consensus         *ConsensusPoller
+	FallbackBackends  map[string]bool
+	MulticallBackends map[string]bool
 }
 
 func (bg *BackendGroup) Fallbacks() []*Backend {
@@ -730,14 +730,14 @@ func (bg *BackendGroup) Fallbacks() []*Backend {
 	return fallbacks
 }
 
-func (bg *BackendGroup) Fanouts() []*Backend {
-	fanouts := []*Backend{}
+func (bg *BackendGroup) Multicalls() []*Backend {
+	multicalls := []*Backend{}
 	for _, a := range bg.Backends {
-		if fallback, ok := bg.FanoutBackends[a.Name]; ok && fallback {
-			fanouts = append(fanouts, a)
+		if multi, ok := bg.MulticallBackends[a.Name]; ok && multi {
+			multicalls = append(multicalls, a)
 		}
 	}
-	return fanouts
+	return multicalls
 }
 
 func (bg *BackendGroup) Primaries() []*Backend {
@@ -751,14 +751,14 @@ func (bg *BackendGroup) Primaries() []*Backend {
 	return primaries
 }
 
-func removeRpcsRequest(rpcs []*RPCReq, s int) []*RPCReq {
-	return append(rpcs[:s], rpcs[s+1:]...)
-}
+// func removeRpcsRequest(rpcs []*RPCReq, s int) []*RPCReq {
+// 	return append(rpcs[:s], rpcs[s+1:]...)
+// }
 
-func containsWriteTx(rpcReqs []*RPCReq) bool {
+func isValidMultiCallTx(rpcReqs []*RPCReq) bool {
 	for _, r := range rpcReqs {
 		if r.Method == "eth_sendRawTransaction" {
-			return true
+			return true && len(rpcReqs) == 1
 		}
 	}
 	return false
@@ -784,13 +784,16 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	// Forward to fanout backends, Note: Further optimization for forward to all
 	// and cancel once a valid response is returned from a go routine
-	if len(bg.FanoutBackends) > 0 && containsWriteTx(rpcReqs) {
+	if len(bg.Multicalls()) > 0 && isValidMultiCallTx(rpcReqs) {
 		var wg sync.WaitGroup
 		fanoutChan := make(chan BackendGroupRPCResponse)
-		for _, backend := range bg.Fanouts() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		for _, backend := range bg.Multicalls() {
 			wg.Add(1)
 			go func(backend *Backend) {
-				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, isBatch)
+				defer wg.Done()
+				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
 				fanoutChan <- *backendResp
 			}(backend)
 		}
@@ -801,6 +804,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		}()
 
 		// Read from the channel as values come in
+		var finalResp BackendGroupRPCResponse
 		for resp := range fanoutChan {
 			if resp.error != nil {
 				log.Error("error serving write request with fanouts enabled",
@@ -808,15 +812,19 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 					"auth", GetAuthCtx(ctx),
 					"err", resp.error,
 				)
+				finalResp = resp
 			} else {
 				log.Info("Received response from fanout chan",
 					"resp", len(resp.RPCRes),
 					"servedBy", resp.ServedBy,
 				)
-				// If valid response return here
-				// return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
+				// Cancel other go routines
+				cancel()
+				finalResp = resp
+				break
 			}
 		}
+		return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 	}
 
 	rpcRequestsTotal.Inc()

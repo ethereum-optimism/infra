@@ -189,6 +189,8 @@ func Start(config *Config) (*Server, func(), error) {
 		backends := make([]*Backend, 0)
 		fallbackBackends := make(map[string]bool)
 		fallbackCount := 0
+		multicallBackends := make(map[string]bool)
+		multicallCount := 0
 		for _, bName := range bg.Backends {
 			if backendsByName[bName] == nil {
 				return nil, nil, fmt.Errorf("backend %s is not defined", bName)
@@ -213,6 +215,21 @@ func Start(config *Config) (*Server, func(), error) {
 					"backend_group", bgName,
 				)
 			}
+
+			if bg.MutlicallMode {
+				for _, mutliB := range bg.MulticallBackends {
+					if bName == mutliB {
+						multicallBackends[bName] = true
+						log.Info("configured backend as multicall",
+							"backend_name", bName,
+							"backend_group", bgName,
+						)
+						multicallCount++
+					}
+
+				}
+
+			}
 		}
 
 		if fallbackCount != len(bg.Fallbacks) {
@@ -223,11 +240,20 @@ func Start(config *Config) (*Server, func(), error) {
 				)
 		}
 
+		if multicallCount != len(bg.MulticallBackends) {
+			return nil, nil,
+				fmt.Errorf(
+					"error: number of fallbacks instantiated (%d) did not match configured (%d) for backend group %s",
+					fallbackCount, len(bg.Fallbacks), bgName,
+				)
+		}
+
 		backendGroups[bgName] = &BackendGroup{
-			Name:             bgName,
-			Backends:         backends,
-			WeightedRouting:  bg.WeightedRouting,
-			FallbackBackends: fallbackBackends,
+			Name:              bgName,
+			Backends:          backends,
+			WeightedRouting:   bg.WeightedRouting,
+			FallbackBackends:  fallbackBackends,
+			MulticallBackends: multicallBackends,
 		}
 	}
 
@@ -388,6 +414,15 @@ func Start(config *Config) (*Server, func(), error) {
 					RecordBackendGroupFallbacks(bg, be, fallback)
 				}
 			}
+
+			// for _, be := range bgcfg.Backends {
+			// 	if fallback, ok := bg.Mu[be]; !ok {
+			// 		log.Crit("error backend not found in backend fallback configurations", "backend_name", be)
+			// 	} else {
+			// 		log.Debug("configuring new backend for group", "backend_group", bgName, "backend_name", be, "fallback", fallback)
+			// 		RecordBackendGroupFallbacks(bg, be, fallback)
+			// 	}
+			// }
 
 			var tracker ConsensusTracker
 			if bgcfg.ConsensusHA {
