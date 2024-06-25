@@ -131,26 +131,6 @@ func TestBlockHeightZero(t *testing.T) {
 		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()), responseCode)
 	}
 
-	type blockHeights struct {
-		latestBlockNumber    hexutil.Uint64
-		latestBlockHash      string
-		safeBlockNumber      hexutil.Uint64
-		finalizedBlockNumber hexutil.Uint64
-	}
-
-	// getBlockHeights := func(node string) blockHeights {
-	// 	bs := bg.Consensus.GetBackendState(nodes[node].backend)
-	// 	lB, lHash := bs.GetLatestBlock()
-	// 	sB := bs.GetSafeBlockNumber()
-	// 	fB := bs.GetFinalizedBlockNumber()
-	// 	return blockHeights{
-	// 		latestBlockNumber:    lB,
-	// 		latestBlockHash:      lHash,
-	// 		safeBlockNumber:      sB,
-	// 		finalizedBlockNumber: fB,
-	// 	}
-	// }
-
 	for _, blockState := range []string{"latest", "finalized", "safe"} {
 
 		t.Run("Test that the backend will not be banned if "+blockState+" responds 429", func(t *testing.T) {
