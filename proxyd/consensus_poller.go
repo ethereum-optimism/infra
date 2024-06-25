@@ -3,14 +3,12 @@ package proxyd
 import (
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/log"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
-
-	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
@@ -324,6 +322,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	RecordConsensusBackendInSync(be, err == nil && inSync)
 	if err != nil {
 		log.Warn("error updating backend sync state", "name", be.Name, "err", err)
+		return
 	}
 
 	var peerCount uint64
@@ -331,15 +330,24 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		peerCount, err = cp.getPeerCount(ctx, be)
 		if err != nil {
 			log.Warn("error updating backend peer count", "name", be.Name, "err", err)
+			return
+		}
+		if peerCount == 0 {
+			log.Warn("peer count responded with 200 and 0 peers", "name", be.Name)
+			return
 		}
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
 	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
-	if err != nil || latestBlockNumber == 0 {
+	if err != nil {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
-		latestBlockNumber = bs.latestBlockNumber
-		latestBlockHash = bs.latestBlockHash
+		return
+	}
+	if latestBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
 	}
 
 	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")
@@ -348,10 +356,22 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		safeBlockNumber = bs.safeBlockNumber
 	}
 
+	if safeBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
+	}
+
 	finalizedBlockNumber, _, err := cp.fetchBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 		finalizedBlockNumber = bs.finalizedBlockNumber
+	}
+
+	if finalizedBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)

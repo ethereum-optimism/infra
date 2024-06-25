@@ -102,7 +102,7 @@ func TestConsensus(t *testing.T) {
 		for _, node := range nodes {
 			node.handler.ResetOverrides()
 			node.mockBackend.Reset()
-			node.backend.ClearNetworkErrorsSlidingWindows()
+			node.backend.ClearSlidingWindows()
 		}
 		bg.Consensus.ClearListeners()
 		bg.Consensus.Reset()
