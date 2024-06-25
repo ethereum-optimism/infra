@@ -36,7 +36,11 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 		Autoload:     true,
 		AutoloadFile: responses,
 	}
-	h2 := ms.MockedHandler{}
+	h2 := ms.MockedHandler{
+		Overrides:    []*ms.MethodTemplate{},
+		Autoload:     true,
+		AutoloadFile: "",
+	}
 
 	require.NoError(t, os.Setenv("NODE1_URL", node1.URL()))
 	require.NoError(t, os.Setenv("NODE2_URL", node2.URL()))
@@ -96,6 +100,7 @@ func TestMulticall(t *testing.T) {
 		for _, node := range nodes {
 			node.handler.ResetOverrides()
 			node.mockBackend.Reset()
+			require.Zero(t, len(node.mockBackend.requests))
 		}
 		bg.Consensus.ClearListeners()
 		bg.Consensus.Reset()
@@ -126,6 +131,11 @@ func TestMulticall(t *testing.T) {
 		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()))
 	}
 
+	nodeBackendRequestCount := func(node string) int {
+		return len(nodes[node].mockBackend.requests)
+	}
+	// TODO: Maybe add a function that verifies the backend request is the dummy raw tx
+
 	// force ban node2 and make sure node1 is the only one in consensus
 	// useOnlyNode1 := func() {
 	// 	overridePeerCount("node2", 0)
@@ -153,6 +163,9 @@ func TestMulticall(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
 		// unknown consensus at inik
+
+		require.Equal(t, 1, nodeBackendRequestCount("node1"))
+		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
 	t.Run("prevent using a backend with low peer count", func(t *testing.T) {
