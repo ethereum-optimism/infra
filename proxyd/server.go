@@ -76,6 +76,9 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
+
+	dynamicAuthenticator DynamicAuthenticator
+	adminToken           string
 }
 
 type limiterFunc func(method string) bool
@@ -97,6 +100,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	redisClient *redis.Client,
+	dynamicAuthenticationConfig DynamicAuthentication,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -172,6 +176,23 @@ func NewServer(
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
 	}
 
+	var dynamicAuthenticator DynamicAuthenticator
+	if dynamicAuthenticationConfig.Enabled {
+		if dynamicAuthenticationConfig.Type != "postgresql" {
+			return nil, fmt.Errorf("only postgresql type supported for dynamic authentication, %s provided", dynamicAuthenticationConfig.Type)
+		}
+
+		var err error
+		dynamicAuthenticator, err = NewPSQLAuthenticator(dynamicAuthenticationConfig.ConnectionString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create dynamic authenticator: %w", err)
+		}
+
+		if err := dynamicAuthenticator.Initialize(); err != nil {
+			return nil, fmt.Errorf("failed to initialize postgresql dynamic authenticator: %w", err)
+		}
+	}
+
 	return &Server{
 		BackendGroups:        backendGroups,
 		wsBackendGroup:       wsBackendGroup,
@@ -197,6 +218,8 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
+		dynamicAuthenticator:   dynamicAuthenticator,
+		adminToken:             dynamicAuthenticationConfig.AdminToken,
 	}, nil
 }
 
@@ -206,6 +229,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
 	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
 	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
+	hdlr.HandleFunc("/admin/keys/{rpc-auth-key}", s.HandleAdmin).Methods("PUT", "DELETE")
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 	})
@@ -253,6 +277,76 @@ func (s *Server) Shutdown() {
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
+}
+
+func (s *Server) HandleAdmin(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	secret := vars["rpc-auth-key"]
+
+	if s.dynamicAuthenticator == nil {
+		log.Warn("admin rpc endpoint called when dynamic authenticator disabled")
+		httpResponseCodesTotal.WithLabelValues("401").Inc()
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	if s.adminToken == "" {
+		log.Warn("admin endpoint disabled because admin token is not set in the config(dynamic_authenticator.admin_token)")
+		httpResponseCodesTotal.WithLabelValues("401").Inc()
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	authToken := r.Header.Get("Authorization")
+	if !strings.Contains(authToken, s.adminToken) {
+		log.Warn("admin endpoint called with invalid admin token")
+		httpResponseCodesTotal.WithLabelValues("401").Inc()
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	response := struct {
+		StatusCode int
+		Details    string
+	}{}
+
+	if r.Method == "PUT" {
+		if err := s.dynamicAuthenticator.NewSecret(secret); err != nil {
+			response.StatusCode = http.StatusInternalServerError
+			response.Details = err.Error()
+			log.Error(fmt.Sprintf("failed to add new secret(%s)", secret), "error", err)
+		} else {
+			response.StatusCode = http.StatusOK
+		}
+
+	} else if r.Method == "DELETE" {
+		if err := s.dynamicAuthenticator.DeleteSecret(secret); err != nil {
+			response.StatusCode = http.StatusInternalServerError
+			response.Details = err.Error()
+			log.Error(fmt.Sprintf("failed to delete secret(%s)", secret), "error", err)
+		} else {
+			response.StatusCode = http.StatusOK
+		}
+	} else {
+		response.StatusCode = http.StatusInternalServerError
+		response.Details = "Invalid HTTP method"
+
+	}
+
+	responseString, err := json.MarshalIndent(response, "", "    ")
+	if err != nil {
+		log.Warn("failed to marshal response into json", "error", err)
+		httpResponseCodesTotal.WithLabelValues("401").Inc()
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	log.Warn("admin endpoint called with invalid admin token")
+	httpResponseCodesTotal.WithLabelValues(fmt.Sprintf("%d", response.StatusCode)).Inc()
+	w.WriteHeader(response.StatusCode)
+	if _, err = w.Write(responseString); err != nil {
+		log.Error("failed to send response for admin rpc", "error", err)
+	}
 }
 
 func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
@@ -634,10 +728,13 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	if len(s.authenticatedPaths) > 0 {
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			log.Info("blocked unauthorized request", "authorization", authorization)
-			httpResponseCodesTotal.WithLabelValues("401").Inc()
-			w.WriteHeader(401)
-			return nil
+			// fallback to dynamic authentication
+			if s.dynamicAuthenticator == nil || s.dynamicAuthenticator.IsSecretValid(authorization) != nil {
+				log.Info("blocked unauthorized request", "authorization", authorization)
+				httpResponseCodesTotal.WithLabelValues("401").Inc()
+				w.WriteHeader(401)
+				return nil
+			}
 		}
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck

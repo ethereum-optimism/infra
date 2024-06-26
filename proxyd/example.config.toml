@@ -121,3 +121,9 @@ secret = "test"
 eth_call = "main"
 eth_chainId = "main"
 eth_blockNumber = "alchemy"
+
+[dynamic_authentication]
+enabled = true
+type = "postgresql"
+connection_string = "postgresql://user:pass@host:5432/dbname?sslmode=disable"
+auth_token = "0xdeadbeef"
