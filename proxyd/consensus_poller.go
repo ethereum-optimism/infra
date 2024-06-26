@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
-
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -61,6 +60,24 @@ type backendState struct {
 
 func (bs *backendState) IsBanned() bool {
 	return time.Now().Before(bs.bannedUntil)
+}
+
+func (bs *backendState) GetLatestBlock() (hexutil.Uint64, string) {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.latestBlockNumber, bs.latestBlockHash
+}
+
+func (bs *backendState) GetSafeBlockNumber() hexutil.Uint64 {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.safeBlockNumber
+}
+
+func (bs *backendState) GetFinalizedBlockNumber() hexutil.Uint64 {
+	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
+	return bs.finalizedBlockNumber
 }
 
 // GetConsensusGroup returns the backend members that are agreeing in a consensus
@@ -287,7 +304,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 
 // UpdateBackend refreshes the consensus state of a single backend
 func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
-	bs := cp.getBackendState(be)
+	bs := cp.GetBackendState(be)
 	RecordConsensusBackendBanned(be, bs.IsBanned())
 
 	if bs.IsBanned() {
@@ -306,6 +323,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	RecordConsensusBackendInSync(be, err == nil && inSync)
 	if err != nil {
 		log.Warn("error updating backend sync state", "name", be.Name, "err", err)
+		return
 	}
 
 	var peerCount uint64
@@ -313,23 +331,49 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		peerCount, err = cp.getPeerCount(ctx, be)
 		if err != nil {
 			log.Warn("error updating backend peer count", "name", be.Name, "err", err)
+			return
+		}
+		if peerCount == 0 {
+			log.Warn("peer count responded with 200 and 0 peers", "name", be.Name)
+			be.intermittentErrorsSlidingWindow.Incr()
+			return
 		}
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
 	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
 	if err != nil {
-		log.Warn("error updating backend - latest block", "name", be.Name, "err", err)
+		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+	if latestBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
 	}
 
 	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")
 	if err != nil {
-		log.Warn("error updating backend - safe block", "name", be.Name, "err", err)
+		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+
+	if safeBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
 	}
 
 	finalizedBlockNumber, _, err := cp.fetchBlock(ctx, be, "finalized")
 	if err != nil {
-		log.Warn("error updating backend - finalized block", "name", be.Name, "err", err)
+		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+
+	if finalizedBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
@@ -523,6 +567,14 @@ func (cp *ConsensusPoller) IsBanned(be *Backend) bool {
 	return bs.IsBanned()
 }
 
+// IsBanned checks if a specific backend is banned
+func (cp *ConsensusPoller) BannedUntil(be *Backend) time.Time {
+	bs := cp.backendState[be]
+	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
+	return bs.bannedUntil
+}
+
 // Ban bans a specific backend
 func (cp *ConsensusPoller) Ban(be *Backend) {
 	if be.forcedCandidate {
@@ -618,8 +670,8 @@ func (cp *ConsensusPoller) isInSync(ctx context.Context, be *Backend) (result bo
 	return res, nil
 }
 
-// getBackendState creates a copy of backend state so that the caller can use it without locking
-func (cp *ConsensusPoller) getBackendState(be *Backend) *backendState {
+// GetBackendState creates a copy of backend state so that the caller can use it without locking
+func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 	bs := cp.backendState[be]
 	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
@@ -691,7 +743,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 
 	for _, be := range backends {
 
-		bs := cp.getBackendState(be)
+		bs := cp.GetBackendState(be)
 		if be.forcedCandidate {
 			candidates[be] = bs
 			continue

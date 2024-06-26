@@ -182,7 +182,7 @@ func TestFallback(t *testing.T) {
 		Fallback will be returned subsequent update
 	*/
 	triggerFirstNormalFailure := func() {
-		overridePeerCount("normal", 0)
+		overridePeerCount("normal", 1)
 		update()
 		require.True(t, containsNode(bg.Consensus.GetConsensusGroup(), "fallback"))
 		require.False(t, containsNode(bg.Consensus.GetConsensusGroup(), "normal"))

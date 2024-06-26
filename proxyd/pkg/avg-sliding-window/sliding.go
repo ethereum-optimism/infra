@@ -186,3 +186,11 @@ func (sw *AvgSlidingWindow) Count() uint {
 	sw.advance()
 	return sw.qty
 }
+
+// advance evicts old data points
+func (sw *AvgSlidingWindow) Clear() {
+	defer sw.mux.Unlock()
+	sw.mux.Lock()
+	sw.qty = 0
+	sw.sum = 0.0
+}
