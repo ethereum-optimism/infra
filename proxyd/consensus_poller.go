@@ -335,6 +335,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		}
 		if peerCount == 0 {
 			log.Warn("peer count responded with 200 and 0 peers", "name", be.Name)
+			be.intermittentErrorsSlidingWindow.Incr()
 			return
 		}
 		RecordConsensusBackendPeerCount(be, peerCount)

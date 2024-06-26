@@ -279,6 +279,12 @@ func WithConsensusReceiptTarget(receiptsTarget string) BackendOpt {
 	}
 }
 
+func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendOpt {
+	return func(b *Backend) {
+		b.intermittentErrorsSlidingWindow = sw
+	}
+}
+
 type indexedReqRes struct {
 	index int
 	req   *RPCReq
