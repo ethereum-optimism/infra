@@ -415,15 +415,6 @@ func Start(config *Config) (*Server, func(), error) {
 				}
 			}
 
-			// for _, be := range bgcfg.Backends {
-			// 	if fallback, ok := bg.Mu[be]; !ok {
-			// 		log.Crit("error backend not found in backend fallback configurations", "backend_name", be)
-			// 	} else {
-			// 		log.Debug("configuring new backend for group", "backend_group", bgName, "backend_name", be, "fallback", fallback)
-			// 		RecordBackendGroupFallbacks(bg, be, fallback)
-			// 	}
-			// }
-
 			var tracker ConsensusTracker
 			if bgcfg.ConsensusHA {
 				if bgcfg.ConsensusHARedis.URL == "" {
