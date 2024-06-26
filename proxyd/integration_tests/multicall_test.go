@@ -2,26 +2,24 @@ package integration_tests
 
 import (
 	"bytes"
-	"context"
+	// "context"
 	"encoding/json"
+	"fmt"
+	"github.com/ethereum-optimism/optimism/proxyd"
+	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
-
-	"github.com/ethereum-optimism/optimism/proxyd"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
-	"github.com/stretchr/testify/require"
 )
 
 // func makeSendRawTransaction(dataHex string) []byte {
 // 	return []byte(`{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["` + dataHex + `"],"id":1}`)
 // }
 
-func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server) {
+func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
 	// setup mock servers
 	node1 := NewMockBackend(nil)
 	node2 := NewMockBackend(nil)
@@ -76,24 +74,25 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 		},
 	}
 
-	return nodes, bg, client, shutdown, svr
+	handlers := []*ms.MockedHandler{&h1, &h2}
+	return nodes, bg, client, shutdown, svr, handlers
 }
 
 func TestMulticall(t *testing.T) {
-	nodes, bg, _, shutdown, svr := setupMulticall(t)
+	nodes, bg, _, shutdown, svr, handlers := setupMulticall(t)
 	defer nodes["node1"].mockBackend.Close()
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
 
-	ctx := context.Background()
+	// ctx := context.Background()
 
 	// poll for updated consensus
-	update := func() {
-		for _, be := range bg.Backends {
-			bg.Consensus.UpdateBackend(ctx, be)
-		}
-		bg.Consensus.UpdateBackendGroupConsensus(ctx)
-	}
+	// update := func() {
+	// 	for _, be := range bg.Backends {
+	// 		bg.Consensus.UpdateBackend(ctx, be)
+	// 	}
+	// 	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+	// }
 
 	// convenient methods to manipulate state and mock responses
 	reset := func() {
@@ -104,37 +103,50 @@ func TestMulticall(t *testing.T) {
 		}
 		bg.Consensus.ClearListeners()
 		bg.Consensus.Reset()
+
+		// Reset Handlers to Original Values, Default Node 1 will respond
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+		nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
 	}
 
-	override := func(node string, method string, block string, response string) {
-		if _, ok := nodes[node]; !ok {
-			t.Fatalf("node %s does not exist in the nodes map", node)
-		}
-		nodes[node].handler.AddOverride(&ms.MethodTemplate{
-			Method:   method,
-			Block:    block,
-			Response: response,
-		})
-	}
+	// override := func(node string, method string, block string, response string) {
+	// 	if _, ok := nodes[node]; !ok {
+	// 		t.Fatalf("node %s does not exist in the nodes map", node)
+	// 	}
+	// 	nodes[node].handler.AddOverride(&ms.MethodTemplate{
+	// 		Method:   method,
+	// 		Block:    block,
+	// 		Response: response,
+	// 	})
+	// }
 
-	overrideBlock := func(node string, blockRequest string, blockResponse string) {
-		override(node,
-			"eth_getBlockByNumber",
-			blockRequest,
-			buildResponse(map[string]string{
-				"number": blockResponse,
-				"hash":   "hash_" + blockResponse,
-			}))
-	}
+	// overrideBlock := func(node string, blockRequest string, blockResponse string) {
+	// 	override(node,
+	// 		"eth_getBlockByNumber",
+	// 		blockRequest,
+	// 		buildResponse(map[string]string{
+	// 			"number": blockResponse,
+	// 			"hash":   "hash_" + blockResponse,
+	// 		}))
+	// }
 
-	overridePeerCount := func(node string, count int) {
-		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()))
-	}
+	// overridePeerCount := func(node string, count int) {
+	// 	override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()))
+	// }
 
 	nodeBackendRequestCount := func(node string) int {
 		return len(nodes[node].mockBackend.requests)
 	}
-	// TODO: Maybe add a function that verifies the backend request is the dummy raw tx
+
+	setResponsiveBackend := func(node string) {
+		for nodeName := range nodes {
+			if nodeName == node {
+				nodes[nodeName].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+			} else {
+				nodes[nodeName].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
+			}
+		}
+	}
 
 	// force ban node2 and make sure node1 is the only one in consensus
 	// useOnlyNode1 := func() {
@@ -158,7 +170,7 @@ func TestMulticall(t *testing.T) {
 		resp := rr.Result()
 		require.NotNil(t, resp.Body)
 		require.Equal(t, 200, resp.StatusCode)
-		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
@@ -168,46 +180,47 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
-	t.Run("prevent using a backend with low peer count", func(t *testing.T) {
-		reset()
-		overridePeerCount("node1", 0)
-		update()
+	t.Run("Modifying the fallbacks list, we should expect only one request", func(t *testing.T) {
+		for i := 0; i < 2; i++ {
+			reset()
 
-		consensusGroup := bg.Consensus.GetConsensusGroup()
-		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
+			body := makeSendRawTransaction(txHex1)
+			req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+			req.Header.Set("X-Forwarded-For", "203.0.113.1")
+			rr := httptest.NewRecorder()
+
+			bg1 := svr.BackendGroups
+			bg1["node"].MulticallBackends = map[string]bool{
+				"node1": bool(i == 0),
+				"node2": bool(i == 1),
+			}
+			svr.BackendGroups = bg1
+
+			setResponsiveBackend(fmt.Sprintf("node%d", i+1))
+
+			svr.HandleRPC(rr, req)
+
+			resp := rr.Result()
+			require.NotNil(t, resp.Body)
+			require.Equal(t, 200, resp.StatusCode)
+			servedBy := fmt.Sprintf("node/node%d", i+1)
+			require.Equal(t, resp.Header["X-Served-By"], []string{servedBy})
+			rpcRes := &proxyd.RPCRes{}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+			require.False(t, rpcRes.IsError())
+			// unknown consensus at inik
+
+			if i == 0 {
+				require.Equal(t, 1, nodeBackendRequestCount("node1"))
+				require.Equal(t, 0, nodeBackendRequestCount("node2"))
+			} else {
+				require.Equal(t, 0, nodeBackendRequestCount("node1"))
+				require.Equal(t, 1, nodeBackendRequestCount("node2"))
+
+			}
+		}
 	})
 
-	t.Run("prevent using a backend lagging behind", func(t *testing.T) {
-		reset()
-		// node2 is 8+1 blocks ahead of node1 (0x101 + 8+1 = 0x10a)
-		overrideBlock("node2", "latest", "0x10a")
-		update()
-
-		// since we ignored node1, the consensus should be at 0x10a
-		require.Equal(t, "0x10a", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
-		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-
-		consensusGroup := bg.Consensus.GetConsensusGroup()
-		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
-	})
-
-	t.Run("prevent using a backend lagging behind - one before limit", func(t *testing.T) {
-		reset()
-		// node2 is 8 blocks ahead of node1 (0x101 + 8 = 0x109)
-		overrideBlock("node2", "latest", "0x109")
-		update()
-
-		// both nodes are in consensus with the lowest block
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
-		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
-	})
 }
 
 // func buildResponse(result interface{}) string {
