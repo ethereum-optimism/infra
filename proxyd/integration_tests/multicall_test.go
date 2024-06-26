@@ -5,14 +5,15 @@ import (
 	// "context"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum-optimism/optimism/proxyd"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
+
+	"github.com/ethereum-optimism/optimism/proxyd"
+	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/stretchr/testify/require"
 )
 
 // func makeSendRawTransaction(dataHex string) []byte {
@@ -168,6 +169,7 @@ func TestMulticall(t *testing.T) {
 		rr := httptest.NewRecorder()
 		svr.HandleRPC(rr, req)
 		resp := rr.Result()
+		defer resp.Body.Close()
 		require.NotNil(t, resp.Body)
 		require.Equal(t, 200, resp.StatusCode)
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
@@ -201,6 +203,7 @@ func TestMulticall(t *testing.T) {
 			svr.HandleRPC(rr, req)
 
 			resp := rr.Result()
+			defer resp.Body.Close()
 			require.NotNil(t, resp.Body)
 			require.Equal(t, 200, resp.StatusCode)
 			servedBy := fmt.Sprintf("node/node%d", i+1)

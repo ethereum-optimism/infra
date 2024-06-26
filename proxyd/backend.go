@@ -843,7 +843,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 
 	// re-apply overridden responses
-	log.Trace("successfuly served request overriding responses",
+	log.Trace("successfully served request overriding responses",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
 	)
