@@ -16,9 +16,10 @@ import (
 )
 
 type MethodTemplate struct {
-	Method   string `yaml:"method"`
-	Block    string `yaml:"block"`
-	Response string `yaml:"response"`
+	Method       string `yaml:"method"`
+	Block        string `yaml:"block"`
+	Response     string `yaml:"response"`
+	ResponseCode int    `yaml:"response_code"`
 }
 
 type MockedHandler struct {
@@ -85,6 +86,9 @@ func (mh *MockedHandler) Handler(w http.ResponseWriter, req *http.Request) {
 		for _, r := range template {
 			if r.Method == method && r.Block == block {
 				selectedResponse = r.Response
+				if r.ResponseCode != 0 {
+					w.WriteHeader(r.ResponseCode)
+				}
 			}
 		}
 		if selectedResponse != "" {

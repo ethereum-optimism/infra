@@ -158,9 +158,9 @@ type Backend struct {
 	maxLatencyThreshold         time.Duration
 	maxErrorRateThreshold       float64
 
-	latencySlidingWindow         *sw.AvgSlidingWindow
-	networkRequestsSlidingWindow *sw.AvgSlidingWindow
-	networkErrorsSlidingWindow   *sw.AvgSlidingWindow
+	latencySlidingWindow            *sw.AvgSlidingWindow
+	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
+	intermittentErrorsSlidingWindow *sw.AvgSlidingWindow
 
 	weight int
 }
@@ -279,6 +279,12 @@ func WithConsensusReceiptTarget(receiptsTarget string) BackendOpt {
 	}
 }
 
+func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendOpt {
+	return func(b *Backend) {
+		b.intermittentErrorsSlidingWindow = sw
+	}
+}
+
 type indexedReqRes struct {
 	index int
 	req   *RPCReq
@@ -328,9 +334,9 @@ func NewBackend(
 		maxDegradedLatencyThreshold: 5 * time.Second,
 		maxErrorRateThreshold:       0.5,
 
-		latencySlidingWindow:         sw.NewSlidingWindow(),
-		networkRequestsSlidingWindow: sw.NewSlidingWindow(),
-		networkErrorsSlidingWindow:   sw.NewSlidingWindow(),
+		latencySlidingWindow:            sw.NewSlidingWindow(),
+		networkRequestsSlidingWindow:    sw.NewSlidingWindow(),
+		intermittentErrorsSlidingWindow: sw.NewSlidingWindow(),
 	}
 
 	backend.Override(opts...)
@@ -534,7 +540,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", b.rpcURL, bytes.NewReader(body))
 	if err != nil {
-		b.networkErrorsSlidingWindow.Incr()
+		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error creating backend request")
 	}
@@ -560,7 +566,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
-		b.networkErrorsSlidingWindow.Incr()
+		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error in backend request")
 	}
@@ -579,7 +585,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	// Alchemy returns a 400 on bad JSONs, so handle that case
 	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
-		b.networkErrorsSlidingWindow.Incr()
+		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
@@ -590,7 +596,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, ErrBackendResponseTooLarge
 	}
 	if err != nil {
-		b.networkErrorsSlidingWindow.Incr()
+		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error reading response body")
 	}
@@ -608,18 +614,18 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		if err := json.Unmarshal(resB, &rpcRes); err != nil {
 			// Infura may return a single JSON-RPC response if, for example, the batch contains a request for an unsupported method
 			if responseIsNotBatched(resB) {
-				b.networkErrorsSlidingWindow.Incr()
+				b.intermittentErrorsSlidingWindow.Incr()
 				RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 				return nil, ErrBackendUnexpectedJSONRPC
 			}
-			b.networkErrorsSlidingWindow.Incr()
+			b.intermittentErrorsSlidingWindow.Incr()
 			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 			return nil, ErrBackendBadResponse
 		}
 	}
 
 	if len(rpcReqs) != len(rpcRes) {
-		b.networkErrorsSlidingWindow.Incr()
+		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, ErrBackendUnexpectedJSONRPC
 	}
@@ -670,7 +676,7 @@ func (b *Backend) ErrorRate() (errorRate float64) {
 	// we only really start counting the error rate after a minimum of 10 requests
 	// this is to avoid false positives when the backend is just starting up
 	if b.networkRequestsSlidingWindow.Sum() >= 10 {
-		errorRate = b.networkErrorsSlidingWindow.Sum() / b.networkRequestsSlidingWindow.Sum()
+		errorRate = b.intermittentErrorsSlidingWindow.Sum() / b.networkRequestsSlidingWindow.Sum()
 	}
 	return errorRate
 }
@@ -1264,6 +1270,11 @@ func RecordBatchRPCForward(ctx context.Context, backendName string, reqs []*RPCR
 	for _, req := range reqs {
 		RecordRPCForward(ctx, backendName, req.Method, source)
 	}
+}
+
+func (b *Backend) ClearSlidingWindows() {
+	b.intermittentErrorsSlidingWindow.Clear()
+	b.networkRequestsSlidingWindow.Clear()
 }
 
 func stripXFF(xff string) string {

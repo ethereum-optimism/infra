@@ -462,6 +462,8 @@ workflows:
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+          requires:
+            - hold
       - docker-publish:
           name: op-conductor-mon-docker-publish
           docker_name: op-conductor-mon
