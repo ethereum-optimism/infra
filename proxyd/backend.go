@@ -624,7 +624,6 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		}
 	}
 
-	// NOTE: We only return 1:1 mappings, interesting
 	if len(rpcReqs) != len(rpcRes) {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
@@ -750,10 +749,6 @@ func (bg *BackendGroup) Primaries() []*Backend {
 	}
 	return primaries
 }
-
-// func removeRpcsRequest(rpcs []*RPCReq, s int) []*RPCReq {
-// 	return append(rpcs[:s], rpcs[s+1:]...)
-// }
 
 func isValidMultiCallTx(rpcReqs []*RPCReq) bool {
 	for _, r := range rpcReqs {
