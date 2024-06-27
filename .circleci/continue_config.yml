@@ -80,6 +80,32 @@ jobs:
             echo "Pipeline Trigger Information:"
             echo "pipeline.trigger_source: << pipeline.trigger_source >>"
             echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
+
+            echo "Tag Information:"
+            # Get the current tag, if any
+            CURRENT_TAG=$(git describe --tags --exact-match 2> /dev/null || echo "No tag")
+            echo "Current tag: $CURRENT_TAG"
+
+            # Check for proxyd tag
+            if [[ $CURRENT_TAG =~ ^proxyd/v.* ]]; then
+              echo "proxyd tag regex match: true"
+            else
+              echo "proxyd tag regex match: false"
+            fi
+
+            # Check for op-conductor-mon tag (example)
+            if [[ $CURRENT_TAG =~ ^op-conductor-mon/v.* ]]; then
+              echo "op-conductor-mon tag regex match: true"
+            else
+              echo "op-conductor-mon tag regex match: false"
+            fi
+
+            # Check for op-ufm tag (example)
+            if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
+              echo "op-ufm tag regex match: true"
+            else
+              echo "op-ufm tag regex match: false"
+            fi
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
