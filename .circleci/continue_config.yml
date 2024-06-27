@@ -64,6 +64,22 @@ commands:
 
 
 jobs:
+  log-config-results:
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
+    steps:
+      - run:
+          name: Log Configuration Results
+          command: |
+            echo "Configuration Results:"
+            echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
+            echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-all: << pipeline.parameters.run-all >>"
+            echo ""
+            echo "Pipeline Trigger Information:"
+            echo "pipeline.trigger_source: << pipeline.trigger_source >>"
+            echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -343,6 +359,9 @@ jobs:
             ghr -t "$GITHUB_TOKEN" -u "$CIRCLE_PROJECT_USERNAME" -r "$CIRCLE_PROJECT_REPONAME" -c "$CIRCLE_SHA1" -delete "$CIRCLE_TAG" <<parameters.package_name>>/<<parameters.artifact_path>>
 
 workflows:
+  logging:
+    jobs:
+      - log-config-results
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
