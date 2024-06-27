@@ -64,6 +64,46 @@ commands:
 
 
 jobs:
+  log-config-results:
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    steps:
+      - checkout
+      - run:
+          name: Log Configuration Results
+          command: |
+            echo "Configuration Results:"
+            echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
+            echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-all: << pipeline.parameters.run-all >>"
+            echo ""
+            echo "Pipeline Trigger Information:"
+            echo "pipeline.trigger_source: << pipeline.trigger_source >>"
+            echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
+            echo ""
+            echo "Tag Information:"
+            CURRENT_TAG=$(git describe --tags --exact-match 2> /dev/null || echo "No tag")
+            echo "Current tag: $CURRENT_TAG"
+
+            # Use the same regex patterns as defined in the YAML anchors
+            if [[ $CURRENT_TAG =~ ^proxyd/v.* ]]; then
+              echo "proxyd tag regex match: true"
+            else
+              echo "proxyd tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-conductor-mon/v.* ]]; then
+              echo "op-conductor-mon tag regex match: true"
+            else
+              echo "op-conductor-mon tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
+              echo "op-ufm tag regex match: true"
+            else
+              echo "op-ufm tag regex match: false"
+            fi
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -343,6 +383,9 @@ jobs:
             ghr -t "$GITHUB_TOKEN" -u "$CIRCLE_PROJECT_USERNAME" -r "$CIRCLE_PROJECT_REPONAME" -c "$CIRCLE_SHA1" -delete "$CIRCLE_TAG" <<parameters.package_name>>/<<parameters.artifact_path>>
 
 workflows:
+  logging:
+    jobs:
+      - log-config-results
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
