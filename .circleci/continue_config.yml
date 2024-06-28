@@ -4,7 +4,7 @@ orbs:
   go: circleci/go@1.9.0
   gcp-cli: circleci/gcp-cli@2.4.1
   shellcheck: circleci/shellcheck@3.1.2
-  path-filtering: circleci/path-filtering@0.1.1
+  path-filtering: circleci/path-filtering@1.0.0
 
 parameters:
   run-build-op-conductor-mon:

@@ -4,13 +4,13 @@ version: 2.1
 setup: true
 
 orbs:
-  path-filtering: circleci/path-filtering@0.1.1
+  path-filtering: circleci/path-filtering@1.0.0
 
 workflows:
   check-updated-files:
     jobs:
       - path-filtering/filter:
-          name: check-updated-files-jacob
+          name: check-updated-files-jacob-2
           # 3-column, whitespace-delimited mapping. One mapping per
           # line:
           # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
