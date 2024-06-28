@@ -63,6 +63,7 @@ commands:
             echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
 
 
+<<<<<<< Updated upstream
 jobs:
   docker-build:
     environment:
@@ -342,6 +343,8 @@ jobs:
             go install github.com/tcnksm/ghr@v0.16.2
             ghr -t "$GITHUB_TOKEN" -u "$CIRCLE_PROJECT_USERNAME" -r "$CIRCLE_PROJECT_REPONAME" -c "$CIRCLE_SHA1" -delete "$CIRCLE_TAG" <<parameters.package_name>>/<<parameters.artifact_path>>
 
+=======
+>>>>>>> Stashed changes
 workflows:
   op-conductor-mon:
     when:
