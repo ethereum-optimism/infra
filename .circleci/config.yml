@@ -4,7 +4,8 @@ version: 2.1
 setup: true
 
 orbs:
-  path-filtering: circleci/path-filtering@0.1.1
+  path-filtering: circleci/path-filtering@1.0.0
+  continuation: circleci/continuation@1.0.0
 
 workflows:
   check-updated-files:
@@ -27,105 +28,9 @@ workflows:
           # complete. In this case, we are using the parent dynamic
           # configuration itself.
           config-path: .circleci/continue_config.yml
-  logging:
-    jobs:
-      - log-tag-results
-  release:
-    when:
-      not:
-        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
-    jobs:
-      - hold:
-          type: approval
-          filters:
-            tags:
-              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
-            branches:
-              ignore: /.*/
-      - docker-build:
-          name: op-ufm-docker-build
-          filters:
-            tags:
-              only: /^op-ufm\/v.*/
-            branches:
-              ignore: /.*/
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: op-ufm/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: op-ufm-docker-publish
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-ufm-docker-build
-
-      - docker-build:
-          name: proxyd-docker-build
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: proxyd/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: proxyd-docker-release
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - proxyd-docker-build
-
-      - docker-build:
-          name: op-conductor-mon-docker-build
-          docker_file: op-conductor-mon/Dockerfile
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: .
-          requires:
-            - hold
-      - docker-publish:
-          name: op-conductor-mon-docker-publish
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-conductor-mon-docker-build
-
+      - continuation/continue:
+          configuration_path: .circleci/release.yml
 jobs:
-  log-path-filtering-results:
-    docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
-    steps:
-      - checkout
-      - run:
-          name: Log path-filtering results
-          command: |
-            echo "Configuration Results:"
-            echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
-            echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
-            echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
-            echo "run-all: << pipeline.parameters.run-all >>"
   log-tag-results:
     docker:
       - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
@@ -259,7 +164,7 @@ jobs:
 
       - when:
           condition:
-            equal: ['main', <<pipeline.git.branch>>]
+            equal: ["main", <<pipeline.git.branch>>]
           steps:
             - gcp-oidc-authenticate:
                 service_account_email: GCP_SERVICE_ATTESTOR_ACCOUNT_EMAIL
@@ -279,7 +184,6 @@ jobs:
                       --image-path="$IMAGE_PATH"\
                       --signer-logging-level="INFO"\
                       --attestor-key-id="//cloudkms.googleapis.com/v1/projects/$ATTESTOR_PROJECT_NAME/locations/global/keyRings/$ATTESTOR_NAME-key-ring/cryptoKeys/$ATTESTOR_NAME-key/cryptoKeyVersions/1"
-
 
   docker-tag-op-stack-release:
     parameters:
@@ -326,11 +230,11 @@ jobs:
       - run:
           name: run lint
           command: |
-             if [ -f .golangci.yml ]; then
-              golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             else
-              golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             fi
+            if [ -f .golangci.yml ]; then
+             golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
+            else
+             golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
+            fi
           working_directory: <<parameters.module>>
 
   go-test:

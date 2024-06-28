@@ -20,15 +20,17 @@ parameters:
     type: boolean
     default: false
 
-
-
 workflows:
   logging:
     jobs:
       - log-path-filtering-results
   op-conductor-mon:
     when:
-      or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
+      or:
+        [
+          << pipeline.parameters.run-build-op-conductor-mon >>,
+          << pipeline.parameters.run-all >>,
+        ]
     jobs:
       - go-lint:
           name: op-conductor-mon-lint
@@ -44,7 +46,11 @@ workflows:
           docker_context: .
   op-ufm:
     when:
-      or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
+      or:
+        [
+          << pipeline.parameters.run-build-op-ufm >>,
+          << pipeline.parameters.run-all >>,
+        ]
     jobs:
       - go-lint:
           name: op-ufm-lint
@@ -60,7 +66,11 @@ workflows:
           docker_context: .
   op-proxyd:
     when:
-      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
+      or:
+        [
+          << pipeline.parameters.run-build-proxyd >>,
+          << pipeline.parameters.run-all >>,
+        ]
     jobs:
       - go-lint:
           name: proxyd-lint
@@ -74,3 +84,18 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+
+jobs:
+  log-path-filtering-results:
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    steps:
+      - checkout
+      - run:
+          name: Log path-filtering results
+          command: |
+            echo "Configuration Results:"
+            echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
+            echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-all: << pipeline.parameters.run-all >>"
