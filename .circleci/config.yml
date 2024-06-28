@@ -29,7 +29,7 @@ workflows:
           config-path: .circleci/continue_config.yml
   logging:
     jobs:
-      - log-config-results
+      - log-tag-results
   release:
     when:
       not:
@@ -113,20 +113,27 @@ workflows:
             - op-conductor-mon-docker-build
 
 jobs:
-  log-config-results:
+  log-path-filtering-results:
     docker:
       - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
     steps:
       - checkout
       - run:
-          name: Log Configuration Results
+          name: Log path-filtering results
           command: |
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-all: << pipeline.parameters.run-all >>"
-            echo ""
+  log-tag-results:
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    steps:
+      - checkout
+      - run:
+          name: Log tag results
+          command: |
             echo "Pipeline Trigger Information:"
             echo "pipeline.trigger_source: << pipeline.trigger_source >>"
             echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
