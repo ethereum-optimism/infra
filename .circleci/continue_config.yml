@@ -446,14 +446,18 @@ workflows:
     #     equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
       - log-config-results:
-          filters:  # required since `deploy` has tag filters AND requires `build`
+          filters:
             tags:
               only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+            branches:
+              ignore: /.*/
       - hold:
           type: approval
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
               only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+            branches:
+              ignore: /.*/
       - docker-build:
           name: op-ufm-docker-build
           filters:
