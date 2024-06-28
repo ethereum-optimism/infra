@@ -22,8 +22,7 @@ workflows:
             .github/.* run-all true
           filters:
             tags:
-              only:
-                - /.*
+              only: /.*/
 
           base-revision: main
           # this is the path of the configuration we should trigger once

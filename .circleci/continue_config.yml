@@ -456,8 +456,6 @@ workflows:
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
               only: /.*/
-            branches:
-              ignore: /.*/
       # - docker-build:
       #     name: op-ufm-docker-build
       #     filters:
