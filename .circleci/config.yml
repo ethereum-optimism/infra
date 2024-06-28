@@ -4,7 +4,7 @@ version: 2.1
 setup: true
 
 orbs:
-  path-filtering: circleci/path-filtering@0.1.1
+  path-filtering: circleci/path-filtering@1.0.0
 
 workflows:
   check-updated-files:
@@ -20,6 +20,9 @@ workflows:
             proxyd/.* run-build-proxyd true
             .circleci/.* run-all true
             .github/.* run-all true
+          filters:
+            tags:
+              only: /.*/
 
           base-revision: main
           # this is the path of the configuration we should trigger once
