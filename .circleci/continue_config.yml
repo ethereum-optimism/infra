@@ -441,89 +441,93 @@ workflows:
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   release:
-    when:
-      not:
-        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+    # when:
+    #   not:
+    #     equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
       - log-config-results:
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
               only: /.*/
-            branches:
-              ignore: /.*/
+            # branches:
+              # ignore: /.*/
       - hold:
           type: approval
-      - docker-build:
-          name: op-ufm-docker-build
-          filters:
+          filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
-              only: /^op-ufm\/v.*/
+              only: /.*/
             branches:
               ignore: /.*/
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: op-ufm/Dockerfile
-          context:
-            - oplabs-gcr
-          requires:
-            - hold
-      - docker-publish:
-          name: op-ufm-docker-publish
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-ufm-docker-build
-
-      - docker-build:
-          name: proxyd-docker-build
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: proxyd/Dockerfile
-          context:
-            - oplabs-gcr
-          requires:
-            - hold
-      - docker-publish:
-          name: proxyd-docker-release
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr
-          requires:
-            - proxyd-docker-build
-
-      - docker-build:
-          name: op-conductor-mon-docker-build
-          filters:
-            tags:
-              only: /^op-conductor-mon\/v.*/
-            branches:
-              ignore: /.*/
-          docker_file: op-conductor-mon/Dockerfile
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: .
-          requires:
-            - hold
-      - docker-publish:
-          name: op-conductor-mon-docker-publish
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          context:
-            - oplabs-gcr
-          requires:
-            - op-conductor-mon-docker-build
+      # - docker-build:
+      #     name: op-ufm-docker-build
+      #     filters:
+      #       tags:
+      #         only: /^op-ufm\/v.*/
+      #       branches:
+      #         ignore: /.*/
+      #     docker_name: op-ufm
+      #     docker_tags: <<pipeline.git.revision>>
+      #     docker_context: .
+      #     docker_file: op-ufm/Dockerfile
+      #     context:
+      #       - oplabs-gcr
+      #     requires:
+      #       - hold
+      # - docker-publish:
+      #     name: op-ufm-docker-publish
+      #     docker_name: op-ufm
+      #     docker_tags: <<pipeline.git.revision>>
+      #     context:
+      #       - oplabs-gcr
+      #     requires:
+      #       - op-ufm-docker-build
+      # - docker-build:
+      #     name: proxyd-docker-build
+      #     filters:
+      #       tags:
+      #         only: /^proxyd\/v.*/
+      #       branches:
+      #         ignore: /.*/
+      #     docker_name: proxyd
+      #     docker_tags: <<pipeline.git.revision>>
+      #     docker_context: .
+      #     docker_file: proxyd/Dockerfile
+      #     context:
+      #       - oplabs-gcr
+      #     requires:
+      #       - hold
+      # - docker-publish:
+      #     name: proxyd-docker-release
+      #     filters:
+      #       tags:
+      #         only: /^proxyd\/v.*/
+      #       branches:
+      #         ignore: /.*/
+      #     docker_name: proxyd
+      #     docker_tags: <<pipeline.git.revision>>
+      #     context:
+      #       - oplabs-gcr
+      #     requires:
+      #       - proxyd-docker-build
+      #
+      # - docker-build:
+      #     name: op-conductor-mon-docker-build
+      #     filters:
+      #       tags:
+      #         only: /^op-conductor-mon\/v.*/
+      #       branches:
+      #         ignore: /.*/
+      #     docker_file: op-conductor-mon/Dockerfile
+      #     docker_name: op-conductor-mon
+      #     docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+      #     docker_context: .
+      #     requires:
+      #       - hold
+      # - docker-publish:
+      #     name: op-conductor-mon-docker-publish
+      #     docker_name: op-conductor-mon
+      #     docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+      #     context:
+      #       - oplabs-gcr
+      #     requires:
+      #       - op-conductor-mon-docker-build

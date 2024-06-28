@@ -10,7 +10,7 @@ workflows:
   check-updated-files:
     jobs:
       - path-filtering/filter:
-          name: check-updated-files-jacob-2
+          name: check-updated-files-jacob-3
           # 3-column, whitespace-delimited mapping. One mapping per
           # line:
           # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
@@ -20,6 +20,10 @@ workflows:
             proxyd/.* run-build-proxyd true
             .circleci/.* run-all true
             .github/.* run-all true
+          filters:
+            tags:
+              only:
+                - /.*
 
           base-revision: main
           # this is the path of the configuration we should trigger once
