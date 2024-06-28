@@ -7,29 +7,6 @@ orbs:
   path-filtering: circleci/path-filtering@1.0.0
   continuation: circleci/continuation@1.0.0
 
-workflows:
-  check-updated-files:
-    jobs:
-      - path-filtering/filter:
-          name: check-updated-files
-          # 3-column, whitespace-delimited mapping. One mapping per
-          # line:
-          # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
-          mapping: |
-            op-conductor-mon/.* run-build-op-conductor-mon true
-            op-ufm/.* run-build-op-ufm true
-            proxyd/.* run-build-proxyd true
-            .circleci/.* run-all true
-            .github/.* run-all true
-
-          base-revision: main
-          # this is the path of the configuration we should trigger once
-          # path filtering and pipeline parameter value updates are
-          # complete. In this case, we are using the parent dynamic
-          # configuration itself.
-          config-path: .circleci/continue_config.yml
-      - continuation/continue:
-          configuration_path: .circleci/release.yml
 jobs:
   log-tag-results:
     docker:
@@ -383,3 +360,27 @@ commands:
             gcloud auth login --brief --cred-file "<< parameters.gcp_cred_config_file_path >>"
             # Configure ADC
             echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
+
+workflows:
+  check-updated-files:
+    jobs:
+      - path-filtering/filter:
+          name: check-updated-files
+          # 3-column, whitespace-delimited mapping. One mapping per
+          # line:
+          # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
+          mapping: |
+            op-conductor-mon/.* run-build-op-conductor-mon true
+            op-ufm/.* run-build-op-ufm true
+            proxyd/.* run-build-proxyd true
+            .circleci/.* run-all true
+            .github/.* run-all true
+
+          base-revision: main
+          # this is the path of the configuration we should trigger once
+          # path filtering and pipeline parameter value updates are
+          # complete. In this case, we are using the parent dynamic
+          # configuration itself.
+          config-path: .circleci/continue_config.yml
+      - continuation/continue:
+          configuration_path: .circleci/release.yml
