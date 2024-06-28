@@ -387,7 +387,7 @@ workflows:
   logging:
     jobs:
       - log-config-results:
-          filters:
+          filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
               only: /.*/
   op-conductor-mon:
@@ -439,15 +439,14 @@ workflows:
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   release:
-    filters:
-      tags:
-        only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
-      branches:
-        ignore: /.*/
     when:
       not:
         equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
+      - log-config-results:
+          filters:  # required since `deploy` has tag filters AND requires `build`
+            tags:
+              only: /.*/
       - hold:
           type: approval
       - docker-build:
