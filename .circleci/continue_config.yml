@@ -448,12 +448,12 @@ workflows:
       - log-config-results:
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
-              only: /.*/
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
       - hold:
           type: approval
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
-              only: /.*/
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
       - docker-build:
           name: op-ufm-docker-build
           filters:
