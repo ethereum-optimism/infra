@@ -4,7 +4,7 @@ orbs:
   go: circleci/go@1.9.0
   gcp-cli: circleci/gcp-cli@2.4.1
   shellcheck: circleci/shellcheck@3.1.2
-  path-filtering: circleci/path-filtering@0.1.1
+  path-filtering: circleci/path-filtering@1.0.0
 
 parameters:
   run-build-op-conductor-mon:
@@ -67,6 +67,8 @@ jobs:
   log-config-results:
     docker:
       - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    environment:
+      CURRENT_TAG: << pipeline.git.tag >>
     steps:
       - checkout
       - run:
@@ -83,7 +85,6 @@ jobs:
             echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
             echo ""
             echo "Tag Information:"
-            CURRENT_TAG=$(git describe --tags --exact-match 2> /dev/null || echo "No tag")
             echo "Current tag: $CURRENT_TAG"
 
             # Use the same regex patterns as defined in the YAML anchors
@@ -385,7 +386,12 @@ jobs:
 workflows:
   logging:
     jobs:
-      - log-config-results
+      - log-config-results:
+          filters:
+            tags:
+              only: /.*/
+            branches:
+              ignore: /.*/
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
@@ -435,10 +441,13 @@ workflows:
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   release:
-    when:
-      not:
-        equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
     jobs:
+      - log-config-results:
+          filters:
+            tags:
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+            branches:
+              ignore: /.*/
       - hold:
           type: approval
           filters:
@@ -451,8 +460,6 @@ workflows:
           filters:
             tags:
               only: /^op-ufm\/v.*/
-            branches:
-              ignore: /.*/
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
@@ -466,17 +473,14 @@ workflows:
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>
           context:
-            - oplabs-gcr
+            - oplabs-gcr-release
           requires:
             - op-ufm-docker-build
-
       - docker-build:
           name: proxyd-docker-build
           filters:
             tags:
               only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
@@ -490,8 +494,6 @@ workflows:
           filters:
             tags:
               only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           context:
@@ -501,10 +503,15 @@ workflows:
 
       - docker-build:
           name: op-conductor-mon-docker-build
+          filters:
+            tags:
+              only: /^op-conductor-mon\/v.*/
           docker_file: op-conductor-mon/Dockerfile
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+          context:
+            - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
@@ -512,6 +519,6 @@ workflows:
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           context:
-            - oplabs-gcr
+            - oplabs-gcr-release
           requires:
             - op-conductor-mon-docker-build
