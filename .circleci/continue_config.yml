@@ -67,6 +67,8 @@ jobs:
   log-config-results:
     docker:
       - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    environment:
+      CURRENT_TAG: << pipeline.git.tag >>
     steps:
       - checkout
       - run:
@@ -83,7 +85,6 @@ jobs:
             echo "Is not a scheduled pipeline: $([ "<< pipeline.trigger_source >>" != "scheduled_pipeline" ] && echo "true" || echo "false")"
             echo ""
             echo "Tag Information:"
-            CURRENT_TAG=$(git describe --tags --exact-match 2> /dev/null || echo "No tag")
             echo "Current tag: $CURRENT_TAG"
 
             # Use the same regex patterns as defined in the YAML anchors
@@ -385,7 +386,10 @@ jobs:
 workflows:
   logging:
     jobs:
-      - log-config-results
+      - log-config-results:
+          filters:
+            tags:
+              only: /.*/
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
@@ -458,7 +462,7 @@ workflows:
           docker_context: .
           docker_file: op-ufm/Dockerfile
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - hold
       - docker-publish:
@@ -482,7 +486,7 @@ workflows:
           docker_context: .
           docker_file: proxyd/Dockerfile
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - hold
       - docker-publish:
@@ -495,7 +499,7 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - proxyd-docker-build
 
