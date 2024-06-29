@@ -144,3 +144,34 @@ The metrics port is configurable via the `metrics.port` and `metrics.host` keys 
 ## Adding Backend SSL Certificates in Docker
 
 The Docker image runs on Alpine Linux. If you get SSL errors when connecting to a backend within Docker, you may need to add additional certificates to Alpine's certificate store. To do this, bind mount the certificate bundle into a file in `/usr/local/share/ca-certificates`. The `entrypoint.sh` script will then update the store with whatever is in the `ca-certificates` directory prior to starting `proxyd`.
+
+## Dynamic authentication
+
+Dynamic authentication is module that allows you to add/delete authorization keys w/o restarting the proxyd service. The authorization secrets are stored in the following backends:
+
+- PostgreSQL
+
+The proxyd setups database automatically when starting, you do not need to run any migration.
+
+### Config example
+
+```toml
+[dynamic_authentication]
+enabled = true
+type = "postgresql"
+connection_string = "postgresql://user:pass@host:5432/dbname?sslmode=disable"
+admin_token = "0xdeadbeef"
+```
+
+### Usage
+
+- `PUT /admin/keys/{rpc-auth-key}` -  adds a new key
+- `DELETE /admin/keys/{rpc-auth-key}` - revokes an existing key
+
+```shell
+# add new secret
+curl -X PUT -H "Authorization: Bearer 0xdeadbeef"  "http://localhost:8084/admin/keys/new-secret-to-add"
+
+# revoke previously added secret
+curl -X DELETE -H "Authorization: Bearer 0xdeadbeef"  "http://localhost:8084/admin/keys/new-secret-to-add"
+```

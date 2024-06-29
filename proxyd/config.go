@@ -149,6 +149,13 @@ type SenderRateLimitConfig struct {
 	AllowedChainIds []*big.Int `toml:"allowed_chain_ids"`
 }
 
+type DynamicAuthentication struct {
+	Enabled          bool
+	Type             string
+	ConnectionString string `toml:"connection_string"`
+	AdminToken       string `toml:"admin_token"`
+}
+
 type Config struct {
 	WSBackendGroup        string                `toml:"ws_backend_group"`
 	Server                ServerConfig          `toml:"server"`
@@ -160,6 +167,7 @@ type Config struct {
 	Backends              BackendsConfig        `toml:"backends"`
 	BatchConfig           BatchConfig           `toml:"batch"`
 	Authentication        map[string]string     `toml:"authentication"`
+	DynamicAuthentication DynamicAuthentication `toml:"dynamic_authentication"`
 	BackendGroups         BackendGroupsConfig   `toml:"backend_groups"`
 	RPCMethodMappings     map[string]string     `toml:"rpc_method_mappings"`
 	WSMethodWhitelist     []string              `toml:"ws_method_whitelist"`
