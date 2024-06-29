@@ -11,11 +11,15 @@ import (
 type ServerConfig struct {
 	RPCHost           string `toml:"rpc_host"`
 	RPCPort           int    `toml:"rpc_port"`
+	EnableWS          bool   `toml:"enable_ws"`
 	WSHost            string `toml:"ws_host"`
 	WSPort            int    `toml:"ws_port"`
 	MaxBodySizeBytes  int64  `toml:"max_body_size_bytes"`
 	MaxConcurrentRPCs int64  `toml:"max_concurrent_rpcs"`
 	LogLevel          string `toml:"log_level"`
+
+	// Allow direct client connection without x_forwarded_for header for local tests
+	AllowDirect       bool   `toml:"allow_direct"`
 
 	// TimeoutSeconds specifies the maximum time spent serving an HTTP request. Note that isn't used for websocket connections
 	TimeoutSeconds int `toml:"timeout_seconds"`
