@@ -54,7 +54,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	// expose the backend group
 	bg := svr.BackendGroups["node"]
 	require.NotNil(t, bg)
-	require.Nil(t, bg.Consensus, "Expeceted Consensus Not to be Initalized")
+	require.Nil(t, bg.Consensus, "Expeceted consensus not to be initialized")
 	require.Equal(t, 2, len(bg.Backends))                       // should match config
 	require.Equal(t, bg.GetRoutingStrategy(), proxyd.Multicall) // should match config
 
@@ -103,7 +103,7 @@ func TestMulticall(t *testing.T) {
 		// bg.Consensus.ClearListeners()
 		// bg.Consensus.Reset()
 
-		// Reset Handlers to Original Values, Default Node 1 will respond
+		// NOTE: Handlers to Original Values, Default Node 1 will respond
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 		nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
 	}
@@ -208,8 +208,6 @@ func TestMulticall(t *testing.T) {
 			rpcRes := &proxyd.RPCRes{}
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 			require.False(t, rpcRes.IsError())
-			// unknown consensus at inik
-
 			if i == 0 {
 				require.Equal(t, 1, nodeBackendRequestCount("node1"))
 				require.Equal(t, 0, nodeBackendRequestCount("node2"))
@@ -221,6 +219,18 @@ func TestMulticall(t *testing.T) {
 		}
 	})
 
+	t.Run("When one of the backends times out", func(t *testing.T) {})
+
+	t.Run("When all of the backends times out", func(t *testing.T) {})
+
+	t.Run("When all of the backends return non 200", func(t *testing.T) {})
+
+	// Make the handlers take various time, and ensure shortest time is always returned first
+	t.Run("Ensure we return the first success back to the caller", func(t *testing.T) {})
+
+	t.Run("Ensure application level error is returned to caller", func(t *testing.T) {})
+
+	// NOTE: Add Test to ensure routing strategy cannot be a invalid routing strategy string
 }
 
 // func buildResponse(result interface{}) string {

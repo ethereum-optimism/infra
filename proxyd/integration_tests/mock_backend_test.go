@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum-optimism/optimism/proxyd"
 	"github.com/gorilla/websocket"
@@ -29,6 +30,15 @@ type MockBackend struct {
 
 func SingleResponseHandler(code int, response string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(response))
+	}
+}
+
+// Use this to change the how quickly it respondes
+func SingleResponseHandlerWithSleep(code int, response string, responseTime time.Duration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(responseTime)
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))
 	}
