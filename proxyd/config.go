@@ -107,14 +107,22 @@ type BackendConfig struct {
 
 type BackendsConfig map[string]*BackendConfig
 
+type RoutingStrategy string
+
+const (
+	ConsensusAware RoutingStrategy = "consensus_aware"
+	Multicall      RoutingStrategy = "multi_call"
+)
+
 type BackendGroupConfig struct {
 	Backends []string `toml:"backends"`
 
 	WeightedRouting bool `toml:"weighted_routing"`
 
-	ConsensusAware          bool         `toml:"consensus_aware"`
-	ConsensusAsyncHandler   string       `toml:"consensus_handler"`
-	ConsensusPollerInterval TOMLDuration `toml:"consensus_poller_interval"`
+	// ConsensusAware          string         `toml:"consensus_aware"`
+	RoutingStrategy         RoutingStrategy `toml:"routing_strategy"`
+	ConsensusAsyncHandler   string          `toml:"consensus_handler"`
+	ConsensusPollerInterval TOMLDuration    `toml:"consensus_poller_interval"`
 
 	ConsensusBanPeriod          TOMLDuration `toml:"consensus_ban_period"`
 	ConsensusMaxUpdateThreshold TOMLDuration `toml:"consensus_max_update_threshold"`

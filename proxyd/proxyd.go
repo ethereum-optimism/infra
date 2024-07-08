@@ -189,8 +189,8 @@ func Start(config *Config) (*Server, func(), error) {
 		backends := make([]*Backend, 0)
 		fallbackBackends := make(map[string]bool)
 		fallbackCount := 0
-		multicallBackends := make(map[string]bool)
-		multicallCount := 0
+		// multicallBackends := make(map[string]bool)
+		// multicallCount := 0
 		for _, bName := range bg.Backends {
 			if backendsByName[bName] == nil {
 				return nil, nil, fmt.Errorf("backend %s is not defined", bName)
@@ -215,21 +215,6 @@ func Start(config *Config) (*Server, func(), error) {
 					"backend_group", bgName,
 				)
 			}
-
-			if bg.MutlicallMode {
-				for _, mutliB := range bg.MulticallBackends {
-					if bName == mutliB {
-						multicallBackends[bName] = true
-						log.Info("configured backend as multicall",
-							"backend_name", bName,
-							"backend_group", bgName,
-						)
-						multicallCount++
-					}
-
-				}
-
-			}
 		}
 
 		if fallbackCount != len(bg.Fallbacks) {
@@ -240,20 +225,12 @@ func Start(config *Config) (*Server, func(), error) {
 				)
 		}
 
-		if multicallCount != len(bg.MulticallBackends) {
-			return nil, nil,
-				fmt.Errorf(
-					"error: number of fallbacks instantiated (%d) did not match configured (%d) for backend group %s",
-					fallbackCount, len(bg.Fallbacks), bgName,
-				)
-		}
-
 		backendGroups[bgName] = &BackendGroup{
-			Name:              bgName,
-			Backends:          backends,
-			WeightedRouting:   bg.WeightedRouting,
-			FallbackBackends:  fallbackBackends,
-			MulticallBackends: multicallBackends,
+			Name:             bgName,
+			Backends:         backends,
+			WeightedRouting:  bg.WeightedRouting,
+			FallbackBackends: fallbackBackends,
+			routingStrategy:  bg.RoutingStrategy,
 		}
 	}
 
@@ -379,7 +356,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 	for bgName, bg := range backendGroups {
 		bgcfg := config.BackendGroups[bgName]
-		if bgcfg.ConsensusAware {
+		if bgcfg.RoutingStrategy == ConsensusAware {
 			log.Info("creating poller for consensus aware backend_group", "name", bgName)
 
 			copts := make([]ConsensusOpt, 0)

@@ -16,10 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// func makeSendRawTransaction(dataHex string) []byte {
-// 	return []byte(`{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["` + dataHex + `"],"id":1}`)
-// }
-
 func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
 	// setup mock servers
 	node1 := NewMockBackend(nil)
@@ -58,8 +54,9 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	// expose the backend group
 	bg := svr.BackendGroups["node"]
 	require.NotNil(t, bg)
-	require.NotNil(t, bg.Consensus)
-	require.Equal(t, 2, len(bg.Backends)) // should match config
+	require.Nil(t, bg.Consensus, "Expeceted Consensus Not to be Initalized")
+	require.Equal(t, 2, len(bg.Backends))                       // should match config
+	require.Equal(t, bg.GetRoutingStrategy(), proxyd.Multicall) // should match config
 
 	// convenient mapping to access the nodes by name
 	nodes := map[string]nodeContext{
@@ -80,7 +77,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 }
 
 func TestMulticall(t *testing.T) {
-	nodes, bg, _, shutdown, svr, handlers := setupMulticall(t)
+	nodes, _, _, shutdown, svr, handlers := setupMulticall(t)
 	defer nodes["node1"].mockBackend.Close()
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
@@ -102,8 +99,9 @@ func TestMulticall(t *testing.T) {
 			node.mockBackend.Reset()
 			require.Zero(t, len(node.mockBackend.requests))
 		}
-		bg.Consensus.ClearListeners()
-		bg.Consensus.Reset()
+		// NOTE: May want to make consensus an empty object or getter since it can cause nil pointer
+		// bg.Consensus.ClearListeners()
+		// bg.Consensus.Reset()
 
 		// Reset Handlers to Original Values, Default Node 1 will respond
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
@@ -182,7 +180,7 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
-	t.Run("Modifying the fallbacks list, we should expect only one request", func(t *testing.T) {
+	t.Run("Modifying the backend list, we should expect only one request", func(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			reset()
 
@@ -192,9 +190,8 @@ func TestMulticall(t *testing.T) {
 			rr := httptest.NewRecorder()
 
 			bg1 := svr.BackendGroups
-			bg1["node"].MulticallBackends = map[string]bool{
-				"node1": bool(i == 0),
-				"node2": bool(i == 1),
+			bg1["node"].Backends = []*proxyd.Backend{
+				nodes[fmt.Sprintf("node%d", i+1)].backend,
 			}
 			svr.BackendGroups = bg1
 

@@ -711,12 +711,16 @@ func sortBatchRPCResponse(req []*RPCReq, res []*RPCRes) {
 }
 
 type BackendGroup struct {
-	Name              string
-	Backends          []*Backend
-	WeightedRouting   bool
-	Consensus         *ConsensusPoller
-	FallbackBackends  map[string]bool
-	MulticallBackends map[string]bool
+	Name             string
+	Backends         []*Backend
+	WeightedRouting  bool
+	Consensus        *ConsensusPoller
+	FallbackBackends map[string]bool
+	routingStrategy  RoutingStrategy
+}
+
+func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
+	return bg.routingStrategy
 }
 
 func (bg *BackendGroup) Fallbacks() []*Backend {
@@ -729,15 +733,15 @@ func (bg *BackendGroup) Fallbacks() []*Backend {
 	return fallbacks
 }
 
-func (bg *BackendGroup) Multicalls() []*Backend {
-	multicalls := []*Backend{}
-	for _, a := range bg.Backends {
-		if multi, ok := bg.MulticallBackends[a.Name]; ok && multi {
-			multicalls = append(multicalls, a)
-		}
-	}
-	return multicalls
-}
+// func (bg *BackendGroup) Multicalls() []*Backend {
+// 	multicalls := []*Backend{}
+// 	for _, a := range bg.Backends {
+// 		if multi, ok := bg.MulticallBackends[a.Name]; ok && multi {
+// 			multicalls = append(multicalls, a)
+// 		}
+// 	}
+// 	return multicalls
+// }
 
 func (bg *BackendGroup) Primaries() []*Backend {
 	primaries := []*Backend{}
@@ -779,12 +783,12 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	// Forward to fanout backends, Note: Further optimization for forward to all
 	// and cancel once a valid response is returned from a go routine
-	if len(bg.Multicalls()) > 0 && isValidMultiCallTx(rpcReqs) {
+	if bg.GetRoutingStrategy() == Multicall && isValidMultiCallTx(rpcReqs) {
 		var wg sync.WaitGroup
 		fanoutChan := make(chan BackendGroupRPCResponse)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		for _, backend := range bg.Multicalls() {
+		for _, backend := range bg.Backends {
 			wg.Add(1)
 			go func(backend *Backend) {
 				defer wg.Done()

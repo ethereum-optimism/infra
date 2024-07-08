@@ -72,7 +72,7 @@ func setupBlockHeightZero(t *testing.T) (map[string]*bhZeroNodeContext, *proxyd.
 	bg := svr.BackendGroups["node"]
 
 	require.NotNil(t, bg)
-	require.NotNil(t, bg.Consensus)
+	require.NotNil(t, bg.Consensus, "Expected Consenus Poller to be intialized")
 	require.Equal(t, 2, len(bg.Backends))
 
 	// convenient mapping to access the nodes
