@@ -185,17 +185,14 @@ func TestMulticall(t *testing.T) {
 
 	t.Run("When one of the backends times out", func(t *testing.T) {
 
-		// shutdownServer := make(chan struct{})
 		for i := 1; i < 3; i++ {
 			reset()
 			fmt.Println("backed timeout iteration test ", i)
 			shutdownChan := make(chan struct{})
 			if i == 1 {
 				nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-				// nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, time.Duration(time.Second*10)))
 				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
 			} else if i == 2 {
-				// nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, time.Duration(time.Second*10)))
 				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
 				nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 			}
@@ -223,11 +220,37 @@ func TestMulticall(t *testing.T) {
 
 			require.Equal(t, 1, nodeBackendRequestCount("node1"))
 			require.Equal(t, 1, nodeBackendRequestCount("node2"))
-
 		}
 	})
 
-	// t.Run("When all of the backends times out", func(t *testing.T) {})
+	// t.Run("When all of the backends times out", func(t *testing.T) {
+	// 	reset()
+	// 	shutdownChan2 := make(chan struct{})
+	// 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
+	// 	nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
+	//
+	// 	setServerBackend()
+	//
+	// 	body := makeSendRawTransaction(txHex1)
+	// 	req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+	// 	req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	// 	rr := httptest.NewRecorder()
+	//
+	// 	svr.HandleRPC(rr, req)
+	// 	shutdownChan2 <- struct{}{}
+	// 	resp := rr.Result()
+	// 	defer resp.Body.Close()
+	//
+	// 	require.NotNil(t, resp.Body)
+	// 	require.Equal(t, 500, resp.StatusCode, "expected no response")
+	// 	rpcRes := &proxyd.RPCRes{}
+	// 	require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+	// 	require.False(t, rpcRes.IsError())
+	//
+	// 	require.Equal(t, 1, nodeBackendRequestCount("node1"))
+	// 	require.Equal(t, 1, nodeBackendRequestCount("node2"))
+	//
+	// })
 	//
 	// t.Run("When all of the backends return non 200", func(t *testing.T) {})
 	//

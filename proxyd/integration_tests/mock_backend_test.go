@@ -45,6 +45,7 @@ func SingleResponseHandlerWithSleep(code int, response string, responseTime time
 
 func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(6 * time.Second)
 		<-shutdownServer
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))

@@ -815,6 +815,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		go func() {
 			wg.Wait()
 			close(fanoutChan)
+			fmt.Println("fanoutChan closed")
 		}()
 
 		var finalResp BackendGroupRPCResponse
@@ -826,6 +827,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 				fmt.Println("Fanout response ", i, " response: ", len(resp.RPCRes), " ok: ", ok)
 				if !ok {
 					// Channel closed, all responses received
+					fmt.Println("channel closed returning")
 					return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 				}
 				if resp.error != nil {
