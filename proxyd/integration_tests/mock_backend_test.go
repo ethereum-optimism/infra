@@ -35,10 +35,17 @@ func SingleResponseHandler(code int, response string) http.HandlerFunc {
 	}
 }
 
-// Use this to change the how quickly it respondes
 func SingleResponseHandlerWithSleep(code int, response string, responseTime time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(responseTime)
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(response))
+	}
+}
+
+func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		<-shutdownServer
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))
 	}

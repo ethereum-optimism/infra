@@ -786,14 +786,29 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	if bg.GetRoutingStrategy() == Multicall && isValidMultiCallTx(rpcReqs) {
 		var wg sync.WaitGroup
 		fanoutChan := make(chan BackendGroupRPCResponse)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		for _, backend := range bg.Backends {
 			wg.Add(1)
 			go func(backend *Backend) {
 				defer wg.Done()
+				// select {
+				// case <-ctx.Done():
+				// 	return // Exit if context is cancelled
+				// default:
 				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
-				fanoutChan <- *backendResp
+				select {
+				case fanoutChan <- *backendResp:
+					fmt.Println("Call suceceeded for backend", backend.Name)
+				case <-ctx.Done():
+					fmt.Println("Context Canceled for backend", backend.Name)
+					log.Warn("backend multicall request timedout",
+						"req_id", GetReqID(ctx),
+						"auth", GetAuthCtx(ctx),
+						"backend", backend.Name,
+					)
+					return // Exit if context is cancelled while sending response
+				}
 			}(backend)
 		}
 		// Separately wait in goroutine so we do not block reading from fanoutChan
@@ -802,29 +817,63 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			close(fanoutChan)
 		}()
 
-		// Read from the channel as values come in
 		var finalResp BackendGroupRPCResponse
-		for resp := range fanoutChan {
-			if resp.error != nil {
-				log.Error("error serving write request with fanouts enabled",
-					"req_id", GetReqID(ctx),
-					"auth", GetAuthCtx(ctx),
-					"err", resp.error,
-				)
-				finalResp = resp
-			} else {
-				log.Info("Received response from fanout chan",
-					"resp", len(resp.RPCRes),
-					"servedBy", resp.ServedBy,
-				)
-				// Cancel other go routines
-				cancel()
-				finalResp = resp
-				break
+		i := 0
+		for {
+			select {
+			case resp, ok := <-fanoutChan:
+				i++
+				fmt.Println("Fanout response ", i, " response: ", len(resp.RPCRes), " ok: ", ok)
+				if !ok {
+					// Channel closed, all responses received
+					return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+				}
+				if resp.error != nil {
+					fmt.Println("Recieved Error Response from backend ", resp.error.Error())
+					log.Error("error serving write request with fanouts enabled",
+						"req_id", GetReqID(ctx),
+						"auth", GetAuthCtx(ctx),
+						"err", resp.error,
+					)
+					finalResp = resp
+				} else {
+					fmt.Println("Recieved Response from fanout chan ", resp.ServedBy)
+					log.Info("Received response from fanout chan",
+						"resp", len(resp.RPCRes),
+						"servedBy", resp.ServedBy,
+					)
+					finalResp = resp
+					return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+				}
+			case <-ctx.Done():
+				// Context cancelled or timed out
+				return nil, "", ctx.Err()
 			}
 		}
-		return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 	}
+	// Read from the channel as values come in
+	// for resp := range fanoutChan {
+	// // 	if resp.error != nil {
+	// // 		fmt.Println("Recieved Error Response from backend ", resp.error.Error())
+	// // 		log.Error("error serving write request with fanouts enabled",
+	// // 			"req_id", GetReqID(ctx),
+	// // 			"auth", GetAuthCtx(ctx),
+	// // 			"err", resp.error,
+	// // 		)
+	// // 		finalResp = resp
+	// // 	} else {
+	// // 		fmt.Println("Recieved Response from fanout chan ", resp.ServedBy)
+	// // 		log.Info("Received response from fanout chan",
+	// // 			"resp", len(resp.RPCRes),
+	// // 			"servedBy", resp.ServedBy,
+	// // 		)
+	// // 		// Note: Do Not Cancel other go routines, since we want all calls to complete
+	// // 		// cancel()
+	// // 		finalResp = resp
+	// // 		break
+	// // 	}
+	// // }
+	// // return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 
 	rpcRequestsTotal.Inc()
 

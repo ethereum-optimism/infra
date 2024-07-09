@@ -2,18 +2,17 @@ package integration_tests
 
 import (
 	"bytes"
-	// "context"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum-optimism/optimism/proxyd"
+	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
-
-	"github.com/ethereum-optimism/optimism/proxyd"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
-	"github.com/stretchr/testify/require"
+	// "time"
 )
 
 func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
@@ -82,16 +81,19 @@ func TestMulticall(t *testing.T) {
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
 
-	// ctx := context.Background()
-
-	// poll for updated consensus
-	// update := func() {
-	// 	for _, be := range bg.Backends {
-	// 		bg.Consensus.UpdateBackend(ctx, be)
-	// 	}
-	// 	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+	// setServerBackend := func(backends []*proxyd.Backend) {
+	// 	bg := svr.BackendGroups
+	// 	bg["node"].Backends = backends
+	// 	svr.BackendGroups = bg
 	// }
-
+	setServerBackend := func() {
+		bg := svr.BackendGroups
+		bg["node"].Backends = []*proxyd.Backend{
+			nodes["node1"].backend,
+			nodes["node2"].backend,
+		}
+		svr.BackendGroups = bg
+	}
 	// convenient methods to manipulate state and mock responses
 	reset := func() {
 		for _, node := range nodes {
@@ -99,39 +101,13 @@ func TestMulticall(t *testing.T) {
 			node.mockBackend.Reset()
 			require.Zero(t, len(node.mockBackend.requests))
 		}
-		// NOTE: May want to make consensus an empty object or getter since it can cause nil pointer
-		// bg.Consensus.ClearListeners()
-		// bg.Consensus.Reset()
 
 		// NOTE: Handlers to Original Values, Default Node 1 will respond
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 		nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
+
+		setServerBackend()
 	}
-
-	// override := func(node string, method string, block string, response string) {
-	// 	if _, ok := nodes[node]; !ok {
-	// 		t.Fatalf("node %s does not exist in the nodes map", node)
-	// 	}
-	// 	nodes[node].handler.AddOverride(&ms.MethodTemplate{
-	// 		Method:   method,
-	// 		Block:    block,
-	// 		Response: response,
-	// 	})
-	// }
-
-	// overrideBlock := func(node string, blockRequest string, blockResponse string) {
-	// 	override(node,
-	// 		"eth_getBlockByNumber",
-	// 		blockRequest,
-	// 		buildResponse(map[string]string{
-	// 			"number": blockResponse,
-	// 			"hash":   "hash_" + blockResponse,
-	// 		}))
-	// }
-
-	// overridePeerCount := func(node string, count int) {
-	// 	override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()))
-	// }
 
 	nodeBackendRequestCount := func(node string) int {
 		return len(nodes[node].mockBackend.requests)
@@ -146,17 +122,6 @@ func TestMulticall(t *testing.T) {
 			}
 		}
 	}
-
-	// force ban node2 and make sure node1 is the only one in consensus
-	// useOnlyNode1 := func() {
-	// 	overridePeerCount("node2", 0)
-	// 	update()
-	//
-	// 	consensusGroup := bg.Consensus.GetConsensusGroup()
-	// 	require.Equal(t, 1, len(consensusGroup))
-	// 	require.Contains(t, consensusGroup, nodes["node1"].backend)
-	// 	nodes["node1"].mockBackend.Reset()
-	// }
 
 	t.Run("initial multi-call test", func(t *testing.T) {
 		reset()
@@ -174,7 +139,6 @@ func TestMulticall(t *testing.T) {
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
-		// unknown consensus at inik
 
 		require.Equal(t, 1, nodeBackendRequestCount("node1"))
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
@@ -219,16 +183,58 @@ func TestMulticall(t *testing.T) {
 		}
 	})
 
-	t.Run("When one of the backends times out", func(t *testing.T) {})
+	t.Run("When one of the backends times out", func(t *testing.T) {
 
-	t.Run("When all of the backends times out", func(t *testing.T) {})
+		// shutdownServer := make(chan struct{})
+		for i := 1; i < 3; i++ {
+			reset()
+			fmt.Println("backed timeout iteration test ", i)
+			shutdownChan := make(chan struct{})
+			if i == 1 {
+				nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+				// nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, time.Duration(time.Second*10)))
+				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
+			} else if i == 2 {
+				// nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, time.Duration(time.Second*10)))
+				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
+				nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+			}
 
-	t.Run("When all of the backends return non 200", func(t *testing.T) {})
+			setServerBackend()
 
-	// Make the handlers take various time, and ensure shortest time is always returned first
-	t.Run("Ensure we return the first success back to the caller", func(t *testing.T) {})
+			body := makeSendRawTransaction(txHex1)
+			req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+			req.Header.Set("X-Forwarded-For", "203.0.113.1")
+			rr := httptest.NewRecorder()
 
-	t.Run("Ensure application level error is returned to caller", func(t *testing.T) {})
+			svr.HandleRPC(rr, req)
+			shutdownChan <- struct{}{}
+			resp := rr.Result()
+			defer resp.Body.Close()
+
+			require.NotNil(t, resp.Body)
+			servedBy := fmt.Sprintf("node/node%d", i)
+			require.Equal(t, 200, resp.StatusCode, fmt.Sprintf("expected 200 response from node%d", i))
+
+			require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
+			rpcRes := &proxyd.RPCRes{}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+			require.False(t, rpcRes.IsError())
+
+			require.Equal(t, 1, nodeBackendRequestCount("node1"))
+			require.Equal(t, 1, nodeBackendRequestCount("node2"))
+
+		}
+	})
+
+	// t.Run("When all of the backends times out", func(t *testing.T) {})
+	//
+	// t.Run("When all of the backends return non 200", func(t *testing.T) {})
+	//
+	// // Make the handlers take various time, and ensure shortest time is always returned first
+	// t.Run("Ensure we return the first success back to the caller", func(t *testing.T) {})
+	//
+	// t.Run("Ensure application level error is returned to caller", func(t *testing.T) {})
 
 	// NOTE: Add Test to ensure routing strategy cannot be a invalid routing strategy string
 }
