@@ -378,6 +378,72 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
+	// t.Run("Test with many multi-calls in without resetting", func(t *testing.T) {
+	// 	nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+	// 	defer nodes["node1"].mockBackend.Close()
+	// 	defer nodes["node2"].mockBackend.Close()
+	// 	defer nodes["node3"].mockBackend.Close()
+	// 	defer shutdown()
+	//
+	// 	for i := 1; i < 4; i++ {
+	// 		shutdownChan1 := make(chan struct{})
+	// 		shutdownChan2 := make(chan struct{})
+	//
+	// 		select {
+	// 		case i == 1:
+	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
+	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
+	// 		case i == 2:
+	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
+	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
+	//
+	// 		case i == 3:
+	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
+	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
+	//
+	// 		default:
+	// 			t.Fail()
+	// 		}
+	//
+	// 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
+	// 		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
+	//
+	// 		localSvr := setServerBackend(svr, nodes)
+	//
+	// 		body := makeSendRawTransaction(txHex1)
+	// 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+	// 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	// 		rr := httptest.NewRecorder()
+	//
+	// 		var wg sync.WaitGroup
+	// 		wg.Add(1)
+	// 		go func() {
+	// 			shutdownChan1 <- struct{}{}
+	// 			shutdownChan2 <- struct{}{}
+	// 			wg.Done()
+	// 		}()
+	//
+	// 		fmt.Println("sending request")
+	// 		localSvr.HandleRPC(rr, req)
+	//
+	// 		resp := rr.Result()
+	// 		defer resp.Body.Close()
+	//
+	// 		require.NotNil(t, resp.Body)
+	// 		require.Equal(t, 503, resp.StatusCode, "expected no response")
+	// 		rpcRes := &proxyd.RPCRes{}
+	// 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+	// 		require.True(t, rpcRes.IsError())
+	// 		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
+	//
+	// 		// Wait for test response to complete before checking query count
+	// 		wg.Wait()
+	// 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
+	// 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+	// 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
+	// 	}
+	// })
+
 }
 
 func SingleResponseHandlerWithSleep(code int, response string, duration time.Duration) http.HandlerFunc {
@@ -400,50 +466,3 @@ func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownS
 		_, _ = w.Write([]byte(response))
 	}
 }
-
-// t.Run("Modifying the backend list, we should expect only one request", func(t *testing.T) {
-// 	for i := 1; i < 3; i++ {
-// 		reset()
-//
-// 		body := makeSendRawTransaction(txHex1)
-// 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
-// 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
-// 		rr := httptest.NewRecorder()
-//
-// 		// bg1 := svr.BackendGroups
-// 		// bg1["node"].Backends = []*proxyd.Backend{
-// 		// 	nodes[fmt.Sprintf("node%d", i+1)].backend,
-// 		// }
-// 		localSvr := setServerBackend(
-// 			map[string]nodeContext{
-// 				"node": nodes[fmt.Sprintf("node%d", i+1)],
-// 			},
-// 		)
-//
-// 		// if nodeName == node {
-// 		// 	nodes[nodeName].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
-// 		// } else {
-// 		// 	nodes[nodeName].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
-// 		// }
-//
-// 		localSvr.HandleRPC(rr, req)
-//
-// 		resp := rr.Result()
-// 		defer resp.Body.Close()
-// 		require.NotNil(t, resp.Body)
-// 		require.Equal(t, 200, resp.StatusCode)
-// 		servedBy := fmt.Sprintf("node/node%d", i+1)
-// 		require.Equal(t, resp.Header["X-Served-By"], []string{servedBy})
-// 		rpcRes := &proxyd.RPCRes{}
-// 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-// 		require.False(t, rpcRes.IsError())
-// 		if i == 0 {
-// 			require.Equal(t, 1, nodeBackendRequestCount("node1"))
-// 			require.Equal(t, 0, nodeBackendRequestCount("node2"))
-// 		} else {
-// 			require.Equal(t, 0, nodeBackendRequestCount("node1"))
-// 			require.Equal(t, 1, nodeBackendRequestCount("node2"))
-//
-// 		}
-// 	}
-// })
