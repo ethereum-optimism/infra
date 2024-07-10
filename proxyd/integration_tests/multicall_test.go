@@ -231,38 +231,41 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 
 	})
-	//
-	// t.Run("When one of the backends times out", func(t *testing.T) {
-	//
-	// 	reset()
-	// 	shutdownChan := make(chan struct{})
-	// 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-	// 	nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 6*time.Second))
-	//
-	// 	localSvr := setServerBackend(nodes)
-	//
-	// 	body := makeSendRawTransaction(txHex1)
-	// 	req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
-	// 	req.Header.Set("X-Forwarded-For", "203.0.113.1")
-	// 	rr := httptest.NewRecorder()
-	//
-	// 	localSvr.HandleRPC(rr, req)
-	// 	resp := rr.Result()
-	// 	shutdownChan <- struct{}{}
-	// 	defer resp.Body.Close()
-	//
-	// 	require.NotNil(t, resp.Body)
-	// 	servedBy := "node/node1"
-	// 	require.Equal(t, 200, resp.StatusCode, "expected 200 response from node1")
-	//
-	// 	require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
-	// 	rpcRes := &proxyd.RPCRes{}
-	// 	require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-	// 	require.False(t, rpcRes.IsError())
-	//
-	// 	require.Equal(t, 1, nodeBackendRequestCount("node1"))
-	// 	require.Equal(t, 1, nodeBackendRequestCount("node2"))
-	// })
+
+	t.Run("When one of the backends times out", func(t *testing.T) {
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		defer nodes["node1"].mockBackend.Close()
+		defer nodes["node2"].mockBackend.Close()
+		defer shutdown()
+
+		shutdownChan := make(chan struct{})
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 6*time.Second))
+
+		localSvr := setServerBackend(svr, nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		localSvr.HandleRPC(rr, req)
+		resp := rr.Result()
+		shutdownChan <- struct{}{}
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		servedBy := "node/node1"
+		require.Equal(t, 200, resp.StatusCode, "expected 200 response from node1")
+
+		require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.False(t, rpcRes.IsError())
+
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+	})
 
 	// t.Run("allBackends times out", func(t *testing.T) {
 	// 	reset()
