@@ -754,9 +754,85 @@ func isValidMultiCallTx(rpcReqs []*RPCReq) bool {
 }
 
 // Using special struct since servedBy may not be populated if error occurs
-type MutlicallTuple struct {
+type mutlicallTuple struct {
 	response    *BackendGroupRPCResponse
 	backendName string
+}
+
+func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
+	var wg sync.WaitGroup
+	responseChan := make(chan *mutlicallTuple)
+	for _, backend := range bg.Backends {
+		wg.Add(1)
+		go func(backend *Backend) {
+			defer wg.Done()
+			backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
+
+			multicallResp := &mutlicallTuple{
+				response:    backendResp,
+				backendName: backend.Name,
+			}
+			select {
+			case responseChan <- multicallResp:
+				fmt.Printf("[Execution][%s] Multicall returned for backend \n", backend.Name)
+				if backendResp.error != nil {
+					fmt.Printf("[Execution][%s] Multicall error Backend Error: %s \n", backend.Name, backendResp.error.Error())
+				}
+			case <-ctx.Done():
+				fmt.Printf("[Execution][%s] Context Expiried for backend \n", backend.Name)
+				log.Warn("backend multicall context is done",
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"backend", backend.Name,
+				)
+				return
+			}
+		}(backend)
+	}
+	// Separately wait in goroutine so we do not block reading from fanoutChan
+	go func() {
+		wg.Wait()
+		close(responseChan)
+		fmt.Println("[Cleanup] responseChan closed")
+	}()
+
+	var finalResp *BackendGroupRPCResponse
+	for {
+		select {
+		case multiCallResp, ok := <-responseChan:
+
+			if !ok {
+				// Channel closed, all responses received
+				fmt.Println("[ProcessingMulticallResponse] channel closed returning")
+				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+			}
+
+			resp := multiCallResp.response
+			backendName := multiCallResp.backendName
+			fmt.Printf("[ProcessingMulticallResponse][%s] Reading Backend Response \n", backendName)
+
+			if resp.error != nil {
+				fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Error Response: %s \n", backendName, resp.error.Error())
+				log.Error("error serving write request with fanouts enabled",
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"err", resp.error,
+				)
+				finalResp = resp
+			} else {
+				fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Response from fanout chan \n", resp.ServedBy)
+				log.Info("Received response from fanout chan",
+					"resp", len(resp.RPCRes),
+					"servedBy", resp.ServedBy,
+				)
+				finalResp = resp
+				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+			}
+		case <-ctx.Done():
+			fmt.Println("[ProcessingMulticallResponse] Context done, returning")
+			return nil, "", ctx.Err()
+		}
+	}
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
@@ -780,82 +856,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// Forward to fanout backends, Note: Further optimization for forward to all
 	// and cancel once a valid response is returned from a go routine
 	if bg.GetRoutingStrategy() == Multicall && isValidMultiCallTx(rpcReqs) {
-		var wg sync.WaitGroup
-		responseChan := make(chan *MutlicallTuple)
-		for _, backend := range bg.Backends {
-			wg.Add(1)
-			go func(backend *Backend) {
-				defer wg.Done()
-				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
-
-				multicallResp := &MutlicallTuple{
-					response:    backendResp,
-					backendName: backend.Name,
-				}
-				select {
-				case responseChan <- multicallResp:
-					fmt.Printf("[Execution][%s] Multicall returned for backend \n", backend.Name)
-					if backendResp.error != nil {
-						fmt.Printf("[Execution][%s] Multicall error Backend Error: %s \n", backend.Name, backendResp.error.Error())
-					}
-				case <-ctx.Done():
-					fmt.Printf("[Execution][%s] Context Expiried for backend \n", backend.Name)
-					log.Warn("backend multicall context is done",
-						"req_id", GetReqID(ctx),
-						"auth", GetAuthCtx(ctx),
-						"backend", backend.Name,
-					)
-					return // Exit if context is cancelled while sending response
-				}
-			}(backend)
-		}
-		// Separately wait in goroutine so we do not block reading from fanoutChan
-		go func() {
-			wg.Wait()
-			close(responseChan)
-			fmt.Println("[Cleanup] responseChan closed")
-		}()
-
-		var finalResp *BackendGroupRPCResponse
-		for {
-			select {
-			case multiCallResp, ok := <-responseChan:
-
-				if !ok {
-					// Channel closed, all responses received
-					fmt.Println("[ProcessingMulticallResponse] channel closed returning")
-					return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
-				}
-
-				resp := multiCallResp.response
-				backendName := multiCallResp.backendName
-				fmt.Printf("[ProcessingMulticallResponse][%s] Reading Backend Response \n", backendName)
-
-				if resp.error != nil {
-					fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Error Response: %s \n", backendName, resp.error.Error())
-					log.Error("error serving write request with fanouts enabled",
-						"req_id", GetReqID(ctx),
-						"auth", GetAuthCtx(ctx),
-						"err", resp.error,
-					)
-					finalResp = resp
-				} else {
-					fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Response from fanout chan \n", resp.ServedBy)
-					log.Info("Received response from fanout chan",
-						"resp", len(resp.RPCRes),
-						"servedBy", resp.ServedBy,
-					)
-					finalResp = resp
-					return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
-				}
-			case <-ctx.Done():
-				fmt.Println("[ProcessingMulticallResponse] Context done, returning")
-				// if finalResp != nil {
-				// 	return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
-				// }
-				return nil, "", ctx.Err()
-			}
-		}
+		return bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
 	}
 
 	rpcRequestsTotal.Inc()
@@ -1333,12 +1334,10 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
 
-			if err := ctx.Err(); err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					fmt.Println("The context deadline was exceeded")
-					log.Warn("Context deadline execed requesting backend")
-				}
+			if err != nil {
+				fmt.Println("Error forwarding request to backend: ", err.Error())
 			}
+
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
 				errors.Is(err, ErrMethodNotWhitelisted) {

@@ -273,7 +273,7 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan := make(chan struct{})
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 6*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 7*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -309,8 +309,8 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan1 := make(chan struct{})
 		shutdownChan2 := make(chan struct{})
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 6*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 6*time.Second))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
