@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum-optimism/optimism/proxyd"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
+	"time"
+
+	"github.com/ethereum-optimism/optimism/proxyd"
+	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/stretchr/testify/require"
 	// "time"
 )
 
@@ -207,6 +209,38 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
+	t.Run("It should return the first 200 response", func(t *testing.T) {
+		reset()
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+
+		setServerBackend(nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		svr.HandleRPC(rr, req)
+
+		resp := rr.Result()
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 200, resp.StatusCode)
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.False(t, rpcRes.IsError())
+		require.Equal(t, "2.0", rpcRes.JSONRPC)
+		// require.Equal(t, proxyd.ErrNoBackends.Message, rpcRes.ID)
+
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
+		require.False(t, rpcRes.IsError())
+
+		require.Equal(t, 1, nodeBackendRequestCount("node1"))
+		require.Equal(t, 1, nodeBackendRequestCount("node2"))
+	})
+
 	// t.Run("When one of the backends times out", func(t *testing.T) {
 	//
 	// 	for i := 1; i < 3; i++ {
@@ -214,7 +248,7 @@ func TestMulticall(t *testing.T) {
 	// 		fmt.Println("===============backend timeout iteration test ", i, " ================")
 	// 		shutdownChan := make(chan struct{})
 	// 		if i == 1 {
-	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+	// nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
 	// 		} else if i == 2 {
 	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
