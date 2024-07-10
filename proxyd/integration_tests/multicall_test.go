@@ -81,6 +81,9 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
 	nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
 
+	require.Equal(t, 0, nodeBackendRequestCount(nodes, "node1"))
+	require.Equal(t, 0, nodeBackendRequestCount(nodes, "node2"))
+
 	return nodes, bg, client, shutdown, svr, handlers
 }
 
@@ -94,21 +97,17 @@ func setServerBackend(s *proxyd.Server, nodes map[string]nodeContext) *proxyd.Se
 	return s
 }
 
+func nodeBackendRequestCount(nodes map[string]nodeContext, node string) int {
+	return len(nodes[node].mockBackend.requests)
+}
+
 func TestMulticall(t *testing.T) {
-
-	// convenient methods to manipulate state and mock responses
-
-	nodeBackendRequestCount := func(nodes map[string]nodeContext, node string) int {
-		return len(nodes[node].mockBackend.requests)
-	}
 
 	t.Run("Multicall will request all backends", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer shutdown()
-
-		// reset()
 
 		body := makeSendRawTransaction(txHex1)
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
@@ -229,7 +228,6 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
-
 	})
 
 	t.Run("When one of the backends times out", func(t *testing.T) {

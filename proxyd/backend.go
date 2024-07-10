@@ -733,16 +733,6 @@ func (bg *BackendGroup) Fallbacks() []*Backend {
 	return fallbacks
 }
 
-// func (bg *BackendGroup) Multicalls() []*Backend {
-// 	multicalls := []*Backend{}
-// 	for _, a := range bg.Backends {
-// 		if multi, ok := bg.MulticallBackends[a.Name]; ok && multi {
-// 			multicalls = append(multicalls, a)
-// 		}
-// 	}
-// 	return multicalls
-// }
-
 func (bg *BackendGroup) Primaries() []*Backend {
 	primaries := []*Backend{}
 	for _, a := range bg.Backends {
@@ -785,15 +775,15 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// and cancel once a valid response is returned from a go routine
 	if bg.GetRoutingStrategy() == Multicall && isValidMultiCallTx(rpcReqs) {
 		var wg sync.WaitGroup
-		fanoutChan := make(chan *BackendGroupRPCResponse)
+		responseChan := make(chan *BackendGroupRPCResponse)
 		for _, backend := range bg.Backends {
 			wg.Add(1)
 			go func(backend *Backend) {
 				defer wg.Done()
 				backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
 				select {
-				case fanoutChan <- backendResp:
-					fmt.Println("Call suceceeded for backend", backend.Name)
+				case responseChan <- backendResp:
+					fmt.Println("Call returned for backend", backend.Name)
 					if backendResp.error != nil {
 						fmt.Println("Backend Resp Error: ", backendResp.error.Error())
 					}
@@ -811,15 +801,15 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		// Separately wait in goroutine so we do not block reading from fanoutChan
 		go func() {
 			wg.Wait()
-			close(fanoutChan)
-			fmt.Println("fanoutChan closed")
+			close(responseChan)
+			fmt.Println("responseChan closed")
 		}()
 
 		var finalResp *BackendGroupRPCResponse
 		i := 0
 		for {
 			select {
-			case resp, ok := <-fanoutChan:
+			case resp, ok := <-responseChan:
 				i++
 				fmt.Println("Fanout response ", i, " fanout chan open: ", ok)
 				if !ok {

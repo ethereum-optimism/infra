@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/gorilla/websocket"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/ethereum-optimism/optimism/proxyd"
-	"github.com/gorilla/websocket"
 )
 
 type RecordedRequest struct {
@@ -31,25 +28,6 @@ type MockBackend struct {
 
 func SingleResponseHandler(code int, response string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(code)
-		_, _ = w.Write([]byte(response))
-	}
-}
-
-func SingleResponseHandlerWithSleep(code int, response string, responseTime time.Duration) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(responseTime)
-		w.WriteHeader(code)
-		_, _ = w.Write([]byte(response))
-	}
-}
-
-func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("sleeping")
-		time.Sleep(time.Duration(6 * time.Second))
-		<-shutdownServer
-		fmt.Println("Shutting down Single Response Handler")
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))
 	}
