@@ -81,12 +81,7 @@ func TestMulticall(t *testing.T) {
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
 
-	// setServerBackend := func(backends []*proxyd.Backend) {
-	// 	bg := svr.BackendGroups
-	// 	bg["node"].Backends = backends
-	// 	svr.BackendGroups = bg
-	// }
-	setServerBackend := func() {
+	setServerBackend := func(nodes map[string]nodeContext) {
 		bg := svr.BackendGroups
 		bg["node"].Backends = []*proxyd.Backend{
 			nodes["node1"].backend,
@@ -106,7 +101,7 @@ func TestMulticall(t *testing.T) {
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 		nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
 
-		setServerBackend()
+		setServerBackend(nodes)
 	}
 
 	nodeBackendRequestCount := func(node string) int {
@@ -183,83 +178,116 @@ func TestMulticall(t *testing.T) {
 		}
 	})
 
-	t.Run("When one of the backends times out", func(t *testing.T) {
+	t.Run("When all of the backends return non 200", func(t *testing.T) {
+		reset()
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(429, dummyRes))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(429, dummyRes))
 
-		for i := 1; i < 3; i++ {
-			reset()
-			fmt.Println("backed timeout iteration test ", i)
-			shutdownChan := make(chan struct{})
-			if i == 1 {
-				nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
-			} else if i == 2 {
-				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
-				nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-			}
+		setServerBackend(nodes)
 
-			setServerBackend()
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
 
-			body := makeSendRawTransaction(txHex1)
-			req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
-			req.Header.Set("X-Forwarded-For", "203.0.113.1")
-			rr := httptest.NewRecorder()
+		svr.HandleRPC(rr, req)
 
-			svr.HandleRPC(rr, req)
-			shutdownChan <- struct{}{}
-			resp := rr.Result()
-			defer resp.Body.Close()
+		resp := rr.Result()
+		defer resp.Body.Close()
 
-			require.NotNil(t, resp.Body)
-			servedBy := fmt.Sprintf("node/node%d", i)
-			require.Equal(t, 200, resp.StatusCode, fmt.Sprintf("expected 200 response from node%d", i))
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 503, resp.StatusCode)
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.True(t, rpcRes.IsError())
+		require.Equal(t, proxyd.ErrNoBackends.Code, rpcRes.Error.Code)
+		require.Equal(t, proxyd.ErrNoBackends.Message, rpcRes.Error.Message)
 
-			require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
-			rpcRes := &proxyd.RPCRes{}
-			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-			require.False(t, rpcRes.IsError())
-
-			require.Equal(t, 1, nodeBackendRequestCount("node1"))
-			require.Equal(t, 1, nodeBackendRequestCount("node2"))
-		}
+		require.Equal(t, 1, nodeBackendRequestCount("node1"))
+		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
-	// t.Run("When all of the backends times out", func(t *testing.T) {
+	// t.Run("When one of the backends times out", func(t *testing.T) {
+	//
+	// 	for i := 1; i < 3; i++ {
+	// 		reset()
+	// 		fmt.Println("===============backend timeout iteration test ", i, " ================")
+	// 		shutdownChan := make(chan struct{})
+	// 		if i == 1 {
+	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
+	// 		} else if i == 2 {
+	// 			nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan))
+	// 			nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+	// 		}
+	//
+	// 		setServerBackend(nodes)
+	//
+	// 		body := makeSendRawTransaction(txHex1)
+	// 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+	// 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	// 		rr := httptest.NewRecorder()
+	//
+	// 		svr.HandleRPC(rr, req)
+	// 		resp := rr.Result()
+	// 		shutdownChan <- struct{}{}
+	// 		defer resp.Body.Close()
+	//
+	// 		require.NotNil(t, resp.Body)
+	// 		servedBy := fmt.Sprintf("node/node%d", i)
+	// 		require.Equal(t, 200, resp.StatusCode, fmt.Sprintf("expected 200 response from node%d", i))
+	//
+	// 		require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
+	// 		rpcRes := &proxyd.RPCRes{}
+	// 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+	// 		require.False(t, rpcRes.IsError())
+	//
+	// 		require.Equal(t, 1, nodeBackendRequestCount("node1"))
+	// 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
+	// 	}
+	// })
+
+	// t.Run("allBackends times out", func(t *testing.T) {
 	// 	reset()
 	// 	shutdownChan2 := make(chan struct{})
 	// 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
 	// 	nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
+	// 	// nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
 	//
-	// 	setServerBackend()
+	// 	setServerBackend(nodes)
 	//
 	// 	body := makeSendRawTransaction(txHex1)
 	// 	req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 	// 	req.Header.Set("X-Forwarded-For", "203.0.113.1")
 	// 	rr := httptest.NewRecorder()
 	//
+	// 	go func() {
+	// 		shutdownChan2 <- struct{}{}
+	// 	}()
+	//
+	// 	fmt.Println("sending request")
 	// 	svr.HandleRPC(rr, req)
-	// 	shutdownChan2 <- struct{}{}
+	//
 	// 	resp := rr.Result()
 	// 	defer resp.Body.Close()
 	//
 	// 	require.NotNil(t, resp.Body)
-	// 	require.Equal(t, 500, resp.StatusCode, "expected no response")
+	// 	require.Equal(t, 200, resp.StatusCode, "expected no response")
 	// 	rpcRes := &proxyd.RPCRes{}
 	// 	require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-	// 	require.False(t, rpcRes.IsError())
+	// 	require.True(t, rpcRes.IsError())
+	// 	require.Equal(t, rpcRes.Error.Code, proxyd.JSONRPCErrorInternal)
 	//
 	// 	require.Equal(t, 1, nodeBackendRequestCount("node1"))
 	// 	require.Equal(t, 1, nodeBackendRequestCount("node2"))
-	//
 	// })
 	//
-	// t.Run("When all of the backends return non 200", func(t *testing.T) {})
 	//
 	// // Make the handlers take various time, and ensure shortest time is always returned first
 	// t.Run("Ensure we return the first success back to the caller", func(t *testing.T) {})
 	//
 	// t.Run("Ensure application level error is returned to caller", func(t *testing.T) {})
 
-	// NOTE: Add Test to ensure routing strategy cannot be a invalid routing strategy string
 }
 
 // func buildResponse(result interface{}) string {

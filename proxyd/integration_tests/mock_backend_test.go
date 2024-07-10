@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,8 +46,10 @@ func SingleResponseHandlerWithSleep(code int, response string, responseTime time
 
 func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(6 * time.Second)
+		fmt.Println("sleeping")
+		time.Sleep(time.Duration(6 * time.Second))
 		<-shutdownServer
+		fmt.Println("Shutting down Single Response Handler")
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))
 	}
