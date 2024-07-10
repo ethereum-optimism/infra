@@ -24,11 +24,13 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	// setup mock servers
 	node1 := NewMockBackend(nil)
 	node2 := NewMockBackend(nil)
+	node3 := NewMockBackend(nil)
 
 	dir, err := os.Getwd()
 	require.NoError(t, err)
 
-	responses := path.Join(dir, "testdata/consensus_responses.yml")
+	responses := path.Join(dir, "testdata/mutlicall_responses.yml")
+	emptyResponses := path.Join(dir, "testdata/empty_responses.yml")
 
 	h1 := ms.MockedHandler{
 		Overrides:    []*ms.MethodTemplate{},
@@ -40,12 +42,19 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 		Autoload:     true,
 		AutoloadFile: "",
 	}
+	h3 := ms.MockedHandler{
+		Overrides:    []*ms.MethodTemplate{},
+		Autoload:     true,
+		AutoloadFile: emptyResponses,
+	}
 
 	require.NoError(t, os.Setenv("NODE1_URL", node1.URL()))
 	require.NoError(t, os.Setenv("NODE2_URL", node2.URL()))
+	require.NoError(t, os.Setenv("NODE3_URL", node3.URL()))
 
 	node1.SetHandler(http.HandlerFunc(h1.Handler))
 	node2.SetHandler(SingleResponseHandler(200, txAccepted))
+	node3.SetHandler(SingleResponseHandler(429, dummyRes))
 
 	// setup proxyd
 	config := ReadConfig("multicall")
@@ -60,7 +69,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	bg := svr.BackendGroups["node"]
 	require.NotNil(t, bg)
 	require.Nil(t, bg.Consensus, "Expeceted consensus not to be initialized")
-	require.Equal(t, 2, len(bg.Backends))                       // should match config
+	require.Equal(t, 3, len(bg.Backends))                       // should match config
 	require.Equal(t, bg.GetRoutingStrategy(), proxyd.Multicall) // should match config
 
 	// convenient mapping to access the nodes by name
@@ -75,15 +84,23 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 			backend:     bg.Backends[1],
 			handler:     &h2,
 		},
+		"node3": {
+			mockBackend: node3,
+			backend:     bg.Backends[2],
+			handler:     &h3,
+		},
 	}
 
-	handlers := []*ms.MockedHandler{&h1, &h2}
+	handlers := []*ms.MockedHandler{&h1, &h2, &h3}
 
 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
 	nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
+	//Node 3 has no handler empty handler never respondes should always context timeout
+	nodes["node3"].mockBackend.SetHandler(http.HandlerFunc(handlers[2].Handler))
 
 	require.Equal(t, 0, nodeBackendRequestCount(nodes, "node1"))
 	require.Equal(t, 0, nodeBackendRequestCount(nodes, "node2"))
+	require.Equal(t, 0, nodeBackendRequestCount(nodes, "node3"))
 
 	return nodes, bg, client, shutdown, svr, handlers
 }
@@ -93,6 +110,7 @@ func setServerBackend(s *proxyd.Server, nm map[string]nodeContext) *proxyd.Serve
 	bg["node"].Backends = []*proxyd.Backend{
 		nm["node1"].backend,
 		nm["node2"].backend,
+		nm["node3"].backend,
 	}
 	s.BackendGroups = bg
 	return s
@@ -108,6 +126,7 @@ func TestMulticall(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		body := makeSendRawTransaction(txHex1)
@@ -126,12 +145,14 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("When all of the backends return non 200, multicall should return 503", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(429, dummyRes))
@@ -159,12 +180,14 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("It should return the first 200 response", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
@@ -194,12 +217,14 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("Ensure application level error is returned to caller if its first", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 2*time.Second))
@@ -229,12 +254,14 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("It should ignore network errors and return a 200 from a slower request", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		// We should ignore node2 first response cause 429, and return node 1 because 200
@@ -263,12 +290,14 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("When one of the backends times out", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		shutdownChan := make(chan struct{})
@@ -298,6 +327,7 @@ func TestMulticall(t *testing.T) {
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 	t.Run("allBackends times out", func(t *testing.T) {
@@ -305,6 +335,7 @@ func TestMulticall(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
 		shutdownChan1 := make(chan struct{})
@@ -344,6 +375,7 @@ func TestMulticall(t *testing.T) {
 		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 }

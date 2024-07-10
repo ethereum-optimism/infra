@@ -14,13 +14,12 @@ rpc_url = "$NODE1_URL"
 [backends.node2]
 rpc_url = "$NODE2_URL"
 
-## TODO: Add a 3rd node
-# [backends.node3]
-# rpc_url = "$NODE3_URL"
+[backends.node3]
+rpc_url = "$NODE3_URL"
 
 [backend_groups]
 [backend_groups.node]
-backends = ["node1", "node2"]
+backends = ["node1", "node2", "node3"]
 routing_strategy = "multi_call"
 consensus_handler = "noop" # allow more control over the consensus poller for tests
 consensus_ban_period = "1m"
@@ -28,8 +27,6 @@ consensus_max_update_threshold = "2m"
 consensus_max_block_lag = 8
 consensus_min_peer_count = 4
 multicall_mode = true
-multicalls = ["node1", "node2"]
-fallbacks = ["node1"]
 
 [rpc_method_mappings]
 eth_call = "node"
