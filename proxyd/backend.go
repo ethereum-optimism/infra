@@ -1331,13 +1331,14 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 		if len(rpcReqs) > 0 {
 
-			//NOTE: TO BE DELETED
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
 
-			if err != nil {
-				fmt.Println("Error: ", err.Error(), " backend: ", backends[0].Name)
+			if err := ctx.Err(); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					fmt.Println("The context deadline was exceeded")
+					log.Warn("Context deadline execed requesting backend")
+				}
 			}
-
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
 				errors.Is(err, ErrMethodNotWhitelisted) {
@@ -1385,7 +1386,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		}
 
 		// return res, servedBy, nil
-		fmt.Println("Returning response ", res[0], " served by: ", servedBy)
+		// fmt.Println("Returning response ", res[0], " served by: ", servedBy)
 		return &BackendGroupRPCResponse{
 			RPCRes:   res,
 			ServedBy: servedBy,
