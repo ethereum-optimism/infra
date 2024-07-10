@@ -49,6 +49,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 
 	// setup proxyd
 	config := ReadConfig("multicall")
+	fmt.Printf("[SetupMutlicall] Using Timeout of %d \n", config.Server.TimeoutSeconds)
 	svr, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
 
@@ -87,11 +88,11 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	return nodes, bg, client, shutdown, svr, handlers
 }
 
-func setServerBackend(s *proxyd.Server, nodes map[string]nodeContext) *proxyd.Server {
+func setServerBackend(s *proxyd.Server, nm map[string]nodeContext) *proxyd.Server {
 	bg := s.BackendGroups
 	bg["node"].Backends = []*proxyd.Backend{
-		nodes["node1"].backend,
-		nodes["node2"].backend,
+		nm["node1"].backend,
+		nm["node2"].backend,
 	}
 	s.BackendGroups = bg
 	return s
@@ -195,13 +196,13 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 	})
 
-	t.Run("Ensure application level error is returned to caller", func(t *testing.T) {
+	t.Run("Ensure application level error is returned to caller if its first", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer shutdown()
 
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, nonceErrorResponse, 3*time.Second))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 2*time.Second))
 		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, nonceErrorResponse))
 
 		localSvr := setServerBackend(svr, nodes)
@@ -230,6 +231,40 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 	})
 
+	t.Run("It should ignore network errors and return a 200 from a slower request", func(t *testing.T) {
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		defer nodes["node1"].mockBackend.Close()
+		defer nodes["node2"].mockBackend.Close()
+		defer shutdown()
+
+		// We should ignore node2 first response cause 429, and return node 1 because 200
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(429, txAccepted))
+
+		localSvr := setServerBackend(svr, nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		localSvr.HandleRPC(rr, req)
+
+		resp := rr.Result()
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 200, resp.StatusCode)
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.False(t, rpcRes.IsError())
+		require.Equal(t, "2.0", rpcRes.JSONRPC)
+
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+	})
+
 	t.Run("When one of the backends times out", func(t *testing.T) {
 		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
 		defer nodes["node1"].mockBackend.Close()
@@ -238,7 +273,7 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan := make(chan struct{})
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 6*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -274,8 +309,8 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan1 := make(chan struct{})
 		shutdownChan2 := make(chan struct{})
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 10*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 10*time.Second))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 6*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 6*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -305,21 +340,13 @@ func TestMulticall(t *testing.T) {
 		require.True(t, rpcRes.IsError())
 		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
 
+		// Wait for test response to complete before checking query count
 		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 	})
 
 }
-
-// func SingleResponseHandlerWithSleepWg(code int, response string, responseTime time.Duration, wg *sync.WaitGroup) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		defer wg.Done()
-// 		time.Sleep(responseTime)
-// 		w.WriteHeader(code)
-// 		_, _ = w.Write([]byte(response))
-// 	}
-// }
 
 func SingleResponseHandlerWithSleep(code int, response string, duration time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
