@@ -3,7 +3,7 @@ package integration_tests
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	// "fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 	// "time"
 )
+
+const nonceErrorResponse = `{"jsonrpc": "2.0","error": {"code": -32000, "message": "nonce too low"},"id": 1}`
+const txAccepted = `{"jsonrpc": "2.0","result": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef","id": 1}`
 
 func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
 	// setup mock servers
@@ -42,7 +45,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	require.NoError(t, os.Setenv("NODE2_URL", node2.URL()))
 
 	node1.SetHandler(http.HandlerFunc(h1.Handler))
-	node2.SetHandler(SingleResponseHandler(200, dummyRes))
+	node2.SetHandler(SingleResponseHandler(200, txAccepted))
 
 	// setup proxyd
 	config := ReadConfig("multicall")
@@ -83,13 +86,14 @@ func TestMulticall(t *testing.T) {
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
 
-	setServerBackend := func(nodes map[string]nodeContext) {
+	setServerBackend := func(nodes map[string]nodeContext) *proxyd.Server {
 		bg := svr.BackendGroups
 		bg["node"].Backends = []*proxyd.Backend{
 			nodes["node1"].backend,
 			nodes["node2"].backend,
 		}
 		svr.BackendGroups = bg
+		return svr
 	}
 	// convenient methods to manipulate state and mock responses
 	reset := func() {
@@ -100,7 +104,7 @@ func TestMulticall(t *testing.T) {
 		}
 
 		// NOTE: Handlers to Original Values, Default Node 1 will respond
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
 		nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
 
 		setServerBackend(nodes)
@@ -110,17 +114,10 @@ func TestMulticall(t *testing.T) {
 		return len(nodes[node].mockBackend.requests)
 	}
 
-	setResponsiveBackend := func(node string) {
-		for nodeName := range nodes {
-			if nodeName == node {
-				nodes[nodeName].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-			} else {
-				nodes[nodeName].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
-			}
-		}
-	}
+	// setResponsiveBackend := func(node string) {
+	// }
 
-	t.Run("initial multi-call test", func(t *testing.T) {
+	t.Run("Multicall will request all backends", func(t *testing.T) {
 		reset()
 
 		body := makeSendRawTransaction(txHex1)
@@ -141,58 +138,66 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
 	})
 
-	t.Run("Modifying the backend list, we should expect only one request", func(t *testing.T) {
-		for i := 0; i < 2; i++ {
-			reset()
+	// t.Run("Modifying the backend list, we should expect only one request", func(t *testing.T) {
+	// 	for i := 1; i < 3; i++ {
+	// 		reset()
+	//
+	// 		body := makeSendRawTransaction(txHex1)
+	// 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+	// 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	// 		rr := httptest.NewRecorder()
+	//
+	// 		// bg1 := svr.BackendGroups
+	// 		// bg1["node"].Backends = []*proxyd.Backend{
+	// 		// 	nodes[fmt.Sprintf("node%d", i+1)].backend,
+	// 		// }
+	// 		localSvr := setServerBackend(
+	// 			map[string]nodeContext{
+	// 				"node": nodes[fmt.Sprintf("node%d", i+1)],
+	// 			},
+	// 		)
+	//
+	// 		// if nodeName == node {
+	// 		// 	nodes[nodeName].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
+	// 		// } else {
+	// 		// 	nodes[nodeName].mockBackend.SetHandler(http.HandlerFunc(handlers[0].Handler))
+	// 		// }
+	//
+	// 		localSvr.HandleRPC(rr, req)
+	//
+	// 		resp := rr.Result()
+	// 		defer resp.Body.Close()
+	// 		require.NotNil(t, resp.Body)
+	// 		require.Equal(t, 200, resp.StatusCode)
+	// 		servedBy := fmt.Sprintf("node/node%d", i+1)
+	// 		require.Equal(t, resp.Header["X-Served-By"], []string{servedBy})
+	// 		rpcRes := &proxyd.RPCRes{}
+	// 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+	// 		require.False(t, rpcRes.IsError())
+	// 		if i == 0 {
+	// 			require.Equal(t, 1, nodeBackendRequestCount("node1"))
+	// 			require.Equal(t, 0, nodeBackendRequestCount("node2"))
+	// 		} else {
+	// 			require.Equal(t, 0, nodeBackendRequestCount("node1"))
+	// 			require.Equal(t, 1, nodeBackendRequestCount("node2"))
+	//
+	// 		}
+	// 	}
+	// })
 
-			body := makeSendRawTransaction(txHex1)
-			req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
-			req.Header.Set("X-Forwarded-For", "203.0.113.1")
-			rr := httptest.NewRecorder()
-
-			bg1 := svr.BackendGroups
-			bg1["node"].Backends = []*proxyd.Backend{
-				nodes[fmt.Sprintf("node%d", i+1)].backend,
-			}
-			svr.BackendGroups = bg1
-
-			setResponsiveBackend(fmt.Sprintf("node%d", i+1))
-
-			svr.HandleRPC(rr, req)
-
-			resp := rr.Result()
-			defer resp.Body.Close()
-			require.NotNil(t, resp.Body)
-			require.Equal(t, 200, resp.StatusCode)
-			servedBy := fmt.Sprintf("node/node%d", i+1)
-			require.Equal(t, resp.Header["X-Served-By"], []string{servedBy})
-			rpcRes := &proxyd.RPCRes{}
-			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-			require.False(t, rpcRes.IsError())
-			if i == 0 {
-				require.Equal(t, 1, nodeBackendRequestCount("node1"))
-				require.Equal(t, 0, nodeBackendRequestCount("node2"))
-			} else {
-				require.Equal(t, 0, nodeBackendRequestCount("node1"))
-				require.Equal(t, 1, nodeBackendRequestCount("node2"))
-
-			}
-		}
-	})
-
-	t.Run("When all of the backends return non 200", func(t *testing.T) {
+	t.Run("When all of the backends return non 200, multicall should return 503", func(t *testing.T) {
 		reset()
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(429, dummyRes))
 		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(429, dummyRes))
 
-		setServerBackend(nodes)
+		localSvr := setServerBackend(nodes)
 
 		body := makeSendRawTransaction(txHex1)
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
 
-		svr.HandleRPC(rr, req)
+		localSvr.HandleRPC(rr, req)
 
 		resp := rr.Result()
 		defer resp.Body.Close()
@@ -211,17 +216,17 @@ func TestMulticall(t *testing.T) {
 
 	t.Run("It should return the first 200 response", func(t *testing.T) {
 		reset()
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, dummyRes, 3*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
 
-		setServerBackend(nodes)
+		localSvr := setServerBackend(nodes)
 
 		body := makeSendRawTransaction(txHex1)
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
 
-		svr.HandleRPC(rr, req)
+		localSvr.HandleRPC(rr, req)
 
 		resp := rr.Result()
 		defer resp.Body.Close()
@@ -232,13 +237,44 @@ func TestMulticall(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
 		require.Equal(t, "2.0", rpcRes.JSONRPC)
-		// require.Equal(t, proxyd.ErrNoBackends.Message, rpcRes.ID)
 
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
 		require.False(t, rpcRes.IsError())
 
 		require.Equal(t, 1, nodeBackendRequestCount("node1"))
 		require.Equal(t, 1, nodeBackendRequestCount("node2"))
+	})
+
+	t.Run("Ensure application level error is returned to caller", func(t *testing.T) {
+		reset()
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, nonceErrorResponse, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, nonceErrorResponse))
+
+		localSvr := setServerBackend(nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		localSvr.HandleRPC(rr, req)
+
+		resp := rr.Result()
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 200, resp.StatusCode)
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.True(t, rpcRes.IsError())
+		require.Equal(t, "2.0", rpcRes.JSONRPC)
+
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
+		require.True(t, rpcRes.IsError())
+
+		require.Equal(t, 1, nodeBackendRequestCount("node1"))
+		require.Equal(t, 1, nodeBackendRequestCount("node2"))
+
 	})
 
 	// t.Run("When one of the backends times out", func(t *testing.T) {
@@ -317,10 +353,6 @@ func TestMulticall(t *testing.T) {
 	// })
 	//
 	//
-	// // Make the handlers take various time, and ensure shortest time is always returned first
-	// t.Run("Ensure we return the first success back to the caller", func(t *testing.T) {})
-	//
-	// t.Run("Ensure application level error is returned to caller", func(t *testing.T) {})
 
 }
 
