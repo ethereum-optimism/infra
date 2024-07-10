@@ -267,42 +267,46 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 	})
 
-	// t.Run("allBackends times out", func(t *testing.T) {
-	// 	reset()
-	// 	shutdownChan2 := make(chan struct{})
-	// 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
-	// 	nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2))
-	// 	// nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-	//
-	// 	setServerBackend(nodes)
-	//
-	// 	body := makeSendRawTransaction(txHex1)
-	// 	req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
-	// 	req.Header.Set("X-Forwarded-For", "203.0.113.1")
-	// 	rr := httptest.NewRecorder()
-	//
-	// 	go func() {
-	// 		shutdownChan2 <- struct{}{}
-	// 	}()
-	//
-	// 	fmt.Println("sending request")
-	// 	svr.HandleRPC(rr, req)
-	//
-	// 	resp := rr.Result()
-	// 	defer resp.Body.Close()
-	//
-	// 	require.NotNil(t, resp.Body)
-	// 	require.Equal(t, 200, resp.StatusCode, "expected no response")
-	// 	rpcRes := &proxyd.RPCRes{}
-	// 	require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-	// 	require.True(t, rpcRes.IsError())
-	// 	require.Equal(t, rpcRes.Error.Code, proxyd.JSONRPCErrorInternal)
-	//
-	// 	require.Equal(t, 1, nodeBackendRequestCount("node1"))
-	// 	require.Equal(t, 1, nodeBackendRequestCount("node2"))
-	// })
-	//
-	//
+	t.Run("allBackends times out", func(t *testing.T) {
+
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		defer nodes["node1"].mockBackend.Close()
+		defer nodes["node2"].mockBackend.Close()
+		defer shutdown()
+
+		shutdownChan1 := make(chan struct{})
+		shutdownChan2 := make(chan struct{})
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 6*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 6*time.Second))
+
+		localSvr := setServerBackend(svr, nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		go func() {
+			shutdownChan1 <- struct{}{}
+			shutdownChan2 <- struct{}{}
+		}()
+
+		fmt.Println("sending request")
+		localSvr.HandleRPC(rr, req)
+
+		resp := rr.Result()
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 503, resp.StatusCode, "expected no response")
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.True(t, rpcRes.IsError())
+		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
+
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+	})
 
 }
 
