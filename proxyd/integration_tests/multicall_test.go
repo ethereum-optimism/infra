@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
-	// "sync"
+	"sync"
 	"testing"
 	"time"
 
@@ -238,7 +238,7 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan := make(chan struct{})
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 6*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 3*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -274,8 +274,8 @@ func TestMulticall(t *testing.T) {
 
 		shutdownChan1 := make(chan struct{})
 		shutdownChan2 := make(chan struct{})
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 6*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 6*time.Second))
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 10*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 10*time.Second))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -284,9 +284,12 @@ func TestMulticall(t *testing.T) {
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
 
+		var wg sync.WaitGroup
+		wg.Add(1)
 		go func() {
 			shutdownChan1 <- struct{}{}
 			shutdownChan2 <- struct{}{}
+			wg.Done()
 		}()
 
 		fmt.Println("sending request")
@@ -302,6 +305,7 @@ func TestMulticall(t *testing.T) {
 		require.True(t, rpcRes.IsError())
 		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
 
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 	})
