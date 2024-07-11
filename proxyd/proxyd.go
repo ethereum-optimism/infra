@@ -419,6 +419,10 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()
 			}
+		} else if bgcfg.RoutingStrategy == Multicall {
+			log.Info("configuring routing multicall strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+		} else {
+			log.Info("no routing strategy defined for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		}
 	}
 

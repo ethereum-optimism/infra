@@ -1,10 +1,8 @@
 [server]
 enable_request_log = true
 log_level = "debug"
-max_body_size_bytes = 10485760
 rpc_host = "0.0.0.0"
 rpc_port = 8082
-max_upstream_batch_size = 100
 
 [metrics]
 enabled = true

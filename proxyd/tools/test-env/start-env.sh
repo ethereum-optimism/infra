@@ -6,13 +6,15 @@ source .env
 # Iterate through all arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -build)
-            echo "-build argument detected"
+        build)
+            echo "build argument detected"
+            echo "building proxyd..."
             pushd ../../
             make proxyd
             cd ..
             docker buildx build -f ./proxyd/Dockerfile -t ${IMAGE_NAME}:${IMAGE_TAG} . --platform linux/arm64
             popd
+            echo "build complete"
             ;;
         *)
             # Handle other arguments if needed
@@ -29,4 +31,6 @@ envsubst < ./proxyd/upstream-proxyd-2/proxyd.toml.template > ./proxyd/upstream-p
 
 
 # Start Docker Compose
+echo "deploying..."
 docker-compose up -d --force-recreate
+echo "deployment complete"

@@ -372,6 +372,13 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 			),
 		)
 
+		log.Trace(
+			"forwarding request to backend",
+			"name", b.Name,
+			"req_id", GetReqID(ctx),
+			"attempt_count", i+1,
+			"max_attempts", i,
+		)
 		res, err := b.doForward(ctx, reqs, isBatch)
 		switch err {
 		case nil: // do nothing
@@ -415,6 +422,8 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"name", b.Name,
 				"req_id", GetReqID(ctx),
 				"err", err,
+				"attempt_count", i,
+				"max_retries", b.maxRetries,
 			)
 			timer.ObserveDuration()
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
@@ -760,11 +769,21 @@ type mutlicallTuple struct {
 }
 
 func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
+
+	log.Debug("executing multicall tx forwarding",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+	)
 	var wg sync.WaitGroup
 	responseChan := make(chan *mutlicallTuple)
 	for _, backend := range bg.Backends {
 		wg.Add(1)
 		go func(backend *Backend) {
+			log.Trace("forwarding multicall request to upstream backend",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"backend", backend.Name,
+			)
 			defer wg.Done()
 			backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
 
@@ -775,12 +794,23 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 			select {
 			case responseChan <- multicallResp:
 				fmt.Printf("[Execution][%s] Multicall returned for backend \n", backend.Name)
+				log.Trace("received multicall response from backend",
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"backend", backend.Name,
+				)
 				if backendResp.error != nil {
 					fmt.Printf("[Execution][%s] Multicall error Backend Error: %s \n", backend.Name, backendResp.error.Error())
+					log.Trace("received multicall error response from backend",
+						"req_id", GetReqID(ctx),
+						"auth", GetAuthCtx(ctx),
+						"backend", backend.Name,
+						"error", backendResp.error.Error(),
+					)
 				}
 			case <-ctx.Done():
 				fmt.Printf("[Execution][%s] Context Expiried for backend \n", backend.Name)
-				log.Warn("backend multicall context is done",
+				log.Warn("multicall context expired prior to response from backend",
 					"req_id", GetReqID(ctx),
 					"auth", GetAuthCtx(ctx),
 					"backend", backend.Name,
@@ -794,6 +824,10 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 		wg.Wait()
 		close(responseChan)
 		fmt.Println("[Cleanup] responseChan closed")
+		log.Trace("closing mutlicall channel, all multicall requests have terminated",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+		)
 	}()
 
 	var finalResp *BackendGroupRPCResponse
@@ -804,32 +838,48 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 			if !ok {
 				// Channel closed, all responses received
 				fmt.Println("[ProcessingMulticallResponse] channel closed returning")
+				log.Trace("multicall processing, channel closed",
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+				)
 				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 			}
 
 			resp := multiCallResp.response
 			backendName := multiCallResp.backendName
 			fmt.Printf("[ProcessingMulticallResponse][%s] Reading Backend Response \n", backendName)
+			log.Trace("processing backend multicall response",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"backend", backendName,
+			)
 
 			if resp.error != nil {
 				fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Error Response: %s \n", backendName, resp.error.Error())
-				log.Error("error serving write request with fanouts enabled",
+				log.Error("processing multical backend response returned error",
 					"req_id", GetReqID(ctx),
 					"auth", GetAuthCtx(ctx),
 					"err", resp.error,
+					"backend", backendName,
 				)
 				finalResp = resp
 			} else {
 				fmt.Printf("[ProcessingMulticallResponse][%s] Recieved Response from fanout chan \n", resp.ServedBy)
-				log.Info("Received response from fanout chan",
-					"resp", len(resp.RPCRes),
+				log.Info("received response from multicall chan",
+					"num_responses", len(resp.RPCRes),
 					"servedBy", resp.ServedBy,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
 				)
 				finalResp = resp
 				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 			}
 		case <-ctx.Done():
 			fmt.Println("[ProcessingMulticallResponse] Context done, returning")
+			log.Warn("context timout for multicall",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+			)
 			return nil, "", ctx.Err()
 		}
 	}

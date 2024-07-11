@@ -1,6 +1,6 @@
 [server]
 enable_request_log = true
-log_level = "debug"
+log_level = "trace"
 rpc_host = "0.0.0.0"
 rpc_port = 8080
 
@@ -15,7 +15,7 @@ port = 7300
 max_degraded_latency_threshold = "30ms"
 max_retries = 0
 out_of_service_seconds = 0
-response_timeout_seconds = 5
+response_timeout_seconds = 10
 
 
 [backends.upstream-proxyd-1]
@@ -23,13 +23,14 @@ rpc_url = "http://upstream-proxyd-1:8081"
 consensus_skip_peer_count = true
 
 [backends.upstream-proxyd-2]
-consensus_skip_peer_count = true
 rpc_url = "http://upstream-proxyd-2:8082"
+consensus_skip_peer_count = true
 
 [backend_groups]
 [backend_groups.replica]
 backends = ["upstream-proxyd-1", "upstream-proxyd-2"]
-consensus_aware = true
+## backends = ["upstream-proxyd-2"]
+routing_strategy = "multi_call"
 consensus_ha = false
 consensus_poller_interval = "3s"
 
