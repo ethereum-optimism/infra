@@ -7,14 +7,14 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # - job_name: 'node_exporter'
-  #   static_configs:
-  #     - targets: ['node_exporter:9100']
-  #
-  # - job_name: 'cadvisor'
-  #   static_configs:
-  #     - targets: ['cadvisor:8080']
-
-  - job_name: 'grafana'
+  - job_name: 'proxyd'
     static_configs:
-      - targets: ['grafana:3000']
+      - targets: ['proxyd:7300']
+
+  - job_name: 'upstream-proxyd-1'
+    static_configs:
+      - targets: ['upstream-proxyd-1:7301']
+
+  - job_name: 'upstream-proxyd-2'
+    static_configs:
+      - targets: ['upstream-proxyd-2:7302']

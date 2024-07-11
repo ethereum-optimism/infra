@@ -3,6 +3,7 @@ version: '3'
 services:
   grafana:
     image: grafana/grafana:9.5.20
+    container_name: grafana
     ports:
       - "3000:3000"
     volumes:
@@ -13,39 +14,47 @@ services:
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/home.json
     depends_on:
       - prometheus
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.45.5
+    container_name: prometheus
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
 
-  proxyd-1:
-    image: prom/prometheus:v2.45.5
+  proxyd:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: proxyd
+    ports:
+      - "8080:8080"
+      - "7300:7300"
+    volumes:
+      - ./proxyd/proxyd/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
+
+
+
+  upstream-proxyd-1:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: upstream-proxyd-1
     ports:
       - "8081:8081"
+      - "7301:7301"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - ./proxyd/upstream-proxyd-1/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
 
-  proxyd-2:
-    image: prom/prometheus:v2.45.5
+  upstream-proxyd-2:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: upstream-proxyd-2
     ports:
       - "8082:8082"
+      - "7302:7302"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-
-  proxyd-3:
-    image: prom/prometheus:v2.45.5
-    ports:
-      - "8083:8083"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - ./proxyd/upstream-proxyd-2/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped

@@ -7,9 +7,9 @@ rpc_port = 8081
 max_upstream_batch_size = 100
 
 [metrics]
-enabled = false
+enabled = true
 host = "0.0.0.0"
-port = 7300
+port = 7301
 
 [batch]
 max_size = 1000
@@ -25,7 +25,7 @@ response_timeout_seconds = 5
 
 
 [backends.alchemy]
-rpc_url = ${UPSTREAM_PROXYD_RPC_URL_1}
+rpc_url = "${UPSTREAM_PROXYD_RPC_URL_1}"
 consensus_skip_peer_count = true
 
 [backend_groups]
