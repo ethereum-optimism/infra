@@ -1,3 +1,8 @@
 bin
 
 config.toml
+
+tools/test-env/.env
+tools/test-env/proxyd/proxyd/proxyd.toml
+tools/test-env/proxyd/upstream-proxyd-1/proxyd.toml
+tools/test-env/proxyd/upstream-proxyd-2/proxyd.toml

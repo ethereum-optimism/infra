@@ -1,0 +1,75 @@
+[server]
+enable_request_log = true
+log_level = "debug"
+max_body_size_bytes = 10485760
+rpc_host = "0.0.0.0"
+rpc_port = 8081
+max_upstream_batch_size = 100
+
+[metrics]
+enabled = false
+host = "0.0.0.0"
+port = 7300
+
+[batch]
+max_size = 1000
+
+[cache]
+enabled = true
+
+[backend]
+max_degraded_latency_threshold = "30ms"
+max_retries = 0
+out_of_service_seconds = 0
+response_timeout_seconds = 5
+
+
+[backends.alchemy]
+rpc_url = ${UPSTREAM_PROXYD_RPC_URL_1}
+consensus_skip_peer_count = true
+
+[backend_groups]
+[backend_groups.replica]
+backends = ["alchemy"]
+consensus_aware = true
+consensus_ha = false
+consensus_poller_interval = "3s"
+
+[rpc_method_mappings]
+debug_dbGet = "replica"
+debug_getRawReceipts = "replica"
+debug_storageRangeAt = "replica"
+debug_traceBlockByHash = "replica"
+debug_traceBlockByNumber = "replica"
+debug_traceTransaction = "replica"
+eth_accounts = "replica"
+eth_blockNumber = "replica"
+eth_call = "replica"
+eth_chainId = "replica"
+eth_estimateGas = "replica"
+eth_feeHistory = "replica"
+eth_gasPrice = "replica"
+eth_getBalance = "replica"
+eth_getBlockByHash = "replica"
+eth_getBlockByNumber = "replica"
+eth_getBlockRange = "replica"
+eth_getBlockReceipts = "replica"
+eth_getBlockTransactionCountByHash = "replica"
+eth_getBlockTransactionCountByNumber = "replica"
+eth_getCode = "replica"
+eth_getLogs = "replica"
+eth_getProof = "replica"
+eth_getStorageAt = "replica"
+eth_getTransactionByBlockHashAndIndex = "replica"
+eth_getTransactionByHash = "replica"
+eth_getTransactionCount = "replica"
+eth_getTransactionReceipt = "replica"
+eth_getUncleByBlockHashAndIndex = "replica"
+eth_maxPriorityFeePerGas = "replica"
+eth_sendRawTransaction = "replica"
+eth_syncing = "replica"
+net_version = "replica"
+rollup_getInfo = "replica"
+web3_clientVersion = "replica"
+
+

@@ -1,0 +1,51 @@
+version: '3'
+
+services:
+  grafana:
+    image: grafana/grafana:9.5.20
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/home.json
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:v2.45.5
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  proxyd-1:
+    image: prom/prometheus:v2.45.5
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  proxyd-2:
+    image: prom/prometheus:v2.45.5
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  proxyd-3:
+    image: prom/prometheus:v2.45.5
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
