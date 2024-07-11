@@ -58,3 +58,11 @@ services:
     volumes:
       - ./proxyd/upstream-proxyd-2/proxyd.toml:/etc/proxyd/proxyd.toml
     restart: unless-stopped
+
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:v8.0.5
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 8888:8080
