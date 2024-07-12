@@ -2,7 +2,7 @@
 enable_request_log = true
 log_level = "debug"
 rpc_host = "0.0.0.0"
-rpc_port = 8082
+rpc_port = 8083
 
 [metrics]
 enabled = true
@@ -22,16 +22,16 @@ out_of_service_seconds = 0
 response_timeout_seconds = 5
 
 
-[backends.bne]
-rpc_url = "${UPSTREAM_PROXYD_RPC_URL_2}"
+[backends.backend-3]
+rpc_url = "${UPSTREAM_PROXYD_RPC_URL_3}"
 consensus_skip_peer_count = true
 
 [backend_groups]
 [backend_groups.replica]
-backends = ["bne"]
-# consensus_aware = true
-# consensus_ha = false
-# consensus_poller_interval = "3s"
+backends = ["backend-3"]
+consensus_aware = true
+consensus_ha = false
+consensus_poller_interval = "3s"
 
 [rpc_method_mappings]
 debug_dbGet = "replica"

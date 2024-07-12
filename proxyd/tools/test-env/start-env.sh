@@ -28,6 +28,7 @@ done
 envsubst < ./proxyd/proxyd/proxyd.toml.template > ./proxyd/proxyd/proxyd.toml
 envsubst < ./proxyd/upstream-proxyd-1/template.proxyd.toml > ./proxyd/upstream-proxyd-1/proxyd.toml
 envsubst < ./proxyd/upstream-proxyd-2/template.proxyd.toml > ./proxyd/upstream-proxyd-2/proxyd.toml
+envsubst < ./proxyd/upstream-proxyd-3/template.proxyd.toml > ./proxyd/upstream-proxyd-3/proxyd.toml
 
 
 # Start Docker Compose

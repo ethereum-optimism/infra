@@ -26,9 +26,13 @@ consensus_skip_peer_count = true
 rpc_url = "http://upstream-proxyd-2:8082"
 consensus_skip_peer_count = true
 
+[backends.upstream-proxyd-3]
+rpc_url = "http://upstream-proxyd-3:8083"
+consensus_skip_peer_count = true
+
 [backend_groups]
 [backend_groups.replica]
-backends = ["upstream-proxyd-1", "upstream-proxyd-2"]
+backends = ["upstream-proxyd-1", "upstream-proxyd-2", "upstream-proxyd-3"]
 routing_strategy = "multi_call"
 consensus_ha = false
 consensus_poller_interval = "3s"
