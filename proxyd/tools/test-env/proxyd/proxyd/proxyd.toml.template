@@ -2,7 +2,7 @@
 enable_request_log = true
 log_level = "trace"
 rpc_host = "0.0.0.0"
-rpc_port = 8080
+rpc_port = 8001
 
 [metrics]
 enabled = true
@@ -29,7 +29,6 @@ consensus_skip_peer_count = true
 [backend_groups]
 [backend_groups.replica]
 backends = ["upstream-proxyd-1", "upstream-proxyd-2"]
-## backends = ["upstream-proxyd-2"]
 routing_strategy = "multi_call"
 consensus_ha = false
 consensus_poller_interval = "3s"
