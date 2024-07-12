@@ -771,7 +771,7 @@ type mutlicallTuple struct {
 	backendName string
 }
 
-func (bg *BackendGroup) MulticallRequest(backend *Backend, wg *sync.WaitGroup, rpcReqs []*RPCReq, ctx context.Context, responseChan chan *mutlicallTuple) {
+func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, responseChan chan *mutlicallTuple) {
 	defer wg.Done()
 	// Create ctx without cancel so background tasks process
 	log.Trace("forwarding multicall request to upstream backend",
@@ -815,38 +815,7 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 	responseChan := make(chan *mutlicallTuple)
 	for _, backend := range bg.Backends {
 		wg.Add(1)
-		go bg.MulticallRequest(backend, &wg, rpcReqs, ctx, responseChan)
-		// go func(backend *Backend) {
-		// 	defer wg.Done()
-		// 	// Create ctx without cancel so background tasks process
-		// 	log.Trace("forwarding multicall request to upstream backend",
-		// 		"req_id", GetReqID(bgCtx),
-		// 		"auth", GetAuthCtx(bgCtx),
-		// 		"backend", backend.Name,
-		// 	)
-		// 	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, bgCtx, false)
-		//
-		// 	multicallResp := &mutlicallTuple{
-		// 		response:    backendResp,
-		// 		backendName: backend.Name,
-		// 	}
-		// 	responseChan <- multicallResp
-		// 	fmt.Printf("[Execution][%s] Multicall returned for backend \n", backend.Name)
-		// 	log.Trace("received multicall response from upstream backend",
-		// 		"req_id", GetReqID(bgCtx),
-		// 		"auth", GetAuthCtx(bgCtx),
-		// 		"backend", backend.Name,
-		// 	)
-		// 	if backendResp.error != nil {
-		// 		fmt.Printf("[Execution][%s] Multicall error Backend Error: %s \n", backend.Name, backendResp.error.Error())
-		// 		log.Trace("received multicall error response from upstream backend",
-		// 			"req_id", GetReqID(bgCtx),
-		// 			"auth", GetAuthCtx(bgCtx),
-		// 			"backend", backend.Name,
-		// 			"error", backendResp.error.Error(),
-		// 		)
-		// 	}
-		// }(backend)
+		go bg.MulticallRequest(backend, rpcReqs, &wg, ctx, responseChan)
 	}
 
 	go func() {
