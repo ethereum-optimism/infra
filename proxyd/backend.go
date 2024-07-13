@@ -823,18 +823,22 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 	}()
 
 	var finalResp *BackendGroupRPCResponse
+	i := 0
 	for {
 		multiCallResp, ok := <-responseChan
-
 		if !ok {
 			// fmt.Println("[ProcessingMulticallResponse] channel closed returning")
 			log.Trace("multicall processing, channel closed",
 				"req_id", GetReqID(bgCtx),
 				"auth", GetAuthCtx(bgCtx),
 			)
-			return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+			if i > 0 {
+				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+			}
+			return nil, "", errors.New("no mutlicall response was recieved")
 		}
 
+		i++
 		resp := multiCallResp.response
 		backendName := multiCallResp.backendName
 		// fmt.Printf("[ProcessingMulticallResponse][%s] Reading Backend Response \n", backendName)
@@ -852,16 +856,16 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 				"backend", backendName,
 			)
 			finalResp = resp
-		} else {
-			log.Info("received response from multicall chan",
-				"servedBy", resp.ServedBy,
-				"req_id", GetReqID(bgCtx),
-				"auth", GetAuthCtx(bgCtx),
-			)
-
-			finalResp = resp
-			return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
+			continue
 		}
+		log.Info("received response from multicall chan",
+			"servedBy", resp.ServedBy,
+			"req_id", GetReqID(bgCtx),
+			"auth", GetAuthCtx(bgCtx),
+		)
+
+		finalResp = resp
+		return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
 	}
 }
 
