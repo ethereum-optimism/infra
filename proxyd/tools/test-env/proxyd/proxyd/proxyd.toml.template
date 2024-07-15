@@ -33,7 +33,7 @@ consensus_skip_peer_count = true
 [backend_groups]
 [backend_groups.replica]
 backends = ["upstream-proxyd-1", "upstream-proxyd-2", "upstream-proxyd-3"]
-routing_strategy = "multi_call"
+routing_strategy = "multicall"
 consensus_ha = false
 consensus_poller_interval = "3s"
 
