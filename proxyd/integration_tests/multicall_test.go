@@ -69,8 +69,8 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	bg := svr.BackendGroups["node"]
 	require.NotNil(t, bg)
 	require.Nil(t, bg.Consensus, "Expeceted consensus not to be initialized")
-	require.Equal(t, 3, len(bg.Backends))                       // should match config
-	require.Equal(t, bg.GetRoutingStrategy(), proxyd.Multicall) // should match config
+	require.Equal(t, 3, len(bg.Backends))
+	require.Equal(t, bg.GetRoutingStrategy(), proxyd.MulticallRoutingStrategy)
 
 	// convenient mapping to access the nodes by name
 	nodes := map[string]nodeContext{

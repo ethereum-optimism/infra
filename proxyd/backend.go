@@ -773,12 +773,12 @@ type mutlicallTuple struct {
 
 func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, responseChan chan *mutlicallTuple) {
 	defer wg.Done()
-	log.Debug("forwarding multicall request to upstream backend",
+	log.Debug("forwarding multicall request to backend",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
 		"backend", backend.Name,
 	)
-	// NOTE: Maybe add with Timeout here
+
 	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
 
 	multicallResp := &mutlicallTuple{
@@ -786,13 +786,13 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 		backendName: backend.Name,
 	}
 	responseChan <- multicallResp
-	log.Debug("received multicall response from upstream backend",
+	log.Debug("received multicall response from backend",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
 		"backend", backend.Name,
 	)
 	if backendResp.error != nil {
-		log.Debug("received multicall error response from upstream backend",
+		log.Debug("received multicall error response from backend",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"backend", backend.Name,
@@ -801,12 +801,57 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 	}
 }
 
-func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
+func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTuple, ctx context.Context) *BackendGroupRPCResponse {
+	var finalResp *BackendGroupRPCResponse
+	i := 0
+	for {
+		multicallResp, ok := <-responseChan
+		if !ok {
+			log.Trace("multicall processing channel closed",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+			)
+			if i > 0 {
+				return finalResp
+			}
+			return &BackendGroupRPCResponse{
+				RPCRes:   nil,
+				ServedBy: "",
+				error:    errors.New("no multicall response received"),
+			}
+		}
+
+		i++
+		resp := multicallResp.response
+		backendName := multicallResp.backendName
+
+		if resp.error != nil {
+			log.Error("recieved error response from multicall",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"err", resp.error,
+				"backend", backendName,
+			)
+			finalResp = resp
+			continue
+		}
+		log.Info("received sucessful response from multicall",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"servedBy", resp.ServedBy,
+			"backend", backendName,
+		)
+		return resp
+	}
+}
+
+func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) *BackendGroupRPCResponse {
 
 	// Create ctx without cancel so background tasks process
+	// after original request returns
 	bgCtx := context.WithoutCancel(ctx)
 
-	log.Info("executing multicall tx forwarding",
+	log.Info("executing multicall routing strategy",
 		"req_id", GetReqID(bgCtx),
 		"auth", GetAuthCtx(bgCtx),
 	)
@@ -814,7 +859,7 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 	responseChan := make(chan *mutlicallTuple)
 	for _, backend := range bg.Backends {
 		wg.Add(1)
-		go bg.MulticallRequest(backend, rpcReqs, &wg, ctx, responseChan)
+		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, responseChan)
 	}
 
 	go func() {
@@ -822,51 +867,7 @@ func (bg *BackendGroup) ExecuteMultiCall(ctx context.Context, rpcReqs []*RPCReq,
 		close(responseChan)
 	}()
 
-	var finalResp *BackendGroupRPCResponse
-	i := 0
-	for {
-		multiCallResp, ok := <-responseChan
-		if !ok {
-			// fmt.Println("[ProcessingMulticallResponse] channel closed returning")
-			log.Trace("multicall processing, channel closed",
-				"req_id", GetReqID(bgCtx),
-				"auth", GetAuthCtx(bgCtx),
-			)
-			if i > 0 {
-				return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
-			}
-			return nil, "", errors.New("no mutlicall response was recieved")
-		}
-
-		i++
-		resp := multiCallResp.response
-		backendName := multiCallResp.backendName
-		// fmt.Printf("[ProcessingMulticallResponse][%s] Reading Backend Response \n", backendName)
-		log.Trace("processing backend multicall response",
-			"req_id", GetReqID(bgCtx),
-			"auth", GetAuthCtx(bgCtx),
-			"backend", backendName,
-		)
-
-		if resp.error != nil {
-			log.Error("processing multical backend response returned error",
-				"req_id", GetReqID(bgCtx),
-				"auth", GetAuthCtx(bgCtx),
-				"err", resp.error,
-				"backend", backendName,
-			)
-			finalResp = resp
-			continue
-		}
-		log.Info("received response from multicall chan",
-			"servedBy", resp.ServedBy,
-			"req_id", GetReqID(bgCtx),
-			"auth", GetAuthCtx(bgCtx),
-		)
-
-		finalResp = resp
-		return finalResp.RPCRes, finalResp.ServedBy, finalResp.error
-	}
+	return bg.ProcessMulticallResponses(responseChan, bgCtx)
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
@@ -889,8 +890,9 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	// Forward to fanout backends, Note: Further optimization for forward to all
 	// and cancel once a valid response is returned from a go routine
-	if bg.GetRoutingStrategy() == Multicall && isValidMultiCallTx(rpcReqs) {
-		return bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
+	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMultiCallTx(rpcReqs) {
+		backendResp := bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
+		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	rpcRequestsTotal.Inc()

@@ -356,7 +356,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 	for bgName, bg := range backendGroups {
 		bgcfg := config.BackendGroups[bgName]
-		if bgcfg.RoutingStrategy == ConsensusAware {
+		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
 			log.Info("creating poller for consensus aware backend_group", "name", bgName)
 
 			copts := make([]ConsensusOpt, 0)
@@ -419,7 +419,7 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()
 			}
-		} else if bgcfg.RoutingStrategy == Multicall {
+		} else if bgcfg.RoutingStrategy == MulticallRoutingStrategy {
 			log.Info("configuring routing multicall strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		} else {
 			log.Info("no routing strategy defined for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
