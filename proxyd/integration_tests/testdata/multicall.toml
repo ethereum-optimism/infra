@@ -20,7 +20,7 @@ rpc_url = "$NODE3_URL"
 [backend_groups]
 [backend_groups.node]
 backends = ["node1", "node2", "node3"]
-routing_strategy = "multi_call"
+routing_strategy = "multicall"
 consensus_handler = "noop" # allow more control over the consensus poller for tests
 consensus_ban_period = "1m"
 consensus_max_update_threshold = "2m"

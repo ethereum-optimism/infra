@@ -884,15 +884,15 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	overriddenResponses := make([]*indexedReqRes, 0)
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
 
-	// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
+	// When routing_strategy is set to `consensus_aware` the backend group acts as a load balancer
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	}
 
-	// Forward to fanout backends, Note: Further optimization for forward to all
-	// and cancel once a valid response is returned from a go routine
+	// When routing_strategy is set to 'mutlicall' the request will be forward to all backends
+	// and return the first sucessful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMultiCallTx(rpcReqs, isBatch) {
 		backendResp := bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
