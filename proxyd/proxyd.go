@@ -189,8 +189,6 @@ func Start(config *Config) (*Server, func(), error) {
 		backends := make([]*Backend, 0)
 		fallbackBackends := make(map[string]bool)
 		fallbackCount := 0
-		// multicallBackends := make(map[string]bool)
-		// multicallCount := 0
 		for _, bName := range bg.Backends {
 			if backendsByName[bName] == nil {
 				return nil, nil, fmt.Errorf("backend %s is not defined", bName)
@@ -422,7 +420,7 @@ func Start(config *Config) (*Server, func(), error) {
 		} else if bgcfg.RoutingStrategy == MulticallRoutingStrategy {
 			log.Info("configuring routing multicall strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		} else {
-			log.Info("no routing strategy defined for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+			log.Info("no routing strategy defined for backend_group using default round robin", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		}
 	}
 

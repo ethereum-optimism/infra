@@ -808,9 +808,10 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 	for {
 		multicallResp, ok := <-responseChan
 		if !ok {
-			log.Trace("multicall processing channel closed",
+			log.Trace("multicall response channel closed",
 				"req_id", GetReqID(ctx),
 				"auth", GetAuthCtx(ctx),
+				"response_count", i,
 			)
 			if i > 0 {
 				return finalResp
@@ -828,7 +829,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 		RecordBackendGroupMulticallCompletion(bg, backendName)
 
 		if resp.error != nil {
-			log.Error("received error response from multicall",
+			log.Error("received error response from multicall channel",
 				"req_id", GetReqID(ctx),
 				"auth", GetAuthCtx(ctx),
 				"err", resp.error,
@@ -837,7 +838,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 			finalResp = resp
 			continue
 		}
-		log.Info("received successful response from multicall",
+		log.Info("received successful response from multicall channel",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"served_by", resp.ServedBy,
