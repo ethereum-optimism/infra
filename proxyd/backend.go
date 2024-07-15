@@ -892,7 +892,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	}
 
 	// When routing_strategy is set to 'mutlicall' the request will be forward to all backends
-	// and return the first sucessful response
+	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMultiCallTx(rpcReqs, isBatch) {
 		backendResp := bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
