@@ -129,6 +129,10 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(401, dummyRes))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(500, dummyRes))
+		nodes["node3"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
+
 		body := makeSendRawTransaction(txHex1)
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
@@ -138,7 +142,7 @@ func TestMulticall(t *testing.T) {
 		defer resp.Body.Close()
 		require.NotNil(t, resp.Body)
 		require.Equal(t, 200, resp.StatusCode)
-		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node3"})
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
@@ -225,10 +229,23 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
+
 		defer shutdown()
 
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 2*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, nonceErrorResponse))
+		shutdownChan1 := make(chan struct{})
+		shutdownChan2 := make(chan struct{})
+
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan1, 4*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan2, 1*time.Second))
+		nodes["node3"].mockBackend.SetHandler(SingleResponseHandler(403, dummyRes))
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			shutdownChan2 <- struct{}{}
+			shutdownChan1 <- struct{}{}
+			wg.Done()
+		}()
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -246,11 +263,11 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, 200, resp.StatusCode)
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
-		require.True(t, rpcRes.IsError())
 		require.Equal(t, "2.0", rpcRes.JSONRPC)
-
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
 		require.True(t, rpcRes.IsError())
+
+		wg.Wait()
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
