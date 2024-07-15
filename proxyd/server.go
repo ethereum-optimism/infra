@@ -256,7 +256,7 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
-	ctx := s.populateContext(w, r)
+	ctx := s.populateContext(w, r, false)
 	if ctx == nil {
 		return
 	}
@@ -584,7 +584,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
-	ctx := s.populateContext(w, r)
+	ctx := s.populateContext(w, r, true)
 	if ctx == nil {
 		return
 	}
@@ -620,7 +620,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	log.Info("accepted WS connection", "auth", GetAuthCtx(ctx), "req_id", GetReqID(ctx))
 }
 
-func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
+func (s *Server) populateContext(w http.ResponseWriter, r *http.Request, ws bool) context.Context {
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
@@ -630,7 +630,16 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			xff = ipPort[0]
 		}
 	}
-	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
+
+	ctx := r.Context()
+
+	if ws {
+		// Should not use HTTP context as parent; since it might get cancelled after upgrade
+		// This issue prevents redis usage within WS handler
+		ctx = context.Background()
+	}
+
+	ctx = context.WithValue(ctx, ContextKeyXForwardedFor, xff) // nolint:staticcheck
 
 	if len(s.authenticatedPaths) > 0 {
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
