@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/ethereum-optimism/optimism/proxyd"
-	"github.com/gorilla/websocket"
 	"io"
 	"net/http"
 	"net/http/httptest"
