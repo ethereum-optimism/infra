@@ -826,7 +826,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 		backendName := multicallResp.backendName
 
 		if resp.error != nil {
-			log.Error("recieved error response from multicall",
+			log.Error("received error response from multicall",
 				"req_id", GetReqID(ctx),
 				"auth", GetAuthCtx(ctx),
 				"err", resp.error,
@@ -835,10 +835,10 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 			finalResp = resp
 			continue
 		}
-		log.Info("received sucessful response from multicall",
+		log.Info("received successful response from multicall",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
-			"servedBy", resp.ServedBy,
+			"served_by", resp.ServedBy,
 			"backend", backendName,
 		)
 		return resp
