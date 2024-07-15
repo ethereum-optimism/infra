@@ -21,12 +21,6 @@ rpc_url = "$NODE3_URL"
 [backend_groups.node]
 backends = ["node1", "node2", "node3"]
 routing_strategy = "multicall"
-consensus_handler = "noop" # allow more control over the consensus poller for tests
-consensus_ban_period = "1m"
-consensus_max_update_threshold = "2m"
-consensus_max_block_lag = 8
-consensus_min_peer_count = 4
-multicall_mode = true
 
 [rpc_method_mappings]
 eth_call = "node"

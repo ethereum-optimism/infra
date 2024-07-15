@@ -136,8 +136,6 @@ type BackendGroupConfig struct {
 	ConsensusHARedis             RedisConfig  `toml:"consensus_ha_redis"`
 
 	Fallbacks []string `toml:"fallbacks"`
-
-	MulticallBackends []string `toml:"multicalls"`
 }
 
 type BackendGroupsConfig map[string]*BackendGroupConfig

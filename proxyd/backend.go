@@ -1364,7 +1364,6 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	isBatch bool,
 ) *BackendGroupRPCResponse {
 	for _, back := range backends {
-		fmt.Println("Forwarding request to backend group")
 		res := make([]*RPCRes, 0)
 		var err error
 
