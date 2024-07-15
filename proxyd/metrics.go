@@ -432,7 +432,7 @@ var (
 	backendGroupMulticallCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "backend_group_multicall_request_counter",
-		Help:      "Record the amount of mutlicall requests",
+		Help:      "Record the amount of multicall requests",
 	}, []string{
 		"backend_group",
 		"backend_name",
@@ -441,7 +441,7 @@ var (
 	backendGroupMulticallCompletionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "backend_group_multicall_completion_counter",
-		Help:      "Record the amount of completed mutlicall requests",
+		Help:      "Record the amount of completed multicall requests",
 	}, []string{
 		"backend_group",
 		"backend_name",
