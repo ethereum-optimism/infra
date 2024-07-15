@@ -612,11 +612,11 @@ func RecordBackendGroupFallbacks(bg *BackendGroup, name string, fallback bool) {
 }
 
 func RecordBackendGroupMulticallRequest(bg *BackendGroup, backendName string) {
-	backendGroupMulticallCounter.WithLabelValues(bg.Name, backendName)
+	backendGroupMulticallCounter.WithLabelValues(bg.Name, backendName).Inc()
 }
 
 func RecordBackendGroupMulticallCompletion(bg *BackendGroup, backendName string) {
-	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName)
+	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName).Inc()
 }
 
 func boolToFloat64(b bool) float64 {
