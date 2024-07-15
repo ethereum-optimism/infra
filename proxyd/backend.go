@@ -756,10 +756,10 @@ func (bg *BackendGroup) Primaries() []*Backend {
 	return primaries
 }
 
-func isValidMultiCallTx(rpcReqs []*RPCReq) bool {
-	for _, r := range rpcReqs {
-		if r.Method == "eth_sendRawTransaction" {
-			return true && len(rpcReqs) == 1
+func isValidMultiCallTx(rpcReqs []*RPCReq, isBatch bool) bool {
+	if len(rpcReqs) == 1 && !isBatch {
+		if rpcReqs[0].Method == "eth_sendRawTransaction" {
+			return true
 		}
 	}
 	return false
@@ -892,7 +892,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	// Forward to fanout backends, Note: Further optimization for forward to all
 	// and cancel once a valid response is returned from a go routine
-	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMultiCallTx(rpcReqs) {
+	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMultiCallTx(rpcReqs, isBatch) {
 		backendResp := bg.ExecuteMultiCall(ctx, rpcReqs, isBatch)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
@@ -913,7 +913,6 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			"auth", GetAuthCtx(ctx),
 			"err", backendResp.error,
 		)
-		// return nil, servedBy, err
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
@@ -1426,7 +1425,6 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	}
 
 	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
-	// return nil, "", ErrNoBackends
 	return &BackendGroupRPCResponse{
 		RPCRes:   nil,
 		ServedBy: "",
@@ -1484,6 +1482,5 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 			rewrittenReqs = append(rewrittenReqs, req)
 		}
 	}
-	// rpcReqs = rewrittenReqs
 	return rewrittenReqs, overriddenResponses
 }

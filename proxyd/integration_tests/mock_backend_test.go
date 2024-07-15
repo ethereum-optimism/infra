@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/ethereum-optimism/optimism/proxyd"
 	"io"
 	"net/http"
 	"net/http/httptest"

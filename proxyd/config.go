@@ -119,9 +119,10 @@ type BackendGroupConfig struct {
 
 	WeightedRouting bool `toml:"weighted_routing"`
 
-	RoutingStrategy         RoutingStrategy `toml:"routing_strategy"`
-	ConsensusAsyncHandler   string          `toml:"consensus_handler"`
-	ConsensusPollerInterval TOMLDuration    `toml:"consensus_poller_interval"`
+	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
+
+	ConsensusAsyncHandler   string       `toml:"consensus_handler"`
+	ConsensusPollerInterval TOMLDuration `toml:"consensus_poller_interval"`
 
 	ConsensusBanPeriod          TOMLDuration `toml:"consensus_ban_period"`
 	ConsensusMaxUpdateThreshold TOMLDuration `toml:"consensus_max_update_threshold"`
