@@ -779,6 +779,7 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 		"backend", backend.Name,
 	)
 
+	RecordBackendGroupMulticallRequest(bg, backend.Name)
 	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
 
 	multicallResp := &mutlicallTuple{
@@ -824,6 +825,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(responseChan chan *mutlicallTu
 		i++
 		resp := multicallResp.response
 		backendName := multicallResp.backendName
+		RecordBackendGroupMulticallCompletion(bg, backendName)
 
 		if resp.error != nil {
 			log.Error("received error response from multicall",

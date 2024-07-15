@@ -428,6 +428,24 @@ var (
 		"backend_name",
 		"fallback",
 	})
+
+	backendGroupMulticallCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "backend_group_multicall_request_counter",
+		Help:      "Record the amount of mutlicall requests",
+	}, []string{
+		"backend_group",
+		"backend_name",
+	})
+
+	backendGroupMulticallCompletionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "backend_group_multicall_completion_counter",
+		Help:      "Record the amount of completed mutlicall requests",
+	}, []string{
+		"backend_group",
+		"backend_name",
+	})
 )
 
 func RecordRedisError(source string) {
@@ -591,6 +609,14 @@ func RecordBackendNetworkErrorRateSlidingWindow(b *Backend, rate float64) {
 
 func RecordBackendGroupFallbacks(bg *BackendGroup, name string, fallback bool) {
 	backendGroupFallbackBackend.WithLabelValues(bg.Name, name, strconv.FormatBool(fallback)).Set(boolToFloat64(fallback))
+}
+
+func RecordBackendGroupMulticallRequest(bg *BackendGroup, backendName string) {
+	backendGroupMulticallCounter.WithLabelValues(bg.Name, backendName)
+}
+
+func RecordBackendGroupMulticallCompletion(bg *BackendGroup, backendName string) {
+	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName)
 }
 
 func boolToFloat64(b bool) float64 {
