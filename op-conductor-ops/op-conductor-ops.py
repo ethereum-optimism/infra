@@ -171,6 +171,12 @@ networks = {
                 "https://sequencer-2-op-conductor.tertiary.mainnet.prod.oplabs.cloud",
                 "https://sequencer-2-op-node.tertiary.mainnet.prod.oplabs.cloud",
             ),
+            Sequencer(
+                "prod-mainnet-sequencer-4",
+                "sequencer-4-op-conductor-raft.tertiary.mainnet.prod.oplabs.cloud:50050",
+                "https://sequencer-4-op-conductor.tertiary.mainnet.prod.oplabs.cloud",
+                "https://sequencer-4-op-node.tertiary.mainnet.prod.oplabs.cloud",
+            ),
         ],
     ),
     "op-sepolia": Network(
