@@ -121,6 +121,10 @@ type BackendGroupConfig struct {
 
 	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
 
+	/*
+		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance
+	*/
+	ConsensusAware          bool         `toml:"consensus_aware"`
 	ConsensusAsyncHandler   string       `toml:"consensus_handler"`
 	ConsensusPollerInterval TOMLDuration `toml:"consensus_poller_interval"`
 

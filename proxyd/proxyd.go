@@ -354,6 +354,14 @@ func Start(config *Config) (*Server, func(), error) {
 
 	for bgName, bg := range backendGroups {
 		bgcfg := config.BackendGroups[bgName]
+		if bgcfg.ConsensusAware && bgcfg.RoutingStrategy != "" {
+			log.Warn("consensus_aware is now deprecated, please use routing_strategy = consenus_aware")
+			log.Crit("Exiting consensus_aware and routing strategy are mutually exclusive, they cannot both be defined")
+		}
+		if bgcfg.ConsensusAware {
+			bgcfg.RoutingStrategy = ConsensusAwareRoutingStrategy
+			log.Info("consensus_aware is now deprecated, please use routing_strategy = consenus_aware in the future")
+		}
 		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
 			log.Info("creating poller for consensus aware backend_group", "name", bgName)
 
