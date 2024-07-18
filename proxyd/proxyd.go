@@ -354,14 +354,13 @@ func Start(config *Config) (*Server, func(), error) {
 
 	for bgName, bg := range backendGroups {
 		bgcfg := config.BackendGroups[bgName]
-		if bgcfg.ConsensusAware && bgcfg.RoutingStrategy != "" {
-			log.Warn("consensus_aware is now deprecated, please use routing_strategy = consenus_aware")
-			log.Crit("Exiting consensus_aware and routing strategy are mutually exclusive, they cannot both be defined")
+
+		if !bgcfg.ValidateRoutingStrategy(bgName) {
+			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, \"\"", "name", bgName)
 		}
-		if bgcfg.ConsensusAware {
-			bgcfg.RoutingStrategy = ConsensusAwareRoutingStrategy
-			log.Info("consensus_aware is now deprecated, please use routing_strategy = consenus_aware in the future")
-		}
+
+		log.Info("configuring routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+
 		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
 			log.Info("creating poller for consensus aware backend_group", "name", bgName)
 
@@ -425,10 +424,6 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()
 			}
-		} else if bgcfg.RoutingStrategy != "" {
-			log.Info("configured routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
-		} else {
-			log.Info("no routing strategy was defined for backend_group using default fallback strategy", "name", bgName)
 		}
 	}
 

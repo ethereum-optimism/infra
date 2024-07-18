@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"os"
 	"strings"
@@ -108,6 +109,36 @@ type BackendConfig struct {
 type BackendsConfig map[string]*BackendConfig
 
 type RoutingStrategy string
+
+func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
+
+	// If Consensus Aware is Set and Routing RoutingStrategy is populated fail
+	if b.ConsensusAware && b.RoutingStrategy != "" {
+		log.Warn("consensus_aware is now deprecated, please use routing_strategy = consensus_aware")
+		log.Crit("Exiting consensus_aware and routing strategy are mutually exclusive, they cannot both be defined")
+	}
+
+	// If Consensus Aware is Set set RoutingStrategy to consensus_aware
+	if b.ConsensusAware {
+		b.RoutingStrategy = ConsensusAwareRoutingStrategy
+		log.Info("consensus_aware is now deprecated, please use routing_strategy = consenus_aware in the future")
+	}
+
+	switch b.RoutingStrategy {
+	case ConsensusAwareRoutingStrategy:
+		return true
+	case MulticallRoutingStrategy:
+		return true
+	case FallbackRoutingStrategy:
+		return true
+	case "":
+		log.Info("Empty routing strategy provided for backend_group, using fallback strategy ", "name", bgName)
+		b.RoutingStrategy = FallbackRoutingStrategy
+		return true
+	default:
+		return false
+	}
+}
 
 const (
 	ConsensusAwareRoutingStrategy RoutingStrategy = "consensus_aware"
