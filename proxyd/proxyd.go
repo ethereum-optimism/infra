@@ -427,8 +427,10 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 		} else if bgcfg.RoutingStrategy == MulticallRoutingStrategy {
 			log.Info("configuring routing multicall strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+		} else if bgcfg.RoutingStrategy == FallbackRoutingStrategy {
+			log.Info("configuring routing fallback strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		} else {
-			log.Info("no routing strategy defined for backend_group using default fallback strategy", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+			log.Info("no routing strategy was defined for backend_group using default fallback strategy", "name", bgName)
 		}
 	}
 

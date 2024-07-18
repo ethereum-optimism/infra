@@ -112,6 +112,7 @@ type RoutingStrategy string
 const (
 	ConsensusAwareRoutingStrategy RoutingStrategy = "consensus_aware"
 	MulticallRoutingStrategy      RoutingStrategy = "multicall"
+	FallbackRoutingStrategy       RoutingStrategy = "fallback"
 )
 
 type BackendGroupConfig struct {
