@@ -425,10 +425,8 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()
 			}
-		} else if bgcfg.RoutingStrategy == MulticallRoutingStrategy {
-			log.Info("configuring routing multicall strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
-		} else if bgcfg.RoutingStrategy == FallbackRoutingStrategy {
-			log.Info("configuring routing fallback strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+		} else if bgcfg.RoutingStrategy != "" {
+			log.Info("configured routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 		} else {
 			log.Info("no routing strategy was defined for backend_group using default fallback strategy", "name", bgName)
 		}
