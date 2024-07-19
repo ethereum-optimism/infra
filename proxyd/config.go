@@ -2,11 +2,12 @@ package proxyd
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type ServerConfig struct {
