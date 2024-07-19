@@ -976,6 +976,7 @@ type WSProxier struct {
 	methodWhitelist *StringSet
 	readTimeout     time.Duration
 	writeTimeout    time.Duration
+	reqIdToMethod   map[string]string
 }
 
 func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet) *WSProxier {
@@ -986,6 +987,7 @@ func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, met
 		methodWhitelist: methodWhitelist,
 		readTimeout:     defaultWSReadTimeout,
 		writeTimeout:    defaultWSWriteTimeout,
+		reqIdToMethod:   make(map[string]string),
 	}
 }
 
@@ -1078,6 +1080,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			errC <- err
 			return
 		}
+		w.reqIdToMethod[GetReqID(ctx)] = req.Method
 	}
 }
 
@@ -1106,6 +1109,13 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 		}
 
 		res, err := w.parseBackendMsg(msg)
+		method := w.reqIdToMethod[GetReqID(ctx)]
+		if method == "" {
+			method = MethodUnknown
+		} else {
+			delete(w.reqIdToMethod, GetReqID(ctx))
+		}
+
 		if err != nil {
 			var id json.RawMessage
 			if res != nil {
@@ -1123,7 +1133,7 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 					"auth", GetAuthCtx(ctx),
 					"req_id", GetReqID(ctx),
 				)
-				RecordRPCError(ctx, w.backend.Name, MethodUnknown, res.Error)
+				RecordRPCError(ctx, w.backend.Name, method, res.Error)
 			} else {
 				log.Info(
 					"forwarded WS message to client",
