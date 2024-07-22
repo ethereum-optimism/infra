@@ -228,6 +228,7 @@ func Start(config *Config) (*Server, func(), error) {
 			Backends:         backends,
 			WeightedRouting:  bg.WeightedRouting,
 			FallbackBackends: fallbackBackends,
+			routingStrategy:  bg.RoutingStrategy,
 		}
 	}
 
@@ -353,7 +354,14 @@ func Start(config *Config) (*Server, func(), error) {
 
 	for bgName, bg := range backendGroups {
 		bgcfg := config.BackendGroups[bgName]
-		if bgcfg.ConsensusAware {
+
+		if !bgcfg.ValidateRoutingStrategy(bgName) {
+			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, \"\"", "name", bgName)
+		}
+
+		log.Info("configuring routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
+
+		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
 			log.Info("creating poller for consensus aware backend_group", "name", bgName)
 
 			copts := make([]ConsensusOpt, 0)
