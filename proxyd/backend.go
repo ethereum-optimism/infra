@@ -372,6 +372,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 			),
 		)
 
+		log.Trace(
+			"forwarding request to backend",
+			"name", b.Name,
+			"req_id", GetReqID(ctx),
+			"attempt_count", i+1,
+			"max_attempts", b.maxRetries+1,
+			"method", metricLabelMethod,
+		)
 		res, err := b.doForward(ctx, reqs, isBatch)
 		switch err {
 		case nil: // do nothing
@@ -381,6 +389,7 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"name", b.Name,
 				"req_id", GetReqID(ctx),
 				"max", b.maxResponseSize,
+				"method", metricLabelMethod,
 			)
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
 		case ErrConsensusGetReceiptsCantBeBatched:
@@ -415,6 +424,9 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"name", b.Name,
 				"req_id", GetReqID(ctx),
 				"err", err,
+				"method", metricLabelMethod,
+				"attempt_count", i+1,
+				"max_retries", b.maxRetries+1,
 			)
 			timer.ObserveDuration()
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
@@ -716,6 +728,11 @@ type BackendGroup struct {
 	WeightedRouting  bool
 	Consensus        *ConsensusPoller
 	FallbackBackends map[string]bool
+	routingStrategy  RoutingStrategy
+}
+
+func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
+	return bg.routingStrategy
 }
 
 func (bg *BackendGroup) Fallbacks() []*Backend {
@@ -750,113 +767,165 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	overriddenResponses := make([]*indexedReqRes, 0)
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
 
+	// When routing_strategy is set to `consensus_aware` the backend group acts as a load balancer
+	// serving traffic from any backend that agrees in the consensus group
+	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
-		// When `consensus_aware` is set to `true`, the backend group acts as a load balancer
-		// serving traffic from any backend that agrees in the consensus group
+		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+	}
 
-		// We also rewrite block tags to enforce compliance with consensus
-		rctx := RewriteContext{
-			latest:        bg.Consensus.GetLatestBlockNumber(),
-			safe:          bg.Consensus.GetSafeBlockNumber(),
-			finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-			maxBlockRange: bg.Consensus.maxBlockRange,
-		}
-
-		for i, req := range rpcReqs {
-			res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
-			result, err := RewriteTags(rctx, req, &res)
-			switch result {
-			case RewriteOverrideError:
-				overriddenResponses = append(overriddenResponses, &indexedReqRes{
-					index: i,
-					req:   req,
-					res:   &res,
-				})
-				if errors.Is(err, ErrRewriteBlockOutOfRange) {
-					res.Error = ErrBlockOutOfRange
-				} else if errors.Is(err, ErrRewriteRangeTooLarge) {
-					res.Error = ErrInvalidParams(
-						fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
-					)
-				} else {
-					res.Error = ErrParseErr
-				}
-			case RewriteOverrideResponse:
-				overriddenResponses = append(overriddenResponses, &indexedReqRes{
-					index: i,
-					req:   req,
-					res:   &res,
-				})
-			case RewriteOverrideRequest, RewriteNone:
-				rewrittenReqs = append(rewrittenReqs, req)
-			}
-		}
-		rpcReqs = rewrittenReqs
+	// When routing_strategy is set to 'multicall' the request will be forward to all backends
+	// and return the first successful response
+	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
+		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
+		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	rpcRequestsTotal.Inc()
 
-	for _, back := range backends {
-		res := make([]*RPCRes, 0)
-		var err error
+	ch := make(chan BackendGroupRPCResponse)
+	go func() {
+		defer close(ch)
+		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+		ch <- *backendResp
+	}()
+	backendResp := <-ch
 
-		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
-
-		if len(rpcReqs) > 0 {
-			res, err = back.Forward(ctx, rpcReqs, isBatch)
-			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
-				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
-				errors.Is(err, ErrMethodNotWhitelisted) {
-				return nil, "", err
-			}
-			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return nil, servedBy, err
-			}
-			if errors.Is(err, ErrBackendOffline) {
-				log.Warn(
-					"skipping offline backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if errors.Is(err, ErrBackendOverCapacity) {
-				log.Warn(
-					"skipping over-capacity backend",
-					"name", back.Name,
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				continue
-			}
-			if err != nil {
-				log.Error(
-					"error forwarding request to backend",
-					"name", back.Name,
-					"req_id", GetReqID(ctx),
-					"auth", GetAuthCtx(ctx),
-					"err", err,
-				)
-				continue
-			}
-		}
-
-		// re-apply overridden responses
-		for _, ov := range overriddenResponses {
-			if len(res) > 0 {
-				// insert ov.res at position ov.index
-				res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)
-			} else {
-				res = append(res, ov.res)
-			}
-		}
-
-		return res, servedBy, nil
+	if backendResp.error != nil {
+		log.Error("error serving requests",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"err", backendResp.error,
+		)
+		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
-	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
-	return nil, "", ErrNoBackends
+	// re-apply overridden responses
+	log.Trace("successfully served request overriding responses",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+	)
+	res := OverrideResponses(backendResp.RPCRes, overriddenResponses)
+	return res, backendResp.ServedBy, backendResp.error
+}
+
+func isValidMulticallTx(rpcReqs []*RPCReq) bool {
+	if len(rpcReqs) == 1 {
+		if rpcReqs[0].Method == "eth_sendRawTransaction" {
+			return true
+		}
+	}
+	return false
+}
+
+// Using special struct since servedBy may not be populated if error occurs
+type multicallTuple struct {
+	response    *BackendGroupRPCResponse
+	backendName string
+}
+
+func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq) *BackendGroupRPCResponse {
+
+	// Create ctx without cancel so background tasks process
+	// after original request returns
+	bgCtx := context.WithoutCancel(ctx)
+
+	log.Info("executing multicall routing strategy",
+		"req_id", GetReqID(bgCtx),
+		"auth", GetAuthCtx(bgCtx),
+	)
+	var wg sync.WaitGroup
+	ch := make(chan *multicallTuple)
+	for _, backend := range bg.Backends {
+		wg.Add(1)
+		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	return bg.ProcessMulticallResponses(ch, bgCtx)
+}
+
+func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple) {
+	defer wg.Done()
+	log.Debug("forwarding multicall request to backend",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"backend", backend.Name,
+	)
+
+	RecordBackendGroupMulticallRequest(bg, backend.Name)
+	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
+
+	multicallResp := &multicallTuple{
+		response:    backendResp,
+		backendName: backend.Name,
+	}
+
+	ch <- multicallResp
+
+	log.Debug("received multicall response from backend",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"backend", backend.Name,
+	)
+	if backendResp.error != nil {
+		log.Error("received multicall error response from backend",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"backend", backend.Name,
+			"error", backendResp.error.Error(),
+		)
+	}
+}
+
+func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx context.Context) *BackendGroupRPCResponse {
+	var finalResp *BackendGroupRPCResponse
+	i := 0
+	for {
+		multicallResp, ok := <-ch
+		if !ok {
+			log.Trace("multicall response channel closed",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"response_count", i,
+			)
+			if i > 0 {
+				return finalResp
+			}
+			return &BackendGroupRPCResponse{
+				RPCRes:   nil,
+				ServedBy: "",
+				error:    errors.New("no multicall response received"),
+			}
+		}
+
+		i++
+		resp := multicallResp.response
+		backendName := multicallResp.backendName
+		RecordBackendGroupMulticallCompletion(bg, backendName)
+
+		if resp.error != nil {
+			log.Error("received error response from multicall channel",
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+				"err", resp.error,
+				"backend", backendName,
+			)
+			finalResp = resp
+			continue
+		}
+		log.Info("received successful response from multicall channel",
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"served_by", resp.ServedBy,
+			"backend", backendName,
+		)
+		return resp
+	}
 }
 
 func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet) (*WSProxier, error) {
@@ -1280,4 +1349,140 @@ func (b *Backend) ClearSlidingWindows() {
 func stripXFF(xff string) string {
 	ipList := strings.Split(xff, ",")
 	return strings.TrimSpace(ipList[0])
+}
+
+type BackendGroupRPCResponse struct {
+	RPCRes   []*RPCRes
+	ServedBy string
+	error    error
+}
+
+func (bg *BackendGroup) ForwardRequestToBackendGroup(
+	rpcReqs []*RPCReq,
+	backends []*Backend,
+	ctx context.Context,
+	isBatch bool,
+) *BackendGroupRPCResponse {
+	for _, back := range backends {
+		res := make([]*RPCRes, 0)
+		var err error
+
+		servedBy := fmt.Sprintf("%s/%s", bg.Name, back.Name)
+
+		if len(rpcReqs) > 0 {
+
+			res, err = back.Forward(ctx, rpcReqs, isBatch)
+
+			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
+				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+				errors.Is(err, ErrMethodNotWhitelisted) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
+			if errors.Is(err, ErrBackendResponseTooLarge) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
+			if errors.Is(err, ErrBackendOffline) {
+				log.Warn(
+					"skipping offline backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if errors.Is(err, ErrBackendOverCapacity) {
+				log.Warn(
+					"skipping over-capacity backend",
+					"name", back.Name,
+					"auth", GetAuthCtx(ctx),
+					"req_id", GetReqID(ctx),
+				)
+				continue
+			}
+			if err != nil {
+				log.Error(
+					"error forwarding request to backend",
+					"name", back.Name,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+					"err", err,
+				)
+				continue
+			}
+		}
+
+		return &BackendGroupRPCResponse{
+			RPCRes:   res,
+			ServedBy: servedBy,
+			error:    nil,
+		}
+	}
+
+	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+	return &BackendGroupRPCResponse{
+		RPCRes:   nil,
+		ServedBy: "",
+		error:    ErrNoBackends,
+	}
+
+}
+
+func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*RPCRes {
+	for _, ov := range overriddenResponses {
+		if len(res) > 0 {
+			// insert ov.res at position ov.index
+			res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)
+		} else {
+			res = append(res, ov.res)
+		}
+	}
+	return res
+}
+
+func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+	rctx := RewriteContext{
+		latest:        bg.Consensus.GetLatestBlockNumber(),
+		safe:          bg.Consensus.GetSafeBlockNumber(),
+		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
+		maxBlockRange: bg.Consensus.maxBlockRange,
+	}
+
+	for i, req := range rpcReqs {
+		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
+		result, err := RewriteTags(rctx, req, &res)
+		switch result {
+		case RewriteOverrideError:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			if errors.Is(err, ErrRewriteBlockOutOfRange) {
+				res.Error = ErrBlockOutOfRange
+			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
+				res.Error = ErrInvalidParams(
+					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
+				)
+			} else {
+				res.Error = ErrParseErr
+			}
+		case RewriteOverrideResponse:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+		case RewriteOverrideRequest, RewriteNone:
+			rewrittenReqs = append(rewrittenReqs, req)
+		}
+	}
+	return rewrittenReqs, overriddenResponses
 }
