@@ -523,7 +523,7 @@ workflows:
             tags:
               only: /^proxyd\/v.*/
           docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
+          docker_tags: <<pipeline.git.revision>>,${proxyd_SEMVER}
           docker_context: .
           docker_file: proxyd/Dockerfile
           context:
@@ -536,7 +536,7 @@ workflows:
             tags:
               only: /^proxyd\/v.*/
           docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
+          docker_tags: <<pipeline.git.revision>>,${proxyd_SEMVER}
           context:
             - oplabs-gcr
           requires:
