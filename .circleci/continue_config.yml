@@ -179,6 +179,11 @@ jobs:
             fi
             IMAGE_BASE="<<parameters.registry>>/<<parameters.repo>>/<<parameters.docker_name>>"
             DOCKER_TAGS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|-t ${IMAGE_BASE}:|")
+
+            # Output Docker tags
+            echo "Docker Tags:"
+            echo "$DOCKER_TAGS" | tr ' ' '\n'
+
             docker build \
             $(echo -ne $DOCKER_TAGS | tr '\n' ' ') \
             -f <<parameters.docker_file>> \
@@ -187,6 +192,11 @@ jobs:
           name: Save
           command: |
             IMAGE_BASE="<<parameters.registry>>/<<parameters.repo>>/<<parameters.docker_name>>"
+
+            # Output Docker labels
+            echo "Docker Labels:"
+            echo "$DOCKER_LABELS" | tr ' ' '\n'
+
             DOCKER_LABELS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
             echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker save -o /tmp/docker_images/<<parameters.docker_name>>_{}.tar $IMAGE_BASE:{}
       - persist_to_workspace:
@@ -219,6 +229,11 @@ jobs:
           name: Docker load
           command: |
             DOCKER_LABELS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
+
+            # Output Docker labels
+            echo "Docker Labels:"
+            echo "$DOCKER_LABELS" | tr ' ' '\n'
+
             echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker load -i /tmp/docker_images/<<parameters.docker_name>>_{}.tar
       - gcp-oidc-authenticate
       # Below is CircleCI recommended way of specifying nameservers on an Ubuntu box:
@@ -234,6 +249,11 @@ jobs:
             gcloud auth configure-docker <<parameters.registry>>
             IMAGE_BASE="<<parameters.registry>>/<<parameters.repo>>/<<parameters.docker_name>>"
             DOCKER_TAGS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|${IMAGE_BASE}:|")
+
+            # Output Docker labels
+            echo "Docker Tags:"
+            echo "$DOCKER_TAGS" | tr ' ' '\n'
+
             echo -ne $DOCKER_TAGS | tr ' ' '\n' | xargs -L1 docker push
 
       - when:
@@ -489,6 +509,8 @@ workflows:
               only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
+          context:
+            - oplabs-gcr
       - hold:
           type: approval
           filters:
@@ -496,6 +518,8 @@ workflows:
               only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
+          requires:
+            - determine-semver
       - docker-build:
           name: op-ufm-docker-build
           filters:
