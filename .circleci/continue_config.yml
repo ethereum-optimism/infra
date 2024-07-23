@@ -134,6 +134,10 @@ jobs:
               export SEMVER=$(echo "$full_release_tag" | tail -n 1)
             fi
             echo "SEMVER: $SEMVER"
+            echo '<<parameters.docker_name>>_SEMVER=$SEMVER'
+
+            echo 'export SEMVER=$SEMVER' >> $BASH_ENV
+            echo 'export <<parameters.docker_name>>_SEMVER=$SEMVER' >> $BASH_ENV
 
   docker-build:
     environment:
@@ -458,8 +462,6 @@ workflows:
     when:
       or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
     jobs:
-      - determine-semver:
-          docker_name: proxyd
       - go-lint:
           name: proxyd-lint
           module: proxyd
@@ -475,6 +477,13 @@ workflows:
   release:
     jobs:
       - log-config-results:
+          filters:
+            tags:
+              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+            branches:
+              ignore: /.*/
+      - determine-semver:
+          docker_name: proxyd
           filters:
             tags:
               only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
@@ -497,7 +506,7 @@ workflows:
           docker_context: .
           docker_file: op-ufm/Dockerfile
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - hold
       - docker-publish:
@@ -518,7 +527,7 @@ workflows:
           docker_context: .
           docker_file: proxyd/Dockerfile
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - hold
       - docker-publish:
@@ -529,7 +538,7 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>
           context:
-            - oplabs-gcr-release
+            - oplabs-gcr
           requires:
             - proxyd-docker-build
 
