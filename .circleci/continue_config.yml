@@ -91,15 +91,6 @@ jobs:
             if [[ $CURRENT_TAG =~ ^proxyd/v.* ]]; then
               echo "proxyd tag regex match: true"
 
-              sorted_tags=$(echo "$CURRENT_TAG" | sed "s/proxyd\///" | sort -V)
-              full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
-              if [ -z "$full_release_tag" ]; then
-                export GIT_VERSION=$(echo "$sorted_tags" | tail -n 1)
-              else
-                export GIT_VERSION=$(echo "$full_release_tag" | tail -n 1)
-              fi
-              echo "GIT_VERSION: $GIT_VERSION"
-
             else
               echo "proxyd tag regex match: false"
             fi
@@ -115,6 +106,35 @@ jobs:
             else
               echo "op-ufm tag regex match: false"
             fi
+  determine-semver:
+    parameters:
+      docker_name:
+        description: Docker image name
+        type: string
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    environment:
+      CURRENT_TAG: << pipeline.git.tag >>
+    steps:
+      - checkout
+      - run:
+          name: Determine semver
+          command: |
+            echo "Tag Information:"
+            echo "Current tag: $CURRENT_TAG"
+            echo "docker_name parameter: <<parameters.docker_name>>"
+            sorted_tags=$(echo "$CURRENT_TAG" | sed "s/<<parameters.docker_name>>\///" | sort -V)
+            echo "sorted_tags: $sorted_tags"
+
+            # prefer full release tag over "-rc" release candidate tag if both exist
+            full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
+            if [ -z "$full_release_tag" ]; then
+              export SEMVER=$(echo "$sorted_tags" | tail -n 1)
+            else
+              export SEMVER=$(echo "$full_release_tag" | tail -n 1)
+            fi
+            echo "SEMVER: $SEMVER"
+
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -438,6 +458,8 @@ workflows:
     when:
       or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
     jobs:
+      - determine-semver:
+          docker_name: proxyd
       - go-lint:
           name: proxyd-lint
           module: proxyd
