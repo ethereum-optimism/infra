@@ -90,6 +90,16 @@ jobs:
             # Use the same regex patterns as defined in the YAML anchors
             if [[ $CURRENT_TAG =~ ^proxyd/v.* ]]; then
               echo "proxyd tag regex match: true"
+
+              sorted_tags=$(echo "$CURRENT_TAG" | sed "s/proxyd\///" | sort -V)
+              full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
+              if [ -z "$full_release_tag" ]; then
+                export GIT_VERSION=$(echo "$sorted_tags" | tail -n 1)
+              else
+                export GIT_VERSION=$(echo "$full_release_tag" | tail -n 1)
+              fi
+              echo "GIT_VERSION: $GIT_VERSION"
+
             else
               echo "proxyd tag regex match: false"
             fi
