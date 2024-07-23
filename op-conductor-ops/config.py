@@ -1,0 +1,101 @@
+from network import Network
+from sequencer import Sequencer
+
+CERT_PATH = "./combined-cacert.pem"
+NETWORKS = {
+    "op-mainnet": Network(
+        "op-mainnet",
+        [
+            Sequencer(
+                CERT_PATH,
+                "prod-mainnet-sequencer-0",
+                "sequencer-0-op-conductor-raft.primary.mainnet.prod.oplabs.cloud:50050",
+                "https://sequencer-0-op-conductor.primary.mainnet.prod.oplabs.cloud",
+                "https://sequencer-0-op-node.primary.mainnet.prod.oplabs.cloud",
+                True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "prod-mainnet-sequencer-1",
+                "sequencer-1-op-conductor-raft.secondary.mainnet.prod.oplabs.cloud:50050",
+                "https://sequencer-1-op-conductor.secondary.mainnet.prod.oplabs.cloud",
+                "https://sequencer-1-op-node.secondary.mainnet.prod.oplabs.cloud",
+                False,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "prod-mainnet-sequencer-2",
+                "sequencer-2-op-conductor-raft.tertiary.mainnet.prod.oplabs.cloud:50050",
+                "https://sequencer-2-op-conductor.tertiary.mainnet.prod.oplabs.cloud",
+                "https://sequencer-2-op-node.tertiary.mainnet.prod.oplabs.cloud",
+                True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "prod-mainnet-sequencer-4",
+                "sequencer-4-op-conductor-raft.tertiary.mainnet.prod.oplabs.cloud:50050",
+                "https://sequencer-4-op-conductor.tertiary.mainnet.prod.oplabs.cloud",
+                "https://sequencer-4-op-node.tertiary.mainnet.prod.oplabs.cloud",
+                True,
+            ),
+        ],
+    ),
+    "op-sepolia": Network(
+        "op-sepolia",
+        [
+            Sequencer(
+                CERT_PATH,
+                "prod-sepolia-sequencer-0",
+                "sequencer-0-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050",
+                "https://sequencer-0-op-conductor.primary.sepolia.prod.oplabs.cloud",
+                "https://sequencer-0-op-node.primary.sepolia.prod.oplabs.cloud",
+                True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "prod-sepolia-sequencer-1",
+                "sequencer-1-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050",
+                "https://sequencer-1-op-conductor.primary.sepolia.prod.oplabs.cloud",
+                "https://sequencer-1-op-node.primary.sepolia.prod.oplabs.cloud",
+                True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "prod-sepolia-sequencer-2",
+                "sequencer-2-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050",
+                "https://sequencer-2-op-conductor.primary.sepolia.prod.oplabs.cloud",
+                "https://sequencer-2-op-node.primary.sepolia.prod.oplabs.cloud",
+                True,
+            ),
+        ],
+    ),
+    "conductor-dev": Network(
+        "conductor-dev",
+        [
+            Sequencer(
+                CERT_PATH,
+                "dev-client-conductor-dev-sequencer-0",
+                "conductor-dev-sequencer-0-op-conductor-raft.primary.client.dev.oplabs.cloud:50050",
+                "https://conductor-dev-sequencer-0-op-conductor.primary.client.dev.oplabs.cloud",
+                "https://conductor-dev-sequencer-0-op-node.primary.client.dev.oplabs.cloud",
+                 True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "dev-client-conductor-dev-sequencer-1",
+                "conductor-dev-sequencer-1-op-conductor-raft.primary.client.dev.oplabs.cloud:50050",
+                "https://conductor-dev-sequencer-1-op-conductor.primary.client.dev.oplabs.cloud",
+                "https://conductor-dev-sequencer-1-op-node.primary.client.dev.oplabs.cloud",
+                True,
+            ),
+            Sequencer(
+                CERT_PATH,
+                "dev-client-conductor-dev-sequencer-2",
+                "conductor-dev-sequencer-2-op-conductor-raft.primary.client.dev.oplabs.cloud:50050",
+                "https://conductor-dev-sequencer-2-op-conductor.primary.client.dev.oplabs.cloud",
+                "https://conductor-dev-sequencer-2-op-node.primary.client.dev.oplabs.cloud",
+                True,
+            ),
+        ],
+    ),
+}
