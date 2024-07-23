@@ -247,7 +247,7 @@ jobs:
           name: Tag
           command: |
             gcloud auth configure-docker <<parameters.registry>>
-            ./ops/scripts/ci-docker-tag-op-stack-release.sh <<parameters.registry>>/<<parameters.repo>> $CIRCLE_TAG $CIRCLE_SHA1
+            ./ops/ci-tag-docker-release/ci-docker-tag-op-stack-release.sh <<parameters.registry>>/<<parameters.repo>> $CIRCLE_TAG $CIRCLE_SHA1
 
   go-lint:
     parameters:
@@ -476,6 +476,17 @@ workflows:
             - oplabs-gcr-release
           requires:
             - op-ufm-docker-build
+      - docker-tag-op-stack-release:
+          name: docker-tag-op-ufm-release
+          filters:
+            tags:
+              only: /^op-ufm\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-ufm-docker-publish
       - docker-build:
           name: proxyd-docker-build
           filters:
@@ -500,7 +511,17 @@ workflows:
             - oplabs-gcr-release
           requires:
             - proxyd-docker-build
-
+      - docker-tag-op-stack-release:
+          name: docker-tag-op-stack-release
+          filters:
+            tags:
+              only: /^proxyd\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - proxyd-docker-release
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
@@ -522,3 +543,14 @@ workflows:
             - oplabs-gcr-release
           requires:
             - op-conductor-mon-docker-build
+      - docker-tag-op-stack-release:
+          name: docker-tag-op-stack-release
+          filters:
+            tags:
+              only: /^op-conductor-mon\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-conductor-mon-docker-publish
