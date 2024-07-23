@@ -1,0 +1,76 @@
+services:
+  grafana:
+    image: grafana/grafana:9.5.20
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/home.json
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.45.5
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+
+  proxyd:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: proxyd
+    ports:
+      - "8001:8001"
+      - "7300:7300"
+    volumes:
+      - ./proxyd/proxyd/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
+
+
+
+  upstream-proxyd-1:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: upstream-proxyd-1
+    ports:
+      - "8081:8081"
+      - "7301:7301"
+    volumes:
+      - ./proxyd/upstream-proxyd-1/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
+
+  upstream-proxyd-2:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: upstream-proxyd-2
+    ports:
+      - "8082:8082"
+      - "7302:7302"
+    volumes:
+      - ./proxyd/upstream-proxyd-2/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
+
+  upstream-proxyd-3:
+    image: ${IMAGE_NAME:-default/image}:${IMAGE_TAG:-latest}
+    container_name: upstream-proxyd-3
+    ports:
+      - "8083:8083"
+      - "7303:7303"
+    volumes:
+      - ./proxyd/upstream-proxyd-3/proxyd.toml:/etc/proxyd/proxyd.toml
+    restart: unless-stopped
+
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:v8.0.5
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 8888:8080
