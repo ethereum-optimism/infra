@@ -23,7 +23,7 @@ type nodeContext struct {
 	handler     *ms.MockedHandler // this is where we control the state of mocked responses
 }
 
-func setup(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func()) {
+func setupConsensusTest(t *testing.T, configName string) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func()) {
 	// setup mock servers
 	node1 := NewMockBackend(nil)
 	node2 := NewMockBackend(nil)
@@ -51,7 +51,7 @@ func setup(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydH
 	node2.SetHandler(http.HandlerFunc(h2.Handler))
 
 	// setup proxyd
-	config := ReadConfig("consensus")
+	config := ReadConfig(configName)
 	svr, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
 
@@ -82,7 +82,7 @@ func setup(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydH
 }
 
 func TestConsensus(t *testing.T) {
-	nodes, bg, client, shutdown := setup(t)
+	nodes, bg, client, shutdown := setupConsensusTest(t, "consensus")
 	defer nodes["node1"].mockBackend.Close()
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()

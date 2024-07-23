@@ -726,6 +726,7 @@ type BackendGroup struct {
 	Name             string
 	Backends         []*Backend
 	WeightedRouting  bool
+	DisableShuffle   bool
 	Consensus        *ConsensusPoller
 	FallbackBackends map[string]bool
 	routingStrategy  RoutingStrategy
@@ -1004,17 +1005,19 @@ func (bg *BackendGroup) loadBalancedConsensusGroup() []*Backend {
 		backendsHealthy = append(backendsHealthy, be)
 	}
 
-	// shuffle both slices
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	r.Shuffle(len(backendsHealthy), func(i, j int) {
-		backendsHealthy[i], backendsHealthy[j] = backendsHealthy[j], backendsHealthy[i]
-	})
-	r.Shuffle(len(backendsDegraded), func(i, j int) {
-		backendsDegraded[i], backendsDegraded[j] = backendsDegraded[j], backendsDegraded[i]
-	})
+	if !bg.DisableShuffle {
+		// shuffle both slices
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		r.Shuffle(len(backendsHealthy), func(i, j int) {
+			backendsHealthy[i], backendsHealthy[j] = backendsHealthy[j], backendsHealthy[i]
+		})
+		r.Shuffle(len(backendsDegraded), func(i, j int) {
+			backendsDegraded[i], backendsDegraded[j] = backendsDegraded[j], backendsDegraded[i]
+		})
 
-	if bg.WeightedRouting {
-		weightedShuffle(backendsHealthy)
+		if bg.WeightedRouting {
+			weightedShuffle(backendsHealthy)
+		}
 	}
 
 	// healthy are put into a priority position

@@ -151,6 +151,7 @@ type BackendGroupConfig struct {
 	Backends []string `toml:"backends"`
 
 	WeightedRouting bool `toml:"weighted_routing"`
+	DisableShuffle  bool `toml:"disable_shuffle"`
 
 	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
 
