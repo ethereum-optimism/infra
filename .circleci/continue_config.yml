@@ -138,6 +138,7 @@ jobs:
 
             echo 'export SEMVER=$SEMVER' >> $BASH_ENV
             echo 'export <<parameters.docker_name>>_SEMVER=$SEMVER' >> $BASH_ENV
+            printenv | grep SEMVER
 
   docker-build:
     environment:
@@ -172,6 +173,9 @@ jobs:
       - run:
           name: Build
           command: |
+
+            printenv | grep SEMVER
+
             # Check to see if DOCKER_HUB_READ_ONLY_TOKEN is set (i.e. we are in repo) before attempting to use secrets.
             # Building should work without this read only login, but may get rate limited.
             if [[ -v DOCKER_HUB_READ_ONLY_TOKEN ]]; then
