@@ -182,25 +182,25 @@ jobs:
             IMAGE_BASE="<<parameters.registry>>/<<parameters.repo>>/<<parameters.docker_name>>"
             DOCKER_TAGS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|-t ${IMAGE_BASE}:|")
 
-            ## Determine Semver Tags
-            if [ -z "$CURRENT_TAG" ]; then
-              echo "No tags found."
-            else
-              echo "Current Tag: $CURRENT_TAG"
-              sorted_tags=$(echo "$CURRENT_TAG" | sed "s/<<parameters.docker_name>>\///" | sort -V)
-              echo "sorted_tags: $sorted_tags"
-
-              # prefer full release tag over "-rc" release candidate tag if both exist
-              full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
-              if [ -z "$full_release_tag" ]; then
-                export SEMVER=$(echo "$sorted_tags" | tail -n 1)
-              else
-                export SEMVER=$(echo "$full_release_tag" | tail -n 1)
-              fi
-
-              echo "Semver Tag: $SEMVER"
-              # DOCKER_TAGS="${DOCKER_TAGS},${SEMVER}"
-            fi
+            # ## Determine Semver Tags
+            # if [ -z "$CURRENT_TAG" ]; then
+            #   echo "No tags found."
+            # else
+            #   echo "Current Tag: $CURRENT_TAG"
+            #   sorted_tags=$(echo "$CURRENT_TAG" | sed "s/<<parameters.docker_name>>\///" | sort -V)
+            #   echo "sorted_tags: $sorted_tags"
+            #
+            #   # prefer full release tag over "-rc" release candidate tag if both exist
+            #   full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
+            #   if [ -z "$full_release_tag" ]; then
+            #     export SEMVER=$(echo "$sorted_tags" | tail -n 1)
+            #   else
+            #     export SEMVER=$(echo "$full_release_tag" | tail -n 1)
+            #   fi
+            #
+            #   echo "Semver Tag: $SEMVER"
+            #   # DOCKER_TAGS="${DOCKER_TAGS},${SEMVER}"
+            # fi
 
             # Output Docker tags
             echo "Docker Tags:"
@@ -221,6 +221,10 @@ jobs:
 
             DOCKER_LABELS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
             echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker save -o /tmp/docker_images/<<parameters.docker_name>>_{}.tar $IMAGE_BASE:{}
+      - persist_to_workspace:
+          root: /tmp/docker_images
+          paths:
+            - "."
 
   docker-publish:
     parameters:
