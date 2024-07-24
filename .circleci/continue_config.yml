@@ -199,7 +199,7 @@ jobs:
               fi
 
               echo "Semver Tag: $SEMVER"
-              DOCKER_TAGS="${DOCKER_TAGS},${NEW_TAG_FORMAT}"
+              # DOCKER_TAGS="${DOCKER_TAGS},${SEMVER}"
             fi
 
             # Output Docker tags
