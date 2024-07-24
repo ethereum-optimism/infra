@@ -221,10 +221,6 @@ jobs:
 
             DOCKER_LABELS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
             echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker save -o /tmp/docker_images/<<parameters.docker_name>>_{}.tar $IMAGE_BASE:{}
-      - persist_to_workspace:
-          root: /tmp/docker_images
-          paths:
-            - "."
 
   docker-publish:
     parameters:
@@ -316,14 +312,14 @@ jobs:
       - image: cimg/python:3.7
     resource_class: small
     steps:
-      - gcp-cli/install
+      # - gcp-cli/install
       - gcp-oidc-authenticate
       - checkout
       - run:
           name: Tag
           command: |
             gcloud auth configure-docker <<parameters.registry>>
-            ./ops/scripts/ci-docker-tag-op-stack-release.sh <<parameters.registry>>/<<parameters.repo>> $CIRCLE_TAG $CIRCLE_SHA1
+            ./ops/scripts/ci-tag-docker-release/ci-docker-tag-op-stack-release.sh <<parameters.registry>>/<<parameters.repo>> $CIRCLE_TAG $CIRCLE_SHA1
 
   go-lint:
     parameters:
@@ -569,7 +565,7 @@ workflows:
             tags:
               only: /^proxyd\/v.*/
           docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>,${proxyd_SEMVER}
+          docker_tags: <<pipeline.git.revision>>
           docker_context: .
           docker_file: proxyd/Dockerfile
           context:
@@ -582,12 +578,11 @@ workflows:
             tags:
               only: /^proxyd\/v.*/
           docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>,${proxyd_SEMVER}
+          docker_tags: <<pipeline.git.revision>>
           context:
             - oplabs-gcr
           requires:
             - proxyd-docker-build
-
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
@@ -609,3 +604,11 @@ workflows:
             - oplabs-gcr-release
           requires:
             - op-conductor-mon-docker-build
+      - docker-tag-op-stack-release:
+          name: docker-tag-op-stack-release
+          registry: "us-docker.pkg.dev"
+          repo: "oplabs-tools-artifacts/images"
+          context:
+            - oplabs-gcr
+          requires:
+            - proxyd-docker-release
