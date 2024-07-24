@@ -138,11 +138,11 @@ jobs:
 
             echo 'export SEMVER=$SEMVER' >> $BASH_ENV
             echo 'export <<parameters.docker_name>>_SEMVER=$SEMVER' >> $BASH_ENV
-            printenv | grep SEMVER
 
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
+      CURRENT_TAG: << pipeline.git.tag >>
     parameters:
       docker_name:
         description: Docker image name
@@ -174,8 +174,6 @@ jobs:
           name: Build
           command: |
 
-            printenv | grep SEMVER
-
             # Check to see if DOCKER_HUB_READ_ONLY_TOKEN is set (i.e. we are in repo) before attempting to use secrets.
             # Building should work without this read only login, but may get rate limited.
             if [[ -v DOCKER_HUB_READ_ONLY_TOKEN ]]; then
@@ -183,6 +181,26 @@ jobs:
             fi
             IMAGE_BASE="<<parameters.registry>>/<<parameters.repo>>/<<parameters.docker_name>>"
             DOCKER_TAGS=$(echo -ne <<parameters.docker_tags>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|-t ${IMAGE_BASE}:|")
+
+            ## Determine Semver Tags
+            if [ -z "$CURRENT_TAG" ]; then
+              echo "No tags found."
+            else
+              echo "Current Tag: $CURRENT_TAG"
+              sorted_tags=$(echo "$CURRENT_TAG" | sed "s/<<parameters.docker_name>>\///" | sort -V)
+              echo "sorted_tags: $sorted_tags"
+
+              # prefer full release tag over "-rc" release candidate tag if both exist
+              full_release_tag=$(echo "$sorted_tags" | grep -v -- "-rc" || true)
+              if [ -z "$full_release_tag" ]; then
+                export SEMVER=$(echo "$sorted_tags" | tail -n 1)
+              else
+                export SEMVER=$(echo "$full_release_tag" | tail -n 1)
+              fi
+
+              echo "Semver Tag: $SEMVER"
+              DOCKER_TAGS="${DOCKER_TAGS},${NEW_TAG_FORMAT}"
+            fi
 
             # Output Docker tags
             echo "Docker Tags:"
