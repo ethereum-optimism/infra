@@ -587,6 +587,14 @@ workflows:
             - oplabs-gcr
           requires:
             - proxyd-docker-build
+      - docker-tag-op-stack-release:
+          name: docker-tag-op-stack-release
+          registry: "us-docker.pkg.dev"
+          repo: "oplabs-tools-artifacts/images"
+          context:
+            - oplabs-gcr
+          requires:
+            - proxyd-docker-release
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
@@ -608,11 +616,3 @@ workflows:
             - oplabs-gcr-release
           requires:
             - op-conductor-mon-docker-build
-      - docker-tag-op-stack-release:
-          name: docker-tag-op-stack-release
-          registry: "us-docker.pkg.dev"
-          repo: "oplabs-tools-artifacts/images"
-          context:
-            - oplabs-gcr
-          requires:
-            - proxyd-docker-release
