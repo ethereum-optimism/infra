@@ -445,6 +445,7 @@ var (
 	}, []string{
 		"backend_group",
 		"backend_name",
+		"error",
 	})
 )
 
@@ -615,8 +616,8 @@ func RecordBackendGroupMulticallRequest(bg *BackendGroup, backendName string) {
 	backendGroupMulticallCounter.WithLabelValues(bg.Name, backendName).Inc()
 }
 
-func RecordBackendGroupMulticallCompletion(bg *BackendGroup, backendName string) {
-	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName).Inc()
+func RecordBackendGroupMulticallCompletion(bg *BackendGroup, backendName string, error string) {
+	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName, error).Inc()
 }
 
 func boolToFloat64(b bool) float64 {
