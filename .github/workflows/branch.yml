@@ -72,7 +72,7 @@ jobs:
         with:
           # list of Docker images to use as base name for tags
           images: |
-            ghcr.io/settlemint/bpaas/proxyd
+            ghcr.io/settlemint/btp-proxyd
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -91,9 +91,10 @@ jobs:
         uses: docker/build-push-action@v5
         id: build-and-push
         with:
-          context: .
+          context: "{{defaultContext}}:proxyd"
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
+          # push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
 
