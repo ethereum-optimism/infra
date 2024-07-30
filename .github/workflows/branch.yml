@@ -1,0 +1,109 @@
+name: Branch
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+
+env:
+  BUILDX_NO_DEFAULT_ATTESTATIONS: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+  checks: write
+  contents: write
+  deployments: write
+  id-token: write
+  issues: write
+  discussions: write
+  packages: write
+  pages: write
+  pull-requests: write
+  repository-projects: write
+  security-events: write
+  statuses: write
+
+jobs:
+  main:
+    name: Main
+    runs-on:
+      - nscloud-ubuntu-22.04-amd64-32x32-with-cache
+      - nscloud-cache-tag-proxyd
+      - nscloud-cache-size-20gb
+      - nscloud-git-mirror-10gb
+      - nscloud-exp-container-image-cache
+      - nscloud-exp-runner-tool-cache-5gb
+    defaults:
+      run:
+        # Specify shell to help normalize across different operating systems
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: settlemint/bpaas-actions/setup-checkout@main
+
+      - name: Setup Tools
+        uses: settlemint/bpaas-actions/setup-tools@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Setup File Cache
+        uses: settlemint/bpaas-actions/setup-file-cache@main
+
+      - name: Setup Docker
+        uses: settlemint/bpaas-actions/setup-docker@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USER }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASS }}
+
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            ghcr.io/settlemint/bpaas/proxyd
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Create buildx builder
+        run: |-
+          docker buildx create --name mybuilder --use
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        id: build-and-push
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+
+      - name: Sign the images with GitHub OIDC Token
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.docker_meta.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
