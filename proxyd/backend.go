@@ -835,7 +835,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 		"auth", GetAuthCtx(bgCtx),
 	)
 	var wg sync.WaitGroup
-	ch := make(chan *multicallTuple)
+	ch := make(chan *multicallTuple, len(bg.Backends))
 	for _, backend := range bg.Backends {
 		wg.Add(1)
 		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch)
@@ -843,6 +843,10 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 
 	go func() {
 		wg.Wait()
+		log.Debug("closing multicall channel",
+			"req_id", GetReqID(bgCtx),
+			"auth", GetAuthCtx(bgCtx),
+		)
 		close(ch)
 	}()
 
@@ -865,13 +869,20 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 		backendName: backend.Name,
 	}
 
-	ch <- multicallResp
-
-	log.Debug("received multicall response from backend",
+	log.Debug("placing multicall response into channel",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
 		"backend", backend.Name,
 	)
+
+	ch <- multicallResp
+
+	log.Trace("placed multicall response into channel",
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"backend", backend.Name,
+	)
+
 	if backendResp.error != nil {
 		log.Error("received multicall error response from backend",
 			"req_id", GetReqID(ctx),
@@ -879,6 +890,9 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 			"backend", backend.Name,
 			"error", backendResp.error.Error(),
 		)
+		RecordBackendGroupMulticallCompletion(bg, backend.Name, backendResp.error.Error())
+	} else {
+		RecordBackendGroupMulticallCompletion(bg, backend.Name, "nil")
 	}
 }
 
@@ -906,7 +920,6 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 		i++
 		resp := multicallResp.response
 		backendName := multicallResp.backendName
-		RecordBackendGroupMulticallCompletion(bg, backendName)
 
 		if resp.error != nil {
 			log.Error("received error response from multicall channel",
