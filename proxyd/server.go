@@ -301,20 +301,6 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return !ok
 	}
 
-	if isLimited("") {
-		RecordRPCError(ctx, BackendProxyd, "unknown", ErrOverRateLimit)
-		log.Warn(
-			"rate limited request",
-			"req_id", GetReqID(ctx),
-			"auth", GetAuthCtx(ctx),
-			"user_agent", userAgent,
-			"origin", origin,
-			"remote_ip", xff,
-		)
-		writeRPCError(ctx, w, nil, ErrOverRateLimit)
-		return
-	}
-
 	log.Info(
 		"received RPC request",
 		"req_id", GetReqID(ctx),
@@ -469,10 +455,21 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			continue
 		}
 
+		// Take global rate limit first
+		if isLimited("") {
+			fmt.Println("HERERERERE")
+			log.Info(
+				"rate limited individual RPC in a batch request",
+				"source", "rpc",
+				"req_id", parsedReq.ID,
+				"method", parsedReq.Method,
+			)
+			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
+			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
+			continue
+		}
+
 		// Take rate limit for specific methods.
-		// NOTE: eventually, this should apply to all batch requests. However,
-		// since we don't have data right now on the size of each batch, we
-		// only apply this to the methods that have an additional rate limit.
 		if _, ok := s.overrideLims[parsedReq.Method]; ok && isLimited(parsedReq.Method) {
 			log.Info(
 				"rate limited specific RPC",

@@ -16,7 +16,6 @@ type resWithCode struct {
 	res  []byte
 }
 
-const frontendOverLimitResponse = `{"error":{"code":-32016,"message":"over rate limit with special message"},"id":null,"jsonrpc":"2.0"}`
 const frontendOverLimitResponseWithID = `{"error":{"code":-32016,"message":"over rate limit with special message"},"id":999,"jsonrpc":"2.0"}`
 
 var ethChainID = "eth_chainId"
@@ -37,7 +36,7 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 		limitedRes, codes := spamReqs(t, client, ethChainID, 429, 3)
 		require.Equal(t, 1, codes[429])
 		require.Equal(t, 2, codes[200])
-		RequireEqualJSON(t, []byte(frontendOverLimitResponse), limitedRes)
+		RequireEqualJSON(t, []byte(frontendOverLimitResponseWithID), limitedRes)
 	})
 
 	t.Run("exempt user agent over limit", func(t *testing.T) {
@@ -101,6 +100,25 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 		require.Equal(t, 3, len(res))
 		require.Nil(t, res[0].Error)
 		require.Equal(t, expCode, res[1].Error.Code)
+		require.Equal(t, expCode, res[2].Error.Code)
+	})
+
+	time.Sleep(time.Second)
+
+	t.Run("Batch RPC with some requests rate limited", func(t *testing.T) {
+		client := NewProxydClient("http://127.0.0.1:8545")
+		req := NewRPCReq("123", "eth_chainId", nil)
+		out, code, err := client.SendBatchRPC(req, req, req)
+		require.NoError(t, err)
+		var res []proxyd.RPCRes
+		require.NoError(t, json.Unmarshal(out, &res))
+
+		expCode := proxyd.ErrOverRateLimit.Code
+		require.Equal(t, 200, code)
+		require.Equal(t, 3, len(res))
+		require.Nil(t, res[0].Error)
+		require.Nil(t, res[1].Error)
+		// base rate = 2, so the third request should be rate limited
 		require.Equal(t, expCode, res[2].Error.Code)
 	})
 
