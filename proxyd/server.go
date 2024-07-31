@@ -455,9 +455,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			continue
 		}
 
-		// Take global rate limit first
+		// Take base rate limit first
 		if isLimited("") {
-			fmt.Println("HERERERERE")
 			log.Info(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
