@@ -87,7 +87,7 @@ func TestFailover(t *testing.T) {
 		})
 	}
 
-	// the bad endpoint has had 10 requests with 8 error (3xx/4xx/5xx) responses, it should be marked as unhealthy
+	// the bad endpoint has had 10 requests with 8 error (3xx/4xx/5xx) responses, it should be marked as unhealthy and deprioritized
 	t.Run("bad endpoint marked as unhealthy", func(t *testing.T) {
 		badBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
