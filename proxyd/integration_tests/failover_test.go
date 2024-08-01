@@ -87,6 +87,52 @@ func TestFailover(t *testing.T) {
 		})
 	}
 
+	// the bad endpoint has had 10 requests with 8 error (3xx/4xx/5xx) responses, it should be marked as unhealthy and deprioritized
+	t.Run("bad endpoint marked as unhealthy", func(t *testing.T) {
+		res, statusCode, err := client.SendRPC("eth_chainId", nil)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+		RequireEqualJSON(t, []byte(goodResponse), res)
+		require.Equal(t, 1, len(goodBackend.Requests()))
+		require.Equal(t, 0, len(badBackend.Requests())) // bad backend is not called anymore
+		goodBackend.Reset()
+		badBackend.Reset()
+	})
+
+	t.Run("bad endpoint is still called if good endpoint also went bad", func(t *testing.T) {
+		goodBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(2 * time.Second)
+			_, _ = w.Write([]byte("[{}]"))
+		}))
+		badBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(503)
+			_, _ = w.Write([]byte(unexpectedResponse))
+		}))
+		res, statusCode, _ := client.SendRPC("eth_chainId", nil)
+		require.Equal(t, 503, statusCode)
+		RequireEqualJSON(t, []byte(noBackendsResponse), res) // return no backend available since both failed
+		require.Equal(t, 1, len(goodBackend.Requests()))
+		require.Equal(t, 1, len(badBackend.Requests())) // bad backend is still called
+		goodBackend.Reset()
+		badBackend.Reset()
+	})
+}
+
+func TestFailoverMore(t *testing.T) {
+	goodBackend := NewMockBackend(BatchedResponseHandler(200, goodResponse))
+	defer goodBackend.Close()
+	badBackend := NewMockBackend(nil)
+	defer badBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+	require.NoError(t, os.Setenv("BAD_BACKEND_RPC_URL", badBackend.URL()))
+
+	config := ReadConfig("failover")
+	client := NewProxydClient("http://127.0.0.1:8545")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
 	t.Run("backend times out and falls back to another", func(t *testing.T) {
 		badBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
