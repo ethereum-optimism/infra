@@ -87,6 +87,38 @@ func TestFailover(t *testing.T) {
 		})
 	}
 
+	// the bad endpoint has had 10 requests with 8 4xx/5xx responses, it should be marked as unhealthy
+	t.Run("bad endpoint marked as unhealthy", func(t *testing.T) {
+		badBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(2 * time.Second)
+			_, _ = w.Write([]byte("[{}]"))
+		}))
+		res, statusCode, err := client.SendRPC("eth_chainId", nil)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+		RequireEqualJSON(t, []byte(goodResponse), res)
+		require.Equal(t, 1, len(goodBackend.Requests()))
+		require.Equal(t, 0, len(badBackend.Requests())) // bad backend is not called anymore
+		goodBackend.Reset()
+		badBackend.Reset()
+	})
+}
+
+func TestFailoverMore(t *testing.T) {
+	goodBackend := NewMockBackend(BatchedResponseHandler(200, goodResponse))
+	defer goodBackend.Close()
+	badBackend := NewMockBackend(nil)
+	defer badBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+	require.NoError(t, os.Setenv("BAD_BACKEND_RPC_URL", badBackend.URL()))
+
+	config := ReadConfig("failover")
+	client := NewProxydClient("http://127.0.0.1:8545")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
 	t.Run("backend times out and falls back to another", func(t *testing.T) {
 		badBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)

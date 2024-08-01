@@ -989,13 +989,21 @@ func weightedShuffle(backends []*Backend) {
 func (bg *BackendGroup) orderedBackendsForRequest() []*Backend {
 	if bg.Consensus != nil {
 		return bg.loadBalancedConsensusGroup()
-	} else if bg.WeightedRouting {
-		result := make([]*Backend, len(bg.Backends))
-		copy(result, bg.Backends)
-		weightedShuffle(result)
-		return result
 	} else {
-		return bg.Backends
+		healthy := make([]*Backend, 0, len(bg.Backends))
+		unhealthy := make([]*Backend, 0, len(bg.Backends))
+		for _, be := range bg.Backends {
+			if be.IsHealthy() {
+				healthy = append(healthy, be)
+			} else {
+				unhealthy = append(unhealthy, be)
+			}
+		}
+		if bg.WeightedRouting {
+			weightedShuffle(healthy)
+			weightedShuffle(unhealthy)
+		}
+		return append(healthy, unhealthy...)
 	}
 }
 
