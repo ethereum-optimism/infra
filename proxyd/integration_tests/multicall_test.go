@@ -194,8 +194,22 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
+		shutdownChan1 := make(chan struct{})
+		shutdownChan2 := make(chan struct{})
+		shutdownChan3 := make(chan struct{})
+
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, txAccepted, shutdownChan1, 3*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, txAccepted, shutdownChan2, 0*time.Second))
+		nodes["node3"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, txAccepted, shutdownChan3, 3*time.Second))
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			shutdownChan2 <- struct{}{}
+			shutdownChan1 <- struct{}{}
+			shutdownChan3 <- struct{}{}
+			wg.Done()
+		}()
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -219,6 +233,7 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
 		require.False(t, rpcRes.IsError())
 
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
@@ -488,6 +503,8 @@ func SingleResponseHandlerWithSleep(code int, response string, duration time.Dur
 	}
 }
 
+// SingleResponseHandlerWithSleepShutdown uses a channel to control that a backend was requested and returned.
+// Test cases can add an element to the shutdown channel to control the when a specific backend returns
 func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}, duration time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("sleeping")
