@@ -193,13 +193,13 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		triggerHandlerChan1 := make(chan struct{})
-		triggerHandlerChan2 := make(chan struct{})
-		triggerHandlerChan3 := make(chan struct{})
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
+		triggerBackend3 := make(chan struct{})
 
-		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerHandlerChan1))
-		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerHandlerChan2))
-		nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerHandlerChan3))
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend2))
+		nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend3))
 
 		localSvr := setServerBackend(svr, nodes)
 		body := makeSendRawTransaction(txHex1)
@@ -210,10 +210,10 @@ func TestMulticall(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
-			triggerHandlerChan2 <- struct{}{}
+			triggerBackend2 <- struct{}{}
 			time.Sleep(2 * time.Second)
-			triggerHandlerChan1 <- struct{}{}
-			triggerHandlerChan3 <- struct{}{}
+			triggerBackend1 <- struct{}{}
+			triggerBackend3 <- struct{}{}
 			wg.Done()
 		}()
 
@@ -246,11 +246,11 @@ func TestMulticall(t *testing.T) {
 
 		defer shutdown()
 
-		triggerHandlerChan1 := make(chan struct{})
-		triggerHandlerChan2 := make(chan struct{})
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
 
-		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerHandlerChan1))
-		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerHandlerChan2))
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend2))
 		nodes["node3"].mockBackend.SetHandler(SingleResponseHandler(403, dummyRes))
 
 		localSvr := setServerBackend(svr, nodes)
@@ -263,9 +263,9 @@ func TestMulticall(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
-			triggerHandlerChan2 <- struct{}{}
+			triggerBackend2 <- struct{}{}
 			time.Sleep(3 * time.Second)
-			triggerHandlerChan1 <- struct{}{}
+			triggerBackend1 <- struct{}{}
 			wg.Done()
 		}()
 
@@ -296,10 +296,10 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		triggerHandlerChan1 := make(chan struct{})
+		triggerBackend1 := make(chan struct{})
 
 		// We should ignore node2 first response cause 429, and return node 1 because 200
-		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerHandlerChan1))
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
 		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(429, txAccepted))
 
 		localSvr := setServerBackend(svr, nodes)
@@ -313,7 +313,7 @@ func TestMulticall(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			time.Sleep(2 * time.Second)
-			triggerHandlerChan1 <- struct{}{}
+			triggerBackend1 <- struct{}{}
 			wg.Done()
 		}()
 
@@ -343,9 +343,9 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		triggerHandlerChan := make(chan struct{})
+		triggerBackend := make(chan struct{})
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerHandlerChan))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -359,7 +359,7 @@ func TestMulticall(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			time.Sleep(7 * time.Second)
-			triggerHandlerChan <- struct{}{}
+			triggerBackend <- struct{}{}
 			wg.Done()
 		}()
 		resp := rr.Result()
@@ -374,6 +374,7 @@ func TestMulticall(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
 
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
@@ -387,10 +388,10 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		triggerHandlerChan1 := make(chan struct{})
-		triggerHandlerChan2 := make(chan struct{})
-		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerHandlerChan1))
-		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerHandlerChan2))
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend2))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -403,8 +404,8 @@ func TestMulticall(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			time.Sleep(7 * time.Second)
-			triggerHandlerChan1 <- struct{}{}
-			triggerHandlerChan2 <- struct{}{}
+			triggerBackend1 <- struct{}{}
+			triggerBackend2 <- struct{}{}
 			wg.Done()
 		}()
 
@@ -434,24 +435,24 @@ func TestMulticall(t *testing.T) {
 		defer shutdown()
 
 		for i := 1; i < 4; i++ {
-			triggerHandlerChan1 := make(chan struct{})
-			triggerHandlerChan2 := make(chan struct{})
-			triggerHandlerChan3 := make(chan struct{})
+			triggerBackend1 := make(chan struct{})
+			triggerBackend2 := make(chan struct{})
+			triggerBackend3 := make(chan struct{})
 
 			switch {
 			case i == 1:
-				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerHandlerChan1))
-				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(429, dummyRes, triggerHandlerChan2))
-				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(503, dummyRes, triggerHandlerChan3))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(429, dummyRes, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(503, dummyRes, triggerBackend3))
 			case i == 2:
-				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerHandlerChan1))
-				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerHandlerChan2))
-				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(405, dummyRes, triggerHandlerChan3))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(405, dummyRes, triggerBackend3))
 			case i == 3:
 				// Return the quickest response
-				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerHandlerChan1))
-				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(500, dummyRes, triggerHandlerChan2))
-				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerHandlerChan3))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(500, dummyRes, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend3))
 			}
 
 			localSvr := setServerBackend(svr, nodes)
@@ -464,9 +465,9 @@ func TestMulticall(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
-				triggerHandlerChan1 <- struct{}{}
-				triggerHandlerChan2 <- struct{}{}
-				triggerHandlerChan3 <- struct{}{}
+				triggerBackend1 <- struct{}{}
+				triggerBackend2 <- struct{}{}
+				triggerBackend3 <- struct{}{}
 				wg.Done()
 			}()
 
