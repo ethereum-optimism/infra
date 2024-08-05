@@ -976,7 +976,6 @@ type WSProxier struct {
 	methodWhitelist *StringSet
 	readTimeout     time.Duration
 	writeTimeout    time.Duration
-	reqIdToMethod   map[string]string
 }
 
 func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet) *WSProxier {
@@ -987,20 +986,20 @@ func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, met
 		methodWhitelist: methodWhitelist,
 		readTimeout:     defaultWSReadTimeout,
 		writeTimeout:    defaultWSWriteTimeout,
-		reqIdToMethod:   make(map[string]string),
 	}
 }
 
 func (w *WSProxier) Proxy(ctx context.Context) error {
 	errC := make(chan error, 2)
-	go w.clientPump(ctx, errC)
-	go w.backendPump(ctx, errC)
+	idToMethod := NewStringMap()
+	go w.clientPump(ctx, errC, idToMethod)
+	go w.backendPump(ctx, errC, idToMethod)
 	err := <-errC
 	w.close()
 	return err
 }
 
-func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
+func (w *WSProxier) clientPump(ctx context.Context, errC chan error, idToMethod *StringMap) {
 	for {
 		// Block until we get a message.
 		msgType, msg, err := w.clientConn.ReadMessage()
@@ -1080,11 +1079,12 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			errC <- err
 			return
 		}
-		w.reqIdToMethod[GetReqID(ctx)] = req.Method
+
+		idToMethod.Set(string(req.ID), req.Method)
 	}
 }
 
-func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
+func (w *WSProxier) backendPump(ctx context.Context, errC chan error, idToMethod *StringMap) {
 	for {
 		// Block until we get a message.
 		msgType, msg, err := w.backendConn.ReadMessage()
@@ -1108,12 +1108,12 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 			continue
 		}
 
+		method := MethodUnknown
 		res, err := w.parseBackendMsg(msg)
-		method := w.reqIdToMethod[GetReqID(ctx)]
-		if method == "" {
-			method = MethodUnknown
-		} else {
-			delete(w.reqIdToMethod, GetReqID(ctx))
+		if res != nil {
+			if value, has := idToMethod.GetAndRemove(string(res.ID)); has {
+				method = value
+			}
 		}
 
 		if err != nil {
