@@ -1081,14 +1081,15 @@ func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, met
 
 func (w *WSProxier) Proxy(ctx context.Context) error {
 	errC := make(chan error, 2)
-	go w.clientPump(ctx, errC)
-	go w.backendPump(ctx, errC)
+	idToMethod := NewStringMap()
+	go w.clientPump(ctx, errC, idToMethod)
+	go w.backendPump(ctx, errC, idToMethod)
 	err := <-errC
 	w.close()
 	return err
 }
 
-func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
+func (w *WSProxier) clientPump(ctx context.Context, errC chan error, idToMethod *StringMap) {
 	for {
 		// Block until we get a message.
 		msgType, msg, err := w.clientConn.ReadMessage()
@@ -1168,10 +1169,12 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			errC <- err
 			return
 		}
+
+		idToMethod.Set(string(req.ID), req.Method)
 	}
 }
 
-func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
+func (w *WSProxier) backendPump(ctx context.Context, errC chan error, idToMethod *StringMap) {
 	for {
 		// Block until we get a message.
 		msgType, msg, err := w.backendConn.ReadMessage()
@@ -1195,7 +1198,14 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 			continue
 		}
 
+		method := MethodUnknown
 		res, err := w.parseBackendMsg(msg)
+		if res != nil {
+			if value, has := idToMethod.GetAndRemove(string(res.ID)); has {
+				method = value
+			}
+		}
+
 		if err != nil {
 			var id json.RawMessage
 			if res != nil {
@@ -1213,7 +1223,7 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 					"auth", GetAuthCtx(ctx),
 					"req_id", GetReqID(ctx),
 				)
-				RecordRPCError(ctx, w.backend.Name, MethodUnknown, res.Error)
+				RecordRPCError(ctx, w.backend.Name, method, res.Error)
 			} else {
 				log.Info(
 					"forwarded WS message to client",
