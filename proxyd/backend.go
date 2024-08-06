@@ -1328,7 +1328,7 @@ func RecordBatchRPCError(ctx context.Context, backendName string, reqs []*RPCReq
 }
 
 func MaybeRecordErrorsInRPCRes(ctx context.Context, backendName string, reqs []*RPCReq, resBatch []*RPCRes) {
-	log.Info("forwarded RPC request",
+	log.Debug("forwarded RPC request",
 		"backend", backendName,
 		"auth", GetAuthCtx(ctx),
 		"req_id", GetReqID(ctx),

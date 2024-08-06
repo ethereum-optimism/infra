@@ -301,7 +301,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return !ok
 	}
 
-	log.Info(
+	log.Debug(
 		"received RPC request",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
@@ -457,7 +457,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		// Take base rate limit first
 		if isLimited("") {
-			log.Info(
+			log.Debug(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
 				"req_id", parsedReq.ID,
@@ -470,7 +470,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		// Take rate limit for specific methods.
 		if _, ok := s.overrideLims[parsedReq.Method]; ok && isLimited(parsedReq.Method) {
-			log.Info(
+			log.Debug(
 				"rate limited specific RPC",
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
