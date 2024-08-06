@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -18,7 +17,6 @@ type RPCMethodHandler interface {
 
 type StaticMethodHandler struct {
 	cache     Cache
-	m         sync.RWMutex
 	filterGet func(*RPCReq) bool
 	filterPut func(*RPCReq, *RPCRes) bool
 }
@@ -38,9 +36,6 @@ func (e *StaticMethodHandler) GetRPCMethod(ctx context.Context, req *RPCReq) (*R
 	if e.filterGet != nil && !e.filterGet(req) {
 		return nil, nil
 	}
-
-	e.m.RLock()
-	defer e.m.RUnlock()
 
 	key := e.key(req)
 	val, err := e.cache.Get(ctx, key)
@@ -76,9 +71,6 @@ func (e *StaticMethodHandler) PutRPCMethod(ctx context.Context, req *RPCReq, res
 	if e.filterPut != nil && !e.filterPut(req, res) {
 		return nil
 	}
-
-	e.m.Lock()
-	defer e.m.Unlock()
 
 	key := e.key(req)
 	value := mustMarshalJSON(res.Result)

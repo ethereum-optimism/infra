@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
@@ -25,14 +26,18 @@ const (
 
 type cache struct {
 	lru *lru.Cache
+	m   sync.RWMutex
 }
 
 func newMemoryCache() *cache {
 	rep, _ := lru.New(memoryCacheLimit)
-	return &cache{rep}
+	return &cache{lru: rep}
 }
 
 func (c *cache) Get(ctx context.Context, key string) (string, error) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	if val, ok := c.lru.Get(key); ok {
 		return val.(string), nil
 	}
@@ -40,6 +45,9 @@ func (c *cache) Get(ctx context.Context, key string) (string, error) {
 }
 
 func (c *cache) Put(ctx context.Context, key string, value string) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.lru.Add(key, value)
 	return nil
 }
@@ -48,10 +56,11 @@ type redisCache struct {
 	rdb    *redis.Client
 	prefix string
 	ttl    time.Duration
+	m      sync.RWMutex
 }
 
 func newRedisCache(rdb *redis.Client, prefix string, ttl time.Duration) *redisCache {
-	return &redisCache{rdb, prefix, ttl}
+	return &redisCache{rdb: rdb, prefix: prefix, ttl: ttl}
 }
 
 func (c *redisCache) namespaced(key string) string {
@@ -62,6 +71,9 @@ func (c *redisCache) namespaced(key string) string {
 }
 
 func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	start := time.Now()
 	val, err := c.rdb.Get(ctx, c.namespaced(key)).Result()
 	redisCacheDurationSumm.WithLabelValues("GET").Observe(float64(time.Since(start).Milliseconds()))
@@ -76,6 +88,9 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 }
 
 func (c *redisCache) Put(ctx context.Context, key string, value string) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	start := time.Now()
 	err := c.rdb.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
 	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
