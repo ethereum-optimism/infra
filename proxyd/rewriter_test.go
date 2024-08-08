@@ -12,9 +12,10 @@ import (
 )
 
 type args struct {
-	rctx RewriteContext
-	req  *RPCReq
-	res  *RPCRes
+	rctx        RewriteContext
+	req         *RPCReq
+	res         *RPCRes
+	skipeip1898 bool
 }
 
 type rewriteTest struct {
@@ -31,9 +32,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -46,9 +48,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -61,9 +64,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -71,9 +75,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -86,9 +91,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(55).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(55).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -101,9 +107,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(111).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(111).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -111,9 +118,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest", "toBlock": "latest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest", "toBlock": "latest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -127,9 +135,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String(), "toBlock": hexutil.Uint64(77).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String(), "toBlock": hexutil.Uint64(77).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -143,9 +152,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String(), "toBlock": hexutil.Uint64(222).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String(), "toBlock": hexutil.Uint64(222).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -153,9 +163,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock -> toBlock above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(20).String(), "toBlock": hexutil.Uint64(80).String()}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(20).String(), "toBlock": hexutil.Uint64(80).String()}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteRangeTooLarge,
@@ -163,9 +174,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> latest above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "latest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "latest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteRangeTooLarge,
@@ -173,9 +185,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> pending above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "pending"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "pending"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteRangeTooLarge,
@@ -183,9 +196,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> default above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteRangeTooLarge,
@@ -193,9 +207,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs default -> latest within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
-				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				req:         &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -210,9 +225,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"latest"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"latest"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -226,9 +242,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -242,9 +259,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -252,18 +270,20 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts missing parameter",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 		},
 		{
 			name: "debug_getRawReceipts with block hash",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -278,9 +298,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -297,9 +318,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode not enough params, should do nothing",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -312,9 +334,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", "latest"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", "latest"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -331,9 +354,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(55).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(55).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -348,9 +372,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(111).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(111).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -359,9 +384,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -379,9 +405,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", "latest"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", "latest"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -399,9 +426,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(55).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(55).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -417,9 +445,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(111).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(111).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -428,9 +457,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -444,9 +474,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"latest"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"latest"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -460,9 +491,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber finalized",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), finalized: hexutil.Uint64(55)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"finalized"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), finalized: hexutil.Uint64(55)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"finalized"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -476,9 +508,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber safe",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), safe: hexutil.Uint64(50)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"safe"})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100), safe: hexutil.Uint64(50)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"safe"})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -492,9 +525,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -508,9 +542,10 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
-				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
-				res:  nil,
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -523,7 +558,8 @@ func TestRewriteRequest(t *testing.T) {
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"0x65a7ed542fb37fe237fdfbdd70b31598523fe5b32879e307bae27a0bd9581c08",
 					"0x1c4840bcb3de3ac403c0075b46c2c47d4396c5b624b6e1b2874ec04e8879b483"})},
-				res: nil,
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 		},
@@ -538,7 +574,8 @@ func TestRewriteRequest(t *testing.T) {
 					map[string]interface{}{
 						"blockNumber": "0x0",
 					}})},
-				res: nil,
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 		},
@@ -553,7 +590,8 @@ func TestRewriteRequest(t *testing.T) {
 						"blockHash":        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
 						"requireCanonical": true,
 					}})},
-				res: nil,
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteNone,
 			check: func(t *testing.T, args args) {
@@ -579,7 +617,8 @@ func TestRewriteRequest(t *testing.T) {
 					map[string]interface{}{
 						"blockNumber": "latest",
 					}})},
-				res: nil,
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected: RewriteOverrideRequest,
 			check: func(t *testing.T, args args) {
@@ -604,7 +643,8 @@ func TestRewriteRequest(t *testing.T) {
 					map[string]interface{}{
 						"blockNumber": "0x111",
 					}})},
-				res: nil,
+				res:         nil,
+				skipeip1898: false,
 			},
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
@@ -624,7 +664,7 @@ func TestRewriteRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := RewriteRequest(tt.args.rctx, tt.args.req, tt.args.res)
+			result, err := RewriteRequest(tt.args.rctx, tt.args.req, tt.args.res, tt.args.skipeip1898)
 			if result != RewriteOverrideError {
 				require.Nil(t, err)
 				require.Equal(t, tt.expected, result)

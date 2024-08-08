@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -37,12 +38,12 @@ var (
 )
 
 // RewriteTags modifies the request and the response based on block tags
-func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
+func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes, skipEIP1898 bool) (RewriteResult, error) {
 	rw, err := RewriteResponse(rctx, req, res)
 	if rw == RewriteOverrideResponse {
 		return rw, err
 	}
-	return RewriteRequest(rctx, req, res)
+	return RewriteRequest(rctx, req, res, skipEIP1898)
 }
 
 // RewriteResponse modifies the response object to comply with the rewrite context
@@ -60,32 +61,32 @@ func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResu
 // RewriteRequest modifies the request object to comply with the rewrite context
 // before the method has been called at the backend
 // it returns false if nothing was changed
-func RewriteRequest(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
+func RewriteRequest(rctx RewriteContext, req *RPCReq, res *RPCRes, skipEIP1898 bool) (RewriteResult, error) {
 	switch req.Method {
 	case "eth_getLogs",
 		"eth_newFilter":
 		return rewriteRange(rctx, req, res, 0)
 	case "debug_getRawReceipts", "consensus_getReceipts":
-		return rewriteParam(rctx, req, res, 0, true, false)
+		return rewriteParam(rctx, req, res, 0, true, false, skipEIP1898)
 	case "eth_getBalance",
 		"eth_getCode",
 		"eth_getTransactionCount",
 		"eth_call":
-		return rewriteParam(rctx, req, res, 1, false, true)
+		return rewriteParam(rctx, req, res, 1, false, true, skipEIP1898)
 	case "eth_getStorageAt",
 		"eth_getProof":
-		return rewriteParam(rctx, req, res, 2, false, true)
+		return rewriteParam(rctx, req, res, 2, false, true, skipEIP1898)
 	case "eth_getBlockTransactionCountByNumber",
 		"eth_getUncleCountByBlockNumber",
 		"eth_getBlockByNumber",
 		"eth_getTransactionByBlockNumberAndIndex",
 		"eth_getUncleByBlockNumberAndIndex":
-		return rewriteParam(rctx, req, res, 0, false, false)
+		return rewriteParam(rctx, req, res, 0, false, false, skipEIP1898)
 	}
 	return RewriteNone, nil
 }
 
-func rewriteParam(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int, required bool, blockNrOrHash bool) (RewriteResult, error) {
+func rewriteParam(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int, required bool, blockNrOrHash bool, skipEIP1898 bool) (RewriteResult, error) {
 	var p []interface{}
 	err := json.Unmarshal(req.Params, &p)
 	if err != nil {
@@ -104,23 +105,28 @@ func rewriteParam(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int, requir
 	var val interface{}
 	var rw bool
 	if blockNrOrHash {
-		bnh, err := remarshalBlockNumberOrHash(p[pos])
-		if err != nil {
-			// fallback to string
-			s, ok := p[pos].(string)
-			if ok {
-				val, rw, err = rewriteTag(rctx, s)
+		if !skipEIP1898 {
+			log.Debug("Applying eip-1898")
+			bnh, err := remarshalBlockNumberOrHash(p[pos])
+			if err != nil {
+				// fallback to string
+				s, ok := p[pos].(string)
+				if ok {
+					val, rw, err = rewriteTag(rctx, s)
+					if err != nil {
+						return RewriteOverrideError, err
+					}
+				} else {
+					return RewriteOverrideError, errors.New("expected BlockNumberOrHash or string")
+				}
+			} else {
+				val, rw, err = rewriteTagBlockNumberOrHash(rctx, bnh)
 				if err != nil {
 					return RewriteOverrideError, err
 				}
-			} else {
-				return RewriteOverrideError, errors.New("expected BlockNumberOrHash or string")
 			}
 		} else {
-			val, rw, err = rewriteTagBlockNumberOrHash(rctx, bnh)
-			if err != nil {
-				return RewriteOverrideError, err
-			}
+			log.Debug("Skipped eip-1898")
 		}
 	} else {
 		s, ok := p[pos].(string)

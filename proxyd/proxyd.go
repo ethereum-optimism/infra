@@ -245,6 +245,7 @@ func Start(config *Config) (*Server, func(), error) {
 			Name:             bgName,
 			Backends:         backends,
 			WeightedRouting:  bg.WeightedRouting,
+			SkipEIP1898:      bg.SkipEIP1898,
 			FallbackBackends: fallbackBackends,
 			routingStrategy:  bg.RoutingStrategy,
 		}
