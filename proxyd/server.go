@@ -487,7 +487,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		// Check if the sender is sanctioned.
 		if parsedReq.Method == "eth_sendRawTransaction" && s.sanctionedAddresses != nil {
-			if err := s.filterSanctiondAddresses(ctx, parsedReq); err != nil {
+			if err := s.filterSanctionedAddresses(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
@@ -689,43 +689,45 @@ func (s *Server) isUnlimitedUserAgent(origin string) bool {
 func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
 }
-
-func (s *Server) filterSanctiondAddresses(ctx context.Context, req *RPCReq) error {
+func (s *Server) processTransaction(ctx context.Context, req *RPCReq) (*types.Transaction, *core.Message, error) {
 	var params []string
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
-		return ErrParseErr
+		return nil, nil, ErrParseErr
 	}
 
 	if len(params) != 1 {
 		log.Debug("raw transaction request has invalid number of params", "req_id", GetReqID(ctx))
-		// The error below is identical to the one Geth responds with.
-		return ErrInvalidParams("missing value for required argument 0")
+		return nil, nil, ErrInvalidParams("missing value for required argument 0")
 	}
 
 	var data hexutil.Bytes
 	if err := data.UnmarshalText([]byte(params[0])); err != nil {
 		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
-		// Geth returns the raw error from UnmarshalText.
-		return ErrInvalidParams(err.Error())
+		return nil, nil, ErrInvalidParams(err.Error())
 	}
 
-	// Inflates a types.Transaction object from the transaction's raw bytes.
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(data); err != nil {
 		log.Debug("could not unmarshal transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
+		return nil, nil, ErrInvalidParams(err.Error())
 	}
 
-	// Convert the transaction into a Message object so that we can get the
-	// sender. This method performs an ecrecover, which can be expensive.
 	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), nil)
 	if err != nil {
 		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
+		return nil, nil, ErrInvalidParams(err.Error())
 	}
 
-	// Check if the sender is sanctioned.
+	return tx, msg, nil
+}
+
+func (s *Server) filterSanctionedAddresses(ctx context.Context, req *RPCReq) error {
+	tx, msg, err := s.processTransaction(ctx, req)
+	if err != nil {
+		return err
+	}
+
 	from := msg.From
 	to := *tx.To()
 
@@ -741,46 +743,16 @@ func (s *Server) filterSanctiondAddresses(ctx context.Context, req *RPCReq) erro
 }
 
 func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
-	var params []string
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
-		return ErrParseErr
+	tx, msg, err := s.processTransaction(ctx, req)
+	if err != nil {
+		return err
 	}
 
-	if len(params) != 1 {
-		log.Debug("raw transaction request has invalid number of params", "req_id", GetReqID(ctx))
-		// The error below is identical to the one Geth responds with.
-		return ErrInvalidParams("missing value for required argument 0")
-	}
-
-	var data hexutil.Bytes
-	if err := data.UnmarshalText([]byte(params[0])); err != nil {
-		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
-		// Geth returns the raw error from UnmarshalText.
-		return ErrInvalidParams(err.Error())
-	}
-
-	// Inflates a types.Transaction object from the transaction's raw bytes.
-	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(data); err != nil {
-		log.Debug("could not unmarshal transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
-	}
-
-	// Check if the transaction is for the expected chain,
-	// otherwise reject before rate limiting to avoid replay attacks.
 	if !s.isAllowedChainId(tx.ChainId()) {
 		log.Debug("chain id is not allowed", "req_id", GetReqID(ctx))
 		return txpool.ErrInvalidSender
 	}
 
-	// Convert the transaction into a Message object so that we can get the
-	// sender. This method performs an ecrecover, which can be expensive.
-	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), nil)
-	if err != nil {
-		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
-	}
 	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", msg.From.Hex(), tx.Nonce()))
 	if err != nil {
 		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
