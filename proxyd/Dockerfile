@@ -19,7 +19,7 @@ RUN apk add bind-tools jq curl bash git redis
 COPY ./proxyd/entrypoint.sh /bin/entrypoint.sh
 
 RUN apk update && \
-    apk add ca-certificates && \
+    apk add ca-certificates gettext && \
     chmod +x /bin/entrypoint.sh
 
 EXPOSE 8080
