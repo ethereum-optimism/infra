@@ -726,6 +726,7 @@ type BackendGroup struct {
 	Name             string
 	Backends         []*Backend
 	WeightedRouting  bool
+	SkipEIP1898      bool
 	Consensus        *ConsensusPoller
 	FallbackBackends map[string]bool
 	routingStrategy  RoutingStrategy
@@ -1478,7 +1479,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 
 	for i, req := range rpcReqs {
 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
-		result, err := RewriteTags(rctx, req, &res)
+		result, err := RewriteTags(rctx, req, &res, bg.SkipEIP1898)
 		switch result {
 		case RewriteOverrideError:
 			overriddenResponses = append(overriddenResponses, &indexedReqRes{

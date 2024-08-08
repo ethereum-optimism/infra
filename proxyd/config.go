@@ -151,6 +151,7 @@ type BackendGroupConfig struct {
 	Backends []string `toml:"backends"`
 
 	WeightedRouting bool `toml:"weighted_routing"`
+	SkipEIP1898     bool `toml:"skip_eip_1898"`
 
 	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
 
