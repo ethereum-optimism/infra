@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	JSONRPCVersion       = "2.0"
-	JSONRPCErrorInternal = -32000
-	notFoundRpcError     = -32601
+	JSONRPCVersion         = "2.0"
+	JSONRPCErrorInternal   = -32000
+	notFoundRpcError       = -32601
+	sanctionedAddressError = -32801
 )
 
 var (
@@ -109,6 +110,12 @@ var (
 		Code:          JSONRPCErrorInternal - 20,
 		Message:       "backend response too large",
 		HTTPErrorCode: 500,
+	}
+
+	ErrSanctionedAddress = &RPCErr{
+		Code:          sanctionedAddressError,
+		Message:       "address is sanctioned",
+		HTTPErrorCode: 403,
 	}
 
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")

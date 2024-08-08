@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -300,6 +301,20 @@ func Start(config *Config) (*Server, func(), error) {
 		rpcCache = newRPCCache(newCacheWithCompression(cache))
 	}
 
+	sanctionedAddressesMap := make(map[common.Address]struct{})
+	if config.SanctionedAddresses != nil {
+		sanctionedAddressesMap = make(map[common.Address]struct{}, len(config.SanctionedAddresses))
+		for _, addr := range config.SanctionedAddresses {
+			// Ensure that the address is in checksum format, or discard it
+			if !common.IsHexAddress(addr) {
+				log.Warn("invalid sanctioned address", "address", addr)
+				continue
+			}
+			address := common.HexToAddress(addr)
+			sanctionedAddressesMap[address] = struct{}{}
+		}
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -317,6 +332,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		redisClient,
+		sanctionedAddressesMap,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
