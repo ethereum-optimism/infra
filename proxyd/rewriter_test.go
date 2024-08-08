@@ -649,6 +649,66 @@ func TestRewriteRequest(t *testing.T) {
 			expected:    RewriteOverrideError,
 			expectedErr: ErrRewriteBlockOutOfRange,
 		},
+		// eip1898 disabled
+		{
+			name: "eth_getBalance omit block, should do nothing if skipeip1898 is true",
+			args: args{
+				rctx:        RewriteContext{latest: hexutil.Uint64(100)},
+				req:         &RPCReq{Method: "eth_getBalance", Params: mustMarshalJSON([]string{"0x0101010101010101010101010101010101010101"})},
+				res:         nil,
+				skipeip1898: true,
+			},
+			expected: RewriteNone,
+			check: func(t *testing.T, args args) {
+				var p []interface{}
+				err := json.Unmarshal(args.req.Params, &p)
+				require.Nil(t, err)
+				require.Equal(t, 1, len(p))
+				require.Equal(t, "0x0101010101010101010101010101010101010101", p[0])
+			},
+		},
+		{
+			name: "eth_getBalance within range, should do nothing if skipeip1898 is true",
+			args: args{
+				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				req: &RPCReq{Method: "eth_getBalance", Params: mustMarshalJSON([]string{
+					"0x0101010101010101010101010101010101010101",
+					hexutil.Uint64(55).String(),
+				})},
+				res:         nil,
+				skipeip1898: true,
+			},
+			expected: RewriteNone,
+			check: func(t *testing.T, args args) {
+				var p []interface{}
+				err := json.Unmarshal(args.req.Params, &p)
+				require.Nil(t, err)
+				require.Equal(t, 2, len(p))
+				require.Equal(t, "0x0101010101010101010101010101010101010101", p[0])
+				require.Equal(t, hexutil.Uint64(55).String(), p[1])
+			},
+		},
+		{
+			name: "eth_getBalance within range, rewrite request if skipeip1898 is false",
+			args: args{
+				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				req: &RPCReq{Method: "eth_getBalance", Params: mustMarshalJSON([]string{
+					"0x0101010101010101010101010101010101010101",
+					hexutil.Uint64(55).String(),
+				})},
+				res:         nil,
+				skipeip1898: false,
+			},
+			expected: RewriteNone,
+			check: func(t *testing.T, args args) {
+				var p []interface{}
+				err := json.Unmarshal(args.req.Params, &p)
+				require.Nil(t, err)
+				require.Equal(t, 2, len(p))
+				require.Equal(t, "0x0101010101010101010101010101010101010101", p[0])
+				require.Equal(t, hexutil.Uint64(55).String(), p[1])
+			},
+		},
 	}
 
 	// generalize tests for other methods with same interface and behavior
