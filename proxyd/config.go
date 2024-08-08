@@ -211,6 +211,7 @@ type Config struct {
 	WSMethodWhitelist     []string              `toml:"ws_method_whitelist"`
 	WhitelistErrorMessage string                `toml:"whitelist_error_message"`
 	SenderRateLimit       SenderRateLimitConfig `toml:"sender_rate_limit"`
+	SanctionedAddresses   []string              `toml:"sanctioned_addresses"`
 }
 
 func ReadFromEnvOrConfig(value string) (string, error) {

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -76,6 +77,7 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
+	sanctionedAddresses    map[common.Address]struct{}
 }
 
 type limiterFunc func(method string) bool
@@ -97,6 +99,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	redisClient *redis.Client,
+	sanctionedAddresses map[common.Address]struct{},
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -197,6 +200,7 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
+		sanctionedAddresses:    sanctionedAddresses,
 	}, nil
 }
 
@@ -481,6 +485,15 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			continue
 		}
 
+		// Check if the sender is sanctioned.
+		if parsedReq.Method == "eth_sendRawTransaction" && s.sanctionedAddresses != nil {
+			if err := s.filterSanctiondAddresses(ctx, parsedReq); err != nil {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
+			}
+		}
+
 		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
@@ -675,6 +688,56 @@ func (s *Server) isUnlimitedUserAgent(origin string) bool {
 
 func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
+}
+
+func (s *Server) filterSanctiondAddresses(ctx context.Context, req *RPCReq) error {
+	var params []string
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
+		return ErrParseErr
+	}
+
+	if len(params) != 1 {
+		log.Debug("raw transaction request has invalid number of params", "req_id", GetReqID(ctx))
+		// The error below is identical to the one Geth responds with.
+		return ErrInvalidParams("missing value for required argument 0")
+	}
+
+	var data hexutil.Bytes
+	if err := data.UnmarshalText([]byte(params[0])); err != nil {
+		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
+		// Geth returns the raw error from UnmarshalText.
+		return ErrInvalidParams(err.Error())
+	}
+
+	// Inflates a types.Transaction object from the transaction's raw bytes.
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(data); err != nil {
+		log.Debug("could not unmarshal transaction", "err", err, "req_id", GetReqID(ctx))
+		return ErrInvalidParams(err.Error())
+	}
+
+	// Convert the transaction into a Message object so that we can get the
+	// sender. This method performs an ecrecover, which can be expensive.
+	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), nil)
+	if err != nil {
+		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
+		return ErrInvalidParams(err.Error())
+	}
+
+	// Check if the sender is sanctioned.
+	from := msg.From
+	to := *tx.To()
+
+	if _, ok := s.sanctionedAddresses[from]; ok {
+		log.Debug("sender is sanctioned", "sender", from, "req_id", GetReqID(ctx))
+		return ErrSanctionedAddress
+	} else if _, ok := s.sanctionedAddresses[to]; ok {
+		log.Debug("recipient is sanctioned", "recipient", to, "req_id", GetReqID(ctx))
+		return ErrSanctionedAddress
+	}
+
+	return nil
 }
 
 func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
