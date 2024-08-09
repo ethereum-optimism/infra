@@ -689,6 +689,7 @@ func (s *Server) isUnlimitedUserAgent(origin string) bool {
 func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
 }
+
 func (s *Server) processTransaction(ctx context.Context, req *RPCReq) (*types.Transaction, *core.Message, error) {
 	var params []string
 	if err := json.Unmarshal(req.Params, &params); err != nil {
