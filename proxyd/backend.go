@@ -1451,7 +1451,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	return &BackendGroupRPCResponse{
 		RPCRes:   nil,
 		ServedBy: "",
-		error:    ErrNoBackends,
+		error:    ErrNotHealthy,
 	}
 
 }

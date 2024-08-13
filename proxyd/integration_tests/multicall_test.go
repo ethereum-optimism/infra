@@ -179,8 +179,8 @@ func TestMulticall(t *testing.T) {
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.True(t, rpcRes.IsError())
-		require.Equal(t, proxyd.ErrNoBackends.Code, rpcRes.Error.Code)
-		require.Equal(t, proxyd.ErrNoBackends.Message, rpcRes.Error.Message)
+		require.Equal(t, proxyd.ErrNotHealthy.Code, rpcRes.Error.Code)
+		require.Equal(t, proxyd.ErrNotHealthy.Message, rpcRes.Error.Message)
 
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
@@ -386,7 +386,7 @@ func TestMulticall(t *testing.T) {
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.True(t, rpcRes.IsError())
-		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
+		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNotHealthy.Code)
 
 		// Wait for test response to complete before checking query count
 		wg.Wait()
