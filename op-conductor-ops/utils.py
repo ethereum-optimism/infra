@@ -1,3 +1,6 @@
+from rich import print
+
+
 def print_boolean(value):
     if value is None:
         return "❓"
@@ -13,3 +16,11 @@ def make_rpc_payload(method: str, params: list = None):
         "method": method,
         "params": params,
     }
+
+
+def print_error(msg: str):
+    print(f"[bold red]ERROR![/bold red] {msg}")
+
+
+def print_warn(msg: str):
+    print(f"[bold yellow]WARNING![/bold yellow] {msg}")

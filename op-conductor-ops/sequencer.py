@@ -8,12 +8,11 @@ from utils import make_rpc_payload
 
 class Sequencer:
     def __init__(
-        self, cert_path, sequencer_id, raft_addr, rpc_url, node_rpc_url, voting
+        self, sequencer_id, raft_addr, conductor_rpc_url, node_rpc_url, voting
     ):
-        self.cert_path = cert_path
         self.sequencer_id = sequencer_id
         self.raft_addr = raft_addr
-        self.rpc_url = rpc_url
+        self.conductor_rpc_url = conductor_rpc_url
         self.node_rpc_url = node_rpc_url
         self.voting = voting
         self.conductor_active = None
@@ -27,7 +26,6 @@ class Sequencer:
         resp = requests.post(
             self.node_rpc_url,
             json=make_rpc_payload("admin_sequencerActive"),
-            verify=self.cert_path,
         )
         try:
             resp.raise_for_status()
@@ -37,9 +35,8 @@ class Sequencer:
 
     def _get_sequencer_healthy(self):
         resp = requests.post(
-            self.rpc_url,
+            self.conductor_rpc_url,
             json=make_rpc_payload("conductor_sequencerHealthy"),
-            verify=self.cert_path,
         )
         try:
             resp.raise_for_status()
@@ -49,9 +46,8 @@ class Sequencer:
 
     def _get_conductor_active(self):
         resp = requests.post(
-            self.rpc_url,
+            self.conductor_rpc_url,
             json=make_rpc_payload("conductor_active"),
-            verify=self.cert_path,
         )
         try:
             resp.raise_for_status()
@@ -61,9 +57,8 @@ class Sequencer:
 
     def _get_conductor_leader(self):
         resp = requests.post(
-            self.rpc_url,
+            self.conductor_rpc_url,
             json=make_rpc_payload("conductor_leader"),
-            verify=self.cert_path,
         )
         try:
             resp.raise_for_status()
@@ -75,7 +70,6 @@ class Sequencer:
         resp = requests.post(
             self.node_rpc_url,
             json=make_rpc_payload("optimism_syncStatus"),
-            verify=self.cert_path,
         )
         try:
             resp.raise_for_status()
@@ -87,9 +81,8 @@ class Sequencer:
 
     def cluster_membership(self):
         resp = requests.post(
-            self.rpc_url,
+            self.conductor_rpc_url,
             json=make_rpc_payload("conductor_clusterMembership"),
-            verify=self.cert_path,
         )
         resp.raise_for_status()
         return resp.json()["result"]["servers"]

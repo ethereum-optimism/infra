@@ -1,0 +1,87 @@
+cert_path = "./combined-cacert.pem"
+
+[networks]
+
+[networks.op-mainnet]
+sequencers = [
+    "prod-mainnet-sequencer-0",
+    "prod-mainnet-sequencer-1",
+    "prod-mainnet-sequencer-2",
+    "prod-mainnet-sequencer-4"
+]
+
+[networks.op-sepolia]
+sequencers = [
+    "prod-sepolia-sequencer-0",
+    "prod-sepolia-sequencer-1",
+    "prod-sepolia-sequencer-2"
+]
+
+[networks.conductor-dev]
+sequencers = [
+    "dev-client-conductor-dev-sequencer-0",
+    "dev-client-conductor-dev-sequencer-1",
+    "dev-client-conductor-dev-sequencer-2"
+]
+
+[sequencers]
+[sequencers.prod-mainnet-sequencer-0]
+raft_addr = "sequencer-0-op-conductor-raft.primary.mainnet.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-0-op-conductor.primary.mainnet.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-0-op-node.primary.mainnet.prod.oplabs.cloud"
+voting = true
+
+[sequencers.prod-mainnet-sequencer-1]
+raft_addr = "sequencer-1-op-conductor-raft.secondary.mainnet.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-1-op-conductor.secondary.mainnet.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-1-op-node.secondary.mainnet.prod.oplabs.cloud"
+voting = false
+
+[sequencers.prod-mainnet-sequencer-2]
+raft_addr = "sequencer-2-op-conductor-raft.tertiary.mainnet.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-2-op-conductor.tertiary.mainnet.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-2-op-node.tertiary.mainnet.prod.oplabs.cloud"
+voting = true
+
+[sequencers.prod-mainnet-sequencer-4]
+raft_addr = "sequencer-4-op-conductor-raft.tertiary.mainnet.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-4-op-conductor.tertiary.mainnet.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-4-op-node.tertiary.mainnet.prod.oplabs.cloud"
+voting = true
+
+[sequencers.prod-sepolia-sequencer-0]
+raft_addr = "sequencer-0-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-0-op-conductor.primary.sepolia.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-0-op-node.primary.sepolia.prod.oplabs.cloud"
+voting = true
+
+[sequencers.prod-sepolia-sequencer-1]
+raft_addr = "sequencer-1-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-1-op-conductor.primary.sepolia.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-1-op-node.primary.sepolia.prod.oplabs.cloud"
+voting = true
+
+[sequencers.prod-sepolia-sequencer-2]
+raft_addr = "sequencer-2-op-conductor-raft.primary.sepolia.prod.oplabs.cloud:50050"
+conductor_rpc_url = "https://sequencer-2-op-conductor.primary.sepolia.prod.oplabs.cloud"
+node_rpc_url = "https://sequencer-2-op-node.primary.sepolia.prod.oplabs.cloud"
+voting = true
+
+[sequencers.dev-client-conductor-dev-sequencer-0]
+raft_addr = "conductor-dev-sequencer-0-op-conductor-raft.primary.client.dev.oplabs.cloud:50050"
+conductor_rpc_url = "https://conductor-dev-sequencer-0-op-conductor.primary.client.dev.oplabs.cloud"
+node_rpc_url = "https://conductor-dev-sequencer-0-op-node.primary.client.dev.oplabs.cloud"
+voting = true
+
+[sequencers.dev-client-conductor-dev-sequencer-1]
+raft_addr = "conductor-dev-sequencer-1-op-conductor-raft.primary.client.dev.oplabs.cloud:50050"
+conductor_rpc_url = "https://conductor-dev-sequencer-1-op-conductor.primary.client.dev.oplabs.cloud"
+node_rpc_url = "https://conductor-dev-sequencer-1-op-node.primary.client.dev.oplabs.cloud"
+voting = true
+
+[sequencers.dev-client-conductor-dev-sequencer-2]
+raft_addr = "conductor-dev-sequencer-2-op-conductor-raft.primary.client.dev.oplabs.cloud:50050"
+conductor_rpc_url = "https://conductor-dev-sequencer-2-op-conductor.primary.client.dev.oplabs.cloud"
+node_rpc_url = "https://conductor-dev-sequencer-2-op-node.primary.client.dev.oplabs.cloud"
+voting = true
+
