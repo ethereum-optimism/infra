@@ -13,6 +13,9 @@ parameters:
   run-build-op-signer:
     type: boolean
     default: false
+  run-build-op-txproxy:
+    type: boolean
+    default: false
   run-build-op-ufm:
     type: boolean
     default: false
@@ -432,6 +435,22 @@ workflows:
           name: op-signer-docker-build
           docker_file: op-signer/Dockerfile
           docker_name: op-signer
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  op-txproxy:
+    when:
+      or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: op-txproxy-lint
+          module: op-txproxy
+      - go-test:
+          name: op-txproxy-tests
+          module: op-txproxy
+      - docker-build:
+          name: op-txproxy-docker-build
+          docker_file: op-txproxy/Dockerfile
+          docker_name: op-txproxy
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   op-ufm:
