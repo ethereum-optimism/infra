@@ -45,13 +45,14 @@ func (c *cache) Put(ctx context.Context, key string, value string) error {
 }
 
 type redisCache struct {
-	rdb    *redis.Client
-	prefix string
-	ttl    time.Duration
+	redisClient     *redis.Client
+	redisReadClient *redis.Client
+	prefix          string
+	ttl             time.Duration
 }
 
-func newRedisCache(rdb *redis.Client, prefix string, ttl time.Duration) *redisCache {
-	return &redisCache{rdb, prefix, ttl}
+func newRedisCache(redisClient *redis.Client, redisReadClient *redis.Client, prefix string, ttl time.Duration) *redisCache {
+	return &redisCache{redisClient, redisReadClient, prefix, ttl}
 }
 
 func (c *redisCache) namespaced(key string) string {
@@ -63,7 +64,7 @@ func (c *redisCache) namespaced(key string) string {
 
 func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 	start := time.Now()
-	val, err := c.rdb.Get(ctx, c.namespaced(key)).Result()
+	val, err := c.redisReadClient.Get(ctx, c.namespaced(key)).Result()
 	redisCacheDurationSumm.WithLabelValues("GET").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err == redis.Nil {
@@ -77,7 +78,7 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 
 func (c *redisCache) Put(ctx context.Context, key string, value string) error {
 	start := time.Now()
-	err := c.rdb.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
+	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
 	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err != nil {

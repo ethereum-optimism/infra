@@ -264,6 +264,63 @@ func TestBatchCaching(t *testing.T) {
 	require.Equal(t, 1, countRequests(backend, "eth_call"))
 }
 
+func TestCachingWithReadReplica(t *testing.T) {
+	primary, err := miniredis.Run()
+	require.NoError(t, err)
+	defer primary.Close()
+
+	replica, err := miniredis.Run()
+	require.NoError(t, err)
+	defer replica.Close()
+
+	hdlr := NewBatchRPCResponseRouter()
+	hdlr.SetRoute("eth_getBlockByHash", "999", "eth_getBlockByHash")
+
+	backend := NewMockBackend(hdlr)
+	defer backend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", backend.URL()))
+	require.NoError(t, os.Setenv("REDIS_URL", fmt.Sprintf("redis://%s", primary.Addr())))
+	require.NoError(t, os.Setenv("REDIS_READ_URL", fmt.Sprintf("redis://%s", replica.Addr())))
+
+	config := ReadConfig("caching_replica")
+	client := NewProxydClient("http://127.0.0.1:8545")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	// allow time for the block number fetcher to fire
+	time.Sleep(1500 * time.Millisecond)
+
+	params := []interface{}{"0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "false"}
+	response := "{\"jsonrpc\": \"2.0\", \"result\": \"eth_getBlockByHash\", \"id\": 999}"
+	resRaw, _, err := client.SendRPC("eth_getBlockByHash", params)
+	require.NoError(t, err)
+
+	// because the cache is not replicated to the replica, count request must be increased
+	resCache, _, err := client.SendRPC("eth_getBlockByHash", params)
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(response), resCache)
+	RequireEqualJSON(t, resRaw, resCache)
+	require.Equal(t, 2, countRequests(backend, "eth_getBlockByHash"))
+
+	// replicate cache data
+	for _, key := range primary.Keys() {
+		value, err := primary.Get(key)
+		require.NoError(t, err)
+
+		err = replica.Set(key, value)
+		require.NoError(t, err)
+	}
+
+	// now cache hit. count request must be same
+	resCache, _, err = client.SendRPC("eth_getBlockByHash", params)
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(response), resCache)
+	RequireEqualJSON(t, resRaw, resCache)
+	require.Equal(t, 2, countRequests(backend, "eth_getBlockByHash"))
+}
+
 func countRequests(backend *MockBackend, name string) int {
 	var count int
 	for _, req := range backend.Requests() {
