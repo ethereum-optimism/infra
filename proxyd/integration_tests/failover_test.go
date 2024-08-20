@@ -15,7 +15,7 @@ import (
 
 const (
 	goodResponse       = `{"jsonrpc": "2.0", "result": "hello", "id": 999}`
-	notHealthyResponse = `{"error":{"code":-32018,"message":"backend is currently not healthy to serve traffic"},"id":999,"jsonrpc":"2.0"}`
+	noBackendsResponse = `{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":999,"jsonrpc":"2.0"}`
 	unexpectedResponse = `{"error":{"code":-32011,"message":"some error"},"id":999,"jsonrpc":"2.0"}`
 )
 
@@ -110,7 +110,7 @@ func TestFailover(t *testing.T) {
 		}))
 		res, statusCode, _ := client.SendRPC("eth_chainId", nil)
 		require.Equal(t, 503, statusCode)
-		RequireEqualJSON(t, []byte(notHealthyResponse), res) // return currently not healthy since both failed
+		RequireEqualJSON(t, []byte(noBackendsResponse), res) // return currently not healthy since both failed
 		require.Equal(t, 1, len(goodBackend.Requests()))
 		require.Equal(t, 1, len(badBackend.Requests())) // bad backend is still called
 		goodBackend.Reset()
@@ -201,7 +201,7 @@ func TestRetries(t *testing.T) {
 	res, statusCode, err = client.SendRPC("eth_chainId", nil)
 	require.NoError(t, err)
 	require.Equal(t, 503, statusCode)
-	RequireEqualJSON(t, []byte(notHealthyResponse), res)
+	RequireEqualJSON(t, []byte(noBackendsResponse), res)
 	require.Equal(t, 4, len(backend.Requests()))
 }
 
