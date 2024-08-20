@@ -56,7 +56,7 @@ var (
 	}
 	ErrNoBackends = &RPCErr{
 		Code:          JSONRPCErrorInternal - 11,
-		Message:       "no backends available for method",
+		Message:       "no backend is currently healthy to serve traffic",
 		HTTPErrorCode: 503,
 	}
 	ErrBackendOverCapacity = &RPCErr{
