@@ -3,7 +3,6 @@ package integration_tests
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,7 +57,6 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 
 	// setup proxyd
 	config := ReadConfig("multicall")
-	fmt.Printf("[SetupMulticall] Using Timeout of %d \n", config.Server.TimeoutSeconds)
 	svr, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
 
@@ -93,6 +91,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 
 	handlers := []*ms.MockedHandler{&h1, &h2, &h3}
 
+	// Default Handler configurations
 	nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
 	nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(handlers[1].Handler))
 	//Node 3 has no handler empty handler never respondes should always context timeout
@@ -194,15 +193,29 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, txAccepted))
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
+		triggerBackend3 := make(chan struct{})
+
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend2))
+		nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend3))
 
 		localSvr := setServerBackend(svr, nodes)
-
 		body := makeSendRawTransaction(txHex1)
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			triggerBackend2 <- struct{}{}
+			time.Sleep(2 * time.Second)
+			triggerBackend1 <- struct{}{}
+			triggerBackend3 <- struct{}{}
+			wg.Done()
+		}()
 
 		localSvr.HandleRPC(rr, req)
 
@@ -219,6 +232,7 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node2"})
 		require.False(t, rpcRes.IsError())
 
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
@@ -232,20 +246,12 @@ func TestMulticall(t *testing.T) {
 
 		defer shutdown()
 
-		shutdownChan1 := make(chan struct{})
-		shutdownChan2 := make(chan struct{})
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
 
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan1, 4*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan2, 1*time.Second))
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend2))
 		nodes["node3"].mockBackend.SetHandler(SingleResponseHandler(403, dummyRes))
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			shutdownChan2 <- struct{}{}
-			shutdownChan1 <- struct{}{}
-			wg.Done()
-		}()
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -253,6 +259,15 @@ func TestMulticall(t *testing.T) {
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			triggerBackend2 <- struct{}{}
+			time.Sleep(3 * time.Second)
+			triggerBackend1 <- struct{}{}
+			wg.Done()
+		}()
 
 		localSvr.HandleRPC(rr, req)
 
@@ -281,8 +296,10 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
+		triggerBackend1 := make(chan struct{})
+
 		// We should ignore node2 first response cause 429, and return node 1 because 200
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 3*time.Second))
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
 		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(429, txAccepted))
 
 		localSvr := setServerBackend(svr, nodes)
@@ -291,6 +308,14 @@ func TestMulticall(t *testing.T) {
 		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
 		req.Header.Set("X-Forwarded-For", "203.0.113.1")
 		rr := httptest.NewRecorder()
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			time.Sleep(2 * time.Second)
+			triggerBackend1 <- struct{}{}
+			wg.Done()
+		}()
 
 		localSvr.HandleRPC(rr, req)
 
@@ -305,6 +330,7 @@ func TestMulticall(t *testing.T) {
 		require.Equal(t, "2.0", rpcRes.JSONRPC)
 
 		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
@@ -317,9 +343,9 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		shutdownChan := make(chan struct{})
+		triggerBackend := make(chan struct{})
 		nodes["node1"].mockBackend.SetHandler(SingleResponseHandler(200, dummyRes))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan, 7*time.Second))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -329,8 +355,14 @@ func TestMulticall(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		localSvr.HandleRPC(rr, req)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			time.Sleep(7 * time.Second)
+			triggerBackend <- struct{}{}
+			wg.Done()
+		}()
 		resp := rr.Result()
-		shutdownChan <- struct{}{}
 		defer resp.Body.Close()
 
 		require.NotNil(t, resp.Body)
@@ -342,6 +374,7 @@ func TestMulticall(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
 
+		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
@@ -355,10 +388,10 @@ func TestMulticall(t *testing.T) {
 		defer nodes["node3"].mockBackend.Close()
 		defer shutdown()
 
-		shutdownChan1 := make(chan struct{})
-		shutdownChan2 := make(chan struct{})
-		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan1, 7*time.Second))
-		nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, dummyRes, shutdownChan2, 7*time.Second))
+		triggerBackend1 := make(chan struct{})
+		triggerBackend2 := make(chan struct{})
+		nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend1))
+		nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, dummyRes, triggerBackend2))
 
 		localSvr := setServerBackend(svr, nodes)
 
@@ -370,12 +403,12 @@ func TestMulticall(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
-			shutdownChan1 <- struct{}{}
-			shutdownChan2 <- struct{}{}
+			time.Sleep(7 * time.Second)
+			triggerBackend1 <- struct{}{}
+			triggerBackend2 <- struct{}{}
 			wg.Done()
 		}()
 
-		fmt.Println("sending request")
 		localSvr.HandleRPC(rr, req)
 
 		resp := rr.Result()
@@ -388,7 +421,6 @@ func TestMulticall(t *testing.T) {
 		require.True(t, rpcRes.IsError())
 		require.Equal(t, rpcRes.Error.Code, proxyd.ErrNoBackends.Code)
 
-		// Wait for test response to complete before checking query count
 		wg.Wait()
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
 		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
@@ -403,24 +435,24 @@ func TestMulticall(t *testing.T) {
 		defer shutdown()
 
 		for i := 1; i < 4; i++ {
-			shutdownChan1 := make(chan struct{})
-			shutdownChan2 := make(chan struct{})
-			shutdownChan3 := make(chan struct{})
+			triggerBackend1 := make(chan struct{})
+			triggerBackend2 := make(chan struct{})
+			triggerBackend3 := make(chan struct{})
 
 			switch {
 			case i == 1:
-				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, txAccepted, shutdownChan1, 1*time.Second))
-				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(429, dummyRes, shutdownChan2, 1*time.Second))
-				nodes["node3"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(503, dummyRes, shutdownChan3, 1*time.Second))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(429, dummyRes, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(503, dummyRes, triggerBackend3))
 			case i == 2:
-				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(404, dummyRes, shutdownChan1, 1*time.Second))
-				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan2, 1*time.Second))
-				nodes["node3"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(405, dummyRes, shutdownChan3, 1*time.Second))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(405, dummyRes, triggerBackend3))
 			case i == 3:
 				// Return the quickest response
-				nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(404, dummyRes, shutdownChan1, 1*time.Second))
-				nodes["node2"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(500, dummyRes, shutdownChan2, 1*time.Second))
-				nodes["node3"].mockBackend.SetHandler(SingleResponseHandlerWithSleepShutdown(200, nonceErrorResponse, shutdownChan3, 1*time.Second))
+				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
+				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(500, dummyRes, triggerBackend2))
+				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend3))
 			}
 
 			localSvr := setServerBackend(svr, nodes)
@@ -433,9 +465,9 @@ func TestMulticall(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
-				shutdownChan1 <- struct{}{}
-				shutdownChan2 <- struct{}{}
-				shutdownChan3 <- struct{}{}
+				triggerBackend1 <- struct{}{}
+				triggerBackend2 <- struct{}{}
+				triggerBackend3 <- struct{}{}
 				wg.Done()
 			}()
 
@@ -475,25 +507,13 @@ func TestMulticall(t *testing.T) {
 			require.Equal(t, i, nodeBackendRequestCount(nodes, "node3"))
 		}
 	})
-
 }
 
-func SingleResponseHandlerWithSleep(code int, response string, duration time.Duration) http.HandlerFunc {
+// TriggerResponseHandler uses a channel to control when a backend returns
+// test cases can add an element to the triggerResponse channel to control the when a specific backend returns
+func TriggerResponseHandler(code int, response string, triggerResponse chan struct{}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("sleeping")
-		time.Sleep(duration)
-		fmt.Println("Shutting down Single Response Handler")
-		w.WriteHeader(code)
-		_, _ = w.Write([]byte(response))
-	}
-}
-
-func SingleResponseHandlerWithSleepShutdown(code int, response string, shutdownServer chan struct{}, duration time.Duration) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("sleeping")
-		time.Sleep(duration)
-		<-shutdownServer
-		fmt.Println("Shutting down Single Response Handler")
+		<-triggerResponse
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(response))
 	}
