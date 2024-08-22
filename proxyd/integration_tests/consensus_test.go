@@ -12,8 +12,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
-	"github.com/ethereum-optimism/optimism/proxyd"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/ethereum-optimism/infra/proxyd"
+	ms "github.com/ethereum-optimism/infra/proxyd/tools/mockserver/handler"
 	"github.com/stretchr/testify/require"
 )
 
