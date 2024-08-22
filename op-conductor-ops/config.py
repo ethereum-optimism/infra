@@ -7,6 +7,9 @@ def read_config(config_path: str) -> tuple[dict[str, Sequencer], str]:
     config = toml.load(config_path)
 
     cert_path = config.get('cert_path', "")
+    # if cert path is relative, pre-pend the config path
+    if not cert_path.startswith('/'):
+        cert_path = f"{config_path.rsplit('/', 1)[0]}/{cert_path}"
 
     # load sequencers into a map
     sequencers = {}

@@ -10,6 +10,11 @@ Requires [poetry](https://github.com/python-poetry/poetry).
 
 Install python dependencies with `poetry install`.
 
+Recommended updates to your .bashrc/zshrc:
+
+1. `export PATH="export PATH="<path-to-infra-repo>/op-conductor-ops:$PATH""`
+2. `export CONDUCTOR_CONFIG="<path-to-op-conductor-ops-config.toml>"`
+
 ## Usage
 
 After installing dependencies with `poetry`, the tool can be invoked with `./op-conductor-ops`,
