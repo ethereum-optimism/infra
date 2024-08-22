@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/stretchr/testify/require"
 )
 
