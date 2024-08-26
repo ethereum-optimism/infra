@@ -27,3 +27,9 @@ class Network:
             (sequencer for sequencer in self.sequencers if sequencer.conductor_leader),
             None,
         )
+
+    def find_active_sequencer(self):
+        return next(
+            (sequencer for sequencer in self.sequencers if sequencer.sequencer_active),
+            None,
+        )
