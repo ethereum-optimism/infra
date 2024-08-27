@@ -11,6 +11,16 @@ This tool implements `proxyd`, an RPC request router and proxy. It does the foll
 7. Cache immutable responses from backends.
 8. Provides metrics to measure request latency, error rates, and the like.
 
+## cLabs OFAC
+
+You can especify a list of sanctioned addresses with the property `sanctioned_addresses` as a list of strings at the first level of the `toml` config file, like:
+
+```toml
+sanctioned_addresses = [
+  "0x1292d4955bb47f5153b88ca12c7a9e4048f09839",
+  "0x1292d4955bb47f5153b88ca12c7a9e4048f09838",
+]
+```
 
 ## Usage
 
