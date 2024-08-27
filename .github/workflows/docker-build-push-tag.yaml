@@ -19,8 +19,8 @@ jobs:
       artifact-registry: us-west1-docker.pkg.dev/devopsre/proxyd/proxyd
       tags: ${{ github.ref_name }}
       platforms: linux/amd64
-      workload-id-provider: projects/1094498259535/locations/global/workloadIdentityPools/gh-optimism-infra/providers/github-by-repos
-      service-account: optimism-infra@devopsre.iam.gserviceaccount.com
-      context: .
-      file: Dockerfile
+      workload-id-provider: projects/1094498259535/locations/global/workloadIdentityPools/gh-optimism-infra-tag/providers/github-by-repos
+      service-account: optimism-infra-tag@devopsre.iam.gserviceaccount.com
+      context: ./proxyd
+      file: ./proxyd/Dockerfile
       trivy: false
