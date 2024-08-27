@@ -21,6 +21,6 @@ jobs:
       platforms: linux/amd64
       workload-id-provider: projects/1094498259535/locations/global/workloadIdentityPools/gh-optimism-infra/providers/github-by-repos
       service-account: optimism-infra@devopsre.iam.gserviceaccount.com
-      context: ./proxyd
+      context: .
       file: ./proxyd/Dockerfile
       trivy: false
