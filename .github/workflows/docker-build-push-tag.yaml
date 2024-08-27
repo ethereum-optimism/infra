@@ -1,4 +1,3 @@
----
 name: Build and Sign proxyd Container on tag
 
 on:
@@ -8,7 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  compute-tag:
+    runs-on: 'ubuntu-latest'
+    permissions:
+      pull-requests: read
+    outputs:
+      modified_tag: ${{ steps.remove-proxyd-prefix.outputs.modified_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Remove proxyd- prefix from tag
+        id: remove-proxyd-prefix
+        run: echo "::set-output name=modified_tag::$(echo '${{ github.ref_name }}' | sed 's/^proxyd-//')"
+  
   build-container-proxyd-tag:
+    needs: compute-tag
     uses: celo-org/reusable-workflows/.github/workflows/container-cicd.yaml@v2.0.4
     name: Build proxyd image container on tag
     permissions:
@@ -17,7 +30,7 @@ jobs:
       security-events: write
     with:
       artifact-registry: us-west1-docker.pkg.dev/devopsre/proxyd/proxyd
-      tags: ${{ join(fromJson('["' + github.ref_name + '"]').map(tag => tag.replace(/^proxyd-/, '')), '') }}
+      tags: ${{ needs.compute-tag.outputs.modified_tag }}
       platforms: linux/amd64
       workload-id-provider: projects/1094498259535/locations/global/workloadIdentityPools/gh-optimism-infra-tag/providers/github-by-repos
       service-account: optimism-infra-tag@devopsre.iam.gserviceaccount.com
