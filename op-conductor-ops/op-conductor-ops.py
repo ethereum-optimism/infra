@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import time
 import requests
 from rich.console import Console
 from rich.table import Table
@@ -320,6 +321,51 @@ def update_cluster_membership(network: str):
             print_warn(f"Failed to add {sequencer.sequencer_id} as voter: {e}")
     if error:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def force_active_sequencer(network: str, sequencer_id: str):
+    """Forces a sequencer to become active using stop/start."""
+    network_obj = get_network(network)
+    sequencer = network_obj.get_sequencer_by_id(sequencer_id)
+    if sequencer is None:
+        typer.echo(f"sequencer ID {sequencer_id} not found in network {network}")
+        raise typer.Exit(code=1)
+
+    hash = sequencer.unsafe_l2_hash
+
+    active_sequencer = network_obj.find_active_sequencer()
+    if active_sequencer:
+      typer.echo(f"Stopping {active_sequencer.sequencer_id}")
+      resp = requests.post(
+          active_sequencer.node_rpc_url,
+          json=make_rpc_payload("admin_stopSequencer", params=[]),
+      )
+      resp.raise_for_status()
+      if "error" in resp.json():
+          typer.echo(f"Failed to stop {active_sequencer.sequencer_id}: {resp.json()['error']}")
+          raise typer.Exit(code=1)
+      hash = resp.json()["result"]
+
+    if not hash:
+        typer.echo(f"Failed to get a hash to start sequencer")
+        raise typer.Exit(code=1)
+
+    # sleep for a bit to allow sequencer to catch up
+    time.sleep(1)
+
+    # start sequencer
+    typer.echo(f"Starting {sequencer_id} with hash {hash}")
+    resp = requests.post(
+        sequencer.node_rpc_url,
+        json=make_rpc_payload("admin_startSequencer", params=[hash]),
+    )
+    resp.raise_for_status()
+    if "error" in resp.json():
+        typer.echo(f"Failed to start {sequencer_id}: {resp.json()['error']}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Successfully forced {sequencer_id} to become active")
 
 
 if __name__ == "__main__":
