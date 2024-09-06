@@ -18,6 +18,7 @@ on:
         required: true
         type: choice
         options:
+          - op-signer
           - op-ufm
           - proxyd
       prerelease:
