@@ -1,0 +1,3 @@
+auth:
+  - name: localhost
+    key: projects/oplabs-dev-client/locations/nam6/keyRings/signer/cryptoKeys/zhwrd-imported-key/cryptoKeyVersions/1
