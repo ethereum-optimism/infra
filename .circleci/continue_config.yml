@@ -496,6 +496,9 @@ workflows:
             - hold
       - docker-publish:
           name: op-signer-docker-publish
+          filters:
+            tags:
+              only: /^op-signer\/v.*/
           docker_name: op-signer
           docker_tags: <<pipeline.git.revision>>
           context:
@@ -503,7 +506,7 @@ workflows:
           requires:
             - op-signer-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-signer-release
+          name: op-signer-docker-tag
           filters:
             tags:
               only: /^op-signer\/v.*/
@@ -528,6 +531,9 @@ workflows:
             - hold
       - docker-publish:
           name: op-ufm-docker-publish
+          filters:
+            tags:
+              only: /^op-ufm\/v.*/
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>
           context:
@@ -535,7 +541,7 @@ workflows:
           requires:
             - op-ufm-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-ufm-release
+          name: op-ufm-docker-tag
           filters:
             tags:
               only: /^op-ufm\/v.*/
@@ -559,7 +565,7 @@ workflows:
           requires:
             - hold
       - docker-publish:
-          name: proxyd-docker-release
+          name: proxyd-docker-publish
           filters:
             tags:
               only: /^proxyd\/v.*/
@@ -570,7 +576,7 @@ workflows:
           requires:
             - proxyd-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-stack-release
+          name: proxyd-docker-tag
           filters:
             tags:
               only: /^proxyd\/v.*/
@@ -579,7 +585,7 @@ workflows:
           context:
             - oplabs-gcr-release
           requires:
-            - proxyd-docker-release
+            - proxyd-docker-publish
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
@@ -595,6 +601,9 @@ workflows:
             - hold
       - docker-publish:
           name: op-conductor-mon-docker-publish
+          filters:
+            tags:
+              only: /^op-conductor-mon\/v.*/
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           context:
@@ -602,7 +611,7 @@ workflows:
           requires:
             - op-conductor-mon-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-stack-release
+          name: op-conductor-mon-docker-tag
           filters:
             tags:
               only: /^op-conductor-mon\/v.*/
