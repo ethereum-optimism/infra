@@ -6,6 +6,7 @@ import semver
 SERVICES  = [
     'proxyd',
     'op-ufm',
+    'op-signer',
     'op-conductor-mon',
 ]
 VERSION_PATTERN = '^{service}/v\\d+\\.\\d+\\.\\d+(-rc\\.\\d+)?$'
