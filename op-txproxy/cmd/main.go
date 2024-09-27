@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	optxproxy "github.com/ethereum-optimism/infra/op-txproxy"
+
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/opio"
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
-	optxproxy "github.com/ethereum-optimism/optimism/op-txproxy"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"

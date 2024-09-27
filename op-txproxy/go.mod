@@ -1,4 +1,4 @@
-module github.com/ethereum-optimism/optimism/op-txproxy
+module github.com/ethereum-optimism/infra/op-txproxy
 
 go 1.21
 
