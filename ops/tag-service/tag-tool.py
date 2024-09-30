@@ -8,6 +8,7 @@ SERVICES  = [
     'op-ufm',
     'op-signer',
     'op-conductor-mon',
+    'op-txproxy',
 ]
 VERSION_PATTERN = '^{service}/v\\d+\\.\\d+\\.\\d+(-rc\\.\\d+)?$'
 GIT_TAG_COMMAND = 'git tag -a {tag} -m "{message}"'

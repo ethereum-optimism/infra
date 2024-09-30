@@ -17,6 +17,7 @@ workflows:
           mapping: |
             op-conductor-mon/.* run-build-op-conductor-mon true
             op-signer/.* run-build-op-signer true
+            op-txproxy/.* run-build-op-txproxy true
             op-ufm/.* run-build-op-ufm true
             proxyd/.* run-build-proxyd true
             .circleci/.* run-all true
