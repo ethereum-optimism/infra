@@ -1,0 +1,28 @@
+---
+name: Build and Sign proxyd Container
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'proxyd/**'
+  workflow_dispatch:
+
+jobs:
+  build-container-proxyd:
+    uses: celo-org/reusable-workflows/.github/workflows/container-cicd.yaml@v2.0.4
+    name: Build proxyd image container
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+    with:
+      artifact-registry: us-west1-docker.pkg.dev/devopsre/dev-images/proxyd
+      tags: pr
+      platforms: linux/amd64
+      workload-id-provider: projects/1094498259535/locations/global/workloadIdentityPools/gh-optimism-infra/providers/github-by-repos
+      service-account: optimism-infra@devopsre.iam.gserviceaccount.com
+      context: .
+      file: ./proxyd/Dockerfile
+      trivy: false
