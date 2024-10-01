@@ -1,0 +1,62 @@
+# Path to the SSL/TLS certificate file
+cert_path = "./cacert.pem"
+
+# Network configurations
+[networks]
+
+# Example network configuration
+[networks.op-network-1]
+sequencers = [
+    "op-network-1-sequencer-0",
+    "op-network-1-sequencer-1",
+    "op-network-1-sequencer-2",
+]
+
+# Blank network configuration
+[networks.op-network-N]
+sequencers = [
+    "op-network-N-sequencer-0",
+    "op-network-N-sequencer-1",
+    "op-network-N-sequencer-2",
+]
+
+# Sequencer configurations
+[sequencers]
+
+# Example sequencer configuration for op-network-1 with three sequencers
+[sequencers.op-network-1-sequencer-0]
+raft_addr = "op-network-1-sequencer-0-op-conductor-raft:50050"
+conductor_rpc_url = "https://op-network-1-sequencer-0-op-conductor"
+node_rpc_url = "https://op-network-1-sequencer-0-op-node"
+voting = true
+
+[sequencers.op-network-1-sequencer-1]
+raft_addr = "op-network-1-sequencer-1-op-conductor-raft.50050"
+conductor_rpc_url = "https://op-network-1-sequencer-1-op-conductor"
+node_rpc_url = "https://op-network-1-sequencer-1-op-node"
+voting = false
+
+[sequencers.op-network-1-sequencer-2]
+raft_addr = "op-network-1-sequencer-2-op-conductor-raft:50050"
+conductor_rpc_url = "https://op-network-1-sequencer-2-op-conductor"
+node_rpc_url = "https://op-network-1-sequencer-2-op-node"
+voting = true
+
+# Blank sequencer configuration for op-network-N with three blank sequencers
+[sequencers.op-network-N-sequencer-0]
+raft_addr = ""
+conductor_rpc_url = ""
+node_rpc_url = ""
+voting = true
+
+[sequencers.op-network-N-sequencer-1]
+raft_addr = ""
+conductor_rpc_url = ""
+node_rpc_url = ""
+voting = true
+
+[sequencers.op-network-N-sequencer-2]
+raft_addr = ""
+conductor_rpc_url = ""
+node_rpc_url = ""
+voting = true

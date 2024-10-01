@@ -1,0 +1,3 @@
+auth:
+  - name: localhost
+    key: projects/my-gcp-project/locations/my-region/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1

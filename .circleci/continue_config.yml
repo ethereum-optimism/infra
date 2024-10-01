@@ -10,6 +10,12 @@ parameters:
   run-build-op-conductor-mon:
     type: boolean
     default: false
+  run-build-op-signer:
+    type: boolean
+    default: false
+  run-build-op-txproxy:
+    type: boolean
+    default: false
   run-build-op-ufm:
     type: boolean
     default: false
@@ -76,6 +82,7 @@ jobs:
           command: |
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-all: << pipeline.parameters.run-all >>"
@@ -98,6 +105,12 @@ jobs:
               echo "op-conductor-mon tag regex match: true"
             else
               echo "op-conductor-mon tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-signer/v.* ]]; then
+              echo "op-signer tag regex match: true"
+            else
+              echo "op-signer tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
@@ -408,6 +421,38 @@ workflows:
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  op-signer:
+    when:
+      or: [<< pipeline.parameters.run-build-op-signer >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: op-signer-lint
+          module: op-signer
+      - go-test:
+          name: op-signer-tests
+          module: op-signer
+      - docker-build:
+          name: op-signer-docker-build
+          docker_file: op-signer/Dockerfile
+          docker_name: op-signer
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  op-txproxy:
+    when:
+      or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: op-txproxy-lint
+          module: op-txproxy
+      - go-test:
+          name: op-txproxy-tests
+          module: op-txproxy
+      - docker-build:
+          name: op-txproxy-docker-build
+          docker_file: op-txproxy/Dockerfile
+          docker_name: op-txproxy
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
   op-ufm:
     when:
       or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
@@ -456,6 +501,41 @@ workflows:
             branches:
               ignore: /.*/
       - docker-build:
+          name: op-signer-docker-build
+          filters:
+            tags:
+              only: /^op-signer\/v.*/
+          docker_name: op-signer
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: op-signer/Dockerfile
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
+      - docker-publish:
+          name: op-signer-docker-publish
+          filters:
+            tags:
+              only: /^op-signer\/v.*/
+          docker_name: op-signer
+          docker_tags: <<pipeline.git.revision>>
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-signer-docker-build
+      - docker-tag-op-stack-release:
+          name: op-signer-docker-tag
+          filters:
+            tags:
+              only: /^op-signer\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-signer-docker-publish
+      - docker-build:
           name: op-ufm-docker-build
           filters:
             tags:
@@ -470,6 +550,9 @@ workflows:
             - hold
       - docker-publish:
           name: op-ufm-docker-publish
+          filters:
+            tags:
+              only: /^op-ufm\/v.*/
           docker_name: op-ufm
           docker_tags: <<pipeline.git.revision>>
           context:
@@ -477,7 +560,7 @@ workflows:
           requires:
             - op-ufm-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-ufm-release
+          name: op-ufm-docker-tag
           filters:
             tags:
               only: /^op-ufm\/v.*/
@@ -501,7 +584,7 @@ workflows:
           requires:
             - hold
       - docker-publish:
-          name: proxyd-docker-release
+          name: proxyd-docker-publish
           filters:
             tags:
               only: /^proxyd\/v.*/
@@ -512,7 +595,7 @@ workflows:
           requires:
             - proxyd-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-stack-release
+          name: proxyd-docker-tag
           filters:
             tags:
               only: /^proxyd\/v.*/
@@ -521,7 +604,7 @@ workflows:
           context:
             - oplabs-gcr-release
           requires:
-            - proxyd-docker-release
+            - proxyd-docker-publish
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
@@ -537,6 +620,9 @@ workflows:
             - hold
       - docker-publish:
           name: op-conductor-mon-docker-publish
+          filters:
+            tags:
+              only: /^op-conductor-mon\/v.*/
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           context:
@@ -544,7 +630,7 @@ workflows:
           requires:
             - op-conductor-mon-docker-build
       - docker-tag-op-stack-release:
-          name: docker-tag-op-stack-release
+          name: op-conductor-mon-docker-tag
           filters:
             tags:
               only: /^op-conductor-mon\/v.*/

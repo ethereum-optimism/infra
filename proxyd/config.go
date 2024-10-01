@@ -39,6 +39,7 @@ type CacheConfig struct {
 type RedisConfig struct {
 	URL       string `toml:"url"`
 	Namespace string `toml:"namespace"`
+	ReadURL   string `toml:"read_url"`
 }
 
 type MetricsConfig struct {

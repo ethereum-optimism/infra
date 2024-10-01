@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,8 +66,8 @@ func TestBatching(t *testing.T) {
 				NewRPCReq("2", "eth_chainId", nil),
 			},
 			expectedRes: asArray(
-				`{"error":{"code":-32011,"message":"no backends available for method"},"id":1,"jsonrpc":"2.0"}`,
-				`{"error":{"code":-32011,"message":"no backends available for method"},"id":2,"jsonrpc":"2.0"}`,
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":1,"jsonrpc":"2.0"}`,
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":2,"jsonrpc":"2.0"}`,
 			),
 			maxUpstreamBatchSize: 10,
 			numExpectedForwards:  1,
@@ -80,8 +80,8 @@ func TestBatching(t *testing.T) {
 				NewRPCReq("2", "eth_chainId", nil),
 			},
 			expectedRes: asArray(
-				`{"error":{"code":-32011,"message":"no backends available for method"},"id":1,"jsonrpc":"2.0"}`,
-				`{"error":{"code":-32011,"message":"no backends available for method"},"id":2,"jsonrpc":"2.0"}`,
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":1,"jsonrpc":"2.0"}`,
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":2,"jsonrpc":"2.0"}`,
 			),
 			maxUpstreamBatchSize: 1,
 			numExpectedForwards:  2,

@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis"
-	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/stretchr/testify/require"
 )
 
 const (
 	goodResponse       = `{"jsonrpc": "2.0", "result": "hello", "id": 999}`
-	noBackendsResponse = `{"error":{"code":-32011,"message":"no backends available for method"},"id":999,"jsonrpc":"2.0"}`
+	noBackendsResponse = `{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":999,"jsonrpc":"2.0"}`
 	unexpectedResponse = `{"error":{"code":-32011,"message":"some error"},"id":999,"jsonrpc":"2.0"}`
 )
 
@@ -110,7 +110,7 @@ func TestFailover(t *testing.T) {
 		}))
 		res, statusCode, _ := client.SendRPC("eth_chainId", nil)
 		require.Equal(t, 503, statusCode)
-		RequireEqualJSON(t, []byte(noBackendsResponse), res) // return no backend available since both failed
+		RequireEqualJSON(t, []byte(noBackendsResponse), res) // return currently not healthy since both failed
 		require.Equal(t, 1, len(goodBackend.Requests()))
 		require.Equal(t, 1, len(badBackend.Requests())) // bad backend is still called
 		goodBackend.Reset()

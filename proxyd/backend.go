@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	sw "github.com/ethereum-optimism/optimism/proxyd/pkg/avg-sliding-window"
+	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -57,7 +57,7 @@ var (
 	}
 	ErrNoBackends = &RPCErr{
 		Code:          JSONRPCErrorInternal - 11,
-		Message:       "no backends available for method",
+		Message:       "no backend is currently healthy to serve traffic",
 		HTTPErrorCode: 503,
 	}
 	ErrBackendOverCapacity = &RPCErr{
@@ -1336,7 +1336,7 @@ func RecordBatchRPCError(ctx context.Context, backendName string, reqs []*RPCReq
 }
 
 func MaybeRecordErrorsInRPCRes(ctx context.Context, backendName string, reqs []*RPCReq, resBatch []*RPCRes) {
-	log.Info("forwarded RPC request",
+	log.Debug("forwarded RPC request",
 		"backend", backendName,
 		"auth", GetAuthCtx(ctx),
 		"req_id", GetReqID(ctx),
