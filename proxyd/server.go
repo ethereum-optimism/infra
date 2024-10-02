@@ -714,7 +714,7 @@ func (s *Server) processTransaction(ctx context.Context, req *RPCReq) (*types.Tr
 		return nil, nil, ErrInvalidParams(err.Error())
 	}
 
-	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), nil)
+	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), tx.ChainId(), nil)
 	if err != nil {
 		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
 		return nil, nil, ErrInvalidParams(err.Error())

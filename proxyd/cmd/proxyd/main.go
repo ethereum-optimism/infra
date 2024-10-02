@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/BurntSushi/toml"
-	"golang.org/x/exp/slog"
+	"log/slog"
 
 	"github.com/ethereum/go-ethereum/log"
 
