@@ -714,7 +714,11 @@ func (s *Server) processTransaction(ctx context.Context, req *RPCReq) (*types.Tr
 		return nil, nil, ErrInvalidParams(err.Error())
 	}
 
-	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), tx.ChainId(), nil)
+	exchangeRates := make(map[common.Address]*big.Rat)
+	addr1 := common.HexToAddress("0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1")
+	exchangeRates[addr1] = big.NewRat(10, 1)
+
+	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), tx.ChainId(), exchangeRates)
 	if err != nil {
 		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
 		return nil, nil, ErrInvalidParams(err.Error())
