@@ -1,4 +1,4 @@
-module github.com/ethereum-optimism/infra/proxyd
+module github.com/celo-org/optimism-infra/proxyd
 
 go 1.21
 
