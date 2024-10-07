@@ -22,7 +22,7 @@ import (
 var (
 	GitCommit    = ""
 	GitDate      = ""
-	EnvVarPrefix = "op_txproxy"
+	EnvVarPrefix = "OP_TXPROXY"
 )
 
 func main() {
