@@ -11,7 +11,9 @@ import (
 )
 
 type AuthConfig struct {
-	ClientName  string   `yaml:"name"`
+	// ClientName DNS name of the client connecting to op-signer.
+	ClientName string `yaml:"name"`
+	// KeyName key resource name of the Cloud KMS
 	KeyName     string   `yaml:"key"`
 	ToAddresses []string `yaml:"toAddresses"`
 	MaxValue    string   `yaml:"maxValue"`

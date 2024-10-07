@@ -205,7 +205,7 @@ const (
 	SignBlockPayload SignActionType = "block_payload"
 )
 
-func ClientSign(version string) func(cliCtx *cli.Context) error {
+func ClientSign(version string, action SignActionType) func(cliCtx *cli.Context) error {
 	return func(cliCtx *cli.Context) error {
 		cfg := NewConfig(cliCtx)
 		if err := cfg.Check(); err != nil {
@@ -215,12 +215,9 @@ func ClientSign(version string) func(cliCtx *cli.Context) error {
 		l := oplog.NewLogger(os.Stdout, cfg.LogConfig)
 		log.Root().SetHandler(l.GetHandler())
 
-		actionStr := cliCtx.Args().Get(0)
-		action := SignActionType(actionStr)
-
 		switch action {
 		case SignTransaction:
-			txarg := cliCtx.Args().Get(1)
+			txarg := cliCtx.Args().Get(0)
 			if txarg == "" {
 				return errors.New("no transaction argument was provided")
 			}
@@ -248,7 +245,7 @@ func ClientSign(version string) func(cliCtx *cli.Context) error {
 			fmt.Println(string(result))
 
 		case SignBlockPayload:
-			blockPayloadHash := cliCtx.Args().Get(1)
+			blockPayloadHash := cliCtx.Args().Get(0)
 			if blockPayloadHash == "" {
 				return errors.New("no block payload argument was provided")
 			}
