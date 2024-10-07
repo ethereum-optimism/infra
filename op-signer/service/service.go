@@ -166,6 +166,8 @@ func (s *SignerService) SignBlockPayload(ctx context.Context, signingHash common
 		return nil, &InvalidTransactionError{err.Error()}
 	}
 
+	labels["status"] = "success"
+
 	s.logger.Info(
 		"Signed block payload",
 		"signingHash", hexutil.Encode(signingHash.Bytes()),
