@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -145,4 +146,31 @@ func (s *SignerService) SignTransaction(ctx context.Context, args signer.Transac
 	)
 
 	return hexutil.Bytes(txraw), nil
+}
+
+func (s *SignerService) SignBlockPayload(ctx context.Context, signingHash common.Hash) (hexutil.Bytes, error) {
+	clientInfo := ClientInfoFromContext(ctx)
+	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName)
+	if err != nil {
+		return nil, rpc.HTTPError{StatusCode: 403, Status: "Forbidden", Body: []byte(err.Error())}
+	}
+
+	labels := prometheus.Labels{"client": clientInfo.ClientName, "status": "error", "error": ""}
+	defer func() {
+		MetricSignTransactionTotal.With(labels).Inc()
+	}()
+
+	signature, err := s.provider.SignDigest(ctx, authConfig.KeyName, signingHash.Bytes())
+	if err != nil {
+		labels["error"] = "sign_error"
+		return nil, &InvalidTransactionError{err.Error()}
+	}
+
+	s.logger.Info(
+		"Signed block payload",
+		"signingHash", hexutil.Encode(signingHash.Bytes()),
+		"signature", hexutil.Encode(signature),
+	)
+
+	return signature, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -197,6 +198,13 @@ func MainAppAction(version string) cliapp.LifecycleAction {
 	}
 }
 
+type SignActionType string
+
+const (
+	SignTransaction  SignActionType = "transaction"
+	SignBlockPayload SignActionType = "block_payload"
+)
+
 func ClientSign(version string) func(cliCtx *cli.Context) error {
 	return func(cliCtx *cli.Context) error {
 		cfg := NewConfig(cliCtx)
@@ -207,32 +215,64 @@ func ClientSign(version string) func(cliCtx *cli.Context) error {
 		l := oplog.NewLogger(os.Stdout, cfg.LogConfig)
 		log.Root().SetHandler(l.GetHandler())
 
-		txarg := cliCtx.Args().First()
-		if txarg == "" {
-			return errors.New("no transaction argument was provided")
-		}
-		txraw, err := hexutil.Decode(txarg)
-		if err != nil {
-			return errors.New("failed to decode transaction argument")
-		}
+		actionStr := cliCtx.Args().Get(0)
+		action := SignActionType(actionStr)
 
-		client, err := client.NewSignerClient(l, cfg.ClientEndpoint, cfg.TLSConfig)
-		if err != nil {
-			return err
-		}
+		switch action {
+		case SignTransaction:
+			txarg := cliCtx.Args().Get(1)
+			if txarg == "" {
+				return errors.New("no transaction argument was provided")
+			}
+			txraw, err := hexutil.Decode(txarg)
+			if err != nil {
+				return errors.New("failed to decode transaction argument")
+			}
 
-		tx := &types.Transaction{}
-		if err := tx.UnmarshalBinary(txraw); err != nil {
-			return fmt.Errorf("failed to unmarshal transaction argument: %w", err)
-		}
+			client, err := client.NewSignerClient(l, cfg.ClientEndpoint, cfg.TLSConfig)
+			if err != nil {
+				return err
+			}
 
-		tx, err = client.SignTransaction(context.Background(), tx)
-		if err != nil {
-			return err
-		}
+			tx := &types.Transaction{}
+			if err := tx.UnmarshalBinary(txraw); err != nil {
+				return fmt.Errorf("failed to unmarshal transaction argument: %w", err)
+			}
 
-		result, _ := tx.MarshalJSON()
-		fmt.Println(string(result))
+			tx, err = client.SignTransaction(context.Background(), tx)
+			if err != nil {
+				return err
+			}
+
+			result, _ := tx.MarshalJSON()
+			fmt.Println(string(result))
+
+		case SignBlockPayload:
+			blockPayloadHash := cliCtx.Args().Get(1)
+			if blockPayloadHash == "" {
+				return errors.New("no block payload argument was provided")
+			}
+
+			client, err := client.NewSignerClient(l, cfg.ClientEndpoint, cfg.TLSConfig)
+			if err != nil {
+				return err
+			}
+
+			signingHash := common.Hash{}
+			if err := signingHash.UnmarshalText([]byte(blockPayloadHash)); err != nil {
+				return fmt.Errorf("failed to unmarshal block payload argument: %w", err)
+			}
+
+			signature, err := client.SignBlockPayload(context.Background(), signingHash)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(string(signature[:]))
+
+		case "":
+			return errors.New("no action was provided")
+		}
 
 		return nil
 	}
