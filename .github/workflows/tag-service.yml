@@ -20,6 +20,7 @@ on:
         options:
           - op-signer
           - op-ufm
+          - op-txproxy
           - proxyd
       prerelease:
         description: Increment major/minor/patch as prerelease?
