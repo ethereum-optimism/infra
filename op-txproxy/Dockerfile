@@ -1,8 +1,8 @@
 FROM golang:1.21.3-alpine3.18 as builder
 
 COPY ./op-txproxy /app
-
 WORKDIR /app
+
 RUN apk --no-cache add make jq bash git alpine-sdk
 RUN make build
 
@@ -16,3 +16,4 @@ WORKDIR /app
 COPY --from=builder /app/bin/op-txproxy /app
 
 ENTRYPOINT ["/app/op-txproxy"]
+CMD ["/app/op-txproxy"]
