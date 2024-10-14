@@ -59,6 +59,13 @@ type RateLimitConfig struct {
 	IPHeaderOverride string                              `toml:"ip_header_override"`
 }
 
+type NacosConfig struct {
+	URLs               string `toml:"urls"`
+	NamespaceId        string `toml:"namespace_id"`
+	ApplicationName    string `toml:"application_name"`
+	ExternalListenAddr string `toml:"external_listen_addr"`
+}
+
 type RateLimitMethodOverride struct {
 	Limit    int          `toml:"limit"`
 	Interval TOMLDuration `toml:"interval"`
@@ -202,6 +209,7 @@ type Config struct {
 	Redis                 RedisConfig           `toml:"redis"`
 	Metrics               MetricsConfig         `toml:"metrics"`
 	RateLimit             RateLimitConfig       `toml:"rate_limit"`
+	Nacos                 NacosConfig           `toml:"nacos"`
 	BackendOptions        BackendOptions        `toml:"backend"`
 	Backends              BackendsConfig        `toml:"backends"`
 	BatchConfig           BatchConfig           `toml:"batch"`
