@@ -50,32 +50,11 @@ func main() {
 func TxProxyMain(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, error) {
 	log := oplog.NewLogger(oplog.AppOut(ctx), oplog.ReadCLIConfig(ctx))
 
-	metricsRegistry := metrics.NewRegistry()
-	m := metrics.With(metricsRegistry)
-
 	cfg := optxproxy.ReadCLIConfig(ctx)
-	txproxy, err := optxproxy.NewTxProxy(ctx.Context, log, m, &cfg)
+	txproxy, err := optxproxy.NewTxProxy(ctx.Context, log, ctx.App.Version, &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to start superchain backend: %w", err)
 	}
 
-	// Start Metrics SErver
-	metricsConfig := rpc.ReadCLIConfig(ctx)
-	if err := metricsConfig.Check(); err != nil {
-		return nil, fmt.Errorf("invalid metrics config: %w", err)
-	}
-
-	// TODO: Spin up metrics server
-
-	// Start RPC Server
-	rpcConfig := rpc.ReadCLIConfig(ctx)
-	rpcOpts := []rpc.ServerOption{
-		rpc.WithAPIs(txproxy.GetAPIs()),
-		rpc.WithLogger(log),
-		rpc.WithMiddleware(optxproxy.AuthMiddleware(optxproxy.DefaultAuthHeaderKey)),
-	}
-
-	log.Info("rpc server configuration", "host", rpcConfig.ListenAddr, "port", rpcConfig.ListenPort)
-	rpcServer := rpc.NewServer(rpcConfig.ListenAddr, rpcConfig.ListenPort, ctx.App.Version, rpcOpts...)
-	return rpc.NewService(log, rpcServer), nil
+	return txproxy, nil
 }
