@@ -26,7 +26,7 @@ func CLIFlags(envPrefix string) []cli.Flag {
 			Value:   true,
 			EnvVars: opservice.PrefixEnvVar(envPrefix, "SENDRAWTXCONDITIONAL_ENABLED"),
 		},
-		&cli.StringSliceFlag{
+		&cli.StringFlag{
 			Name:     SendRawTransactionConditionalBackendFlagName,
 			Usage:    "block builder to broadcast conditional transactions",
 			Required: true,
