@@ -2,6 +2,8 @@ package op_txproxy
 
 import (
 	opservice "github.com/ethereum-optimism/optimism/op-service"
+	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
+	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 
 	"github.com/urfave/cli/v2"
 )
@@ -13,6 +15,11 @@ const (
 )
 
 type CLIConfig struct {
+	// external config
+	rpcConfig     oprpc.CLIConfig
+	metricsConfig opmetrics.CLIConfig
+
+	// sendRawTxCond
 	SendRawTransactionConditionalEnabled   bool
 	SendRawTransactionConditionalBackend   string
 	SendRawTransactionConditionalRateLimit uint64
@@ -43,6 +50,9 @@ func CLIFlags(envPrefix string) []cli.Flag {
 
 func ReadCLIConfig(ctx *cli.Context) CLIConfig {
 	return CLIConfig{
+		rpcConfig:     oprpc.ReadCLIConfig(ctx),
+		metricsConfig: opmetrics.ReadCLIConfig(ctx),
+
 		SendRawTransactionConditionalEnabled:   ctx.Bool(SendRawTransactionConditionalEnabledFlagName),
 		SendRawTransactionConditionalBackend:   ctx.String(SendRawTransactionConditionalBackendFlagName),
 		SendRawTransactionConditionalRateLimit: ctx.Uint64(SendRawTransactionConditionalRateLimitFlagName),
