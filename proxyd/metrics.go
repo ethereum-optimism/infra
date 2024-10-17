@@ -192,6 +192,14 @@ var (
 		"method",
 	})
 
+	rpcReqTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_reqs_total",
+		Help:      "Number of Rpc requests.",
+	}, []string{
+		"method",
+	})
+
 	batchRPCShortCircuitsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "batch_rpc_short_circuits_total",
@@ -502,6 +510,10 @@ func RecordCacheHit(method string) {
 
 func RecordCacheMiss(method string) {
 	cacheMissesTotal.WithLabelValues(method).Inc()
+}
+
+func RecordRpcRequestCount(method string, count int) {
+	rpcReqTotal.WithLabelValues(method).Add(float64(count))
 }
 
 func RecordCacheError(method string) {
