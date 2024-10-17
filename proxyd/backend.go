@@ -723,12 +723,13 @@ func sortBatchRPCResponse(req []*RPCReq, res []*RPCRes) {
 }
 
 type BackendGroup struct {
-	Name             string
-	Backends         []*Backend
-	WeightedRouting  bool
-	Consensus        *ConsensusPoller
-	FallbackBackends map[string]bool
-	routingStrategy  RoutingStrategy
+	Name                   string
+	Backends               []*Backend
+	WeightedRouting        bool
+	Consensus              *ConsensusPoller
+	FallbackBackends       map[string]bool
+	routingStrategy        RoutingStrategy
+	multicallRPCErrorCheck bool
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -777,7 +778,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
-		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
+		backendResp := bg.ExecuteMulticall(ctx, rpcReqs, bg.multicallRPCErrorCheck)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
@@ -824,7 +825,7 @@ type multicallTuple struct {
 	backendName string
 }
 
-func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq) *BackendGroupRPCResponse {
+func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq, multicallRPCErrorCheck bool) *BackendGroupRPCResponse {
 
 	// Create ctx without cancel so background tasks process
 	// after original request returns
@@ -850,7 +851,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 		close(ch)
 	}()
 
-	return bg.ProcessMulticallResponses(ch, bgCtx)
+	return bg.ProcessMulticallResponses(ch, bgCtx, multicallRPCErrorCheck)
 }
 
 func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple) {
@@ -896,9 +897,11 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 	}
 }
 
-func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx context.Context) *BackendGroupRPCResponse {
-	var finalResp *BackendGroupRPCResponse
+func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx context.Context, multicallRPCErrorCheck bool) *BackendGroupRPCResponse {
 	i := 0
+	var errResp *BackendGroupRPCResponse
+	var rpcResToCheck map[string]*RPCRes = make(map[string]*RPCRes)
+	var successResp map[string]*RPCRes = make(map[string]*RPCRes)
 	for {
 		multicallResp, ok := <-ch
 		if !ok {
@@ -908,7 +911,31 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 				"response_count", i,
 			)
 			if i > 0 {
-				return finalResp
+				// either all responses are failed, or all contain rpc errors
+
+				// check if no success response received
+				if len(successResp) == 0 {
+					return errResp
+				}
+
+				// add rpc error responses to success responses
+				for id, rpcRes := range rpcResToCheck {
+					if _, ok := successResp[id]; !ok {
+						successResp[id] = rpcRes
+					}
+				}
+
+				// get an array of rpcRes
+				var rpcRes = make([]*RPCRes, 0, len(successResp))
+				for _, successRes := range successResp {
+					rpcRes = append(rpcRes, successRes)
+				}
+
+				return &BackendGroupRPCResponse{
+					RPCRes:   rpcRes,
+					ServedBy: "",
+					error:    nil,
+				}
 			}
 			return &BackendGroupRPCResponse{
 				RPCRes:   nil,
@@ -921,22 +948,42 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 		resp := multicallResp.response
 		backendName := multicallResp.backendName
 
+		// if failed response, store it
 		if resp.error != nil {
-			log.Error("received error response from multicall channel",
-				"req_id", GetReqID(ctx),
-				"auth", GetAuthCtx(ctx),
-				"err", resp.error,
-				"backend", backendName,
-			)
-			finalResp = resp
+			errResp = resp
 			continue
 		}
+
+		// success or rpc error response
+		if multicallRPCErrorCheck {
+			// check if any of the response is an RPC error
+			var rpcError = false
+			for _, rpcRes := range resp.RPCRes {
+				// check if the ID is already in the success response
+				if _, ok := successResp[string(rpcRes.ID)]; !ok {
+					if rpcRes.IsError() {
+						rpcResToCheck[string(rpcRes.ID)] = rpcRes
+						rpcError = true
+					} else {
+						successResp[string(rpcRes.ID)] = rpcRes
+					}
+				}
+			}
+
+			// if contains rpc error, continue to next response
+			// otherwise, return the success response at the bottom
+			if rpcError {
+				continue
+			}
+		}
+
 		log.Info("received successful response from multicall channel",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"served_by", resp.ServedBy,
 			"backend", backendName,
 		)
+
 		return resp
 	}
 }

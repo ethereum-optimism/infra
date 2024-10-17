@@ -155,6 +155,8 @@ type BackendGroupConfig struct {
 
 	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
 
+	MulticallRPCErrorCheck bool `toml:"multicall_rpc_error_check"`
+
 	/*
 		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance
 	*/
