@@ -58,16 +58,20 @@ func (txp *TxProxy) Start(_ context.Context) error {
 
 func (txp *TxProxy) Stop(ctx context.Context) error {
 	var result error
+
 	if txp.rpcSrv != nil {
+		txp.log.Info("stopping rpc server")
 		if err := txp.rpcSrv.Stop(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to stop metrics server: %w", err))
 		}
 	}
 	if txp.metricsSrv != nil {
+		txp.log.Info("stopping metrics server")
 		if err := txp.metricsSrv.Stop(ctx); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to stop metrics server: %w", err))
 		}
 	}
+
 	return result
 }
 
