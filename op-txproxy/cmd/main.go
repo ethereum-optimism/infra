@@ -37,8 +37,9 @@ func main() {
 
 	logFlags := oplog.CLIFlags(EnvVarPrefix)
 	rpcFlags := rpc.CLIFlags(EnvVarPrefix)
+	metricsFlags := metrics.CLIFlags(EnvVarPrefix)
 	backendFlags := optxproxy.CLIFlags(EnvVarPrefix)
-	app.Flags = append(append(backendFlags, rpcFlags...), logFlags...)
+	app.Flags = append(append(append(backendFlags, rpcFlags...), metricsFlags...), logFlags...)
 
 	ctx := opio.WithInterruptBlocker(context.Background())
 	if err := app.RunContext(ctx, os.Args); err != nil {
@@ -48,21 +49,12 @@ func main() {
 
 func TxProxyMain(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, error) {
 	log := oplog.NewLogger(oplog.AppOut(ctx), oplog.ReadCLIConfig(ctx))
-	m := metrics.With(metrics.NewRegistry())
 
 	cfg := optxproxy.ReadCLIConfig(ctx)
-	txproxy, err := optxproxy.NewTxProxy(ctx.Context, log, m, &cfg)
+	txproxy, err := optxproxy.NewTxProxy(ctx.Context, log, ctx.App.Version, &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to start superchain backend: %w", err)
 	}
 
-	rpcConfig := rpc.ReadCLIConfig(ctx)
-	rpcOpts := []rpc.ServerOption{
-		rpc.WithAPIs(txproxy.GetAPIs()),
-		rpc.WithLogger(log),
-		rpc.WithMiddleware(optxproxy.AuthMiddleware(optxproxy.DefaultAuthHeaderKey)),
-	}
-
-	rpcServer := rpc.NewServer(rpcConfig.ListenAddr, rpcConfig.ListenPort, ctx.App.Version, rpcOpts...)
-	return rpc.NewService(log, rpcServer), nil
+	return txproxy, nil
 }

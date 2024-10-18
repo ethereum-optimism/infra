@@ -83,6 +83,7 @@ jobs:
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
+            echo "run-build-op-txproxy: << pipeline.parameters.run-build-op-txproxy >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-all: << pipeline.parameters.run-all >>"
@@ -111,6 +112,12 @@ jobs:
               echo "op-signer tag regex match: true"
             else
               echo "op-signer tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-txproxy/v.* ]]; then
+              echo "op-txproxy tag regex match: true"
+            else
+              echo "op-txproxy tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
@@ -535,6 +542,41 @@ workflows:
             - oplabs-gcr-release
           requires:
             - op-signer-docker-publish
+      - docker-build:
+          name: op-txproxy-docker-build
+          filters:
+            tags:
+              only: /^op-txproxy\/v.*/
+          docker_name: op-txproxy
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: op-txproxy/Dockerfile
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
+      - docker-publish:
+          name: op-txproxy-docker-publish
+          filters:
+            tags:
+              only: /^op-txproxy\/v.*/
+          docker_name: op-txproxy
+          docker_tags: <<pipeline.git.revision>>
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-txproxy-docker-build
+      - docker-tag-op-stack-release:
+          name: op-txproxy-docker-tag
+          filters:
+            tags:
+              only: /^op-txproxy\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - op-txproxy-docker-publish
       - docker-build:
           name: op-ufm-docker-build
           filters:
