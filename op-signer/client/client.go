@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -88,4 +89,17 @@ func (s *SignerClient) SignTransaction(
 	}
 
 	return signed, nil
+}
+
+func (s *SignerClient) SignBlockPayload(
+	ctx context.Context,
+	signingHash common.Hash,
+) ([]byte, error) {
+	var result []byte
+
+	if err := s.client.Call(&result, "eth_signBlockPayload", signingHash); err != nil {
+		return []byte{}, fmt.Errorf("eth_signTransaction failed: %w", err)
+	}
+
+	return result, nil
 }

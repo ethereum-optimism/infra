@@ -34,9 +34,15 @@ func main() {
 			Usage: "test client for signer service",
 			Subcommands: []*cli.Command{
 				{
-					Name:   "sign",
+					Name:   string(signer.SignTransaction),
 					Usage:  "sign a transaction",
-					Action: signer.ClientSign(Version),
+					Action: signer.ClientSign(Version, signer.SignTransaction),
+					Flags:  cliapp.ProtectFlags(signer.ClientSignCLIFlags("SIGNER")),
+				},
+				{
+					Name:   string(signer.SignBlockPayload),
+					Usage:  "sign a block payload",
+					Action: signer.ClientSign(Version, signer.SignBlockPayload),
 					Flags:  cliapp.ProtectFlags(signer.ClientSignCLIFlags("SIGNER")),
 				},
 			},
