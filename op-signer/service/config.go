@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"gopkg.in/yaml.v3"
 )
@@ -14,9 +15,13 @@ type AuthConfig struct {
 	// ClientName DNS name of the client connecting to op-signer.
 	ClientName string `yaml:"name"`
 	// KeyName key resource name of the Cloud KMS
-	KeyName     string   `yaml:"key"`
-	ToAddresses []string `yaml:"toAddresses"`
-	MaxValue    string   `yaml:"maxValue"`
+	KeyName string `yaml:"key"`
+	// ChainID chain id of the op-signer to sign for
+	ChainID uint64 `yaml:"chainID"`
+	// FromAddress sender address that is sending the rpc request
+	FromAddress common.Address `yaml:"fromAddress"`
+	ToAddresses []string       `yaml:"toAddresses"`
+	MaxValue    string         `yaml:"maxValue"`
 }
 
 func (c AuthConfig) MaxValueToInt() *big.Int {
@@ -51,12 +56,17 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 	return config, err
 }
 
-func (s SignerServiceConfig) GetAuthConfigForClient(clientName string) (*AuthConfig, error) {
+func (s SignerServiceConfig) GetAuthConfigForClient(clientName string, fromAddress *common.Address) (*AuthConfig, error) {
 	if clientName == "" {
 		return nil, errors.New("client name is empty")
 	}
 	for _, ac := range s.Auth {
 		if ac.ClientName == clientName {
+			// If fromAddress is specified, it must match the address in the authConfig
+			if fromAddress != nil && *fromAddress != ac.FromAddress {
+				continue
+			}
+
 			return &ac, nil
 		}
 	}

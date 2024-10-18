@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -17,6 +16,17 @@ import (
 )
 
 type SignerService struct {
+	eth      *EthService
+	opsigner *OpsignerSerivce
+}
+
+type EthService struct {
+	logger   log.Logger
+	config   SignerServiceConfig
+	provider provider.SignatureProvider
+}
+
+type OpsignerSerivce struct {
 	logger   log.Logger
 	config   SignerServiceConfig
 	provider provider.SignatureProvider
@@ -31,13 +41,19 @@ func NewSignerServiceWithProvider(
 	config SignerServiceConfig,
 	provider provider.SignatureProvider,
 ) *SignerService {
-	return &SignerService{logger, config, provider}
+	ethService := EthService{logger, config, provider}
+	opsignerService := OpsignerSerivce{logger, config, provider}
+	return &SignerService{&ethService, &opsignerService}
 }
 
 func (s *SignerService) RegisterAPIs(server *oprpc.Server) {
 	server.AddAPI(rpc.API{
 		Namespace: "eth",
-		Service:   s,
+		Service:   s.eth,
+	})
+	server.AddAPI(rpc.API{
+		Namespace: "opsigner",
+		Service:   s.opsigner,
 	})
 }
 
@@ -51,9 +67,9 @@ func containsNormalized(s []string, e string) bool {
 }
 
 // SignTransaction will sign the given transaction with the key configured for the authenticated client
-func (s *SignerService) SignTransaction(ctx context.Context, args signer.TransactionArgs) (hexutil.Bytes, error) {
+func (s *EthService) SignTransaction(ctx context.Context, args signer.TransactionArgs) (hexutil.Bytes, error) {
 	clientInfo := ClientInfoFromContext(ctx)
-	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName)
+	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName, nil)
 	if err != nil {
 		return nil, rpc.HTTPError{StatusCode: 403, Status: "Forbidden", Body: []byte(err.Error())}
 	}
@@ -97,6 +113,7 @@ func (s *SignerService) SignTransaction(ctx context.Context, args signer.Transac
 		labels["error"] = "invalid_transaction_error"
 		return nil, &InvalidTransactionError{err.Error()}
 	}
+
 	signerFrom, err := txSigner.Sender(signed)
 	if err != nil {
 		labels["error"] = "sign_error"
@@ -148,9 +165,9 @@ func (s *SignerService) SignTransaction(ctx context.Context, args signer.Transac
 	return hexutil.Bytes(txraw), nil
 }
 
-func (s *SignerService) SignBlockPayload(ctx context.Context, signingHash common.Hash) (hexutil.Bytes, error) {
+func (s *OpsignerSerivce) SignBlockPayload(ctx context.Context, args signer.BlockPayloadArgs) (hexutil.Bytes, error) {
 	clientInfo := ClientInfoFromContext(ctx)
-	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName)
+	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName, args.SenderAddress)
 	if err != nil {
 		return nil, rpc.HTTPError{StatusCode: 403, Status: "Forbidden", Body: []byte(err.Error())}
 	}
@@ -160,10 +177,36 @@ func (s *SignerService) SignBlockPayload(ctx context.Context, signingHash common
 		MetricSignTransactionTotal.With(labels).Inc()
 	}()
 
-	signature, err := s.provider.SignDigest(ctx, authConfig.KeyName, signingHash.Bytes())
+	if err := args.Check(); err != nil {
+		s.logger.Warn("invalid signing arguments", "err", err)
+		labels["error"] = "invalid_blockPayload"
+		return nil, &InvalidBlockPayloadError{message: err.Error()}
+	}
+
+	if *args.SenderAddress != authConfig.FromAddress {
+		s.logger.Warn("user is trying to sign with different sender account than actual signer-provider",
+			"provider", authConfig.FromAddress, "request", *args.SenderAddress)
+		labels["error"] = "sign_error"
+		return nil, &UnauthorizedBlockPayloadError{"unexpected from address"}
+	}
+
+	if args.ChainID.Uint64() != authConfig.ChainID {
+		s.logger.Warn("user is trying to sign a block payload for a different chainID than the actual signer's chainID",
+			"provider", authConfig.ChainID, "request", *args.ChainID)
+		labels["error"] = "sign_error"
+		return nil, &UnauthorizedBlockPayloadError{"unexpected chainId"}
+	}
+
+	signingHash, err := args.ToSigningHash()
+	if err != nil {
+		labels["error"] = "invalid_blockPayload"
+		return nil, &InvalidBlockPayloadError{err.Error()}
+	}
+
+	signature, err := s.provider.SignDigest(ctx, authConfig.KeyName, signingHash[:])
 	if err != nil {
 		labels["error"] = "sign_error"
-		return nil, &InvalidTransactionError{err.Error()}
+		return nil, &InvalidBlockPayloadError{err.Error()}
 	}
 
 	labels["status"] = "success"
