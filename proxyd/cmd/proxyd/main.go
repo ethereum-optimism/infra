@@ -25,6 +25,10 @@ var (
 	GitDate    = ""
 )
 
+const (
+	nacosExternalListenAddr = "NACOS_EXTERNAL_LISTEN_ADDR"
+)
+
 func main() {
 	// Set up logger with a default INFO level in case we fail to parse flags.
 	// Otherwise the final critical log won't show what the parsing error was.
@@ -62,9 +66,26 @@ func main() {
 		}()
 	}
 
+	// non-blocking
 	_, shutdown, err := proxyd.Start(config)
 	if err != nil {
 		log.Crit("error starting proxyd", "err", err)
+	}
+
+	// Register after start.
+	externalListenAddr := config.Nacos.ExternalListenAddr
+	if os.Getenv(nacosExternalListenAddr) != "" {
+		externalListenAddr = os.Getenv(nacosExternalListenAddr)
+	}
+
+	// Register after start.
+	if len(config.Nacos.URLs) > 0 {
+		proxyd.StartNacosClient(
+			config.Nacos.URLs,
+			config.Nacos.NamespaceId,
+			config.Nacos.ApplicationName,
+			externalListenAddr,
+		)
 	}
 
 	sig := make(chan os.Signal, 1)
