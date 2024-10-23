@@ -59,9 +59,16 @@ func TestSendRawTransactionConditionalDisabled(t *testing.T) {
 
 func TestSendRawTransactionConditionalMissingAuth(t *testing.T) {
 	svc := setupSvc(t)
-	hash, err := svc.SendRawTransactionConditional(context.Background(), nil, types.TransactionConditional{})
-	require.Zero(t, hash)
-	require.Equal(t, missingAuthenticationErr, err)
+
+	tx := types.NewTransaction(0, predeploys.EntryPoint_v060Addr, big.NewInt(0), 0, big.NewInt(0), nil)
+	txBytes, err := rlp.EncodeToBytes(tx)
+	require.NoError(t, err)
+
+	// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
+	// We'll be re-enforcing authentcation when fixed
+	hash, err := svc.SendRawTransactionConditional(context.Background(), txBytes, types.TransactionConditional{})
+	require.Equal(t, hash, tx.Hash())
+	require.Nil(t, err)
 }
 
 func TestSendRawTransactionConditionalInvalidTxTarget(t *testing.T) {

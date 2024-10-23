@@ -90,7 +90,11 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	authInfo := AuthFromContext(ctx)
 	if authInfo == nil {
 		s.failures.WithLabelValues("missing auth").Inc()
-		return common.Hash{}, missingAuthenticationErr
+
+		// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
+		// We'll be re-enforcing authentcation when fixed
+		//return common.Hash{}, missingAuthenticationErr
+		authInfo = &AuthContext{}
 	}
 
 	// Handle the request. For now, we do nothing with the authenticated signer
