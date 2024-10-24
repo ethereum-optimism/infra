@@ -79,7 +79,7 @@ func TestAuthHandlerSetContext(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := authHandler{headerKey: "auth", next: ctxHandler}
+	handler := authHandler{headerKey: DefaultAuthHeaderKey, next: ctxHandler}
 
 	rr := httptest.NewRecorder()
 	body := bytes.NewBufferString("body")
@@ -88,7 +88,7 @@ func TestAuthHandlerSetContext(t *testing.T) {
 	privKey, _ := crypto.GenerateKey()
 	sig, _ := crypto.Sign(accounts.TextHash(body.Bytes()), privKey)
 	addr := crypto.PubkeyToAddress(privKey.PublicKey)
-	r.Header.Set("auth", fmt.Sprintf("%s:%s", addr, common.Bytes2Hex(sig)))
+	r.Header.Set(DefaultAuthHeaderKey, fmt.Sprintf("%s:%s", addr, common.Bytes2Hex(sig)))
 
 	handler.ServeHTTP(rr, r)
 	require.Equal(t, http.StatusOK, rr.Code)

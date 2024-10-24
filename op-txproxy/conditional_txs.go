@@ -22,10 +22,12 @@ import (
 
 var (
 	// errs
-	rateLimitErr             = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
-	endpointDisabledErr      = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
-	missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
-	entrypointSupportErr     = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
+	rateLimitErr         = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
+	endpointDisabledErr  = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
+	entrypointSupportErr = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
+
+	// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
+	//missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {
