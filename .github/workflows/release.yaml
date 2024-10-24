@@ -1,0 +1,123 @@
+name: Release
+on:
+  push:
+    tags: ["*"]
+  workflow_dispatch:
+#  pull_request: # for testing only
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  ECR_REPO: 305587085711.dkr.ecr.us-west-2.amazonaws.com/proxyd
+  PUB_REPO: public.ecr.aws
+
+jobs:
+  build-docker-image:
+    name: Build Docker Image and extract files
+    runs-on: ["self-hosted", "linux", "x64", "ubuntu-latest"]
+    steps:
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_REPO }}
+          username: ${{ secrets.ECR_ACCESS_KEY_ID }}
+          password: ${{ secrets.ECR_ACCESS_KEY }}
+
+      - name: Checkout Sources
+        uses: actions/checkout@v4
+        with:
+          submodules: "true"
+          token: ${{ secrets.GIT_CREDENTIALS }}
+
+      - uses: de-vri-es/setup-git-credentials@v2
+        with:
+          credentials: https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_CREDENTIALS }}@github.com
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        id: docker-builder
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare Environment Variables
+        run: |
+          echo "HOME=$HOME" | tee -a $GITHUB_ENV
+          echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}" | tee -a $GITHUB_ENV
+          echo "SHORT_SHA=${GITHUB_SHA::7}" | tee -a $GITHUB_ENV
+          GIT_TAG=$(git tag --points-at HEAD)
+          echo "GIT_TAG=$GIT_TAG" | tee -a $GITHUB_ENV
+          GIT_BRANCH=$(git branch --show-current)
+          echo "GIT_BRANCH=$GIT_BRANCH" | tee -a $GITHUB_ENV
+          echo "REF_NAME=$(echo ${GIT_TAG:-$GITHUB_REF_NAME} | sed 's/[^a-zA-Z0-9._]/-/g')" | tee -a $GITHUB_ENV
+      - run: cat $HOME/.gitconfig && cat $XDG_CONFIG_HOME/git/credentials
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REPO }}
+            ${{ env.PUB_REPO }}/altlayer/mach
+          flavor: |
+            prefix=
+            suffix=
+          tags: |
+            type=sha,format=short,prefix=
+            type=ref,event=branch
+            type=ref,event=branch,suffix=-${{ github.run_number }}
+            type=ref,event=tag
+            type=raw,value=${{ env.REF_NAME }},enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=${{ env.GIT_BRANCH }},enable=${{ env.GIT_BRANCH != '' }}
+            type=raw,value=latest,enable=${{ env.GIT_BRANCH == 'master' }}
+
+      - name: Build with cache and push images
+        uses: docker/build-push-action@v5
+        id: docker_build
+        with:
+          context: .
+          file: ./proxyd/Dockerfile
+          builder: ${{ steps.docker-builder.outputs.name }}
+          target: app
+          push: ${{ github.event_name != 'pull_request' }}
+          # push: true
+          provenance: false
+          cache-from: |
+            type=registry,ref=${{ env.ECR_REPO }}:latest
+            type=registry,ref=${{ env.ECR_REPO }}:${{ env.REF_NAME }}
+          secret-files: |
+            git_config=${{ env.HOME }}/.gitconfig
+            git_credentials=${{ env.XDG_CONFIG_HOME }}/git/credentials
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: pull-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.ECR_REPO }}
+          tags: |
+            type=raw,value=${{ env.REF_NAME }}
+
+      - name: Pull Image
+        run: |
+          docker pull ${{ steps.pull-meta.outputs.tags }}
+          echo IMG=${{ steps.pull-meta.outputs.tags }} | tee -a $GITHUB_ENV
+
+      - name: Extract binary
+        run: >
+          mkdir outputs;
+          docker run --rm -u=root -v $PWD/outputs:/out --entrypoint=/bin/bash $IMG -c
+          'set -x; cp /usr/local/bin/op-mach /out/op-mach; cp /usr/local/bin/arb-mach /out/arb-mach; ls /out'
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: binary
+          path: outputs
