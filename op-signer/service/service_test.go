@@ -158,7 +158,7 @@ func testSignTransaction(t *testing.T, tx *types.Transaction) {
 					SignDigest(ctx, tt.wantKeyName, tt.digest).
 					Return(signature, nil)
 			}
-			resp, err := service.SignTransaction(ctx, tt.args)
+			resp, err := service.eth.SignTransaction(ctx, tt.args)
 			if tt.wantErrCode == 0 {
 				assert.Nil(t, err)
 				if assert.NotNil(t, resp) {

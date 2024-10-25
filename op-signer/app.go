@@ -213,7 +213,7 @@ func ClientSign(version string, action SignActionType) func(cliCtx *cli.Context)
 		}
 
 		l := oplog.NewLogger(os.Stdout, cfg.LogConfig)
-		log.Root().SetHandler(l.GetHandler())
+		oplog.SetGlobalLogHandler(l.Handler())
 
 		switch action {
 		case SignTransaction:
