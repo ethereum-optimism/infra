@@ -2,7 +2,7 @@ module github.com/ethereum-optimism/infra/op-signer
 
 go 1.22
 
-toolchain go1.23.0
+toolchain go1.22.0
 
 replace github.com/ethereum-optimism/optimism v1.4.3-0.20240125020216-6a3b1ec12399 => github.com/testinprod-io/optimism v0.0.0-20241018221952-12c4820e35fb
 
