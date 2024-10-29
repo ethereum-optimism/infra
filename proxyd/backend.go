@@ -778,7 +778,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
-		backendResp := bg.ExecuteMulticall(ctx, rpcReqs, bg.multicallRPCErrorCheck)
+		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
@@ -825,7 +825,9 @@ type multicallTuple struct {
 	backendName string
 }
 
-func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq, multicallRPCErrorCheck bool) *BackendGroupRPCResponse {
+// Note: rpcReqs should only contain 1 request of 'sendRawTransactions'
+func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq) *BackendGroupRPCResponse {
+
 
 	// Create ctx without cancel so background tasks process
 	// after original request returns
@@ -851,7 +853,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq,
 		close(ch)
 	}()
 
-	return bg.ProcessMulticallResponses(ch, bgCtx, multicallRPCErrorCheck)
+	return bg.ProcessMulticallResponses(ch, bgCtx, bg.multicallRPCErrorCheck)
 }
 
 func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple) {
