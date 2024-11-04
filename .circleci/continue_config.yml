@@ -444,6 +444,24 @@ workflows:
           docker_name: op-signer
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  peer-mgmt-service:
+    when:
+      or: [<< pipeline.parameters.run-build-pms >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - docker-build:
+          name: pms-docker-build
+          docker_file: peer-mgmt-service/Dockerfile
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+      - docker-publish:
+          name: pms-docker-publish
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          context:
+            - oplabs-gcr-internal
+          requires:
+            - pms-docker-build
   op-txproxy:
     when:
       or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
