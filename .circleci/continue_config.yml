@@ -22,6 +22,9 @@ parameters:
   run-all:
     type: boolean
     default: false
+  vm-image:
+    type: string
+    default: ubuntu-2204:current
 
 commands:
   gcp-oidc-authenticate:
@@ -147,7 +150,7 @@ jobs:
         type: string
         default: "oplabs-tools-artifacts/images"
     machine:
-      image: default
+      image: <<pipeline.parameters.vm-image>>
     steps:
       - checkout
       - run:
@@ -194,7 +197,7 @@ jobs:
         type: string
         default: "oplabs-tools-artifacts/images"
     machine:
-      image: default
+      image: <<pipeline.parameters.vm-image>>
     steps:
       - attach_workspace:
           at: /tmp/docker_images
