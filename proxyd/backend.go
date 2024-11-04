@@ -561,6 +561,11 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		httpReq.SetBasicAuth(b.authUsername, b.authPassword)
 	}
 
+	opTxProxyAuth := GetOpTxProxyAuthHeader(ctx)
+	if opTxProxyAuth != "" {
+		httpReq.Header.Set(DefaultOpTxProxyAuthHeader, opTxProxyAuth)
+	}
+
 	xForwardedFor := GetXForwardedFor(ctx)
 	if b.stripTrailingXFF {
 		xForwardedFor = stripXFF(xForwardedFor)
