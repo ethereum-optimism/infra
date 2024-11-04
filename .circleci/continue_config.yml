@@ -462,7 +462,7 @@ workflows:
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           context:
-            - oplabs-gcr-internal
+            - oplabs-gcr-release
           requires:
             - pms-docker-build
   op-txproxy:
