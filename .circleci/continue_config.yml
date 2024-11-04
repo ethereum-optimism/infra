@@ -16,6 +16,9 @@ parameters:
   run-build-op-txproxy:
     type: boolean
     default: false
+  run-build-pms:
+    type: boolean
+    default: false
   run-build-op-ufm:
     type: boolean
     default: false
