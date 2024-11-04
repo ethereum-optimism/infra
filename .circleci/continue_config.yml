@@ -1,10 +1,7 @@
 version: 2.1
 
 orbs:
-  go: circleci/go@1.9.0
   gcp-cli: circleci/gcp-cli@2.4.1
-  shellcheck: circleci/shellcheck@3.1.2
-  path-filtering: circleci/path-filtering@1.0.0
 
 parameters:
   run-build-op-conductor-mon:
@@ -334,74 +331,6 @@ jobs:
           command: codecov --verbose --clean --flags <<parameters.module>>
       - store_test_results:
           path: /tmp/test-results
-
-  py-presubmit:
-    parameters:
-      poetry_root:
-        description: Root of the Poetry project directory.
-        type: string
-    docker:
-      - image: cimg/python:3.11
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: prep results dir
-          command: mkdir -p /tmp/test-results
-      - run:
-          name: run presubmit
-          command: |
-            poetry install
-            poetry run presubmit
-          working_directory: <<parameters.poetry_root>>
-
-  build-release:
-    parameters:
-      package_name:
-        description: Package to build
-        type: string
-      artifact_path:
-        description: Path to build artifact
-        type: string
-        default: ./bin
-      release_env:
-        description: Release environment
-        type: string
-        default: prod
-    docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
-    steps:
-      - checkout
-      - run:
-          name: Build
-          command: |
-            VERSION=$(echo "$CIRCLE_TAG" | grep -Eow 'v.*' || true)
-            make build-release VERSION=$VERSION RELEASE_ENV=<<parameters.release_env>>
-          working_directory: <<parameters.package_name>>
-      - persist_to_workspace:
-          root: <<parameters.package_name>>/<<parameters.artifact_path>>
-          paths:
-            - "."
-
-  publish-release:
-    parameters:
-      package_name:
-        description: Package to publish
-        type: string
-      artifact_path:
-        description: Path to build artifact
-        type: string
-        default: ./bin
-    docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
-    steps:
-      - attach_workspace:
-          at: <<parameters.package_name>>/<<parameters.artifact_path>>
-      - run:
-          name: "Publish Release on GitHub"
-          command: |
-            go install github.com/tcnksm/ghr@v0.16.2
-            ghr -t "$GITHUB_TOKEN" -u "$CIRCLE_PROJECT_USERNAME" -r "$CIRCLE_PROJECT_REPONAME" -c "$CIRCLE_SHA1" -delete "$CIRCLE_TAG" <<parameters.package_name>>/<<parameters.artifact_path>>
 
 workflows:
   logging:
