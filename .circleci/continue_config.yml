@@ -258,6 +258,9 @@ jobs:
 
   docker-tag-op-stack-release:
     parameters:
+      docker_name:
+        description: Docker image name
+        type: string
       registry:
         description: Docker registry
         type: string
@@ -466,212 +469,62 @@ workflows:
             branches:
               ignore: /.*/
       - docker-build:
-          name: op-signer-docker-build
+          matrix:
+            parameters:
+              docker_name:
+                - op-signer
+                - op-txproxy
+                - op-ufm
+                - proxyd
+                - op-conductor-mon
+                - peer-mgmt-service
+          name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
-              only: /^op-signer\/v.*/
-          docker_name: op-signer
+              only: /^<<matrix.docker_name>>\/v.*/
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
-          docker_file: op-signer/Dockerfile
+          docker_file: <<matrix.docker_name>>/Dockerfile
           context:
             - oplabs-gcr-release
           requires:
             - hold
       - docker-publish:
-          name: op-signer-docker-publish
+          matrix:
+            parameters:
+              docker_name:
+                - op-signer
+                - op-txproxy
+                - op-ufm
+                - proxyd
+                - op-conductor-mon
+                - peer-mgmt-service
+          name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
-              only: /^op-signer\/v.*/
-          docker_name: op-signer
+              only: /^<<matrix.docker_name>>\/v.*/
           docker_tags: <<pipeline.git.revision>>
           context:
             - oplabs-gcr-release
           requires:
-            - op-signer-docker-build
+            - <<matrix.docker_name>>-docker-build
       - docker-tag-op-stack-release:
-          name: op-signer-docker-tag
+          matrix:
+            parameters:
+              docker_name:
+                - op-signer
+                - op-txproxy
+                - op-ufm
+                - proxyd
+                - op-conductor-mon
+                - peer-mgmt-service
+          name: <<matrix.module>>-docker-tag
           filters:
             tags:
-              only: /^op-signer\/v.*/
+              only: /^<<matrix.docker_name>>\/v.*/
             branches:
               ignore: /.*/
           context:
             - oplabs-gcr-release
           requires:
-            - op-signer-docker-publish
-      - docker-build:
-          name: op-txproxy-docker-build
-          filters:
-            tags:
-              only: /^op-txproxy\/v.*/
-          docker_name: op-txproxy
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: op-txproxy/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: op-txproxy-docker-publish
-          filters:
-            tags:
-              only: /^op-txproxy\/v.*/
-          docker_name: op-txproxy
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-txproxy-docker-build
-      - docker-tag-op-stack-release:
-          name: op-txproxy-docker-tag
-          filters:
-            tags:
-              only: /^op-txproxy\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-txproxy-docker-publish
-      - docker-build:
-          name: op-ufm-docker-build
-          filters:
-            tags:
-              only: /^op-ufm\/v.*/
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: op-ufm/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: op-ufm-docker-publish
-          filters:
-            tags:
-              only: /^op-ufm\/v.*/
-          docker_name: op-ufm
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-ufm-docker-build
-      - docker-tag-op-stack-release:
-          name: op-ufm-docker-tag
-          filters:
-            tags:
-              only: /^op-ufm\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-ufm-docker-publish
-      - docker-build:
-          name: proxyd-docker-build
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: proxyd/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: proxyd-docker-publish
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-          docker_name: proxyd
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - proxyd-docker-build
-      - docker-tag-op-stack-release:
-          name: proxyd-docker-tag
-          filters:
-            tags:
-              only: /^proxyd\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          requires:
-            - proxyd-docker-publish
-      - docker-build:
-          name: pms-docker-build
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-          docker_name: peer-mgmt-service
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: peer-mgmt-service/Dockerfile
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: pms-docker-publish
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-          docker_name: peer-mgmt-service
-          docker_tags: <<pipeline.git.revision>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - pms-docker-build
-      - docker-tag-op-stack-release:
-          name: pms-docker-tag
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          requires:
-            - pms-docker-publish
-      - docker-build:
-          name: op-conductor-mon-docker-build
-          filters:
-            tags:
-              only: /^op-conductor-mon\/v.*/
-          docker_file: op-conductor-mon/Dockerfile
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: .
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: op-conductor-mon-docker-publish
-          filters:
-            tags:
-              only: /^op-conductor-mon\/v.*/
-          docker_name: op-conductor-mon
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-conductor-mon-docker-build
-      - docker-tag-op-stack-release:
-          name: op-conductor-mon-docker-tag
-          filters:
-            tags:
-              only: /^op-conductor-mon\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          requires:
-            - op-conductor-mon-docker-publish
+            - <<matrix.docker_name>>-docker-publish
