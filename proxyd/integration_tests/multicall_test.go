@@ -20,7 +20,7 @@ import (
 const nonceErrorResponse = `{"jsonrpc": "2.0","error": {"code": -32000, "message": "nonce too low"},"id": 1}`
 const txAccepted = `{"jsonrpc": "2.0","result": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef","id": 1}`
 
-func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
+func setupMulticall(t *testing.T, configName string) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func(), *proxyd.Server, []*ms.MockedHandler) {
 	// setup mock servers
 	node1 := NewMockBackend(nil)
 	node2 := NewMockBackend(nil)
@@ -57,7 +57,7 @@ func setupMulticall(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup,
 	node3.SetHandler(SingleResponseHandler(429, dummyRes))
 
 	// setup proxyd
-	config := ReadConfig("multicall")
+	config := ReadConfig(configName)
 	fmt.Printf("[SetupMulticall] Using Timeout of %d \n", config.Server.TimeoutSeconds)
 	svr, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func nodeBackendRequestCount(nodes map[string]nodeContext, node string) int {
 func TestMulticall(t *testing.T) {
 
 	t.Run("Multicall will request all backends", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -153,7 +153,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("When all of the backends return non 200, multicall should return 503", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -188,7 +188,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("It should return the first 200 response", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -225,7 +225,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("Ensure application level error is returned to caller if its first", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -275,7 +275,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("It should ignore network errors and return a 200 from a slower request", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -311,7 +311,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("When one of the backends times out", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -349,7 +349,7 @@ func TestMulticall(t *testing.T) {
 
 	t.Run("allBackends times out", func(t *testing.T) {
 
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -396,7 +396,7 @@ func TestMulticall(t *testing.T) {
 	})
 
 	t.Run("Test with many multi-calls in without resetting", func(t *testing.T) {
-		nodes, _, _, shutdown, svr, _ := setupMulticall(t)
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall")
 		defer nodes["node1"].mockBackend.Close()
 		defer nodes["node2"].mockBackend.Close()
 		defer nodes["node3"].mockBackend.Close()
@@ -474,6 +474,42 @@ func TestMulticall(t *testing.T) {
 			require.Equal(t, i, nodeBackendRequestCount(nodes, "node2"))
 			require.Equal(t, i, nodeBackendRequestCount(nodes, "node3"))
 		}
+	})
+
+	t.Run("All 200 but some with rpc error, return the non-rpc error one", func(t *testing.T) {
+		nodes, _, _, shutdown, svr, _ := setupMulticall(t, "multicall_with_rpc_error_check")
+		defer nodes["node1"].mockBackend.Close()
+		defer nodes["node2"].mockBackend.Close()
+		defer nodes["node3"].mockBackend.Close()
+		defer shutdown()
+
+		nodes["node1"].mockBackend.SetHandler(SingleResponseHandlerWithSleep(200, txAccepted, 1*time.Second))
+		nodes["node2"].mockBackend.SetHandler(SingleResponseHandler(200, nonceErrorResponse))
+		nodes["node3"].mockBackend.SetHandler(SingleResponseHandler(200, nonceErrorResponse))
+
+		localSvr := setServerBackend(svr, nodes)
+
+		body := makeSendRawTransaction(txHex1)
+		req, _ := http.NewRequest("POST", "https://1.1.1.1:8080", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", "203.0.113.1")
+		rr := httptest.NewRecorder()
+
+		localSvr.HandleRPC(rr, req)
+
+		resp := rr.Result()
+		defer resp.Body.Close()
+
+		require.NotNil(t, resp.Body)
+		require.Equal(t, 200, resp.StatusCode)
+		rpcRes := &proxyd.RPCRes{}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
+		require.False(t, rpcRes.IsError())
+		require.Equal(t, "2.0", rpcRes.JSONRPC)
+		require.Equal(t, resp.Header["X-Served-By"], []string{"node/node1"})
+
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
+		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
 	})
 
 }
