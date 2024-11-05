@@ -54,7 +54,7 @@ func (s *Service) Start(ctx context.Context) {
 		}()
 	}
 
-	for network, _ := range s.Config.Networks {
+	for network := range s.Config.Networks {
 		networkNodes := make(map[string]*config.NodeConfig)
 		for _, m := range s.Config.Networks[network].Members {
 			networkNodes[m] = s.Config.Nodes[m]
@@ -69,11 +69,11 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) Shutdown() {
 	log.Info("service shutting down")
 	if s.Config.Healthz.Enabled {
-		s.Healthz.Shutdown()
+		s.Healthz.Shutdown() //nolint:errcheck
 		log.Info("healthz stopped")
 	}
 	if s.Config.Metrics.Enabled {
-		s.Metrics.Shutdown()
+		s.Metrics.Shutdown() //nolint:errcheck
 		log.Info("metrics stopped")
 	}
 	log.Info("service stopped")

@@ -33,5 +33,5 @@ func (h *HealthzServer) Shutdown() error {
 }
 
 func (h *HealthzServer) Handle(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("OK"))
+	w.Write([]byte("OK")) //nolint:errcheck
 }

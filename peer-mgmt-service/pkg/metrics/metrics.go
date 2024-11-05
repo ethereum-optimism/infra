@@ -48,7 +48,7 @@ var (
 		"network",
 	})
 
-	networkKnownPeerCount = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	_ = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "network_known_peer_count",
 		Help:      "Known peer count per network",

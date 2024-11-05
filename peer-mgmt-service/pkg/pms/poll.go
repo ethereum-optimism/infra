@@ -118,7 +118,7 @@ func (n *Network) pollNode(ctx context.Context, nodeName string, nodeConfig *con
 func (n *Network) updateGraph(ctx context.Context) {
 	for _, nodeState := range n.state.nodes {
 		knownPeers := make([]string, 0, len(nodeState.peers.Peers))
-		for peerPeerID, _ := range nodeState.peers.Peers {
+		for peerPeerID := range nodeState.peers.Peers {
 			if peerPeerID == nodeState.self.PeerID.String() {
 				continue
 			}
