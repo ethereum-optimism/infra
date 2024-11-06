@@ -470,13 +470,6 @@ workflows:
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
-      - docker-build:
-          name: pms-docker-build-backwards-compatible
-          docker_file: peer-mgmt-service/Dockerfile
-          docker_name: peer-mgmt-service
-          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
-          docker_context: .
   op-txproxy:
     when:
       or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
@@ -680,47 +673,6 @@ workflows:
             - oplabs-gcr-release
           requires:
             - proxyd-docker-publish
-      #region backwards-compatibility of PMS
-      ## The following region-ed section builds, pushes and tags the peer-mgmt-service exactly at the destination where it was pushed when it was closed source for accomplishing backwards-compatibility with any clients mistakenly still relying on it.
-      - docker-build:
-          name: pms-docker-build-backwards-compatible
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-          docker_name: peer-mgmt-service
-          docker_tags: <<pipeline.git.revision>>
-          docker_context: .
-          docker_file: peer-mgmt-service/Dockerfile
-          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
-          context:
-            - oplabs-gcr-release
-          requires:
-            - hold
-      - docker-publish:
-          name: pms-docker-publish-backwards-compatible
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-          docker_name: peer-mgmt-service
-          docker_tags: <<pipeline.git.revision>>
-          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
-          context:
-            - oplabs-gcr-release
-          requires:
-            - pms-docker-build-backwards-compatible
-      - docker-tag-op-stack-release:
-          name: pms-docker-tag-backwards-compatible
-          filters:
-            tags:
-              only: /^peer-mgmt-service\/v.*/
-            branches:
-              ignore: /.*/
-          context:
-            - oplabs-gcr-release
-          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
-          requires:
-            - pms-docker-publish-backwards-compatible
-      #endregion
       - docker-build:
           name: pms-docker-build
           filters:
