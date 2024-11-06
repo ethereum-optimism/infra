@@ -1,0 +1,28 @@
+log_level: info
+dry_run: false
+
+metrics:
+  enabled: true
+  host: 0.0.0.0
+  port: 7300
+
+healthz:
+  enabled: true
+  host: 0.0.0.0
+  port: 8080
+
+poll_interval: 30s
+node_state_expiration: 1h
+rpc_timeout: 15s
+
+nodes:
+  op-node-0:
+    rpc_address: http://op-node-0:9545
+  op-node-1:
+    rpc_address: http://op-node-1:9545
+
+networks:
+  network_name:
+    members:
+      - op-node-0
+      - op-node-1
