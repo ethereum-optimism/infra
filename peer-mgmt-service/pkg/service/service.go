@@ -6,9 +6,9 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/metrics"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/pms"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/pms"
 	"github.com/ethereum/go-ethereum/log"
 )
 

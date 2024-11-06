@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/metrics"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/metrics/opp2p_client"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics/opp2p_client"
 	"github.com/ethereum/go-ethereum/log"
 )
 

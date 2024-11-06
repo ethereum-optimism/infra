@@ -12,8 +12,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/log"
 
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/service"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/service"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 )
 

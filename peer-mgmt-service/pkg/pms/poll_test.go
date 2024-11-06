@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/config"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/stretchr/testify/require"
 )

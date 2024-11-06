@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service/pkg/metrics"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
+	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
 	opp2p "github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"

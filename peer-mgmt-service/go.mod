@@ -1,4 +1,4 @@
-module github.com/ethereum-optimism/infrastructure-services/peer-mgmt-service
+module github.com/ethereum-optimism/infra/peer-mgmt-service
 
 go 1.21
 
