@@ -16,6 +16,9 @@ parameters:
   run-build-op-txproxy:
     type: boolean
     default: false
+  run-build-pms:
+    type: boolean
+    default: false
   run-build-op-ufm:
     type: boolean
     default: false
@@ -84,6 +87,7 @@ jobs:
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
             echo "run-build-op-txproxy: << pipeline.parameters.run-build-op-txproxy >>"
+            echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-all: << pipeline.parameters.run-all >>"
@@ -118,6 +122,12 @@ jobs:
               echo "op-txproxy tag regex match: true"
             else
               echo "op-txproxy tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^peer-mgmt-service/v.* ]]; then
+              echo "peer-mgmt-service tag regex match: true"
+            else
+              echo "peer-mgmt-service tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
@@ -444,6 +454,29 @@ workflows:
           docker_name: op-signer
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  peer-mgmt-service:
+    when:
+      or: [<< pipeline.parameters.run-build-pms >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: pms-lint
+          module: peer-mgmt-service
+      - go-test:
+          name: pms-tests
+          module: peer-mgmt-service
+      - docker-build:
+          name: pms-docker-build
+          docker_file: peer-mgmt-service/Dockerfile
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+      - docker-build:
+          name: pms-docker-build-backwards-compatible
+          docker_file: peer-mgmt-service/Dockerfile
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
+          docker_context: .
   op-txproxy:
     when:
       or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
@@ -497,14 +530,14 @@ workflows:
       - log-config-results:
           filters:
             tags:
-              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -647,6 +680,82 @@ workflows:
             - oplabs-gcr-release
           requires:
             - proxyd-docker-publish
+      #region backwards-compatibility of PMS
+      ## The following region-ed section builds, pushes and tags the peer-mgmt-service exactly at the destination where it was pushed when it was closed source for accomplishing backwards-compatibility with any clients mistakenly still relying on it.
+      - docker-build:
+          name: pms-docker-build-backwards-compatible
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: peer-mgmt-service/Dockerfile
+          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
+      - docker-publish:
+          name: pms-docker-publish-backwards-compatible
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>
+          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
+          context:
+            - oplabs-gcr-release
+          requires:
+            - pms-docker-build-backwards-compatible
+      - docker-tag-op-stack-release:
+          name: pms-docker-tag-backwards-compatible
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
+          requires:
+            - pms-docker-publish-backwards-compatible
+      #endregion
+      - docker-build:
+          name: pms-docker-build
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>
+          docker_context: .
+          docker_file: peer-mgmt-service/Dockerfile
+          context:
+            - oplabs-gcr-release
+          requires:
+            - hold
+      - docker-publish:
+          name: pms-docker-publish
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+          docker_name: peer-mgmt-service
+          docker_tags: <<pipeline.git.revision>>
+          context:
+            - oplabs-gcr-release
+          requires:
+            - pms-docker-build
+      - docker-tag-op-stack-release:
+          name: pms-docker-tag
+          filters:
+            tags:
+              only: /^peer-mgmt-service\/v.*/
+            branches:
+              ignore: /.*/
+          context:
+            - oplabs-gcr-release
+          requires:
+            - pms-docker-publish
       - docker-build:
           name: op-conductor-mon-docker-build
           filters:
