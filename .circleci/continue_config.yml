@@ -124,10 +124,10 @@ jobs:
               echo "op-txproxy tag regex match: false"
             fi
 
-            if [[ $CURRENT_TAG =~ ^pms/v.* ]]; then
-              echo "pms tag regex match: true"
+            if [[ $CURRENT_TAG =~ ^peer-mgmt-service/v.* ]]; then
+              echo "peer-mgmt-service tag regex match: true"
             else
-              echo "pms tag regex match: false"
+              echo "peer-mgmt-service tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-ufm/v.* ]]; then
@@ -530,14 +530,14 @@ workflows:
       - log-config-results:
           filters:
             tags:
-              only: /^(pms|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(pms|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -686,7 +686,7 @@ workflows:
           name: pms-docker-build-backwards-compatible
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
@@ -700,7 +700,7 @@ workflows:
           name: pms-docker-publish-backwards-compatible
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>
           repo: oplabs-tools-artifacts/internal-images ## introduces backwards compatibility
@@ -712,7 +712,7 @@ workflows:
           name: pms-docker-tag-backwards-compatible
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
             branches:
               ignore: /.*/
           context:
@@ -725,7 +725,7 @@ workflows:
           name: pms-docker-build
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>
           docker_context: .
@@ -738,7 +738,7 @@ workflows:
           name: pms-docker-publish
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
           docker_name: peer-mgmt-service
           docker_tags: <<pipeline.git.revision>>
           context:
@@ -749,7 +749,7 @@ workflows:
           name: pms-docker-tag
           filters:
             tags:
-              only: /^pms\/v.*/
+              only: /^peer-mgmt-service\/v.*/
             branches:
               ignore: /.*/
           context:
