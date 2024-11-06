@@ -25,6 +25,7 @@ on:
           - op-ufm
           - op-txproxy
           - proxyd
+          - peer-mgmt-service
       prerelease:
         description: Increment major/minor/patch as prerelease?
         required: false

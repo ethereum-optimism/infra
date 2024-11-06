@@ -5,6 +5,7 @@ import semver
 
 SERVICES  = [
     'proxyd',
+    'peer-mgmt-service',
     'op-ufm',
     'op-signer',
     'op-conductor-mon',
