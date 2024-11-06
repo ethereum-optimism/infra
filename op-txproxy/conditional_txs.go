@@ -25,6 +25,8 @@ var (
 	rateLimitErr         = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
 	endpointDisabledErr  = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
 	entrypointSupportErr = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
+	failedValidationErr  = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
+	maxCostExceededErr   = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
 
 	// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
 	//missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
@@ -103,7 +105,6 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	hash, err := s.sendCondTx(ctx, authInfo.Caller, txBytes, &cond)
 	if err != nil {
 		s.failures.WithLabelValues(err.Error()).Inc()
-		s.log.Error("failed transaction conditional", "caller", authInfo.Caller.String(), "hash", hash.String(), "err", err)
 		return common.Hash{}, err
 	}
 
@@ -123,16 +124,12 @@ func (s *ConditionalTxService) sendCondTx(ctx context.Context, caller common.Add
 		return txHash, entrypointSupportErr
 	}
 	if err := cond.Validate(); err != nil {
-		return txHash, &rpc.JsonError{
-			Message: fmt.Sprintf("failed conditional validation: %s", err),
-			Code:    params.TransactionConditionalRejectedErrCode,
-		}
+		s.log.Info("failed conditional validation", "err", err, "caller", caller.String())
+		return txHash, failedValidationErr
 	}
 	if cost > params.TransactionConditionalMaxCost {
-		return txHash, &rpc.JsonError{
-			Message: fmt.Sprintf("conditional cost, %d, exceeded max: %d", cost, params.TransactionConditionalMaxCost),
-			Code:    params.TransactionConditionalCostExceededMaxErrCode,
-		}
+		s.log.Info("max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost, "caller", caller.String())
+		return txHash, maxCostExceededErr
 	}
 
 	// enforce rate limit on the cost to be observed
