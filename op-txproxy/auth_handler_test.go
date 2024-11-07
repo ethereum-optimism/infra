@@ -3,6 +3,7 @@ package op_txproxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,62 +21,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var pingHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "ping")
-})
-
 func TestAuthHandlerMissingAuth(t *testing.T) {
-	handler := authHandler{next: pingHandler}
+	var authContext *AuthContext
+	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authContext = AuthFromContext(r.Context())
+	})}
 
 	rr := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/", nil)
-	handler.ServeHTTP(rr, r)
 
-	// simply forwards the request
-	require.Equal(t, http.StatusOK, rr.Code)
-	require.Equal(t, "ping", rr.Body.String())
+	handler.ServeHTTP(rr, r)
+	require.Nil(t, authContext)
 }
 
 func TestAuthHandlerBadHeader(t *testing.T) {
-	handler := authHandler{headerKey: "auth", next: pingHandler}
+	var authContext *AuthContext
+	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authContext = AuthFromContext(r.Context())
+	})}
 
 	rr := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/", nil)
 	r.Header.Set("auth", "foobarbaz")
 
 	handler.ServeHTTP(rr, r)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.NotNil(t, authContext)
+	require.Zero(t, authContext.Caller)
+	require.Equal(t, misformattedAuthErr, authContext.Err)
 }
 
 func TestAuthHandlerBadSignature(t *testing.T) {
-	handler := authHandler{headerKey: "auth", next: pingHandler}
+	var authContext *AuthContext
+	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authContext = AuthFromContext(r.Context())
+	})}
 
 	rr := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/", nil)
-	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("0xa"), "foobar"))
+	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("a"), "foobar"))
 
 	handler.ServeHTTP(rr, r)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.NotNil(t, authContext)
+	require.Zero(t, authContext.Caller)
+	require.Equal(t, invalidAuthSignatureErr, authContext.Err)
 }
 
 func TestAuthHandlerMismatchedCaller(t *testing.T) {
-	handler := authHandler{headerKey: "auth", next: pingHandler}
+	var authContext *AuthContext
+	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authContext = AuthFromContext(r.Context())
+	})}
 
 	rr := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "/", strings.NewReader("body"))
+	body := bytes.NewBufferString("body")
+	r, _ := http.NewRequest("GET", "/", body)
 
 	privKey, _ := crypto.GenerateKey()
-	sig, _ := crypto.Sign(accounts.TextHash([]byte("body")), privKey)
-	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("0xa"), sig))
+	sig, _ := crypto.Sign(accounts.TextHash(body.Bytes()), privKey)
+	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("a"), common.Bytes2Hex(sig)))
 
 	handler.ServeHTTP(rr, r)
-	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.NotNil(t, authContext)
+	require.Zero(t, authContext.Caller)
+	require.Equal(t, mismatchedRecoveredSignerErr, authContext.Err)
 }
 
 func TestAuthHandlerSetContext(t *testing.T) {
-	var ctx *AuthContext
+	var authContext *AuthContext
 	ctxHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx = AuthFromContext(r.Context())
+		authContext = AuthFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -92,13 +106,23 @@ func TestAuthHandlerSetContext(t *testing.T) {
 
 	handler.ServeHTTP(rr, r)
 	require.Equal(t, http.StatusOK, rr.Code)
+	require.Nil(t, authContext.Err)
+	require.Equal(t, addr, authContext.Caller)
+}
 
-	require.NotNil(t, ctx)
-	require.Equal(t, addr, ctx.Caller)
+type AuthAwareRPC struct{}
+
+func (a *AuthAwareRPC) Run(ctx context.Context) error {
+	authContext := AuthFromContext(ctx)
+	if authContext == nil || authContext.Err != nil {
+		return errors.New("failed")
+	}
+	return nil
 }
 
 func TestAuthHandlerRpcMiddleware(t *testing.T) {
-	rpcServer := oprpc.NewServer("127.0.0.1", 0, "", oprpc.WithMiddleware(AuthMiddleware("auth")))
+	apis := []rpc.API{{Namespace: "test", Service: &AuthAwareRPC{}}}
+	rpcServer := oprpc.NewServer("127.0.0.1", 0, "", oprpc.WithAPIs(apis), oprpc.WithMiddleware(AuthMiddleware("auth")))
 	require.NoError(t, rpcServer.Start())
 	t.Cleanup(func() { _ = rpcServer.Stop() })
 
@@ -107,13 +131,17 @@ func TestAuthHandlerRpcMiddleware(t *testing.T) {
 	require.NoError(t, err)
 	defer clnt.Close()
 
-	// pass without auth (default handler does not deny)
+	// passthrough auth (default handler does not deny)
 	err = clnt.CallContext(context.Background(), nil, "rpc_modules")
 	require.Nil(t, err)
 
+	// denied with no header
+	err = clnt.CallContext(context.Background(), nil, "test_run")
+	require.NotNil(t, err)
+
 	// denied with bad auth header
 	clnt.SetHeader("auth", "foobar")
-	err = clnt.CallContext(context.Background(), nil, "rpc_modules")
+	err = clnt.CallContext(context.Background(), nil, "test_run")
 	require.NotNil(t, err)
 }
 
