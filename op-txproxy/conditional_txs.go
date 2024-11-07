@@ -22,14 +22,12 @@ import (
 
 var (
 	// errs
-	rateLimitErr         = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
-	endpointDisabledErr  = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
-	entrypointSupportErr = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
-	failedValidationErr  = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
-	maxCostExceededErr   = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
-
-	// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
-	//missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
+	rateLimitErr             = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
+	endpointDisabledErr      = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
+	entrypointSupportErr     = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
+	failedValidationErr      = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
+	maxCostExceededErr       = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
+	missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {
@@ -94,11 +92,7 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	authInfo := AuthFromContext(ctx)
 	if authInfo == nil {
 		s.failures.WithLabelValues("missing auth").Inc()
-
-		// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
-		// We'll be re-enforcing authentcation when fixed
-		//return common.Hash{}, missingAuthenticationErr
-		authInfo = &AuthContext{}
+		return common.Hash{}, missingAuthenticationErr
 	}
 
 	// Handle the request. For now, we do nothing with the authenticated signer
