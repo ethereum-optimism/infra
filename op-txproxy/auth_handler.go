@@ -34,7 +34,7 @@ type authHandler struct {
 // requests and leaves it up to the request handler to do so.
 //  1. Missing Auth Header: AuthContext is missing from context
 //  2. Failed Validation: AuthContext is set with a populated Err
-//  3. Passed Validation: AuthContext is set with the authentication calleErr
+//  3. Passed Validation: AuthContext is set with the authenticated caller
 //
 // note: only up to the default body limit (5MB) is read when constructing the text hash
 func AuthMiddleware(headerKey string) func(next http.Handler) http.Handler {
