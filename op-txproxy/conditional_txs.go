@@ -28,6 +28,7 @@ var (
 	failedValidationErr      = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
 	maxCostExceededErr       = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
 	missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
+	invalidAuthenticationErr = &rpc.JsonError{Message: "invalid authentication", Code: params.TransactionConditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {
@@ -94,6 +95,10 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 		s.failures.WithLabelValues("missing auth").Inc()
 		return common.Hash{}, missingAuthenticationErr
 	}
+	if authInfo.Err != nil {
+		s.failures.WithLabelValues("invalid auth").Inc()
+		return common.Hash{}, invalidAuthenticationErr
+	}
 
 	// Handle the request. For now, we do nothing with the authenticated signer
 	hash, err := s.sendCondTx(ctx, authInfo.Caller, txBytes, &cond)
@@ -122,7 +127,7 @@ func (s *ConditionalTxService) sendCondTx(ctx context.Context, caller common.Add
 		return txHash, failedValidationErr
 	}
 	if cost > params.TransactionConditionalMaxCost {
-		s.log.Info("max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost, "caller", caller.String())
+		s.log.Info("conditional max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost, "caller", caller.String())
 		return txHash, maxCostExceededErr
 	}
 
