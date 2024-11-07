@@ -279,6 +279,16 @@ jobs:
             gcloud auth configure-docker <<parameters.registry>>
             ./ops/ci-tag-docker-release/ci-docker-tag-op-stack-release.sh <<parameters.registry>>/<<parameters.repo>> $CIRCLE_TAG $CIRCLE_SHA1
 
+  print-hello-world:
+    docker:
+      - image: cimg/go:1.21
+    steps:
+      - checkout
+      - run:
+          name: print hello-world
+          command: |
+            echo "Hello, World 1!"
+
   go-lint:
     parameters:
       module:
@@ -520,6 +530,11 @@ workflows:
           docker_context: .
   release:
     jobs:
+      - print-hello-world:
+          filters:
+            branches:
+              only:
+                - yash-test-duplicate-circleci-job-candidate-branch
       - log-config-results:
           filters:
             tags:
