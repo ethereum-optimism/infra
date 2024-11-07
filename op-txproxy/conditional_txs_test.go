@@ -64,8 +64,6 @@ func TestSendRawTransactionConditionalMissingAuth(t *testing.T) {
 	txBytes, err := rlp.EncodeToBytes(tx)
 	require.NoError(t, err)
 
-	// See Issue: https://github.com/ethereum-optimism/infra/issues/68.
-	// We'll be re-enforcing authentcation when fixed
 	hash, err := svc.SendRawTransactionConditional(context.Background(), txBytes, types.TransactionConditional{})
 	require.Zero(t, hash)
 	require.Equal(t, err, missingAuthenticationErr)
