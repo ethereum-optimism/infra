@@ -6,9 +6,25 @@ setup: true
 orbs:
   path-filtering: circleci/path-filtering@1.0.0
 
+jobs:
+  print-hello-world:
+    docker:
+      - image: cimg/go:1.21
+    steps:
+      - checkout
+      - run:
+          name: print hello-world
+          command: |
+            echo "Hello, World 1!"
+
 workflows:
   check-updated-files:
     jobs:
+      - print-hello-world:
+          filters:
+            branches:
+              only:
+                - yash-test-duplicate-circleci-job-candidate-branch
       - path-filtering/filter:
           name: check-updated-files
           # 3-column, whitespace-delimited mapping. One mapping per
