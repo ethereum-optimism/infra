@@ -28,7 +28,6 @@ var (
 	failedValidationErr      = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
 	maxCostExceededErr       = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
 	missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
-	invalidAuthenticationErr = &rpc.JsonError{Message: "invalid authentication", Code: params.TransactionConditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {

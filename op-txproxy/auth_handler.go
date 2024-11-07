@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 var (
@@ -25,6 +26,7 @@ var (
 )
 
 type authHandler struct {
+	log       log.Logger
 	headerKey string
 	next      http.Handler
 }
@@ -37,9 +39,10 @@ type authHandler struct {
 //  3. Passed Validation: AuthContext is set with the authenticated caller
 //
 // note: only up to the default body limit (5MB) is read when constructing the text hash
-func AuthMiddleware(headerKey string) func(next http.Handler) http.Handler {
+func AuthMiddleware(log log.Logger, headerKey string) func(next http.Handler) http.Handler {
+	log = log.New("role", "auth")
 	return func(next http.Handler) http.Handler {
-		return &authHandler{headerKey, next}
+		return &authHandler{log, headerKey, next}
 	}
 }
 
@@ -57,8 +60,11 @@ func (h *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
+
+	h.log.Debug("validating header", "header", authHeader)
 	authElems := strings.Split(authHeader, ":")
 	if len(authElems) != 2 {
+		h.log.Info("invalid auth header", "header", authHeader, "err", misformattedAuthErr)
 		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, misformattedAuthErr})
 		h.next.ServeHTTP(w, r.WithContext(newCtx))
 		return
@@ -88,12 +94,14 @@ func (h *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	caller, signature := common.HexToAddress(authElems[0]), common.FromHex(authElems[1])
 	sigPubKey, err := crypto.SigToPub(txtHash, signature)
 	if sigPubKey == nil || err != nil {
+		h.log.Info("invalid auth header", "header", authHeader, "err", invalidSignatureErr)
 		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, invalidSignatureErr})
 		h.next.ServeHTTP(w, r.WithContext(newCtx))
 		return
 	}
 
 	if caller != crypto.PubkeyToAddress(*sigPubKey) {
+		h.log.Info("invalid auth header", "header", authHeader, "err", mismatchedRecoveredSignerErr)
 		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, mismatchedRecoveredSignerErr})
 		h.next.ServeHTTP(w, r.WithContext(newCtx))
 		return

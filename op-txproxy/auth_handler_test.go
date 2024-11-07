@@ -12,10 +12,12 @@ import (
 	"testing"
 
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
+	"github.com/ethereum-optimism/optimism/op-service/testlog"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/stretchr/testify/require"
@@ -23,7 +25,8 @@ import (
 
 func TestAuthHandlerMissingAuth(t *testing.T) {
 	var authContext *AuthContext
-	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authContext = AuthFromContext(r.Context())
 	})}
 
@@ -36,7 +39,8 @@ func TestAuthHandlerMissingAuth(t *testing.T) {
 
 func TestAuthHandlerBadHeader(t *testing.T) {
 	var authContext *AuthContext
-	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authContext = AuthFromContext(r.Context())
 	})}
 
@@ -52,7 +56,8 @@ func TestAuthHandlerBadHeader(t *testing.T) {
 
 func TestAuthHandlerBadSignature(t *testing.T) {
 	var authContext *AuthContext
-	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authContext = AuthFromContext(r.Context())
 	})}
 
@@ -68,7 +73,8 @@ func TestAuthHandlerBadSignature(t *testing.T) {
 
 func TestAuthHandlerMismatchedCaller(t *testing.T) {
 	var authContext *AuthContext
-	handler := authHandler{headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: "auth", next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authContext = AuthFromContext(r.Context())
 	})}
 
@@ -93,7 +99,8 @@ func TestAuthHandlerSetContext(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := authHandler{headerKey: DefaultAuthHeaderKey, next: ctxHandler}
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: DefaultAuthHeaderKey, next: ctxHandler}
 
 	rr := httptest.NewRecorder()
 	body := bytes.NewBufferString("body")
@@ -121,8 +128,9 @@ func (a *AuthAwareRPC) Run(ctx context.Context) error {
 }
 
 func TestAuthHandlerRpcMiddleware(t *testing.T) {
+	log := testlog.Logger(t, log.LevelInfo)
 	apis := []rpc.API{{Namespace: "test", Service: &AuthAwareRPC{}}}
-	rpcServer := oprpc.NewServer("127.0.0.1", 0, "", oprpc.WithAPIs(apis), oprpc.WithMiddleware(AuthMiddleware("auth")))
+	rpcServer := oprpc.NewServer("127.0.0.1", 0, "", oprpc.WithAPIs(apis), oprpc.WithMiddleware(AuthMiddleware(log, "auth")))
 	require.NoError(t, rpcServer.Start())
 	t.Cleanup(func() { _ = rpcServer.Stop() })
 
@@ -152,7 +160,8 @@ func TestAuthHandlerRequestBodyLimit(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := authHandler{headerKey: "auth", next: bodyHandler}
+	log := testlog.Logger(t, log.LevelInfo)
+	handler := authHandler{log: log, headerKey: "auth", next: bodyHandler}
 
 	// only up to limit is read when validating the request body
 	authBody := strings.Repeat("*", defaultBodyLimit)

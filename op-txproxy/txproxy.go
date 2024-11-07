@@ -96,7 +96,7 @@ func (txp *TxProxy) initRPC(cfg *CLIConfig) error {
 	rpcOpts := []oprpc.ServerOption{
 		oprpc.WithAPIs(apis),
 		oprpc.WithLogger(txp.log),
-		oprpc.WithMiddleware(AuthMiddleware(DefaultAuthHeaderKey)),
+		oprpc.WithMiddleware(AuthMiddleware(txp.log, DefaultAuthHeaderKey)),
 	}
 
 	txp.log.Info("starting rpc server", "addr", rpcCfg.ListenAddr, "port", rpcCfg.ListenPort)
