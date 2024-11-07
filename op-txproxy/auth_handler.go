@@ -19,8 +19,8 @@ var (
 	DefaultAuthHeaderKey = "X-Optimism-Signature"
 
 	// errs
-	misformattedAuthErr          = errors.New("misformatted auth header")
-	invalidAuthSignatureErr      = errors.New("invalid auth signature")
+	misformattedAuthErr          = errors.New("misformatted <caller>:<signature> header")
+	invalidSignatureErr          = errors.New("invalid signature")
 	mismatchedRecoveredSignerErr = errors.New("mismatched recovered signer")
 )
 
@@ -88,7 +88,7 @@ func (h *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	caller, signature := common.HexToAddress(authElems[0]), common.FromHex(authElems[1])
 	sigPubKey, err := crypto.SigToPub(txtHash, signature)
 	if sigPubKey == nil || err != nil {
-		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, invalidAuthSignatureErr})
+		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, invalidSignatureErr})
 		h.next.ServeHTTP(w, r.WithContext(newCtx))
 		return
 	}

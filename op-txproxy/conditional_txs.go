@@ -97,7 +97,10 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	}
 	if authInfo.Err != nil {
 		s.failures.WithLabelValues("invalid auth").Inc()
-		return common.Hash{}, invalidAuthenticationErr
+		return common.Hash{}, &rpc.JsonError{
+			Message: fmt.Sprintf("invalid authentication: %s", authInfo.Err),
+			Code:    params.TransactionConditionalRejectedErrCode,
+		}
 	}
 
 	// Handle the request. For now, we do nothing with the authenticated signer

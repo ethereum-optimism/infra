@@ -58,12 +58,12 @@ func TestAuthHandlerBadSignature(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/", nil)
-	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("a"), "foobar"))
+	r.Header.Set("auth", fmt.Sprintf("%s:%s", common.HexToAddress("a"), "0x123"))
 
 	handler.ServeHTTP(rr, r)
 	require.NotNil(t, authContext)
 	require.Zero(t, authContext.Caller)
-	require.Equal(t, invalidAuthSignatureErr, authContext.Err)
+	require.Equal(t, invalidSignatureErr, authContext.Err)
 }
 
 func TestAuthHandlerMismatchedCaller(t *testing.T) {
