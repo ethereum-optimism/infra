@@ -22,13 +22,11 @@ import (
 
 var (
 	// errs
-	rateLimitErr             = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
-	endpointDisabledErr      = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
-	entrypointSupportErr     = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
-	failedValidationErr      = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
-	maxCostExceededErr       = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
-	missingAuthenticationErr = &rpc.JsonError{Message: "missing authentication", Code: params.TransactionConditionalRejectedErrCode}
-	invalidAuthenticationErr = &rpc.JsonError{Message: "invalid authentication", Code: params.TransactionConditionalRejectedErrCode}
+	rateLimitErr         = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
+	endpointDisabledErr  = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
+	entrypointSupportErr = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
+	failedValidationErr  = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
+	maxCostExceededErr   = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {
@@ -89,19 +87,7 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 		return common.Hash{}, endpointDisabledErr
 	}
 
-	// Ensure the request is authenticated
-	authInfo := AuthFromContext(ctx)
-	if authInfo == nil {
-		s.failures.WithLabelValues("missing auth").Inc()
-		return common.Hash{}, missingAuthenticationErr
-	}
-	if authInfo.Err != nil {
-		s.failures.WithLabelValues("invalid auth").Inc()
-		return common.Hash{}, invalidAuthenticationErr
-	}
-
-	// Handle the request. For now, we do nothing with the authenticated signer
-	hash, err := s.sendCondTx(ctx, authInfo.Caller, txBytes, &cond)
+	hash, err := s.sendCondTx(ctx, txBytes, &cond)
 	if err != nil {
 		s.failures.WithLabelValues(err.Error()).Inc()
 		return common.Hash{}, err
@@ -110,7 +96,7 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	return hash, err
 }
 
-func (s *ConditionalTxService) sendCondTx(ctx context.Context, caller common.Address, txBytes hexutil.Bytes, cond *types.TransactionConditional) (common.Hash, error) {
+func (s *ConditionalTxService) sendCondTx(ctx context.Context, txBytes hexutil.Bytes, cond *types.TransactionConditional) (common.Hash, error) {
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(txBytes); err != nil {
 		return common.Hash{}, fmt.Errorf("failed to unmarshal tx: %w", err)
@@ -123,11 +109,11 @@ func (s *ConditionalTxService) sendCondTx(ctx context.Context, caller common.Add
 		return txHash, entrypointSupportErr
 	}
 	if err := cond.Validate(); err != nil {
-		s.log.Info("failed conditional validation", "err", err, "caller", caller.String())
+		s.log.Info("failed conditional validation", "err", err)
 		return txHash, failedValidationErr
 	}
 	if cost > params.TransactionConditionalMaxCost {
-		s.log.Info("conditional max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost, "caller", caller.String())
+		s.log.Info("conditional max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost)
 		return txHash, maxCostExceededErr
 	}
 
@@ -137,6 +123,6 @@ func (s *ConditionalTxService) sendCondTx(ctx context.Context, caller common.Add
 	}
 
 	s.costSummary.Observe(float64(cost))
-	s.log.Info("broadcasting conditional transaction", "caller", caller.String(), "hash", txHash.String())
+	s.log.Info("broadcasting conditional transaction", "hash", txHash.String())
 	return txHash, s.backend.CallContext(ctx, nil, "eth_sendRawTransactionConditional", txBytes, cond)
 }
