@@ -13,6 +13,8 @@ type HealthzServer struct {
 	server *http.Server
 }
 
+// random-change
+
 func (h *HealthzServer) Start(ctx context.Context, addr string) error {
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", h.Handle).Methods("GET")
