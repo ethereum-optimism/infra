@@ -100,8 +100,9 @@ func (h *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if caller != crypto.PubkeyToAddress(*sigPubKey) {
-		h.log.Info("invalid auth header", "header", authHeader, "err", mismatchedRecoveredSignerErr)
+	recoveredSigner := crypto.PubkeyToAddress(*sigPubKey)
+	if caller != recoveredSigner {
+		h.log.Info("invalid auth header", "header", authHeader, "err", mismatchedRecoveredSignerErr, "signer", recoveredSigner)
 		newCtx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{common.Address{}, mismatchedRecoveredSignerErr})
 		h.next.ServeHTTP(w, r.WithContext(newCtx))
 		return
