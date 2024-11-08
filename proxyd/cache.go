@@ -55,10 +55,6 @@ func newFallbackCache(primaryCache Cache, secondaryCache Cache) *fallbackCache {
 
 func (c *fallbackCache) Get(ctx context.Context, key string) (string, error) {
 	val, err := c.primaryCache.Get(ctx, key)
-	// if context is cancelled, return immediately
-	if err == context.Canceled {
-		return "", err
-	}
 	if err != nil {
 		return c.secondaryCache.Get(ctx, key)
 	}
