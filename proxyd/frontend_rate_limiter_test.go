@@ -27,6 +27,7 @@ func TestFrontendRateLimiter(t *testing.T) {
 	}{
 		{"memory", NewMemoryFrontendRateLimit(2*time.Second, max)},
 		{"redis", NewRedisFrontendRateLimiter(redisClient, 2*time.Second, max, "")},
+		{"fallback", NewFallbackRateLimiter(NewMemoryFrontendRateLimit(2*time.Second, max), NewRedisFrontendRateLimiter(redisClient, 2*time.Second, max, ""))},
 	}
 
 	for _, cfg := range lims {

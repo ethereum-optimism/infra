@@ -50,6 +50,13 @@ func Start(config *Config) (*Server, func(), error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		if err := CheckRedisConnection(redisClient); err != nil {
+			if config.Redis.FallbackToMemory {
+				log.Warn("failed to connect to redis, may fall back to in-memory cache: %v", "err", err)
+			} else {
+				return nil, nil, err
+			}
+		}
 	}
 
 	// redis read replica client
@@ -66,6 +73,14 @@ func Start(config *Config) (*Server, func(), error) {
 		redisReadClient, err = NewRedisClient(rURL)
 		if err != nil {
 			return nil, nil, err
+		}
+
+		if err := CheckRedisConnection(redisClient); err != nil {
+			if config.Redis.FallbackToMemory {
+				log.Warn("failed to connect to redis, may fall back to in-memory cache: %v", "err", err)
+			} else {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -295,8 +310,29 @@ func Start(config *Config) (*Server, func(), error) {
 				ttl = time.Duration(config.Cache.TTL)
 			}
 			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
+
+			if config.Redis.FallbackToMemory {
+				cache = newFallbackCache(cache, newMemoryCache())
+			}
 		}
 		rpcCache = newRPCCache(newCacheWithCompression(cache))
+	}
+
+	limiterFactory := func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
+		if config.RateLimit.UseRedis {
+			limiter := NewRedisFrontendRateLimiter(redisClient, dur, max, prefix)
+
+			if config.Redis.FallbackToMemory {
+				limiter = NewFallbackRateLimiter(
+					limiter,
+					NewMemoryFrontendRateLimit(dur, max),
+				)
+			}
+
+			return limiter
+		}
+
+		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
 	srv, err := NewServer(
@@ -315,7 +351,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.EnableRequestLog,
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
-		redisClient,
+		limiterFactory,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -429,6 +465,9 @@ func Start(config *Config) (*Server, func(), error) {
 				}
 				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL)
 				if err != nil {
+					return nil, nil, err
+				}
+				if err := CheckRedisConnection(consensusHARedisClient); err != nil {
 					return nil, nil, err
 				}
 				ns := fmt.Sprintf("%s:%s", bgcfg.ConsensusHARedis.Namespace, bg.Name)
