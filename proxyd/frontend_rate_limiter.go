@@ -157,10 +157,6 @@ func NewFallbackRateLimiter(primary FrontendRateLimiter, secondary FrontendRateL
 
 func (r *FallbackRateLimiter) Take(ctx context.Context, key string) (bool, error) {
 	if ok, err := r.primary.Take(ctx, key); err != nil {
-		// if context is cancelled, return immediately
-		if err == context.Canceled {
-			return ok, err
-		}
 		return r.secondary.Take(ctx, key)
 	} else {
 		return ok, err
