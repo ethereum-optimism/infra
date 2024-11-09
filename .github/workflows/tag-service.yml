@@ -1,5 +1,8 @@
 name: Tag Service
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,8 +21,11 @@ on:
         required: true
         type: choice
         options:
+          - op-signer
           - op-ufm
+          - op-txproxy
           - proxyd
+          - peer-mgmt-service
       prerelease:
         description: Increment major/minor/patch as prerelease?
         required: false

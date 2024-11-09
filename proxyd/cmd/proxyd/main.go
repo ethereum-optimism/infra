@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -12,11 +13,10 @@ import (
 	"syscall"
 
 	"github.com/BurntSushi/toml"
-	"golang.org/x/exp/slog"
 
 	"github.com/ethereum/go-ethereum/log"
 
-	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/ethereum-optimism/infra/proxyd"
 )
 
 var (

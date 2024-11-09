@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	sw "github.com/ethereum-optimism/optimism/proxyd/pkg/avg-sliding-window"
+	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -559,6 +559,11 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	if b.authPassword != "" {
 		httpReq.SetBasicAuth(b.authUsername, b.authPassword)
+	}
+
+	opTxProxyAuth := GetOpTxProxyAuthHeader(ctx)
+	if opTxProxyAuth != "" {
+		httpReq.Header.Set(DefaultOpTxProxyAuthHeader, opTxProxyAuth)
 	}
 
 	xForwardedFor := GetXForwardedFor(ctx)

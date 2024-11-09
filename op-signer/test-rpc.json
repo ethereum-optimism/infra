@@ -1,0 +1,53 @@
+[
+  {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "method": "eth_signTransaction",
+    "params": [
+      {
+        "to": "0x000000000000000000000000000000000000aaaa",
+        "gas": "0x7530",
+        "gasPrice": null,
+        "maxFeePerGas": "0x1",
+        "maxPriorityFeePerGas": "0x1",
+        "value": "0x1",
+        "nonce": "0x0",
+        "data": "0x",
+        "accessList": [
+          {
+            "address": "0x000000000000000000000000000000000000aaaa",
+            "storageKeys": [
+              "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ]
+          }
+        ],
+        "chainId": "0x539"
+      }
+    ]
+  },
+  {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "method": "eth_signTransaction",
+    "params": [
+      {
+        "to": "0x000000000000000000000000000000000000aaaa",
+        "gas": "0x7530",
+        "gasPrice": null,
+        "maxFeePerGas": "0x1",
+        "maxPriorityFeePerGas": "0x1",
+        "value": "0x1",
+        "data": "0x",
+        "accessList": [
+          {
+            "address": "0x000000000000000000000000000000000000aaaa",
+            "storageKeys": [
+              "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ]
+          }
+        ],
+        "chainId": "0x539"
+      }
+    ]
+  }
+]

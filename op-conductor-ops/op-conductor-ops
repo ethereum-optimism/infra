@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+# cd to the directory of the script
+cd "$(dirname "$0")"
+poetry install --no-interaction --quiet
+poetry run python op-conductor-ops.py "${@}"

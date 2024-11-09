@@ -9,9 +9,9 @@ import (
 
 	"time"
 
-	"github.com/ethereum-optimism/optimism/proxyd"
-	sw "github.com/ethereum-optimism/optimism/proxyd/pkg/avg-sliding-window"
-	ms "github.com/ethereum-optimism/optimism/proxyd/tools/mockserver/handler"
+	"github.com/ethereum-optimism/infra/proxyd"
+	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
+	ms "github.com/ethereum-optimism/infra/proxyd/tools/mockserver/handler"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/stretchr/testify/require"
 )

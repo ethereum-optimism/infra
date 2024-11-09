@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis"
-	"github.com/ethereum-optimism/optimism/proxyd"
+	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/stretchr/testify/require"
 )
 
