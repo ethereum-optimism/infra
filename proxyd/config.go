@@ -60,10 +60,11 @@ type RateLimitConfig struct {
 }
 
 type NacosConfig struct {
-	URLs               string `toml:"urls"`
-	NamespaceId        string `toml:"namespace_id"`
-	ApplicationName    string `toml:"application_name"`
-	ExternalListenAddr string `toml:"external_listen_addr"`
+	URLs            string `toml:"urls"`
+	NamespaceId     string `toml:"namespace_id"`
+	ApplicationName string `toml:"application_name"`
+	ExternalIP      string `toml:"external_ip"`
+	ExternalPorts   string `toml:"external_ports"`
 }
 
 type RateLimitMethodOverride struct {

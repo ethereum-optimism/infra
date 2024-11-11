@@ -12,7 +12,6 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/hashicorp/golang-lru v1.0.2
-	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/nacos-group/nacos-sdk-go v1.1.5
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.17.0
@@ -55,7 +54,6 @@ require (
 	github.com/getsentry/sentry-go v0.25.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
@@ -69,8 +67,6 @@ require (
 	github.com/klauspost/compress v1.17.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect

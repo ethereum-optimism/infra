@@ -21,13 +21,7 @@ const (
 )
 
 // StartNacosClient start nacos client and register rest service in nacos
-func StartNacosClient(urls string, namespace string, name string, externalAddr string) {
-	ip, port, err := ResolveIPAndPort(externalAddr)
-	if err != nil {
-		log.Error(fmt.Sprintf("failed to resolve %s error: %s", externalAddr, err.Error()))
-		return
-	}
-
+func StartNacosClient(urls string, namespace string, name string, externalIP string, externalPorts string) {
 	serverConfigs, err := getServerConfigs(urls)
 	if err != nil {
 		log.Error(fmt.Sprintf("failed to resolve nacos server url %s: %s", urls, err.Error()))
@@ -39,7 +33,7 @@ func StartNacosClient(urls string, namespace string, name string, externalAddr s
 			TimeoutMs:           defaultTimeoutMs,
 			ListenInterval:      defaultListenInterval,
 			NotLoadCacheAtStart: true,
-			NamespaceId:         namespace,
+			NamespaceId:         namespace, // same namespace is shared for all server configs
 			LogDir:              "/dev/null",
 			LogLevel:            "error",
 		},
@@ -49,28 +43,49 @@ func StartNacosClient(urls string, namespace string, name string, externalAddr s
 		return
 	}
 
-	_, err = client.RegisterInstance(vo.RegisterInstanceParam{
-		Ip:          ip,
-		Port:        port,
-		ServiceName: name,
-		Weight:      defaultWeight,
-		ClusterName: "DEFAULT",
-		Enable:      true,
-		Healthy:     true,
-		Ephemeral:   true,
-		Metadata: map[string]string{
-			"preserved.register.source": "GO",
-			"app_registry_tag":          strconv.FormatInt(time.Now().Unix(), 10),
-		},
-	})
-	if err != nil {
-		log.Error(fmt.Sprintf("failed to register instance in nacos server. error: %s", err.Error()))
-		return
+	appNames := strings.Split(name, ",")
+	ports := strings.Split(externalPorts, ",")
+	if len(appNames) != len(ports) {
+		panic(fmt.Sprintf("Nacos: number of app names not equal to number of external addresses."))
 	}
+
+	for i := 0; i < len(ports); i++ {
+		if externalIP == "127.0.0.1" {
+			externalIP = GetLocalIP()
+		}
+
+		port, err := strconv.ParseUint(ports[i], 10, 64)
+		if err != nil {
+			log.Error(fmt.Sprintf("failed to convert port %s error: %s", ports[i], err.Error()))
+			return
+		}
+
+		// Register on each ip,port instance.
+		_, err = client.RegisterInstance(vo.RegisterInstanceParam{
+			Ip:          externalIP,
+			Port:        port,
+			ServiceName: appNames[i],
+			Weight:      defaultWeight,
+			ClusterName: "DEFAULT",
+			Enable:      true,
+			Healthy:     true,
+			Ephemeral:   true,
+			Metadata: map[string]string{
+				"preserved.register.source": "GO",
+				"app_registry_tag":          strconv.FormatInt(time.Now().Unix(), 10),
+			},
+		})
+		if err != nil {
+			log.Error(fmt.Sprintf("failed to register instance in nacos server. error: %s", err.Error()))
+			return
+		}
+	}
+
 	log.Info("register application instance in nacos successfully")
 }
 
 // ResolveIPAndPort resolve ip and port from addr
+// If 127.0.0.1, the same default port will be used.
 func ResolveIPAndPort(addr string) (string, uint64, error) {
 	laddr := strings.Split(addr, ":")
 	ip := laddr[0]

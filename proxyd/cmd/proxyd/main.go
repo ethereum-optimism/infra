@@ -26,7 +26,7 @@ var (
 )
 
 const (
-	nacosExternalListenAddr = "NACOS_EXTERNAL_LISTEN_ADDR"
+	podIpEnv = "MY_POD_IP"
 )
 
 func main() {
@@ -73,18 +73,19 @@ func main() {
 	}
 
 	// Register after start.
-	externalListenAddr := config.Nacos.ExternalListenAddr
-	if os.Getenv(nacosExternalListenAddr) != "" {
-		externalListenAddr = os.Getenv(nacosExternalListenAddr)
-	}
-
-	// Register after start.
 	if len(config.Nacos.URLs) > 0 {
+		externalIP := config.Nacos.ExternalIP
+		if os.Getenv(podIpEnv) != "" {
+			externalIP = os.Getenv(podIpEnv)
+			log.Warn("External IP replaced by env `MY_POD_IP`", "ExternalIP", externalIP)
+		}
+
 		proxyd.StartNacosClient(
 			config.Nacos.URLs,
 			config.Nacos.NamespaceId,
 			config.Nacos.ApplicationName,
-			externalListenAddr,
+			externalIP,
+			config.Nacos.ExternalPorts,
 		)
 	}
 
