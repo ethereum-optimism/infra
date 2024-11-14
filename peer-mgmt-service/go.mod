@@ -9,7 +9,7 @@ require (
 	github.com/libp2p/go-libp2p v0.32.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
-	github.com/rs/cors v1.9.0
+	github.com/rs/cors v1.11.0
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	gopkg.in/yaml.v3 v3.0.1
