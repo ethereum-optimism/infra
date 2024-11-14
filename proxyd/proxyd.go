@@ -242,11 +242,12 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 
 		backendGroups[bgName] = &BackendGroup{
-			Name:             bgName,
-			Backends:         backends,
-			WeightedRouting:  bg.WeightedRouting,
-			FallbackBackends: fallbackBackends,
-			routingStrategy:  bg.RoutingStrategy,
+			Name:                   bgName,
+			Backends:               backends,
+			WeightedRouting:        bg.WeightedRouting,
+			FallbackBackends:       fallbackBackends,
+			routingStrategy:        bg.RoutingStrategy,
+			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
 		}
 	}
 
