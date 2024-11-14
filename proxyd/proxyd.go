@@ -52,7 +52,7 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		if err := CheckRedisConnection(redisClient); err != nil {
 			if config.Redis.FallbackToMemory {
-				log.Warn("failed to connect to redis, may fall back to in-memory cache: %v", "err", err)
+				log.Warn("failed to connect to redis, may fall back to in-memory cache", "err", err)
 			} else {
 				return nil, nil, err
 			}
@@ -77,7 +77,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 		if err := CheckRedisConnection(redisClient); err != nil {
 			if config.Redis.FallbackToMemory {
-				log.Warn("failed to connect to redis, may fall back to in-memory cache: %v", "err", err)
+				log.Warn("failed to connect to redis, may fall back to in-memory cache", "err", err)
 			} else {
 				return nil, nil, err
 			}
