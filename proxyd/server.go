@@ -25,7 +25,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/redis/go-redis/v9"
 	"github.com/rs/cors"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -82,6 +81,8 @@ type Server struct {
 
 type limiterFunc func(method string) bool
 
+type limiterFactoryFunc func(dur time.Duration, max int, prefix string) FrontendRateLimiter
+
 func NewServer(
 	backendGroups map[string]*BackendGroup,
 	wsBackendGroup *BackendGroup,
@@ -98,7 +99,7 @@ func NewServer(
 	enableRequestLog bool,
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
-	redisClient *redis.Client,
+	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -122,14 +123,6 @@ func NewServer(
 
 	if maxBatchSize > MaxBatchRPCCallsHardLimit {
 		maxBatchSize = MaxBatchRPCCallsHardLimit
-	}
-
-	limiterFactory := func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
-		if rateLimitConfig.UseRedis {
-			return NewRedisFrontendRateLimiter(redisClient, dur, max, prefix)
-		}
-
-		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
 	var mainLim FrontendRateLimiter
