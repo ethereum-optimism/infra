@@ -2,6 +2,8 @@ package proxyd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -210,4 +212,52 @@ func TestRPCCacheUnsupportedMethod(t *testing.T) {
 		})
 	}
 
+}
+
+type errorCache struct{}
+
+func (c *errorCache) Get(ctx context.Context, key string) (string, error) {
+	return "", errors.New("test error")
+}
+
+func (c *errorCache) Put(ctx context.Context, key string, value string) error {
+	return errors.New("test error")
+}
+
+func TestFallbackCache(t *testing.T) {
+	ctx := context.Background()
+
+	memoryCache := newMemoryCache()
+
+	success := []Cache{
+		newFallbackCache(memoryCache, memoryCache),
+		newFallbackCache(memoryCache, &errorCache{}),
+		newFallbackCache(&errorCache{}, memoryCache),
+	}
+
+	fail := []Cache{
+		newFallbackCache(&errorCache{}, &errorCache{}),
+	}
+
+	for i, cache := range success {
+		t.Run("success", func(t *testing.T) {
+			err := cache.Put(ctx, "foo", fmt.Sprintf("bar%d", i))
+			require.NoError(t, err)
+
+			val, err := cache.Get(ctx, "foo")
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("bar%d", i), val)
+		})
+	}
+
+	for _, cache := range fail {
+		t.Run("fail", func(t *testing.T) {
+			val, err := cache.Get(ctx, "foo")
+			require.Error(t, err)
+			require.Empty(t, val)
+
+			err = cache.Put(ctx, "foo", "baz")
+			require.Error(t, err)
+		})
+	}
 }

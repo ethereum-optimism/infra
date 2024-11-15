@@ -44,6 +44,31 @@ func (c *cache) Put(ctx context.Context, key string, value string) error {
 	return nil
 }
 
+type fallbackCache struct {
+	primaryCache   Cache
+	secondaryCache Cache
+}
+
+func newFallbackCache(primaryCache Cache, secondaryCache Cache) *fallbackCache {
+	return &fallbackCache{primaryCache: primaryCache, secondaryCache: secondaryCache}
+}
+
+func (c *fallbackCache) Get(ctx context.Context, key string) (string, error) {
+	val, err := c.primaryCache.Get(ctx, key)
+	if err != nil {
+		return c.secondaryCache.Get(ctx, key)
+	}
+	return val, nil
+}
+
+func (c *fallbackCache) Put(ctx context.Context, key string, value string) error {
+	err := c.primaryCache.Put(ctx, key, value)
+	if err != nil {
+		return c.secondaryCache.Put(ctx, key, value)
+	}
+	return nil
+}
+
 type redisCache struct {
 	redisClient     *redis.Client
 	redisReadClient *redis.Client
