@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"testing"
@@ -13,7 +14,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slog"
 
 	"github.com/ethereum/go-ethereum/log"
 

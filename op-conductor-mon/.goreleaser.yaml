@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: op-conductor-mon
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+
+builds:
+  - id: main
+    main: ./cmd/monitor
+    binary: op-conductor-mon
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: linux
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -X main.GitCommit={{ .FullCommit }}
+      - -X main.GitDate={{ .CommitDate }}
+      - -X main.Version={{ .Version }}
+
+archives:
+  - format: tar.gz
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: "{{ .ProjectName }}-{{.Version}}-{{ tolower .Os }}-{{ .Arch }}"
+    # use zip for windows archives
+    wrap_in_directory: true
+    format_overrides:
+      - goos: windows
+        format: zip
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: ethereum-optimism
+    name: infra
+  make_latest: false
+
+monorepo:
+  tag_prefix: op-conductor-mon/
+  dir: op-conductor-mon

@@ -54,7 +54,8 @@ func (l *limitedKeys) Take(key string, max int) bool {
 // truncated timestamp at which the struct was created. If
 // the current truncated timestamp doesn't match what's
 // referenced, the limit is reset. Otherwise, values in
-// a map are incremented to represent the limit.
+// a map are incremented to represent the limit. This will
+// never return an error.
 type MemoryFrontendRateLimiter struct {
 	currGeneration *limitedKeys
 	dur            time.Duration
@@ -136,4 +137,28 @@ func (n *noopFrontendRateLimiter) Take(ctx context.Context, key string) (bool, e
 // to the specified duration.
 func truncateNow(dur time.Duration) int64 {
 	return time.Now().Truncate(dur).Unix()
+}
+
+// FallbackRateLimiter is a combination of a primary and secondary rate limiter.
+// If the primary rate limiter fails, due to an unexpected error, the secondary
+// rate limiter will be used. This is useful to reduce reliance on a single Redis
+// instance for rate limiting. If both fail, the request is not let through.
+type FallbackRateLimiter struct {
+	primary   FrontendRateLimiter
+	secondary FrontendRateLimiter
+}
+
+func NewFallbackRateLimiter(primary FrontendRateLimiter, secondary FrontendRateLimiter) FrontendRateLimiter {
+	return &FallbackRateLimiter{
+		primary:   primary,
+		secondary: secondary,
+	}
+}
+
+func (r *FallbackRateLimiter) Take(ctx context.Context, key string) (bool, error) {
+	if ok, err := r.primary.Take(ctx, key); err != nil {
+		return r.secondary.Take(ctx, key)
+	} else {
+		return ok, err
+	}
 }

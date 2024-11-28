@@ -57,13 +57,6 @@ func TestSendRawTransactionConditionalDisabled(t *testing.T) {
 	require.Equal(t, endpointDisabledErr, err)
 }
 
-func TestSendRawTransactionConditionalMissingAuth(t *testing.T) {
-	svc := setupSvc(t)
-	hash, err := svc.SendRawTransactionConditional(context.Background(), nil, types.TransactionConditional{})
-	require.Zero(t, hash)
-	require.Equal(t, missingAuthenticationErr, err)
-}
-
 func TestSendRawTransactionConditionalInvalidTxTarget(t *testing.T) {
 	svc := setupSvc(t)
 
@@ -71,8 +64,7 @@ func TestSendRawTransactionConditionalInvalidTxTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	// setup auth
-	ctx := context.WithValue(context.Background(), authContextKey{}, &AuthContext{Caller: common.HexToAddress("0xa")})
-	hash, err := svc.SendRawTransactionConditional(ctx, txBytes, types.TransactionConditional{})
+	hash, err := svc.SendRawTransactionConditional(context.Background(), txBytes, types.TransactionConditional{})
 	require.Zero(t, hash)
 	require.Equal(t, entrypointSupportErr, err)
 }
@@ -119,12 +111,7 @@ func TestSendRawTransactionConditionals(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, test := range tests {
-		ctx := context.Background()
-		if !test.mustFail {
-			ctx = context.WithValue(ctx, authContextKey{}, &AuthContext{Caller: common.HexToAddress("0xa")})
-		}
-
-		_, err := svc.SendRawTransactionConditional(ctx, txBytes, test.cond)
+		_, err := svc.SendRawTransactionConditional(context.Background(), txBytes, test.cond)
 		if test.mustFail && err == nil {
 			t.Errorf("Test %s should fail", test.name)
 		}
