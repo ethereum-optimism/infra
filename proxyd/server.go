@@ -18,14 +18,12 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/redis/go-redis/v9"
 	"github.com/rs/cors"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -34,6 +32,8 @@ const (
 	ContextKeyAuth               = "authorization"
 	ContextKeyReqID              = "req_id"
 	ContextKeyXForwardedFor      = "x_forwarded_for"
+	ContextKeyOpTxProxyAuth      = "op_txproxy_auth"
+	DefaultOpTxProxyAuthHeader   = "X-Optimism-Signature"
 	DefaultMaxBatchRPCCallsLimit = 100
 	MaxBatchRPCCallsHardLimit    = 1000
 	cacheStatusHdr               = "X-Proxyd-Cache-Status"
@@ -80,6 +80,8 @@ type Server struct {
 
 type limiterFunc func(method string) bool
 
+type limiterFactoryFunc func(dur time.Duration, max int, prefix string) FrontendRateLimiter
+
 func NewServer(
 	backendGroups map[string]*BackendGroup,
 	wsBackendGroup *BackendGroup,
@@ -96,7 +98,7 @@ func NewServer(
 	enableRequestLog bool,
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
-	redisClient *redis.Client,
+	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -120,14 +122,6 @@ func NewServer(
 
 	if maxBatchSize > MaxBatchRPCCallsHardLimit {
 		maxBatchSize = MaxBatchRPCCallsHardLimit
-	}
-
-	limiterFactory := func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
-		if rateLimitConfig.UseRedis {
-			return NewRedisFrontendRateLimiter(redisClient, dur, max, prefix)
-		}
-
-		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
 	var mainLim FrontendRateLimiter
@@ -626,7 +620,13 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			xff = ipPort[0]
 		}
 	}
+
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
+
+	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
+	if opTxProxyAuth != "" {
+		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
+	}
 
 	if len(s.authenticatedPaths) > 0 {
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
@@ -711,20 +711,19 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 		return txpool.ErrInvalidSender
 	}
 
-	// Convert the transaction into a Message object so that we can get the
-	// sender. This method performs an ecrecover, which can be expensive.
-	msg, err := core.TransactionToMessage(tx, types.LatestSignerForChainID(tx.ChainId()), nil)
+	signer := types.LatestSignerForChainID(tx.ChainId())
+	from, err := types.Sender(signer, tx)
 	if err != nil {
-		log.Debug("could not get message from transaction", "err", err, "req_id", GetReqID(ctx))
+		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 		return ErrInvalidParams(err.Error())
 	}
-	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", msg.From.Hex(), tx.Nonce()))
+	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
 	if err != nil {
 		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal
 	}
 	if !ok {
-		log.Debug("sender rate limit exceeded", "sender", msg.From.Hex(), "req_id", GetReqID(ctx))
+		log.Debug("sender rate limit exceeded", "sender", from.Hex(), "req_id", GetReqID(ctx))
 		return ErrOverSenderRateLimit
 	}
 
@@ -808,6 +807,14 @@ func GetAuthCtx(ctx context.Context) string {
 	}
 
 	return authUser
+}
+
+func GetOpTxProxyAuthHeader(ctx context.Context) string {
+	auth, ok := ctx.Value(ContextKeyOpTxProxyAuth).(string)
+	if !ok {
+		return ""
+	}
+	return auth
 }
 
 func GetReqID(ctx context.Context) string {

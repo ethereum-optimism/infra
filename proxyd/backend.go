@@ -561,6 +561,11 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		httpReq.SetBasicAuth(b.authUsername, b.authPassword)
 	}
 
+	opTxProxyAuth := GetOpTxProxyAuthHeader(ctx)
+	if opTxProxyAuth != "" {
+		httpReq.Header.Set(DefaultOpTxProxyAuthHeader, opTxProxyAuth)
+	}
+
 	xForwardedFor := GetXForwardedFor(ctx)
 	if b.stripTrailingXFF {
 		xForwardedFor = stripXFF(xForwardedFor)
@@ -723,12 +728,13 @@ func sortBatchRPCResponse(req []*RPCReq, res []*RPCRes) {
 }
 
 type BackendGroup struct {
-	Name             string
-	Backends         []*Backend
-	WeightedRouting  bool
-	Consensus        *ConsensusPoller
-	FallbackBackends map[string]bool
-	routingStrategy  RoutingStrategy
+	Name                   string
+	Backends               []*Backend
+	WeightedRouting        bool
+	Consensus              *ConsensusPoller
+	FallbackBackends       map[string]bool
+	routingStrategy        RoutingStrategy
+	multicallRPCErrorCheck bool
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -824,8 +830,8 @@ type multicallTuple struct {
 	backendName string
 }
 
+// Note: rpcReqs should only contain 1 request of 'sendRawTransactions'
 func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq) *BackendGroupRPCResponse {
-
 	// Create ctx without cancel so background tasks process
 	// after original request returns
 	bgCtx := context.WithoutCancel(ctx)
@@ -931,6 +937,13 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 			finalResp = resp
 			continue
 		}
+
+		// Assuming multicall doesn't support batch
+		if bg.multicallRPCErrorCheck && resp.RPCRes[0].IsError() {
+			finalResp = resp
+			continue
+		}
+
 		log.Info("received successful response from multicall channel",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),

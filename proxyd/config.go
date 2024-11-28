@@ -37,9 +37,10 @@ type CacheConfig struct {
 }
 
 type RedisConfig struct {
-	URL       string `toml:"url"`
-	Namespace string `toml:"namespace"`
-	ReadURL   string `toml:"read_url"`
+	URL              string `toml:"url"`
+	Namespace        string `toml:"namespace"`
+	ReadURL          string `toml:"read_url"`
+	FallbackToMemory bool   `toml:"fallback_to_memory"`
 }
 
 type MetricsConfig struct {
@@ -162,6 +163,8 @@ type BackendGroupConfig struct {
 	WeightedRouting bool `toml:"weighted_routing"`
 
 	RoutingStrategy RoutingStrategy `toml:"routing_strategy"`
+
+	MulticallRPCErrorCheck bool `toml:"multicall_rpc_error_check"`
 
 	/*
 		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance

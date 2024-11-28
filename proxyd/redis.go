@@ -13,10 +13,15 @@ func NewRedisClient(url string) (*redis.Client, error) {
 		return nil, err
 	}
 	client := redis.NewClient(opts)
+	return client, nil
+}
+
+func CheckRedisConnection(client *redis.Client) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, wrapErr(err, "error connecting to redis")
+		return wrapErr(err, "error connecting to redis")
 	}
-	return client, nil
+
+	return nil
 }
