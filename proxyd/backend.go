@@ -804,7 +804,12 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	backendResp := <-ch
 
 	if backendResp.error != nil {
-		log.Error("error serving requests",
+		logfn := log.Error
+		// If the context was canceled, downgrade the log level to debug.
+		if errors.Is(backendResp.error, context.Canceled) {
+			logfn = log.Debug
+		}
+		logfn("error serving requests",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"err", backendResp.error,
