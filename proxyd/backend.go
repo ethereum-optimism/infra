@@ -381,6 +381,10 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 			"method", metricLabelMethod,
 		)
 		res, err := b.doForward(ctx, reqs, isBatch)
+		// if it's canceld, we don't want to count it as an error
+		if strings.Contains(err.Error(), "context canceled") {
+			return nil, err
+		}
 		switch err {
 		case nil: // do nothing
 		case ErrBackendResponseTooLarge:
@@ -583,6 +587,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
+		// if it's canceld, we don't want to count it as an error
+		if strings.Contains(err.Error(), "context canceled") {
+			return nil, err
+		}
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error in backend request")
@@ -1406,6 +1414,14 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		if len(rpcReqs) > 0 {
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
+			if strings.Contains(err.Error(), "context canceled") {
+				log.Info("context canceled", "req_id", GetReqID(ctx), "auth", GetAuthCtx(ctx))
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
 
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
