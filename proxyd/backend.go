@@ -1415,7 +1415,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		if len(rpcReqs) > 0 {
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
-			if err != nil && errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) {
 				log.Info("context canceled", "req_id", GetReqID(ctx), "auth", GetAuthCtx(ctx))
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
