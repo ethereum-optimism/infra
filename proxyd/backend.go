@@ -1333,6 +1333,9 @@ type LimitedHTTPClient struct {
 
 func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error) {
 	if err := c.sem.Acquire(req.Context(), 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
 		return nil, wrapErr(err, "too many requests")
 	}
