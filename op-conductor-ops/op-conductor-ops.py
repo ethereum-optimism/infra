@@ -322,6 +322,45 @@ def update_cluster_membership(network: str):
     if error:
         raise typer.Exit(code=1)
 
+@app.command()
+def halt_sequencer(network: str, force: bool = False):
+    """Halts the currently active sequencer."""
+    network_obj = get_network(network)
+    sequencers = network_obj.sequencers
+
+    all_conductors_paused = all(
+        [not sequencer.conductor_active for sequencer in sequencers]
+    )
+    if not all_conductors_paused and not force:
+        print_error(
+            f"Not all conductors were found to be paused. Please run the `pause` command or use --force to override this behaviour"
+        )
+        raise typer.Exit(code=1)
+
+    active_sequencer = network_obj.find_active_sequencer()
+    if active_sequencer is None:
+        print_error(f"Could not find an active sequencer in the network: {network}")
+        raise typer.Exit(code=1)
+
+    try:
+        resp = requests.post(
+            active_sequencer.node_rpc_url,
+            json=make_rpc_payload(
+                method="admin_stopSequencer",
+                params=[],
+            ),
+        )
+        resp.raise_for_status()
+        if "error" in resp.json():
+            raise Exception(resp.json()["error"])
+        typer.echo(
+            f"Successfully halted the active sequencer: {active_sequencer.sequencer_id}"
+        )
+    except Exception as e:
+        print_warn(
+            f"Failed to halt the active sequencer: {active_sequencer.sequencer_id}"
+        )
+
 
 @app.command()
 def force_active_sequencer(network: str, sequencer_id: str):
@@ -366,7 +405,6 @@ def force_active_sequencer(network: str, sequencer_id: str):
         raise typer.Exit(code=1)
 
     typer.echo(f"Successfully forced {sequencer_id} to become active")
-
 
 if __name__ == "__main__":
     app()
