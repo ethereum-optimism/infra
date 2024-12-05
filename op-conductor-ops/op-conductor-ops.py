@@ -363,12 +363,19 @@ def halt_sequencer(network: str, force: bool = False):
 
 
 @app.command()
-def force_active_sequencer(network: str, sequencer_id: str):
+def force_active_sequencer(network: str, sequencer_id: str, force: bool = False):
     """Forces a sequencer to become active using stop/start."""
     network_obj = get_network(network)
     sequencer = network_obj.get_sequencer_by_id(sequencer_id)
     if sequencer is None:
         typer.echo(f"sequencer ID {sequencer_id} not found in network {network}")
+        raise typer.Exit(code=1)
+
+    # Pre-flight check: Ensure all conductors are paused
+    sequencers = network_obj.sequencers
+    all_paused = all(not sequencer.conductor_active for sequencer in sequencers)
+    if not all_paused and not force:
+        print_error("Not all conductors are paused. Run 'pause' command first.")
         raise typer.Exit(code=1)
 
     hash = sequencer.unsafe_l2_hash
