@@ -3,8 +3,8 @@ from rich import print
 
 def print_boolean(value):
     if value is None:
-        return "❓"
-    return "✅" if value else "❌"
+        return "❓" + "\u200B"
+    return ("✅" if value else "❌") + "\u200B"
 
 
 def make_rpc_payload(method: str, params: list = None):
