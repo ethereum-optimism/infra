@@ -105,7 +105,7 @@ def status(network: str):
 
 
 @app.command()
-def transfer_leader(network: str, sequencer_id: str):
+def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     """Transfer leadership to a specific sequencer."""
     network_obj = get_network(network)
 
@@ -119,8 +119,8 @@ def transfer_leader(network: str, sequencer_id: str):
         raise typer.Exit(code=1)
 
     healthy = sequencer.sequencer_healthy
-    if not healthy:
-        print_error(f"Target sequencer {sequencer_id} is not healthy")
+    if not healthy and not force:
+        print_error(f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
         raise typer.Exit(code=1)
 
     leader = network_obj.find_conductor_leader()
