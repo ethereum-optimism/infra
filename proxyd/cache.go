@@ -70,13 +70,13 @@ func (c *fallbackCache) Put(ctx context.Context, key string, value string) error
 }
 
 type redisCache struct {
-	redisClient     *redis.Client
-	redisReadClient *redis.Client
+	redisClient     redis.UniversalClient
+	redisReadClient redis.UniversalClient
 	prefix          string
 	ttl             time.Duration
 }
 
-func newRedisCache(redisClient *redis.Client, redisReadClient *redis.Client, prefix string, ttl time.Duration) *redisCache {
+func newRedisCache(redisClient redis.UniversalClient, redisReadClient redis.UniversalClient, prefix string, ttl time.Duration) *redisCache {
 	return &redisCache{redisClient, redisReadClient, prefix, ttl}
 }
 
