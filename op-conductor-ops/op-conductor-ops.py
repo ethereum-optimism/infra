@@ -225,7 +225,7 @@ def override_leader(network: str, sequencer_id: str):
 
     resp = requests.post(
         sequencer.conductor_rpc_url,
-        json=make_rpc_payload("conductor_overrideLeader"),
+        json=make_rpc_payload("conductor_overrideLeader", [True]),
     )
     resp.raise_for_status()
     if "error" in resp.json():
