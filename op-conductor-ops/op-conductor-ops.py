@@ -212,8 +212,9 @@ def resume(network: str, sequencer_id: str = None):
 
 
 @app.command()
-def override_leader(network: str, sequencer_id: str):
-    """Override the conductor_leader response for a sequencer to True.
+def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bool = False):
+    """Override the conductor_leader response for a sequencer to True. To remove the override, please use --remove.
+    If you want this command to be un-interactive, please use it with --y.
     Note that this does not affect consensus and it should only be used for disaster recovery purposes.
     """
     network_obj = get_network(network)
@@ -222,10 +223,23 @@ def override_leader(network: str, sequencer_id: str):
         print_error(
             f"sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
+    
+    if remove:
+        if y:
+            print_warn("You are trying to remove the override. This would require you to explicitly restart op-node.")
+        else:
+            typer.echo("Note: you are trying to remove the override. This would require you to explicitly restart op-node.")
+            typer.echo("Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':")
+            user_input = input().lower()
+            if user_input not in ['y', 'n']:
+                print_error("Wrong input provided")
+                raise typer.Exit(code=1)
+            if user_input == 'n':
+                raise typer.Exit(code=0)
 
     resp = requests.post(
         sequencer.conductor_rpc_url,
-        json=make_rpc_payload("conductor_overrideLeader", [True]),
+        json=make_rpc_payload("conductor_overrideLeader", [not remove]),
     )
     resp.raise_for_status()
     if "error" in resp.json():
@@ -234,18 +248,21 @@ def override_leader(network: str, sequencer_id: str):
         )
         raise typer.Exit(code=1)
 
-    resp = requests.post(
-        sequencer.node_rpc_url,
-        json=make_rpc_payload("admin_overrideLeader"),
-    )
-    resp.raise_for_status()
-    if "error" in resp.json():
-        print_error(
-            f"Failed to override sequencer leader status for {sequencer_id}: {resp.json()['error']}"
+    if not remove:
+        resp = requests.post(
+            sequencer.node_rpc_url,
+            json=make_rpc_payload("admin_overrideLeader"),
         )
-        raise typer.Exit(code=1)
+        resp.raise_for_status()
+        if "error" in resp.json():
+            print_error(
+                f"Failed to override sequencer leader status for {sequencer_id}: {resp.json()['error']}"
+            )
+            raise typer.Exit(code=1)
 
-    typer.echo(f"Successfully overrode leader for {sequencer_id}")
+    typer.echo(f"Successfully overrode leader for {sequencer_id} to {not remove}")
+    if remove:
+        typer.echo("As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it.")
 
 
 @app.command()
