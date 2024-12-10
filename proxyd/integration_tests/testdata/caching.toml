@@ -10,6 +10,7 @@ namespace = "proxyd"
 
 [cache]
 enabled = true
+block_ttl = "1s"
 
 [backends]
 [backends.good]
