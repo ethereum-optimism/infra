@@ -43,6 +43,7 @@ const (
 	defaultWSReadTimeout         = 2 * time.Minute
 	defaultWSWriteTimeout        = 10 * time.Second
 	defaultCacheTtl              = 1 * time.Hour
+	defaultFilterTimeout         = 10 * time.Minute
 	maxRequestBodyLogLen         = 2000
 	defaultMaxUpstreamBatchSize  = 10
 	defaultRateLimitHeader       = "X-Forwarded-For"
@@ -76,6 +77,9 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
+	filtersMu              sync.Mutex
+	filters                map[string]*filter // filterID -> filter
+	filterTimeout          time.Duration
 }
 
 type limiterFunc func(method string) bool
@@ -99,6 +103,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
+	filterTimeout time.Duration,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -122,6 +127,10 @@ func NewServer(
 
 	if maxBatchSize > MaxBatchRPCCallsHardLimit {
 		maxBatchSize = MaxBatchRPCCallsHardLimit
+	}
+
+	if filterTimeout == 0 {
+		filterTimeout = defaultFilterTimeout
 	}
 
 	var mainLim FrontendRateLimiter
@@ -166,7 +175,7 @@ func NewServer(
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
 	}
 
-	return &Server{
+	ret := &Server{
 		BackendGroups:        backendGroups,
 		wsBackendGroup:       wsBackendGroup,
 		wsMethodWhitelist:    wsMethodWhitelist,
@@ -191,7 +200,13 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
-	}, nil
+		filters:                make(map[string]*filter),
+		filterTimeout:          filterTimeout,
+	}
+
+	go ret.filterTimeoutLoop()
+
+	return ret, nil
 }
 
 func (s *Server) RPCListenAndServe(host string, port int) error {
@@ -398,6 +413,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 	type batchGroup struct {
 		groupID      int
 		backendGroup string
+		backendName  string
 	}
 
 	responses := make([]*RPCRes, len(reqs))
@@ -486,11 +502,45 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			}
 		}
 
+		// route filter calls to the backend where the filter was installed at
+		var backendName string
+		if parsedReq.Method == "eth_getFilterChanges" || parsedReq.Method == "eth_getFilterLogs" || parsedReq.Method == "eth_uninstallFilter" {
+			var params []string
+			if err := json.Unmarshal(parsedReq.Params, &params); err != nil {
+				log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
+			}
+
+			removed := parsedReq.Method == "eth_uninstallFilter"
+			filterID := params[0]
+			if f, ok := s.filters[filterID]; ok {
+				if removed {
+					s.filtersMu.Lock()
+
+					f.deadline.Stop()
+					delete(s.filters, filterID)
+
+					s.filtersMu.Unlock()
+				} else {
+					f.deadline.Reset(s.filterTimeout)
+				}
+
+				group = f.backendGroup
+				backendName = f.backendName
+			} else {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, ErrInvalidParams("filter not found"))
+				continue
+			}
+		}
+
 		id := string(parsedReq.ID)
 		// If this is a duplicate Request ID, move the Request to a new batchGroup
 		ids[id]++
 		batchGroupID := ids[id]
-		batchGroup := batchGroup{groupID: batchGroupID, backendGroup: group}
+		batchGroup := batchGroup{groupID: batchGroupID, backendGroup: group, backendName: backendName}
 		batches[batchGroup] = append(batches[batchGroup], batchElem{parsedReq, i})
 	}
 
@@ -512,7 +562,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// Create minibatches - each minibatch must be no larger than the maxUpstreamBatchSize
 		numBatches := int(math.Ceil(float64(len(cacheMisses)) / float64(s.maxUpstreamBatchSize)))
 		for i := 0; i < numBatches; i++ {
-			if ctx.Err() == context.DeadlineExceeded {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				log.Info("short-circuiting batch RPC",
 					"req_id", GetReqID(ctx),
 					"auth", GetAuthCtx(ctx),
@@ -525,7 +575,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			start := i * s.maxUpstreamBatchSize
 			end := int(math.Min(float64(start+s.maxUpstreamBatchSize), float64(len(cacheMisses))))
 			elems := cacheMisses[start:end]
-			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch)
+			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch, group.backendName)
 			servedBy[sb] = true
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
@@ -547,6 +597,20 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 			for i := range elems {
 				responses[elems[i].Index] = res[i]
+
+				req := elems[i].Req
+				if res[i].Result != nil && strings.Contains(req.Method, "eth_new") && strings.Contains(req.Method, "Filter") {
+					f := &filter{
+						backendGroup: group.backendGroup,
+						backendName:  strings.SplitN(sb, "/", 2)[1],
+						deadline:     time.NewTimer(s.filterTimeout),
+					}
+
+					filterId := res[i].Result.(string)
+					s.filtersMu.Lock()
+					s.filters[filterId] = f
+					s.filtersMu.Unlock()
+				}
 
 				// TODO(inphi): batch put these
 				if res[i].Error == nil && res[i].Result != nil {
@@ -652,6 +716,27 @@ func randStr(l int) string {
 		panic(err)
 	}
 	return hex.EncodeToString(b)
+}
+
+// timeoutLoop runs at the interval set by 'timeout' and deletes filters
+// that have not been recently used. It is started when the Server is created.
+func (s *Server) filterTimeoutLoop() {
+	ticker := time.NewTicker(s.filterTimeout)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		s.filtersMu.Lock()
+		for id, f := range s.filters {
+			select {
+			case <-f.deadline.C:
+				// just delete, the node will automatically expire it on their end
+				delete(s.filters, id)
+			default:
+				continue
+			}
+		}
+		s.filtersMu.Unlock()
+	}
 }
 
 func (s *Server) isUnlimitedOrigin(origin string) bool {
@@ -877,4 +962,10 @@ func createBatchRequest(elems []batchElem) []*RPCReq {
 		batch[i] = elems[i].Req
 	}
 	return batch
+}
+
+type filter struct {
+	backendGroup string
+	backendName  string
+	deadline     *time.Timer // filter is inactive when deadline triggers
 }

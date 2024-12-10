@@ -353,6 +353,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
+		secondsToDuration(config.Server.FilterTimeoutSeconds),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
