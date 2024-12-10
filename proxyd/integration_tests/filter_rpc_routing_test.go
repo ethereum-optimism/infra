@@ -2,11 +2,12 @@ package integration_tests
 
 import (
 	"fmt"
-	"github.com/ethereum-optimism/infra/proxyd"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
 	"testing"
+
+	"github.com/ethereum-optimism/infra/proxyd"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterRpcRouting(t *testing.T) {
@@ -58,10 +59,14 @@ func TestFilterRpcRouting(t *testing.T) {
 	res, statusCode, err = client.SendRPC("eth_getFilterChanges", []interface{}{filterId})
 
 	require.Equal(t, 2, len(selectedBackend.Requests()))
+	require.NoError(t, err)
+	require.Equal(t, 200, statusCode)
 	RequireEqualJSON(t, []byte(getFilterChangesResponse1), res)
 
 	res, statusCode, err = client.SendRPC("eth_getFilterChanges", []interface{}{filterId})
 
 	require.Equal(t, 3, len(selectedBackend.Requests()))
+	require.NoError(t, err)
+	require.Equal(t, 200, statusCode)
 	RequireEqualJSON(t, []byte(getFilterChangesResponse2), res)
 }
