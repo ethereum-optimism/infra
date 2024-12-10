@@ -43,6 +43,7 @@ const (
 	defaultWSReadTimeout         = 2 * time.Minute
 	defaultWSWriteTimeout        = 10 * time.Second
 	defaultCacheTtl              = 1 * time.Hour
+	defaultBlockTtl              = 2 * time.Second
 	maxRequestBodyLogLen         = 2000
 	defaultMaxUpstreamBatchSize  = 10
 	defaultRateLimitHeader       = "X-Forwarded-For"

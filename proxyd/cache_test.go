@@ -220,7 +220,7 @@ func (c *errorCache) Get(ctx context.Context, key string) (string, error) {
 	return "", errors.New("test error")
 }
 
-func (c *errorCache) Put(ctx context.Context, key string, value string) error {
+func (c *errorCache) Put(ctx context.Context, key string, value string, shortLived bool) error {
 	return errors.New("test error")
 }
 
@@ -241,7 +241,7 @@ func TestFallbackCache(t *testing.T) {
 
 	for i, cache := range success {
 		t.Run("success", func(t *testing.T) {
-			err := cache.Put(ctx, "foo", fmt.Sprintf("bar%d", i))
+			err := cache.Put(ctx, "foo", fmt.Sprintf("bar%d", i), false)
 			require.NoError(t, err)
 
 			val, err := cache.Get(ctx, "foo")
@@ -256,7 +256,7 @@ func TestFallbackCache(t *testing.T) {
 			require.Error(t, err)
 			require.Empty(t, val)
 
-			err = cache.Put(ctx, "foo", "baz")
+			err = cache.Put(ctx, "foo", "baz", false)
 			require.Error(t, err)
 		})
 	}

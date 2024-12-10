@@ -310,7 +310,12 @@ func Start(config *Config) (*Server, func(), error) {
 			if config.Cache.TTL != 0 {
 				ttl = time.Duration(config.Cache.TTL)
 			}
-			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
+
+			blockTtl := defaultBlockTtl
+			if config.Cache.BlockTTL != 0 {
+				blockTtl = time.Duration(config.Cache.BlockTTL)
+			}
+			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl, blockTtl)
 
 			if config.Redis.FallbackToMemory {
 				cache = newFallbackCache(cache, newMemoryCache())
