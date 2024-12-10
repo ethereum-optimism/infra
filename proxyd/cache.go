@@ -110,8 +110,13 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 }
 
 func (c *redisCache) Put(ctx context.Context, key string, value string, shortLived bool) error {
+	ttl := c.defaultTTL
+	if shortLived {
+		ttl = c.shortLivedTTL
+	}
+
 	start := time.Now()
-	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, c.defaultTTL).Err()
+	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, ttl).Err()
 	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err != nil {
