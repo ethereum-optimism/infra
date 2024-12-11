@@ -203,6 +203,17 @@ var (
 		"gas price too high",
 		"gas price too low",
 		"invalid parameters",
+		"txpool is full",
+		"pool is full",
+		"pool overflow",
+		"transaction pool is full",
+		"insufficient funds",
+		"replacement underpriced",
+		"already known",
+		"max initcode size exceeded",
+		"insufficient balance",
+		"gas limit exceeded",
+		"intrinsic gas too low",
 	}
 
 	redisCacheDurationSumm = promauto.NewHistogramVec(prometheus.HistogramOpts{
