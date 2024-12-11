@@ -8,19 +8,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func NewRedisClient(url string, choice RedisClientChoice) (redis.UniversalClient, error) {
-	switch choice {
-	case ClusterChoice:
+func NewRedisClient(url string, enable_cluster bool) (redis.UniversalClient, error) {
+	if enable_cluster {
 		log.Info("Using cluster redis client.")
 		opts, err := redis.ParseClusterURL(url)
 		if err != nil {
 			return nil, err
 		}
 		return redis.NewClusterClient(opts), nil
-	case DefaultChoice:
-		fallthrough
-	default:
-		log.Info("Using default redis client.", "choice", choice)
+	} else {
+		log.Info("Using default redis client.")
 		opts, err := redis.ParseURL(url)
 		if err != nil {
 			return nil, err
