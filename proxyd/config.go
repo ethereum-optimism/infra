@@ -36,8 +36,6 @@ type CacheConfig struct {
 	TTL     TOMLDuration `toml:"ttl"`
 }
 
-type RedisClientChoice string
-
 type RedisConfig struct {
 	// If `redis_cluster = true`, you can specify url string for multi-node cluster:
 	//    "redis://<user>:<password>@<host>:<port>?addr=<host2>:<port2>&addr=<host3>:<port3>"
