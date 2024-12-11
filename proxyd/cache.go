@@ -114,7 +114,7 @@ func (c *redisCache) Put(ctx context.Context, key string, value string, shortLiv
 	ttl := c.defaultTTL
 
 	// disable PUT on short lived key if shortLivedTTL is not set
-	if shortLived && c.shortLivedTTL > 0 {
+	if shortLived && c.shortLivedTTL == 0 {
 		return nil
 	}
 
