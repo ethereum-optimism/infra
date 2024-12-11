@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -100,6 +101,7 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 	start := time.Now()
 	val, err := c.redisReadClient.Get(ctx, c.namespaced(key)).Result()
 	redisCacheDurationSumm.WithLabelValues("GET").Observe(float64(time.Since(start).Milliseconds()))
+	fmt.Println("val", val)
 
 	if err == redis.Nil {
 		return "", nil
@@ -114,8 +116,11 @@ func (c *redisCache) Put(ctx context.Context, key string, value string, shortLiv
 	ttl := c.defaultTTL
 
 	// disable PUT on short lived key if shortLivedTTL is not set
-	if shortLived && c.shortLivedTTL == 0 {
-		return nil
+	if shortLived {
+		if c.shortLivedTTL == 0 {
+			return nil
+		}
+		ttl = c.shortLivedTTL
 	}
 
 	start := time.Now()
