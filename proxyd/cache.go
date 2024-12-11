@@ -112,8 +112,10 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 
 func (c *redisCache) Put(ctx context.Context, key string, value string, shortLived bool) error {
 	ttl := c.defaultTTL
-	if shortLived {
-		ttl = c.shortLivedTTL
+
+	// disable PUT on short lived key if shortLivedTTL is not set
+	if shortLived && c.shortLivedTTL > 0 {
+		return nil
 	}
 
 	start := time.Now()
