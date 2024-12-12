@@ -763,12 +763,12 @@ func (bg *BackendGroup) Primaries() []*Backend {
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
-func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
+func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, targetBackend string) ([]*RPCRes, string, error) {
 	if len(rpcReqs) == 0 {
 		return nil, "", nil
 	}
 
-	backends := bg.orderedBackendsForRequest()
+	backends := bg.orderedBackendsForRequest(targetBackend)
 
 	overriddenResponses := make([]*indexedReqRes, 0)
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
@@ -999,13 +999,19 @@ func weightedShuffle(backends []*Backend) {
 	weightedshuffle.ShuffleInplace(backends, weight, nil)
 }
 
-func (bg *BackendGroup) orderedBackendsForRequest() []*Backend {
-	if bg.Consensus != nil {
+func (bg *BackendGroup) orderedBackendsForRequest(targetBackend string) []*Backend {
+	// ignore consensus load balancing if targetBackend is set - no backend other than targetBackend can
+	// serve the requests
+	if bg.Consensus != nil && targetBackend == "" {
 		return bg.loadBalancedConsensusGroup()
 	} else {
 		healthy := make([]*Backend, 0, len(bg.Backends))
 		unhealthy := make([]*Backend, 0, len(bg.Backends))
 		for _, be := range bg.Backends {
+			if targetBackend != "" && be.Name != targetBackend {
+				continue
+			}
+
 			if be.IsHealthy() {
 				healthy = append(healthy, be)
 			} else {

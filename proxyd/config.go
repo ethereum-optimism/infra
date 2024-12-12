@@ -29,6 +29,9 @@ type ServerConfig struct {
 	EnablePprof           bool `toml:"enable_pprof"`
 	EnableXServedByHeader bool `toml:"enable_served_by_header"`
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
+
+	// FilterTimeoutSeconds specifies the maximum time to keep a filter for that has not been polled for changes.
+	FilterTimeoutSeconds int `toml:"filter_timeout_seconds"`
 }
 
 type CacheConfig struct {
