@@ -40,13 +40,13 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	// redis primary client
-	var redisClient *redis.Client
+	var redisClient redis.UniversalClient
 	if config.Redis.URL != "" {
 		rURL, err := ReadFromEnvOrConfig(config.Redis.URL)
 		if err != nil {
 			return nil, nil, err
 		}
-		redisClient, err = NewRedisClient(rURL)
+		redisClient, err = NewRedisClient(rURL, config.Redis.RedisCluster)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -70,7 +70,7 @@ func Start(config *Config) (*Server, func(), error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		redisReadClient, err = NewRedisClient(rURL)
+		redisReadClient, err = NewRedisClient(rURL, config.Redis.RedisCluster)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -464,7 +464,7 @@ func Start(config *Config) (*Server, func(), error) {
 				if bgcfg.ConsensusHAHeartbeatInterval > 0 {
 					topts = append(topts, WithHeartbeatInterval(time.Duration(bgcfg.ConsensusHAHeartbeatInterval)))
 				}
-				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL)
+				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL, bgcfg.ConsensusHARedis.RedisCluster)
 				if err != nil {
 					return nil, nil, err
 				}

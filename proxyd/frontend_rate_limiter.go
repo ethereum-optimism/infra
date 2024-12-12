@@ -93,13 +93,13 @@ func (m *MemoryFrontendRateLimiter) Take(ctx context.Context, key string) (bool,
 // It uses the basic rate limiter pattern described on the Redis best
 // practices website: https://redis.com/redis-best-practices/basic-rate-limiting/.
 type RedisFrontendRateLimiter struct {
-	r      *redis.Client
+	r      redis.UniversalClient
 	dur    time.Duration
 	max    int
 	prefix string
 }
 
-func NewRedisFrontendRateLimiter(r *redis.Client, dur time.Duration, max int, prefix string) FrontendRateLimiter {
+func NewRedisFrontendRateLimiter(r redis.UniversalClient, dur time.Duration, max int, prefix string) FrontendRateLimiter {
 	return &RedisFrontendRateLimiter{
 		r:      r,
 		dur:    dur,
