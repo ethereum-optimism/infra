@@ -61,10 +61,10 @@ def status(network: str):
     sequencers = network_obj.sequencers
     table = Table(
         "Sequencer ID",
-        "Conductor Active",
-        "Sequencer Healthy",
-        "Conductor Leader",
-        "Active Sequencer",
+        "Active",
+        "Healthy",
+        "Leader",
+        "Sequencing",
         "Voting",
         "Unsafe Number",
         "Unsafe Hash",
@@ -225,7 +225,7 @@ def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bo
         print_error(
             f"sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
-    
+
     if remove:
         if y:
             print_warn("You are trying to remove the override. This would require you to explicitly restart op-node.")
