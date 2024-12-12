@@ -65,6 +65,7 @@ def status(network: str):
         "Sequencer Healthy",
         "Conductor Leader",
         "Active Sequencer",
+        "Voting",
         "Unsafe Number",
         "Unsafe Hash",
     )
@@ -75,6 +76,7 @@ def status(network: str):
             print_boolean(sequencer.sequencer_healthy),
             print_boolean(sequencer.conductor_leader),
             print_boolean(sequencer.sequencer_active),
+            print_boolean(sequencer.voting),
             str(sequencer.unsafe_l2_number),
             str(sequencer.unsafe_l2_hash),
         )
