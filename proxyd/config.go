@@ -37,10 +37,16 @@ type CacheConfig struct {
 }
 
 type RedisConfig struct {
+	// If `redis_cluster = true`, you can specify url string for multi-node cluster:
+	//    "redis://<user>:<password>@<host>:<port>?addr=<host2>:<port2>&addr=<host3>:<port3>"
+	// OR "rediss://<user>:<password>@<host>:<port>?addr=<host2>:<port2>&addr=<host3>:<port3>"
+	//
+	// Otherwise, it is also possible to specify single url for Redis cluster with proxy support.
 	URL              string `toml:"url"`
 	Namespace        string `toml:"namespace"`
 	ReadURL          string `toml:"read_url"`
 	FallbackToMemory bool   `toml:"fallback_to_memory"`
+	RedisCluster     bool   `toml:"redis_cluster"`
 }
 
 type MetricsConfig struct {
