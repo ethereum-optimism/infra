@@ -84,7 +84,7 @@ type redisCache struct {
 	shortLivedTTL   time.Duration
 }
 
-func newRedisCache(redisClient *redis.UniversalClient, redisReadClient *redis.UniversalClient, prefix string, defaultTTL time.Duration, shortLivedTTL time.Duration) *redisCache {
+func newRedisCache(redisClient redis.UniversalClient, redisReadClient redis.UniversalClient, prefix string, defaultTTL time.Duration, shortLivedTTL time.Duration) *redisCache {
 	return &redisCache{redisClient, redisReadClient, prefix, defaultTTL, shortLivedTTL}
 }
 
