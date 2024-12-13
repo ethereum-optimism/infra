@@ -3,7 +3,6 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -97,11 +96,9 @@ func (c *redisCache) namespaced(key string) string {
 }
 
 func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
-
 	start := time.Now()
 	val, err := c.redisReadClient.Get(ctx, c.namespaced(key)).Result()
 	redisCacheDurationSumm.WithLabelValues("GET").Observe(float64(time.Since(start).Milliseconds()))
-	fmt.Println("val", val)
 
 	if err == redis.Nil {
 		return "", nil
