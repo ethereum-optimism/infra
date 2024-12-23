@@ -61,10 +61,11 @@ def status(network: str):
     sequencers = network_obj.sequencers
     table = Table(
         "Sequencer ID",
-        "Conductor Active",
-        "Sequencer Healthy",
-        "Conductor Leader",
-        "Active Sequencer",
+        "Active",
+        "Healthy",
+        "Leader",
+        "Sequencing",
+        "Voting",
         "Unsafe Number",
         "Unsafe Hash",
     )
@@ -75,6 +76,7 @@ def status(network: str):
             print_boolean(sequencer.sequencer_healthy),
             print_boolean(sequencer.conductor_leader),
             print_boolean(sequencer.sequencer_active),
+            print_boolean(sequencer.voting),
             str(sequencer.unsafe_l2_number),
             str(sequencer.unsafe_l2_hash),
         )
@@ -105,7 +107,7 @@ def status(network: str):
 
 
 @app.command()
-def transfer_leader(network: str, sequencer_id: str):
+def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     """Transfer leadership to a specific sequencer."""
     network_obj = get_network(network)
 
@@ -119,8 +121,8 @@ def transfer_leader(network: str, sequencer_id: str):
         raise typer.Exit(code=1)
 
     healthy = sequencer.sequencer_healthy
-    if not healthy:
-        print_error(f"Target sequencer {sequencer_id} is not healthy")
+    if not healthy and not force:
+        print_error(f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
         raise typer.Exit(code=1)
 
     leader = network_obj.find_conductor_leader()
@@ -212,8 +214,9 @@ def resume(network: str, sequencer_id: str = None):
 
 
 @app.command()
-def override_leader(network: str, sequencer_id: str):
-    """Override the conductor_leader response for a sequencer to True.
+def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bool = False):
+    """Override the conductor_leader response for a sequencer to True. To remove the override, please use --remove.
+    If you want this command to be un-interactive, please use it with --y.
     Note that this does not affect consensus and it should only be used for disaster recovery purposes.
     """
     network_obj = get_network(network)
@@ -223,9 +226,22 @@ def override_leader(network: str, sequencer_id: str):
             f"sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
 
+    if remove:
+        if y:
+            print_warn("You are trying to remove the override. This would require you to explicitly restart op-node.")
+        else:
+            typer.echo("Note: you are trying to remove the override. This would require you to explicitly restart op-node.")
+            typer.echo("Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':")
+            user_input = input().lower()
+            if user_input not in ['y', 'n']:
+                print_error("Wrong input provided")
+                raise typer.Exit(code=1)
+            if user_input == 'n':
+                raise typer.Exit(code=0)
+
     resp = requests.post(
         sequencer.conductor_rpc_url,
-        json=make_rpc_payload("conductor_overrideLeader"),
+        json=make_rpc_payload("conductor_overrideLeader", [not remove]),
     )
     resp.raise_for_status()
     if "error" in resp.json():
@@ -234,18 +250,21 @@ def override_leader(network: str, sequencer_id: str):
         )
         raise typer.Exit(code=1)
 
-    resp = requests.post(
-        sequencer.node_rpc_url,
-        json=make_rpc_payload("admin_overrideLeader"),
-    )
-    resp.raise_for_status()
-    if "error" in resp.json():
-        print_error(
-            f"Failed to override sequencer leader status for {sequencer_id}: {resp.json()['error']}"
+    if not remove:
+        resp = requests.post(
+            sequencer.node_rpc_url,
+            json=make_rpc_payload("admin_overrideLeader"),
         )
-        raise typer.Exit(code=1)
+        resp.raise_for_status()
+        if "error" in resp.json():
+            print_error(
+                f"Failed to override sequencer leader status for {sequencer_id}: {resp.json()['error']}"
+            )
+            raise typer.Exit(code=1)
 
-    typer.echo(f"Successfully overrode leader for {sequencer_id}")
+    typer.echo(f"Successfully overrode leader for {sequencer_id} to {not remove}")
+    if remove:
+        typer.echo("As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it.")
 
 
 @app.command()
@@ -322,14 +341,60 @@ def update_cluster_membership(network: str):
     if error:
         raise typer.Exit(code=1)
 
+@app.command()
+def halt_sequencer(network: str, force: bool = False):
+    """Halts the currently active sequencer."""
+    network_obj = get_network(network)
+    sequencers = network_obj.sequencers
+
+    all_conductors_paused = all(
+        [not sequencer.conductor_active for sequencer in sequencers]
+    )
+    if not all_conductors_paused and not force:
+        print_error(
+            f"Not all conductors were found to be paused. Please run the `pause` command or use --force to override this behaviour"
+        )
+        raise typer.Exit(code=1)
+
+    active_sequencer = network_obj.find_active_sequencer()
+    if active_sequencer is None:
+        print_error(f"Could not find an active sequencer in the network: {network}")
+        raise typer.Exit(code=1)
+
+    try:
+        resp = requests.post(
+            active_sequencer.node_rpc_url,
+            json=make_rpc_payload(
+                method="admin_stopSequencer",
+                params=[],
+            ),
+        )
+        resp.raise_for_status()
+        if "error" in resp.json():
+            raise Exception(resp.json()["error"])
+        typer.echo(
+            f"Successfully halted the active sequencer: {active_sequencer.sequencer_id}"
+        )
+    except Exception as e:
+        print_warn(
+            f"Failed to halt the active sequencer: {active_sequencer.sequencer_id}"
+        )
+
 
 @app.command()
-def force_active_sequencer(network: str, sequencer_id: str):
+def force_active_sequencer(network: str, sequencer_id: str, force: bool = False):
     """Forces a sequencer to become active using stop/start."""
     network_obj = get_network(network)
     sequencer = network_obj.get_sequencer_by_id(sequencer_id)
     if sequencer is None:
         typer.echo(f"sequencer ID {sequencer_id} not found in network {network}")
+        raise typer.Exit(code=1)
+
+    # Pre-flight check: Ensure all conductors are paused
+    sequencers = network_obj.sequencers
+    all_paused = all(not sequencer.conductor_active for sequencer in sequencers)
+    if not all_paused and not force:
+        print_error("Not all conductors are paused. Run 'pause' command first.")
         raise typer.Exit(code=1)
 
     hash = sequencer.unsafe_l2_hash
@@ -366,7 +431,6 @@ def force_active_sequencer(network: str, sequencer_id: str):
         raise typer.Exit(code=1)
 
     typer.echo(f"Successfully forced {sequencer_id} to become active")
-
 
 if __name__ == "__main__":
     app()

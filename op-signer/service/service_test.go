@@ -158,11 +158,99 @@ func testSignTransaction(t *testing.T, tx *types.Transaction) {
 					SignDigest(ctx, tt.wantKeyName, tt.digest).
 					Return(signature, nil)
 			}
-			resp, err := service.SignTransaction(ctx, tt.args)
+			resp, err := service.eth.SignTransaction(ctx, tt.args)
 			if tt.wantErrCode == 0 {
 				assert.Nil(t, err)
 				if assert.NotNil(t, resp) {
 					assert.NotEmpty(t, resp)
+				}
+			} else {
+				assert.NotNil(t, err)
+				assert.Nil(t, resp)
+				var rpcErr rpc.Error
+				var httpErr rpc.HTTPError
+				if errors.As(err, &rpcErr) {
+					assert.Equal(t, tt.wantErrCode, rpcErr.ErrorCode())
+				} else if errors.As(err, &httpErr) {
+					assert.Equal(t, tt.wantErrCode, httpErr.StatusCode)
+				} else {
+					assert.Fail(t, "returned error is not an rpc.Error or rpc.HTTPError")
+				}
+			}
+		})
+	}
+}
+
+func TestSignBlockPayload(t *testing.T) {
+	priv, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	sender := crypto.PubkeyToAddress(priv.PublicKey)
+
+	var blockPayloadConfig = SignerServiceConfig{
+		Auth: []AuthConfig{
+			{ClientName: "client.oplabs.co", KeyName: "keyName", ChainID: 1, FromAddress: sender},
+			{ClientName: "invalid-chainId-client.oplabs.co", KeyName: "keyName", ChainID: 2, FromAddress: sender},
+			{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName", ChainID: 1, FromAddress: sender},
+			{ClientName: "unspecified-sender-client.oplabs.co", KeyName: "keyName", ChainID: 1},
+		},
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blockPayloadArgs := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte("c0ffee"), &sender)
+	signingHash, err := blockPayloadArgs.ToSigningHash()
+	require.NoError(t, err)
+
+	signature, err := crypto.Sign(signingHash.Bytes(), priv)
+	require.NoError(t, err)
+
+	missingChainId := clientSigner.NewBlockPayloadArgs([32]byte{}, nil, []byte("c0ffee"), &sender)
+
+	missingPayloadHash := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte{}, &sender)
+	missingPayloadHash.PayloadHash = nil
+
+	random := common.HexToAddress("1234")
+	invalidSender := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte("c0ffee"), &random)
+
+	tests := []struct {
+		testName    string
+		args        clientSigner.BlockPayloadArgs
+		signingHash []byte
+		clientName  string
+		wantKeyName string
+		wantErrCode int
+	}{
+		{"happy path", *blockPayloadArgs, signingHash.Bytes(), "client.oplabs.co", "keyName", 0},
+		{"happy path - different client and key", *blockPayloadArgs, signingHash.Bytes(), "alt-client.oplabs.co", "altKeyName", 0},
+
+		{"chainId not specified", *missingChainId, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
+		{"invalid chainId", *blockPayloadArgs, signingHash.Bytes(), "invalid-chainId-client.oplabs.co", "keyName", -32013},
+		{"payload hash not specified", *missingPayloadHash, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
+
+		{"unspecified sender", *blockPayloadArgs, signingHash.Bytes(), "unspecified-sender-client.oplabs.co", "keyName", 403},
+		{"invalid sender", *invalidSender, signingHash.Bytes(), "client.oplabs.co", "keyName", 403},
+		{"client not authorized", *blockPayloadArgs, signingHash.Bytes(), "forbidden-client.oplabs.co", "keyName", 403},
+		{"client empty", *blockPayloadArgs, signingHash.Bytes(), "", "", 403},
+	}
+	for _, tt := range tests {
+		t.Run(tt.testName, func(t *testing.T) {
+			mockSignatureProvider := provider.NewMockSignatureProvider(ctrl)
+			service := NewSignerServiceWithProvider(log.Root(), blockPayloadConfig, mockSignatureProvider)
+
+			ctx := context.WithValue(context.TODO(), clientInfoContextKey{}, ClientInfo{ClientName: tt.clientName})
+			if tt.wantErrCode == 0 || tt.testName == "invalid from" {
+				mockSignatureProvider.EXPECT().
+					SignDigest(ctx, tt.wantKeyName, tt.signingHash).
+					Return(signature, nil)
+			}
+			resp, err := service.opsigner.SignBlockPayload(ctx, tt.args)
+			if tt.wantErrCode == 0 {
+				assert.Nil(t, err)
+				if assert.NotNil(t, resp) {
+					assert.NotEmpty(t, resp)
+					assert.Equal(t, resp.String(), hexutil.Encode(signature))
 				}
 			} else {
 				assert.NotNil(t, err)
