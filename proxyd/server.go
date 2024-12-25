@@ -451,13 +451,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		limitAmount := 1
 		backendGroup := s.BackendGroups[group]
-		parsedRange := ParseRange(parsedReq, backendGroup)
-		if parsedRange != nil {
-			blockRange := int(parsedRange.ToBlock - parsedRange.FromBlock + 1)
+		if blockRange := ExtractBlockRange(parsedReq, backendGroup); blockRange != nil {
+			blockCount := int(blockRange.ToBlock) - int(blockRange.FromBlock) + 1
 			if backendGroup.RateLimitRange {
-				limitAmount = max(limitAmount, blockRange)
+				limitAmount = max(limitAmount, blockCount)
 			}
-			if backendGroup.MaxBlockRange > 0 && blockRange > int(backendGroup.MaxBlockRange) {
+			if backendGroup.MaxBlockRange > 0 && blockCount > int(backendGroup.MaxBlockRange) {
 				log.Debug(
 					"RPC request over max block range",
 					"source", "rpc",
