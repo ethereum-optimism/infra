@@ -168,3 +168,19 @@ func IsBatch(raw []byte) bool {
 	}
 	return false
 }
+
+type BlockNumberTracker interface {
+	GetLatestBlockNumber() (uint64, bool)
+	GetSafeBlockNumber() (uint64, bool)
+	GetFinalizedBlockNumber() (uint64, bool)
+}
+
+type Range struct {
+	FromBlock uint64
+	ToBlock   uint64
+}
+
+func ParseRange(req *RPCReq, tracker BlockNumberTracker) *Range {
+	// TODO
+	return nil
+}

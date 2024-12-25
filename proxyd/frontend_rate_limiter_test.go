@@ -35,18 +35,18 @@ func TestFrontendRateLimiter(t *testing.T) {
 		ctx := context.Background()
 		t.Run(cfg.name, func(t *testing.T) {
 			for i := 0; i < 4; i++ {
-				ok, err := frl.Take(ctx, "foo")
+				ok, err := frl.Take(ctx, "foo", 1)
 				require.NoError(t, err)
 				require.Equal(t, i < max, ok)
-				ok, err = frl.Take(ctx, "bar")
+				ok, err = frl.Take(ctx, "bar", 1)
 				require.NoError(t, err)
 				require.Equal(t, i < max, ok)
 			}
 			time.Sleep(2 * time.Second)
 			for i := 0; i < 4; i++ {
-				ok, _ := frl.Take(ctx, "foo")
+				ok, _ := frl.Take(ctx, "foo", 1)
 				require.Equal(t, i < max, ok)
-				ok, _ = frl.Take(ctx, "bar")
+				ok, _ = frl.Take(ctx, "bar", 1)
 				require.Equal(t, i < max, ok)
 			}
 		})

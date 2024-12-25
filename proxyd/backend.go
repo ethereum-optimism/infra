@@ -732,7 +732,9 @@ type BackendGroup struct {
 	Backends               []*Backend
 	WeightedRouting        bool
 	Consensus              *ConsensusPoller
+	Nonconsensus           *NonconsensusPoller
 	FallbackBackends       map[string]bool
+	MaxBlockRange          uint64
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
 }
@@ -760,6 +762,36 @@ func (bg *BackendGroup) Primaries() []*Backend {
 		}
 	}
 	return primaries
+}
+
+func (bg *BackendGroup) GetLatestBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetLatestBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetLatestBlockNumber()
+	}
+	return 0, false
+}
+
+func (bg *BackendGroup) GetSafeBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetSafeBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetSafeBlockNumber()
+	}
+	return 0, false
+}
+
+func (bg *BackendGroup) GetFinalizedBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetFinalizedBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetFinalizedBlockNumber()
+	}
+	return 0, false
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
@@ -1061,6 +1093,9 @@ func (bg *BackendGroup) loadBalancedConsensusGroup() []*Backend {
 func (bg *BackendGroup) Shutdown() {
 	if bg.Consensus != nil {
 		bg.Consensus.Shutdown()
+	}
+	if bg.Nonconsensus != nil {
+		bg.Nonconsensus.Shutdown()
 	}
 }
 
