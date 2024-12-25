@@ -71,7 +71,7 @@ func TestFrontendRateLimiter(t *testing.T) {
 
 type errorFrontend struct{}
 
-func (e *errorFrontend) Take(ctx context.Context, key string) (bool, error) {
+func (e *errorFrontend) Take(ctx context.Context, key string, amount int) (bool, error) {
 	return false, fmt.Errorf("test error")
 }
 
@@ -90,12 +90,12 @@ func TestFallbackRateLimiter(t *testing.T) {
 
 	ctx := context.Background()
 	for _, frl := range shouldSucceed {
-		ok, err := frl.Take(ctx, "foo")
+		ok, err := frl.Take(ctx, "foo", 1)
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
 	for _, frl := range shouldFail {
-		ok, err := frl.Take(ctx, "foo")
+		ok, err := frl.Take(ctx, "foo", 1)
 		require.Error(t, err)
 		require.False(t, ok)
 	}
