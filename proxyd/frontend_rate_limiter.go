@@ -39,9 +39,9 @@ func newLimitedKeys(t int64) *limitedKeys {
 func (l *limitedKeys) Take(key string, amount, max int) bool {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
-	val := l.keys[key]
-	l.keys[key] = val + amount
-	return val < max
+	val := l.keys[key] + amount
+	l.keys[key] = val
+	return val <= max
 }
 
 // MemoryFrontendRateLimiter is a rate limiter that stores
@@ -118,7 +118,7 @@ func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string, amount 
 		return false, err
 	}
 
-	return incr.Val()-1 < int64(r.max), nil
+	return incr.Val() <= int64(r.max), nil
 }
 
 type noopFrontendRateLimiter struct{}

@@ -34,6 +34,7 @@ func TestFrontendRateLimiter(t *testing.T) {
 		frl := cfg.frl
 		ctx := context.Background()
 		t.Run(cfg.name, func(t *testing.T) {
+			// Test with increment of 1
 			for i := 0; i < 4; i++ {
 				ok, err := frl.Take(ctx, "foo", 1)
 				require.NoError(t, err)
@@ -49,6 +50,21 @@ func TestFrontendRateLimiter(t *testing.T) {
 				ok, _ = frl.Take(ctx, "bar", 1)
 				require.Equal(t, i < max, ok)
 			}
+
+			// Test with increment of 2
+			time.Sleep(2 * time.Second)
+			ok, err := frl.Take(ctx, "baz", 2)
+			require.NoError(t, err)
+			require.True(t, ok)
+			ok, err = frl.Take(ctx, "baz", 1)
+			require.NoError(t, err)
+			require.False(t, ok)
+
+			// Test with increment of 3
+			time.Sleep(2 * time.Second)
+			ok, err = frl.Take(ctx, "baz", 3)
+			require.NoError(t, err)
+			require.False(t, ok)
 		})
 	}
 }
