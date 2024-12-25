@@ -167,6 +167,9 @@ type BackendGroupConfig struct {
 	// MaxBlockRange for eth_getLogs that works in both consensus and nonconsensus mode
 	MaxBlockRange uint64 `toml:"max_block_range"`
 
+	// RateLimitRange controls if eth_getLogs is rate limited by the request block range
+	RateLimitRange bool `toml:"rate_limit_range"`
+
 	/*
 		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance
 	*/

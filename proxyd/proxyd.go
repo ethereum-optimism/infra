@@ -262,6 +262,7 @@ func Start(config *Config) (*Server, func(), error) {
 			WeightedRouting:        bg.WeightedRouting,
 			FallbackBackends:       fallbackBackends,
 			MaxBlockRange:          bg.MaxBlockRange,
+			RateLimitRange:         bg.RateLimitRange,
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
 		}

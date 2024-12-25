@@ -735,6 +735,7 @@ type BackendGroup struct {
 	Nonconsensus           *NonconsensusPoller
 	FallbackBackends       map[string]bool
 	MaxBlockRange          uint64
+	RateLimitRange         bool
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
 }
