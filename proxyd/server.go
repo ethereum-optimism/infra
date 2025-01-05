@@ -500,7 +500,14 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		var cacheMisses []batchElem
 
 		for _, req := range batch {
-			backendRes, _ := s.cache.GetRPC(ctx, req.Req)
+			backendRes, err := s.cache.GetRPC(ctx, req.Req)
+			if err != nil {
+				method := "unknown"
+				if req.Req != nil {
+					method = req.Req.Method
+				}
+				log.Error("error occurred upon GET-ing against the RPCCache", "method", method, "err", err)
+			}
 			if backendRes != nil {
 				responses[req.Index] = backendRes
 				cached = true
