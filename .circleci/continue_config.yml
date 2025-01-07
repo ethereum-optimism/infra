@@ -22,6 +22,9 @@ parameters:
   run-build-proxyd:
     type: boolean
     default: false
+  run-build-cci-stats:
+    type: boolean
+    default: false
   run-all:
     type: boolean
     default: false
@@ -288,7 +291,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.21
+      - image: cimg/go:1.23
     steps:
       - checkout
       - run:
@@ -490,19 +493,35 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  cci-stats:
+    when:
+      or: [ << pipeline.parameters.run-build-cci-stats >>, << pipeline.parameters.run-all >> ]
+    jobs:
+      - go-lint:
+          name: cci-stats-lint
+          module: cci-stats
+      - go-test:
+          name: cci-stats-tests
+          module: cci-stats
+      - docker-build:
+          name: cci-stats-docker-build
+          docker_file: cci-stats/Dockerfile
+          docker_name: cci-stats
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
   release:
     jobs:
       - log-config-results:
           filters:
             tags:
-              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -515,6 +534,7 @@ workflows:
                 - proxyd
                 - op-conductor-mon
                 - peer-mgmt-service
+                - cci-stats
           name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
@@ -536,6 +556,7 @@ workflows:
                 - proxyd
                 - op-conductor-mon
                 - peer-mgmt-service
+                - cci-stats
           name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
@@ -555,6 +576,7 @@ workflows:
                 - proxyd
                 - op-conductor-mon
                 - peer-mgmt-service
+                - cci-stats
           name: <<matrix.docker_name>>-docker-tag
           filters:
             tags:
@@ -575,6 +597,7 @@ workflows:
                 - proxyd
                 - op-conductor-mon
                 - peer-mgmt-service
+                - cci-stats
           name: <<matrix.module>>-go-release
           filters:
             tags:

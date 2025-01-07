@@ -22,14 +22,14 @@ func main() {
 }
 
 func run() error {
-	cciKey := requiredStr("CCI_KEY")
-	dbURI := requiredStr("DATABASE_URI")
-	projectSlug := requiredStr("PROJECT_SLUG")
-	branchPattern := requiredStr("BRANCH_PATTERN")
-	workflowPattern := requiredStr("WORKFLOW_PATTERN")
-	fetchLimitDays := requiredInt("FETCH_LIMIT_DAYS")
-	maxConcurrentFetchJobs := requiredInt("MAX_CONCURRENT_FETCH_JOBS")
-	slowTestThresholdSeconds := requiredInt("SLOW_TEST_THRESHOLD_SECONDS")
+	cciKey := requiredStrEnv("CCI_KEY")
+	dbURI := requiredStrEnv("DATABASE_URI")
+	projectSlug := requiredStrEnv("PROJECT_SLUG")
+	branchPattern := requiredStrEnv("BRANCH_PATTERN")
+	workflowPattern := requiredStrEnv("WORKFLOW_PATTERN")
+	fetchLimitDays := requiredIntEnv("FETCH_LIMIT_DAYS")
+	maxConcurrentFetchJobs := requiredIntEnv("MAX_CONCURRENT_FETCH_JOBS")
+	slowTestThresholdSeconds := requiredIntEnv("SLOW_TEST_THRESHOLD_SECONDS")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -77,7 +77,7 @@ func run() error {
 	}
 }
 
-func requiredStr(envVar string) string {
+func requiredStrEnv(envVar string) string {
 	val := os.Getenv(envVar)
 	if val == "" {
 		panic(fmt.Errorf("%s must be set", envVar))
@@ -85,7 +85,7 @@ func requiredStr(envVar string) string {
 	return val
 }
 
-func requiredInt(envVar string) int {
+func requiredIntEnv(envVar string) int {
 	val := os.Getenv(envVar)
 	if val == "" {
 		panic(fmt.Errorf("%s must be set", envVar))

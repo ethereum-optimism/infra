@@ -21,6 +21,7 @@ workflows:
             peer-mgmt-service/.* run-build-pms true
             op-ufm/.* run-build-op-ufm true
             proxyd/.* run-build-proxyd true
+            cci-stats/.* run-build-cci-stats true
             .circleci/.* run-all true
             .github/.* run-all true
           filters:
