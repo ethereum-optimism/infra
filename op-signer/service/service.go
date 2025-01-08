@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -157,8 +158,8 @@ func (s *EthService) SignTransaction(ctx context.Context, args signer.Transactio
 		"tx.type", tx.Type(),
 		"tx.hash", tx.Hash().Hex(),
 		"tx.chainid", tx.ChainId(),
-		"tx.blobhashes", tx.BlobHashes(),
-		"tx.blobfeecap", tx.BlobGasFeeCap(),
+		"tx.blobhashes", fmt.Sprint(tx.BlobHashes()),
+		"tx.blobfeecap", fmt.Sprint(tx.BlobGasFeeCap()),
 		"signature", hexutil.Encode(signature),
 	)
 
