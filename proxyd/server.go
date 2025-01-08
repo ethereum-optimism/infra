@@ -731,7 +731,7 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 }
 
 func (s *Server) isAllowedChainId(chainId *big.Int) bool {
-	if s.allowedChainIds == nil || len(s.allowedChainIds) == 0 {
+	if len(s.allowedChainIds) == 0 {
 		return true
 	}
 	for _, id := range s.allowedChainIds {
