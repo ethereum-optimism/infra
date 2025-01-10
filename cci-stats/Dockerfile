@@ -12,6 +12,7 @@ RUN make build
 
 FROM alpine:3.20
 RUN addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache ca-certificates
 USER app
 WORKDIR /app
 
