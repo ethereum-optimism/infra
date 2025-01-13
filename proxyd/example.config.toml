@@ -94,6 +94,8 @@ backends = ["infura"]
 # max_block_range = 10000
 # Whether to make rate limits block-range aware (e.g. eth_getLogs request for 10k blocks = 10k tokens)
 # rate_limit_range = true
+# Polling interval for the nonconsensus poller (set to negative to disable polling, e.g "-1s")
+# nonconsensus_poller_interval = "1s"
 # Enable consensus awareness for backend group, making it act as a load balancer, default false
 # consensus_aware = true
 # Period in which the backend wont serve requests if banned, default 5m

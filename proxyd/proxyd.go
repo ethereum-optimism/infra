@@ -487,7 +487,7 @@ func Start(config *Config) (*Server, func(), error) {
 		} else {
 			opts := make([]NonconsensusOpt, 0)
 
-			if bgcfg.NonconsensusPollerInterval > 0 {
+			if bgcfg.NonconsensusPollerInterval != 0 {
 				opts = append(opts, WithPollingInterval(time.Duration(bgcfg.NonconsensusPollerInterval)))
 			}
 

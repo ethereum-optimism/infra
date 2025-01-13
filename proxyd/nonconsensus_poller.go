@@ -11,6 +11,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+const PollerRequestId = "901134"
+
 func NewNonconsensusPoller(bg *BackendGroup, opts ...NonconsensusOpt) *NonconsensusPoller {
 	ctx, cancel := context.WithCancel(context.Background())
 	np := &NonconsensusPoller{
@@ -24,9 +26,11 @@ func NewNonconsensusPoller(bg *BackendGroup, opts ...NonconsensusOpt) *Nonconsen
 	for _, opt := range opts {
 		opt(np)
 	}
-	for _, backend := range bg.Backends {
-		np.wg.Add(1)
-		go np.poll(backend)
+	if np.interval > 0 {
+		for _, backend := range bg.Backends {
+			np.wg.Add(1)
+			go np.poll(backend)
+		}
 	}
 	return np
 }
@@ -106,7 +110,7 @@ func (p *NonconsensusPoller) update(be *Backend, label string, ptr *uint64) {
 
 func (p *NonconsensusPoller) fetchBlock(ctx context.Context, be *Backend, block string) (uint64, error) {
 	var rpcRes RPCRes
-	err := be.ForwardRPC(ctx, &rpcRes, "68", "eth_getBlockByNumber", block, false)
+	err := be.forwardRPC(ctx, true, &rpcRes, PollerRequestId, "eth_getBlockByNumber", block, false)
 	if err != nil {
 		return 0, err
 	}
