@@ -17,7 +17,6 @@ func NewNonconsensusPoller(bg *BackendGroup, opts ...NonconsensusOpt) *Nonconsen
 		interval:       DefaultPollerInterval,
 		ctx:            ctx,
 		cancel:         cancel,
-		done:           make(chan struct{}, 1),
 		latestBlock:    math.MaxUint64,
 		safeBlock:      math.MaxUint64,
 		finalizedBlock: math.MaxUint64,
@@ -26,6 +25,7 @@ func NewNonconsensusPoller(bg *BackendGroup, opts ...NonconsensusOpt) *Nonconsen
 		opt(np)
 	}
 	for _, backend := range bg.Backends {
+		np.wg.Add(1)
 		go np.poll(backend)
 	}
 	return np
@@ -43,8 +43,8 @@ type NonconsensusPoller struct {
 	interval       time.Duration
 	ctx            context.Context
 	cancel         context.CancelFunc
-	done           chan struct{}
 	lock           sync.RWMutex
+	wg             sync.WaitGroup
 	latestBlock    uint64
 	safeBlock      uint64
 	finalizedBlock uint64
@@ -52,7 +52,7 @@ type NonconsensusPoller struct {
 
 func (p *NonconsensusPoller) Shutdown() {
 	p.cancel()
-	<-p.done
+	p.wg.Wait()
 }
 
 func (p *NonconsensusPoller) GetLatestBlockNumber() (uint64, bool) {
@@ -78,7 +78,7 @@ func (p *NonconsensusPoller) poll(be *Backend) {
 	for {
 		select {
 		case <-p.ctx.Done():
-			close(p.done)
+			p.wg.Done()
 			return
 		case <-timer.C:
 			p.update(be, "latest", &p.latestBlock)
