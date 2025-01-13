@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/goccy/go-json"
+	"github.com/valyala/fasthttp"
 	"io"
 	"math"
 	"math/rand"
@@ -111,10 +112,19 @@ var (
 		HTTPErrorCode: 500,
 	}
 
+	ErrBackendResponseDecompressionError = &RPCErr{
+		Code:          JSONRPCErrorInternal - 22,
+		Message:       "backend response too large",
+		HTTPErrorCode: 500,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
 	ErrConsensusGetReceiptsInvalidTarget = errors.New("unsupported consensus_receipts_target")
+
+	// For the new fastHTTP client
+	headerContentTypeJson = []byte("application/json")
 )
 
 func ErrInvalidRequest(msg string) *RPCErr {
@@ -141,6 +151,7 @@ type Backend struct {
 	authUsername         string
 	authPassword         string
 	headers              map[string]string
+	fastClient           *fasthttp.Client
 	client               *LimitedHTTPClient
 	dialer               *websocket.Dialer
 	maxRetries           int
@@ -318,12 +329,29 @@ func NewBackend(
 	rpcSemaphore *semaphore.Weighted,
 	opts ...BackendOpt,
 ) *Backend {
+	readTimeout, _ := time.ParseDuration("10000ms")
+	writeTimeout, _ := time.ParseDuration("10000ms")
+	maxIdleConnDuration, _ := time.ParseDuration("1h")
 	backend := &Backend{
 		Name:            name,
 		rpcURL:          rpcURL,
 		wsURL:           wsURL,
 		maxResponseSize: math.MaxInt64,
-		client: &LimitedHTTPClient{
+		fastClient: &fasthttp.Client{
+			MaxConnsPerHost:               16384,
+			ReadTimeout:                   readTimeout,
+			WriteTimeout:                  writeTimeout,
+			MaxIdleConnDuration:           maxIdleConnDuration,
+			NoDefaultUserAgentHeader:      true, // Don't send: User-Agent: fasthttp
+			DisableHeaderNamesNormalizing: true, // If you set the case on your headers correctly you can enable this
+			DisablePathNormalizing:        true,
+			// increase DNS cache time to five minutes
+			Dial: (&fasthttp.TCPDialer{
+				Concurrency:      32768,
+				DNSCacheDuration: time.Minute * 5,
+			}).Dial,
+		},
+		client: &LimitedHTTPClient{ // Keep legacy client for now, TODO remove
 			Client:      http.Client{Timeout: 5 * time.Second},
 			sem:         rpcSemaphore,
 			backendName: name,
@@ -550,21 +578,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		body = mustMarshalJSON(rpcReqs)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", b.rpcURL, bytes.NewReader(body))
-	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
-		return nil, wrapErr(err, "error creating backend request")
-	}
-
-	if b.authPassword != "" {
-		httpReq.SetBasicAuth(b.authUsername, b.authPassword)
-	}
-
-	opTxProxyAuth := GetOpTxProxyAuthHeader(ctx)
-	if opTxProxyAuth != "" {
-		httpReq.Header.Set(DefaultOpTxProxyAuthHeader, opTxProxyAuth)
-	}
+	req := fasthttp.AcquireRequest()
+	req.SetRequestURI(b.rpcURL)
+	req.Header.SetMethod(fasthttp.MethodPost)
+	req.SetBody(body)
 
 	xForwardedFor := GetXForwardedFor(ctx)
 	if b.stripTrailingXFF {
@@ -573,42 +590,63 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		xForwardedFor = fmt.Sprintf("%s, %s", xForwardedFor, b.proxydIP)
 	}
 
-	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("X-Forwarded-For", xForwardedFor)
+	req.Header.SetContentTypeBytes(headerContentTypeJson)
+	req.Header.Set("X-Forwarded-For", xForwardedFor)
+
+	// Geth native backend supports gzip
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	for name, value := range b.headers {
-		httpReq.Header.Set(name, value)
+		req.Header.Set(name, value)
 	}
 
 	start := time.Now()
-	httpRes, err := b.client.DoLimited(httpReq)
+
+	httpRes := fasthttp.AcquireResponse()
+
+	reqTimeout := time.Duration(5000) * time.Millisecond
+
+	err := b.fastClient.DoTimeout(req, httpRes, reqTimeout)
 	if err != nil {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
-		return nil, wrapErr(err, "error in backend request")
+		return nil, wrapErr(err, "err in backend request")
 	}
+	fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(httpRes)
 
 	metricLabelMethod := rpcReqs[0].Method
 	if isBatch {
 		metricLabelMethod = "<batch>"
 	}
+
+	sc := httpRes.StatusCode()
+
 	rpcBackendHTTPResponseCodesTotal.WithLabelValues(
 		GetAuthCtx(ctx),
 		b.Name,
 		metricLabelMethod,
-		strconv.Itoa(httpRes.StatusCode),
+		strconv.Itoa(sc),
 		strconv.FormatBool(isBatch),
 	).Inc()
 
 	// Alchemy returns a 400 on bad JSONs, so handle that case
-	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
+	if sc != 200 && sc != 400 {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
-	defer httpRes.Body.Close()
-	resB, err := io.ReadAll(LimitReader(httpRes.Body, b.maxResponseSize))
+	// defer httpRes.Body.Close()
+
+	// This should intelligently choose decompression based on whether the downstream
+	// backend supported our request or not.
+	bodyUncomp, err := httpRes.BodyUncompressed()
+	if err != nil {
+		return nil, ErrBackendResponseDecompressionError
+	}
+
+	resB, err := io.ReadAll(LimitReader(bytes.NewReader(bodyUncomp), b.maxResponseSize))
 	if errors.Is(err, ErrLimitReaderOverLimit) {
 		return nil, ErrBackendResponseTooLarge
 	}
@@ -649,9 +687,9 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	// capture the HTTP status code in the response. this will only
 	// ever be 400 given the status check on line 318 above.
-	if httpRes.StatusCode != 200 {
+	if sc != 200 {
 		for _, res := range rpcRes {
-			res.Error.HTTPErrorCode = httpRes.StatusCode
+			res.Error.HTTPErrorCode = sc
 		}
 	}
 	duration := time.Since(start)
@@ -1417,6 +1455,14 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 				}
 			}
 			if errors.Is(err, ErrBackendResponseTooLarge) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
+
+			if errors.Is(err, ErrBackendResponseDecompressionError) {
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
 					ServedBy: "",

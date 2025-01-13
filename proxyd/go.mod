@@ -8,6 +8,7 @@ require (
 	github.com/emirpasic/gods v1.18.1
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/go-redsync/redsync/v4 v4.10.0
+	github.com/goccy/go-json v0.10.2
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.5.0
@@ -18,6 +19,7 @@ require (
 	github.com/rs/cors v1.11.0
 	github.com/stretchr/testify v1.9.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
+	github.com/valyala/fasthttp v1.40.0
 	github.com/xaionaro-go/weightedshuffle v0.0.0-20211213010739-6a74fbc7d24a
 	golang.org/x/sync v0.7.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -28,6 +30,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/alicebob/gopher-json v0.0.0-20230218143504-906a9b012302 // indirect
+	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
@@ -74,6 +77,7 @@ require (
 	github.com/supranational/blst v0.3.11 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/yuin/gopher-lua v1.1.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	golang.org/x/crypto v0.22.0 // indirect

@@ -1,7 +1,7 @@
 package proxyd
 
 import (
-	"encoding/json"
+	"github.com/goccy/go-json"
 	"io"
 	"strings"
 )
