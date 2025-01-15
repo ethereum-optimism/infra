@@ -6,6 +6,7 @@ import (
 	"encoding/asn1"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
@@ -76,4 +77,34 @@ func unmarshalECDSAPublicKey(derBytes []byte) (*ecdsa.PublicKey, error) {
 	}
 
 	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+}
+
+// ConvertCompactRecoverableSignatureToDER converts an Ethereum signature in
+// [R || S || V] format to DER format.
+func convertCompactRecoverableSignatureToDER(sig []byte) ([]byte, error) {
+	// Ensure the signature is the correct length (65 bytes: R=32, S=32, V=1)
+	if len(sig) != 65 {
+		return nil, fmt.Errorf("invalid signature length: expected 65 bytes, got %d", len(sig))
+	}
+
+	// Extract R and S components
+	r := new(big.Int).SetBytes(sig[:32])   // First 32 bytes
+	s := new(big.Int).SetBytes(sig[32:64]) // Next 32 bytes
+
+	// Create a struct representing the DER sequence
+	derSignature := struct {
+		R *big.Int
+		S *big.Int
+	}{
+		R: r,
+		S: s,
+	}
+
+	// Marshal the struct into DER
+	derBytes, err := asn1.Marshal(derSignature)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal DER: %v", err)
+	}
+
+	return derBytes, nil
 }
