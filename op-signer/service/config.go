@@ -11,11 +11,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// KeyProvider represents the cloud provider for the key management service
+type KeyProvider string
+
+const (
+	KeyProviderAWS KeyProvider = "AWS"
+	KeyProviderGCP KeyProvider = "GCP"
+)
+
+// IsValid checks if the KeyProvider value is valid
+func (k KeyProvider) IsValid() bool {
+	switch k {
+	case KeyProviderAWS, KeyProviderGCP:
+		return true
+	default:
+		return false
+	}
+}
+
 type AuthConfig struct {
 	// ClientName DNS name of the client connecting to op-signer.
 	ClientName string `yaml:"name"`
 	// KeyName key resource name of the Cloud KMS
 	KeyName string `yaml:"key"`
+	// KeyProvider specifies which cloud provider's KMS to use
+	KeyProvider KeyProvider `yaml:"type"`
 	// ChainID chain id of the op-signer to sign for
 	ChainID uint64 `yaml:"chainID"`
 	// FromAddress sender address that is sending the rpc request
@@ -41,7 +61,14 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return config, err
 	}
-	for _, authConfig := range config.Auth {
+	for i, authConfig := range config.Auth {
+		// Default to GCP if KeyProvider is empty to avoid breaking changes
+		if config.Auth[i].KeyProvider == "" {
+			config.Auth[i].KeyProvider = KeyProviderGCP
+		}
+		if !config.Auth[i].KeyProvider.IsValid() {
+			return config, fmt.Errorf("invalid key provider '%s' in auth config. Must be 'AWS' or 'GCP'", authConfig.KeyProvider)
+		}
 		for _, toAddress := range authConfig.ToAddresses {
 			if _, err := hexutil.Decode(toAddress); err != nil {
 				return config, fmt.Errorf("invalid toAddress '%s' in auth config: %w", toAddress, err)
