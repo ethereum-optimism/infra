@@ -98,7 +98,7 @@ func (s *SignerClient) SignBlockPayload(
 	var result []byte
 
 	if err := s.client.Call(&result, "eth_signBlockPayload", signingHash); err != nil {
-		return []byte{}, fmt.Errorf("eth_signTransaction failed: %w", err)
+		return []byte{}, fmt.Errorf("eth_signBlockPayload failed: %w", err)
 	}
 
 	return result, nil
