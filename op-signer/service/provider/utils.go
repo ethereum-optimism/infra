@@ -103,7 +103,7 @@ func convertCompactRecoverableSignatureToDER(sig []byte) ([]byte, error) {
 	// Marshal the struct into DER
 	derBytes, err := asn1.Marshal(derSignature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal DER: %v", err)
+		return nil, fmt.Errorf("failed to marshal DER: %w", err)
 	}
 
 	return derBytes, nil
