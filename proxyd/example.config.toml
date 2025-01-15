@@ -122,8 +122,23 @@ eth_call = "main"
 eth_chainId = "main"
 eth_blockNumber = "alchemy"
 
+# defines settings for enabling and managing dynamic authentication 
+# for all requests to the proxyd RPC api.
+# 
+# Authentication works the same way as the static authentication.
+# You should append key to the url. Let's say We have the following 
+# valid API key: e53df8be593259f73f45a62369ccef89 You can authenticate
+# your request as following:
+#   curl http://lcoalhost:8080/e53df8be593259f73f45a62369ccef89 ...
 [dynamic_authentication]
+# Toggles the dynamic authentication feature.
 enabled = true
+# Type. Currently only `postgresql` is supported
 type = "postgresql"
+# A connection string to the postgresql
 connection_string = "postgresql://user:pass@host:5432/dbname?sslmode=disable"
-auth_token = "0xdeadbeef"
+# Admin API token. You have to add it to the admin request within
+# the Authorization header. e.g:
+#   curl -H "Authorization: Bearer 0xdeadbeef" -X PUT \
+#     http://localhost:8080/admin/keys/<token to add>
+admin_token = "0xdeadbeef"
