@@ -42,14 +42,13 @@ type CloudKMSSignatureProvider struct {
 	client CloudKMSClient
 }
 
-func NewCloudKMSSignatureProvider(logger log.Logger) SignatureProvider {
+func NewCloudKMSSignatureProvider(logger log.Logger) (SignatureProvider, error) {
 	ctx := context.Background()
 	client, err := kms.NewKeyManagementClient(ctx)
 	if err != nil {
-		logger.Error("failed to initialize kms client", "error", err)
-		panic(err)
+		return nil, fmt.Errorf("failed to initialize kms client: %w", err)
 	}
-	return &CloudKMSSignatureProvider{logger, client}
+	return &CloudKMSSignatureProvider{logger, client}, nil
 }
 
 func NewCloudKMSSignatureProviderWithClient(logger log.Logger, client CloudKMSClient) SignatureProvider {
