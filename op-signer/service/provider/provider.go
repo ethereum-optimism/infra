@@ -35,10 +35,9 @@ func (k ProviderType) IsValid() bool {
 func NewSignatureProvider(logger log.Logger, providerType ProviderType) (SignatureProvider, error) {
 	switch providerType {
 	case KeyProviderGCP:
-		return NewCloudKMSSignatureProvider(logger), nil
+		return NewCloudKMSSignatureProvider(logger)
 	case KeyProviderAWS:
-		// TODO: Implement AWS provider
-		return nil, fmt.Errorf("AWS provider not yet implemented")
+		return NewAWSKMSSignatureProvider(logger)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
