@@ -28,11 +28,17 @@ func generateSecret() string {
 
 func newPostgreSQL() *embeddedpostgres.EmbeddedPostgres {
 	logger := &bytes.Buffer{}
+	tempDir, err := os.MkdirTemp("", "embedded-postgres")
+	if err != nil {
+		panic(err)
+	}
+
 	return embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
 		Username("user").
 		Password("password").
 		Database("proxyd").
 		Version(embeddedpostgres.V15).
+		RuntimePath(tempDir).
 		Port(9876).
 		StartTimeout(45 * time.Second).
 		StartParameters(map[string]string{"max_connections": "200"}).
