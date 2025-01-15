@@ -221,9 +221,9 @@ func TestPostgreSQLAuthentication(t *testing.T) {
 				defer wg.Done()
 
 				secret := generateSecret()
-				assert.Len(t, secret, 32)
-				psql.NewSecret(secret)
-				assert.NoError(t, psql.IsSecretValid(secret))
+				require.Len(t, secret, 32)
+				require.NoError(t, psql.NewSecret(secret))
+				require.NoError(t, psql.IsSecretValid(secret))
 			}()
 		}
 

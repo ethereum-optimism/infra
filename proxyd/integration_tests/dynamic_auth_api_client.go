@@ -23,6 +23,7 @@ func send(req *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("failed to send request to the admin api: %w", err)
 	}
+	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("invalid response received from the admin api: expected %d, received %d", http.StatusOK, res.StatusCode)
