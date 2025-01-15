@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ethereum-optimism/infra/op-signer/service/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ auth:
 
 	config, err := ReadConfig(tmpFile.Name())
 	require.NoError(t, err)
-	assert.Equal(t, KeyProviderGCP, config.ProviderType)
+	assert.Equal(t, provider.KeyProviderGCP, config.ProviderType)
 }
 
 func TestReadConfig_ExplicitKeyProvider(t *testing.T) {
@@ -50,7 +51,7 @@ auth:
 
 	config, err := ReadConfig(tmpFile.Name())
 	require.NoError(t, err)
-	assert.Equal(t, KeyProviderAWS, config.ProviderType)
+	assert.Equal(t, provider.KeyProviderAWS, config.ProviderType)
 }
 
 func TestReadConfig_InvalidKeyProvider(t *testing.T) {

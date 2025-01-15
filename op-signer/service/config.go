@@ -6,28 +6,11 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/ethereum-optimism/infra/op-signer/service/provider"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"gopkg.in/yaml.v3"
 )
-
-// KeyProvider represents the cloud provider for the key management service
-type KeyProvider string
-
-const (
-	KeyProviderAWS KeyProvider = "AWS"
-	KeyProviderGCP KeyProvider = "GCP"
-)
-
-// IsValid checks if the KeyProvider value is valid
-func (k KeyProvider) IsValid() bool {
-	switch k {
-	case KeyProviderAWS, KeyProviderGCP:
-		return true
-	default:
-		return false
-	}
-}
 
 type AuthConfig struct {
 	// ClientName DNS name of the client connecting to op-signer.
@@ -47,8 +30,8 @@ func (c AuthConfig) MaxValueToInt() *big.Int {
 }
 
 type SignerServiceConfig struct {
-	ProviderType KeyProvider  `yaml:"provider"`
-	Auth         []AuthConfig `yaml:"auth"`
+	ProviderType provider.ProviderType `yaml:"provider"`
+	Auth         []AuthConfig          `yaml:"auth"`
 }
 
 func ReadConfig(path string) (SignerServiceConfig, error) {
@@ -63,7 +46,7 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 
 	// Default to GCP if Provider is empty to avoid breaking changes
 	if config.ProviderType == "" {
-		config.ProviderType = KeyProviderGCP
+		config.ProviderType = provider.KeyProviderGCP
 	}
 
 	if !config.ProviderType.IsValid() {
