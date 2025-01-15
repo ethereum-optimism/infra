@@ -39,6 +39,56 @@ func newPostgreSQL() *embeddedpostgres.EmbeddedPostgres {
 		Logger(logger))
 }
 
+func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
+
+	postgres := newPostgreSQL()
+	err := postgres.Start()
+	require.NoErrorf(t, err, "postgresql should start without error")
+	defer func() {
+		err = postgres.Stop()
+		assert.NoErrorf(t, err, "postgresql should stop without error")
+	}()
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("dynamic_authentication")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	adminClient, err := NewDynamicAuthClient("http://127.0.0.1:8545", "0xdeadbeef")
+	require.NoError(t, err)
+
+	secret := generateSecret()
+	require.Len(t, secret, 32)
+	secret2 := generateSecret()
+	require.Len(t, secret2, 32)
+
+	// Define clients
+	clientValidSecret := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret))
+	clientInvalidSecret := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret2))
+	clientNoAuth := NewProxydClient("http://127.0.0.1:8545")
+
+	require.NoError(t, adminClient.PutKey(secret))
+
+	// Authentication enabled, but no token provided
+	_, code1, err := clientNoAuth.SendRequest(makeSendRawTransaction(txHex1))
+	require.NoError(t, err)
+	require.Equal(t, 401, code1)
+
+	// Authentication enabled, invalid token provided
+	_, code1, err = clientInvalidSecret.SendRequest(makeSendRawTransaction(txHex1))
+	require.NoError(t, err)
+	require.Equal(t, 401, code1)
+
+	// Authentication enabled, valid token provided
+	_, code1, err = clientValidSecret.SendRequest(makeSendRawTransaction(txHex1))
+	require.NoError(t, err)
+	require.Equal(t, 200, code1)
+}
+
 func TestDynamicAuthenticationFeature(t *testing.T) {
 	postgres := newPostgreSQL()
 	err := postgres.Start()
