@@ -4,6 +4,7 @@ go 1.22.0
 
 require (
 	cloud.google.com/go/kms v1.12.1
+	github.com/aws/aws-sdk-go-v2/config v1.28.11
 	github.com/ethereum-optimism/optimism v0.0.0-20241213111354-8bf7ff60f34a
 	github.com/ethereum/go-ethereum v1.14.11
 	github.com/golang/mock v1.6.0
@@ -19,7 +20,6 @@ require (
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.8 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.28.11 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.52 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.23 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.27 // indirect
