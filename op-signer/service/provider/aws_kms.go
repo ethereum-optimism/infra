@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-// AWSKMSClient is the minimal interface for the AWS KMS client	requried by the AWSKMSSignatureProvider. These functions
+// AWSKMSClient is the minimal interface for the AWS KMS client required by the AWSKMSSignatureProvider. These functions
 // are already implemented by the AWS SDK, but we define our own type to allow us to mock the client in tests.
 type AWSKMSClient interface {
 	// https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/kms#Client.Sign
