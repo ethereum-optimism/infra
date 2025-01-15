@@ -176,8 +176,11 @@ func NewServer(
 			return nil, fmt.Errorf("only postgresql type supported for dynamic authentication, %s provided", dynamicAuthenticationConfig.Type)
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		var err error
-		dynamicAuthenticator, err = NewPSQLAuthenticator(dynamicAuthenticationConfig.ConnectionString)
+		dynamicAuthenticator, err = NewPSQLAuthenticator(ctx, dynamicAuthenticationConfig.ConnectionString)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create dynamic authenticator: %w", err)
 		}

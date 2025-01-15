@@ -1,8 +1,10 @@
 package proxyd
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -22,11 +24,10 @@ type psqlAuthenticator struct {
 
 func (pa *psqlAuthenticator) IsSecretValid(secret string) error {
 	rows, err := pa.db.Query("SELECT 1 FROM secrets WHERE secret=$1", secret)
-	defer rows.Close()
-
 	if err != nil {
 		return fmt.Errorf("failed to check if secret is valid: %w", err)
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		return nil
@@ -75,10 +76,16 @@ func (pa *psqlAuthenticator) DeleteSecret(secret string) error {
 	return nil
 }
 
-func NewPSQLAuthenticator(connString string) (DynamicAuthenticator, error) {
+func NewPSQLAuthenticator(ctx context.Context, connString string) (DynamicAuthenticator, error) {
 	db, err := sql.Open("postgres", connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open psql connection: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	return &psqlAuthenticator{
