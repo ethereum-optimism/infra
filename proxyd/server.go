@@ -725,7 +725,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
 	}
 
-	if len(s.authenticatedPaths) > 0 {
+	if len(s.authenticatedPaths) > 0 || s.dynamicAuthenticator != nil {
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
 			// fallback to dynamic authentication
 			if s.dynamicAuthenticator == nil || s.dynamicAuthenticator.IsSecretValid(authorization) != nil {
