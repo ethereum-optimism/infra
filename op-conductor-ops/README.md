@@ -40,7 +40,7 @@ The configuration file is divided into two main sections:
 
 2. **Sequencers**: This section defines the sequencers for each network. Again, there is an example sequencer configuration for `op-network-1` and a blank sequencer configuration for `op-network-N`.
 
-Is is recommended to update the network name and sequencer names for your specifc configuration in the toml object declaration
+Is is recommended to update the network name and sequencer names for your specific configuration in the toml object declaration
 
 ### Config Usage
 
