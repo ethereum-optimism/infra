@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -59,6 +60,10 @@ func (pa *psqlAuthenticator) NewSecret(secret string) error {
 
 	_, err := pa.db.Exec(insertSQL, secret)
 	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint \"secrets_pkey\"") {
+			return fmt.Errorf("secret already exists")
+		}
+
 		return fmt.Errorf("failed to insert secret into postgresql: %w", err)
 	}
 

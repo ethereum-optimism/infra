@@ -338,11 +338,13 @@ func Start(config *Config) (*Server, func(), error) {
 
 	dynamicAuthenticationConfig := config.DynamicAuthentication
 	dynamicAuthenticationAdminToken, err := ReadFromEnvOrConfig(dynamicAuthenticationConfig.AdminToken)
-	dynamicAuthenticationConfig.AdminToken = dynamicAuthenticationAdminToken
-
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read dynamic authentication admin token: %w", err)
 	}
+	dynamicAuthenticationConnectionString, err := ReadFromEnvOrConfig(dynamicAuthenticationConfig.ConnectionString)
+
+	dynamicAuthenticationConfig.AdminToken = dynamicAuthenticationAdminToken
+	dynamicAuthenticationConfig.ConnectionString = dynamicAuthenticationConnectionString
 
 	srv, err := NewServer(
 		backendGroups,

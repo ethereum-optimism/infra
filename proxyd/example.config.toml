@@ -135,10 +135,13 @@ eth_blockNumber = "alchemy"
 enabled = true
 # Type. Currently only `postgresql` is supported
 type = "postgresql"
-# A connection string to the postgresql
+# A connection string to the postgresql. Will be read from the environment
+# if an environment variable prefixed with $ is provided.
 connection_string = "postgresql://user:pass@host:5432/dbname?sslmode=disable"
 # Admin API token. You have to add it to the admin request within
 # the Authorization header. e.g:
 #   curl -H "Authorization: Bearer 0xdeadbeef" -X PUT \
 #     http://localhost:8080/admin/keys/<token to add>
+# Will be read from the environment
+# if an environment variable prefixed with $ is provided.
 admin_token = "0xdeadbeef"

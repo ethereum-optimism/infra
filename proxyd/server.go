@@ -324,7 +324,7 @@ func (s *Server) HandleAdmin(w http.ResponseWriter, r *http.Request) {
 		log.Warn("admin rpc endpoint called when dynamic authenticator disabled")
 		writeResponse(http.StatusUnauthorized, adminResponse{
 			StatusCode: http.StatusUnauthorized,
-			Details:    "admin rpc endpoint disabled, invalid token",
+			Details:    "invalid token",
 		})
 		return
 	}
