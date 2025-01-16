@@ -336,15 +336,16 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
+	var err error
 	dynamicAuthenticationConfig := config.DynamicAuthentication
-	dynamicAuthenticationAdminToken, err := ReadFromEnvOrConfig(dynamicAuthenticationConfig.AdminToken)
+	dynamicAuthenticationConfig.AdminToken, err = ReadFromEnvOrConfig(dynamicAuthenticationConfig.AdminToken)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read dynamic authentication admin token: %w", err)
 	}
-	dynamicAuthenticationConnectionString, err := ReadFromEnvOrConfig(dynamicAuthenticationConfig.ConnectionString)
-
-	dynamicAuthenticationConfig.AdminToken = dynamicAuthenticationAdminToken
-	dynamicAuthenticationConfig.ConnectionString = dynamicAuthenticationConnectionString
+	dynamicAuthenticationConfig.ConnectionString, err = ReadFromEnvOrConfig(dynamicAuthenticationConfig.ConnectionString)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read dynamic authentication connection string: %w", err)
+	}
 
 	srv, err := NewServer(
 		backendGroups,
