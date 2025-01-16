@@ -336,6 +336,14 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
+	dynamicAuthenticationConfig := config.DynamicAuthentication
+	dynamicAuthenticationAdminToken, err := ReadFromEnvOrConfig(dynamicAuthenticationConfig.AdminToken)
+	dynamicAuthenticationConfig.AdminToken = dynamicAuthenticationAdminToken
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read dynamic authentication admin token: %w", err)
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -353,7 +361,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
-		config.DynamicAuthentication,
+		dynamicAuthenticationConfig,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
