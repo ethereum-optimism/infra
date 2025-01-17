@@ -1,0 +1,13 @@
+[tools]
+
+# Core dependencies
+python = "3.10"
+
+[hooks]
+postinstall = [
+    'pip install -r requirements.txt'
+]
+
+[settings]
+# Needs to be enabled for hooks to work
+experimental = true
