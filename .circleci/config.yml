@@ -6,6 +6,31 @@ setup: true
 orbs:
   path-filtering: circleci/path-filtering@1.0.0
 
+parameters: 
+  # An explicit boolean parameter that triggers the tag-service pipeline
+  run-tag-service:
+    type: boolean
+    description: "Run the tag-service job. tag-service--bump and tag-service--service parameters also need to be specified"
+    default: false
+  # Controls the version bump for the tag-service job
+  # 
+  # If left empty, the tag-service job will not run
+  tag-service--bump:
+    type: enum
+    enum: ["", "major", "minor", "patch", "prerelease", "finalize-prerelease", "missing"]
+    default: ""
+  # Controls the affected service for the tag-service job
+  # 
+  # If left empty, the tag-service job will not run
+  tag-service--service:
+    type: enum
+    enum: ["", "op-signer", "op-ufm", "op-txproxy", "proxyd", "peer-mgmt-service"]
+    default: ""
+  # Toggle between prerelase and release for the tag-service job
+  tag-service--prerelease:
+    type: boolean
+    default: false
+
 workflows:
   check-updated-files:
     jobs:
