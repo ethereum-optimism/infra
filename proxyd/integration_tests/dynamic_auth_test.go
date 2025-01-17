@@ -3,6 +3,7 @@ package integration_tests
 import (
 	"crypto/rand"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"testing"
@@ -11,6 +12,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const txHexAuth = "0x02f8b28201a406849502f931849502f931830147f9948f3ddd0fbf3e78ca1d6c" +
+	"d17379ed88e261249b5280b84447e7ef2400000000000000000000000089c8b1" +
+	"b2774201bac50f627403eac1b732459cf7000000000000000000000000000000" +
+	"0000000000000000056bc75e2d63100000c080a0473c95566026c312c9664cd6" +
+	"1145d2f3e759d49209fe96011ac012884ec5b017a0763b58f6fa6096e6ba28ee" +
+	"08bfac58f58fb3b8bcef5af98578bdeaddf40bde42"
 
 func generateSecret() string {
 	b := make([]byte, 16)
@@ -21,6 +29,34 @@ func generateSecret() string {
 	}
 
 	return fmt.Sprintf("%x", b)
+}
+
+const (
+	emptyResponse = "empty-response"
+	validResponse = `{"jsonrpc":"2.0","result":"dummy","id":123}`
+)
+
+func expectedResponse(
+	t *testing.T,
+	client *ProxydHTTPClient,
+	expectedMessage string,
+	expectedResponseCode int,
+	expectedError bool,
+) {
+	res, code1, err := client.SendRequest(makeSendRawTransaction(txHex1))
+
+	if !expectedError {
+		require.NoError(t, err)
+	} else {
+		require.Error(t, err)
+	}
+
+	require.Equal(t, expectedResponseCode, code1)
+	if expectedMessage == emptyResponse {
+		require.Empty(t, string(res))
+	} else {
+		require.Contains(t, string(res), expectedMessage)
+	}
 }
 
 func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
@@ -50,19 +86,13 @@ func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
 	require.NoError(t, adminClient.PutKey(secret))
 
 	// Authentication enabled, but no token provided
-	_, code1, err := clientNoAuth.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
+	expectedResponse(t, clientNoAuth, emptyResponse, http.StatusUnauthorized, false)
 
 	// Authentication enabled, invalid token provided
-	_, code1, err = clientInvalidSecret.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
+	expectedResponse(t, clientInvalidSecret, emptyResponse, http.StatusUnauthorized, false)
 
 	// Authentication enabled, valid token provided
-	_, code1, err = clientValidSecret.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 200, code1)
+	expectedResponse(t, clientValidSecret, validResponse, http.StatusOK, false)
 }
 
 func TestDynamicAuthenticationFeature(t *testing.T) {
@@ -72,7 +102,6 @@ func TestDynamicAuthenticationFeature(t *testing.T) {
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
 	config := ReadConfig("dynamic_authentication")
-	client := NewProxydClient("http://127.0.0.1:8545")
 	_, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
 	defer shutdown()
@@ -80,43 +109,35 @@ func TestDynamicAuthenticationFeature(t *testing.T) {
 	adminClient, err := NewDynamicAuthClient("http://127.0.0.1:8545", "0xdeadbeef")
 	require.NoError(t, err)
 
-	// This request will fail because no authentication is provided
-	_, code1, err := client.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
-
 	secret := generateSecret()
 	require.Len(t, secret, 32)
 	secret2 := generateSecret()
 	require.Len(t, secret2, 32)
 
 	// Define clients
-	client2 := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret))
-	client3 := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret2))
+	noAuthClient := NewProxydClient("http://127.0.0.1:8545")
+	clientSecret1 := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret))
+	clientSecret2 := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret2))
+
+	// This request will fail because no authentication is provided
+	expectedResponse(t, noAuthClient, emptyResponse, http.StatusUnauthorized, false)
 
 	// Authentication enabled, but no token added via api
-	_, code1, err = client2.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
+	expectedResponse(t, clientSecret1, emptyResponse, http.StatusUnauthorized, false)
+	expectedResponse(t, clientSecret2, emptyResponse, http.StatusUnauthorized, false)
 
 	// Add token
 	require.NoError(t, adminClient.PutKey(secret))
 
 	// Token already added, request must not fail
-	_, code1, err = client2.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 200, code1)
+	expectedResponse(t, clientSecret1, validResponse, http.StatusOK, false)
 
 	// This request will fail because second token not added
-	_, code1, err = client3.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
+	expectedResponse(t, clientSecret2, emptyResponse, http.StatusUnauthorized, false)
 
-	// Add second token and send request
+	// Add second token and send request which must succeed
 	require.NoError(t, adminClient.PutKey(secret2))
-	_, code1, err = client3.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 200, code1)
+	expectedResponse(t, clientSecret2, validResponse, http.StatusOK, false)
 
 	// Cannot add the same ticket second time(Maybe we should change it?)
 	require.Error(t, adminClient.PutKey(secret2))
@@ -124,13 +145,9 @@ func TestDynamicAuthenticationFeature(t *testing.T) {
 	// Delete second token
 	require.NoError(t, adminClient.DeleteKey(secret2))
 	// And make sure request will fail
-	_, code1, err = client3.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 401, code1)
+	expectedResponse(t, clientSecret2, emptyResponse, http.StatusUnauthorized, false)
 	// But first token should be still valid
-	_, code1, err = client2.SendRequest(makeSendRawTransaction(txHex1))
-	require.NoError(t, err)
-	require.Equal(t, 200, code1)
+	expectedResponse(t, clientSecret1, validResponse, http.StatusOK, false)
 }
 
 func TestPostgreSQLAuthentication(t *testing.T) {
