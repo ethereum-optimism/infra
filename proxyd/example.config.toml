@@ -133,7 +133,7 @@ eth_blockNumber = "alchemy"
 [dynamic_authentication]
 # Toggles the dynamic authentication feature.
 enabled = true
-# Type. Currently only `postgresql` is supported
+# Type. Currently only `postgresql` and `in-memory` are supported
 type = "postgresql"
 # A connection string to the postgresql. Will be read from the environment
 # if an environment variable prefixed with $ is provided.

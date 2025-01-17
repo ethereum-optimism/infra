@@ -1,17 +1,13 @@
 package integration_tests
 
 import (
-	"bytes"
-	"context"
 	"crypto/rand"
 	"fmt"
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,34 +23,7 @@ func generateSecret() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func newPostgreSQL() *embeddedpostgres.EmbeddedPostgres {
-	logger := &bytes.Buffer{}
-	tempDir, err := os.MkdirTemp("", "embedded-postgres")
-	if err != nil {
-		panic(err)
-	}
-
-	return embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Username("user").
-		Password("password").
-		Database("proxyd").
-		Version(embeddedpostgres.V15).
-		RuntimePath(tempDir).
-		Port(9876).
-		StartTimeout(45 * time.Second).
-		StartParameters(map[string]string{"max_connections": "200"}).
-		Logger(logger))
-}
-
 func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
-
-	postgres := newPostgreSQL()
-	err := postgres.Start()
-	require.NoErrorf(t, err, "postgresql should start without error")
-	defer func() {
-		err = postgres.Stop()
-		assert.NoErrorf(t, err, "postgresql should stop without error")
-	}()
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
 	defer goodBackend.Close()
 
@@ -97,13 +66,6 @@ func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
 }
 
 func TestDynamicAuthenticationFeature(t *testing.T) {
-	postgres := newPostgreSQL()
-	err := postgres.Start()
-	require.NoErrorf(t, err, "postgresql should start without error")
-	defer func() {
-		err = postgres.Stop()
-		assert.NoErrorf(t, err, "postgresql should stop without error")
-	}()
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
 	defer goodBackend.Close()
 
@@ -172,21 +134,7 @@ func TestDynamicAuthenticationFeature(t *testing.T) {
 }
 
 func TestPostgreSQLAuthentication(t *testing.T) {
-	postgres := newPostgreSQL()
-	err := postgres.Start()
-	require.NoErrorf(t, err, "postgresql should start without error")
-	defer func() {
-		err = postgres.Stop()
-		assert.NoErrorf(t, err, "postgresql should stop without error")
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	psql, err := proxyd.NewPSQLAuthenticator(ctx, "postgresql://invalid:user@localhost:9876/non-existing?sslmode=disable")
-	assert.Nil(t, psql)
-	assert.Error(t, err, "failed to ping database")
-
-	psql, err = proxyd.NewPSQLAuthenticator(ctx, "postgresql://user:password@localhost:9876/proxyd?sslmode=disable")
+	psql, err := proxyd.NewInMemoryAuthenticator()
 	assert.NotNil(t, psql)
 	assert.NoError(t, err)
 

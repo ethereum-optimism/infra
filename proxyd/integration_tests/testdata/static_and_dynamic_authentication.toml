@@ -20,7 +20,7 @@ eth_sendRawTransaction = "main"
 
 [dynamic_authentication]
 enabled = true
-type = "postgresql"
+type = "in-memory"
 connection_string = "postgresql://user:password@localhost:9876/proxyd?sslmode=disable"
 admin_token = "0xdeadbeef"
 

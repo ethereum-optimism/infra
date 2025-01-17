@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	// Driver for psql
 	_ "github.com/lib/pq"
+	// Driver for in memory DB
+	_ "github.com/proullon/ramsql/driver"
 )
 
 type DynamicAuthenticator interface {
@@ -24,7 +27,7 @@ type psqlAuthenticator struct {
 }
 
 func (pa *psqlAuthenticator) IsSecretValid(secret string) error {
-	rows, err := pa.db.Query("SELECT 1 FROM secrets WHERE secret=$1", secret)
+	rows, err := pa.db.Query("SELECT secret FROM secrets WHERE secret=$1", secret)
 	if err != nil {
 		return fmt.Errorf("failed to check if secret is valid: %w", err)
 	}
@@ -95,5 +98,19 @@ func NewPSQLAuthenticator(ctx context.Context, connString string) (DynamicAuthen
 
 	return &psqlAuthenticator{
 		db: db,
+	}, nil
+}
+
+// This function is used when we want to spawn the postgresql compatible backed
+// authenticator but with in memory database.
+// Remember this will be erased every time when the program restarts
+func NewInMemoryAuthenticator() (DynamicAuthenticator, error) {
+	ramdb, err := sql.Open("ramsql", "InMemoryProxyD")
+	if err != nil {
+		return nil, fmt.Errorf("failed to start ramsql db: %w", err)
+	}
+
+	return &psqlAuthenticator{
+		db: ramdb,
 	}, nil
 }

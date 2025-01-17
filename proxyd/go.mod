@@ -7,7 +7,6 @@ require (
 	github.com/alicebob/miniredis v2.5.0+incompatible
 	github.com/emirpasic/gods v1.18.1
 	github.com/ethereum/go-ethereum v1.14.8
-	github.com/fergusstrange/embedded-postgres v1.30.0
 	github.com/go-redsync/redsync/v4 v4.10.0
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
 	github.com/gorilla/mux v1.8.0
@@ -16,6 +15,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.17.0
+	github.com/proullon/ramsql v0.1.4
 	github.com/redis/go-redis/v9 v9.2.1
 	github.com/rs/cors v1.11.0
 	github.com/stretchr/testify v1.10.0
@@ -76,7 +76,6 @@ require (
 	github.com/supranational/blst v0.3.11 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/yuin/gopher-lua v1.1.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	golang.org/x/crypto v0.22.0 // indirect

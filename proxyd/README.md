@@ -149,7 +149,8 @@ The Docker image runs on Alpine Linux. If you get SSL errors when connecting to 
 
 Dynamic authentication is module that allows you to add/delete authorization keys w/o restarting the proxyd service. The authorization secrets are stored in the following backends:
 
-- PostgreSQL
+- PostgreSQL (`postgresql`)
+- In Memory (`in-memory`)
 
 The proxyd setups database automatically when starting, you do not need to run any migration.
 
@@ -158,7 +159,7 @@ The proxyd setups database automatically when starting, you do not need to run a
 ```toml
 [dynamic_authentication]
 enabled = true
-type = "postgresql"
+type = "postgresql" # it may be also "in-memory"
 connection_string = "postgresql://user:pass@host:5432/dbname?sslmode=disable"
 admin_token = "0xdeadbeef"
 ```

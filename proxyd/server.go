@@ -172,17 +172,22 @@ func NewServer(
 
 	var dynamicAuthenticator DynamicAuthenticator
 	if dynamicAuthenticationConfig.Enabled {
-		if dynamicAuthenticationConfig.Type != "postgresql" {
-			return nil, fmt.Errorf("only postgresql type supported for dynamic authentication, %s provided", dynamicAuthenticationConfig.Type)
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
 		var err error
-		dynamicAuthenticator, err = NewPSQLAuthenticator(ctx, dynamicAuthenticationConfig.ConnectionString)
+		switch dynamicAuthenticationConfig.Type {
+		case "postgresql":
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			dynamicAuthenticator, err = NewPSQLAuthenticator(ctx, dynamicAuthenticationConfig.ConnectionString)
+		case "in-memory":
+			dynamicAuthenticator, err = NewInMemoryAuthenticator()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to create dynamic authenticator: %w", err)
+		}
+
+		if dynamicAuthenticator == nil {
+			return nil, fmt.Errorf("invalid database provided for dynamic authentication: expected one of [postgresql, in-memory], %s provided", dynamicAuthenticationConfig.Type)
 		}
 
 		if err := dynamicAuthenticator.Initialize(); err != nil {
