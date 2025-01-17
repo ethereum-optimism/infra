@@ -69,12 +69,12 @@ commands:
           command: curl https://mise.run | MISE_INSTALL_PATH=/home/circleci/bin/mise sh
           working_directory: << parameters.module >>
       - run:
-          name: Activate mise
-          command: echo 'eval "$(mise activate bash)"' >> $BASH_ENV
-          working_directory: << parameters.module >>
-      - run:
           name: Contents
           command: ls -al
+          working_directory: << parameters.module >>
+      - run:
+          name: Activate mise
+          command: echo 'eval "$(mise activate bash)"' >> $BASH_ENV
           working_directory: << parameters.module >>
       - run:
           name: Mise doctor
