@@ -426,40 +426,36 @@ jobs:
     
   tag-service:
     executor: default
+    parameters:
+      bump:
+        type: string
+      service:
+        type: string
+      prerelease:
+        type: boolean
     steps:
-      # We only want to run this job if we have all the necessary parameters
-      - when:
-          condition:
-            and: 
-              - << pipeline.parameters.run-tag-service >>
-              - << pipeline.parameters.tag-service--bump >>
-              - << pipeline.parameters.tag-service--service >>
-          steps:
-            - checkout
-            - run:
-                name: Fetch tags
-                command: git fetch --tags origin --force
-            - install-dependencies:
-                module: ops/tag-service
-            - utils/get-github-access-token:
-                output-token-name: INPUT_GITHUB_TOKEN
-            # This conditional step runs the prerelease command
-            - when:
-                condition: << pipeline.parameters.tag-service--prerelease >>
-                steps:
-                  - run:
-                      name: Prerelase
-                      command: ops/tag-service/tag-service.py --bump="<< pipeline.parameters.tag-service--bump >>" --service="<< pipeline.parameters.tag-service--service >>" --pre-release
-            # This conditional step runs the release command
-            - unless:
-                condition: << pipeline.parameters.tag-service--prerelease >>
-                steps:
-                  - run:
-                      name: Release
-                      command: ops/tag-service/tag-service.py --bump="<< pipeline.parameters.tag-service--bump >>" --service="<< pipeline.parameters.tag-service--service >>"
+      - checkout
       - run:
-          name: Placeholder
-          command: echo "This is a placeholder job only to satisfy CircleCI yaml schema. See https://circleci.com/docs/configuration-reference/#logic-statement-examples"
+          name: Fetch tags
+          command: git fetch --tags origin --force
+      - install-dependencies:
+          module: ops/tag-service
+      - utils/get-github-access-token:
+          output-token-name: INPUT_GITHUB_TOKEN
+      # This conditional step runs the prerelease command
+      - when:
+          condition: << parameters.prerelease >>
+          steps:
+            - run:
+                name: Prerelease << parameters.bump >> bump of << parameters.service >>
+                command: ops/tag-service/tag-service.py --bump="<< parameters.bump >>" --service="<< parameters.service >>" --pre-release
+      # This conditional step runs the release command
+      - unless:
+          condition: << parameters.prerelease >>
+          steps:
+            - run:
+                name: Release << parameters.bump >> bump of << parameters.service >>
+                command: ops/tag-service/tag-service.py --bump="<< parameters.bump >>" --service="<< parameters.service >>"
 
 workflows:
   logging:
@@ -681,7 +677,16 @@ workflows:
           context:
             - oplabs-gcr-release
   tag:
+    when:
+      condition:
+        and: 
+          - << pipeline.parameters.run-tag-service >>
+          - << pipeline.parameters.tag-service--bump >>
+          - << pipeline.parameters.tag-service--service >>
     jobs:
       - tag-service:
           context:
             - circleci-repo-infra
+          bump: << pipeline.parameters.tag-service--bump >>
+          service: << pipeline.parameters.tag-service--service >>
+          prerelease: << pipeline.parameters.tag-service--prerelease >>
