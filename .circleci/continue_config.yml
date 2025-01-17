@@ -683,6 +683,8 @@ workflows:
           module: <<matrix.module>>
           context:
             - oplabs-gcr-release
+  tag:
+    jobs:
       - tag-service:
           context:
             - circleci-repo-infra
