@@ -73,6 +73,14 @@ commands:
           command: echo 'eval "$(mise activate bash)"' >> $BASH_ENV
           working_directory: << parameters.module >>
       - run:
+          name: Mise doctor
+          command: mise doctor
+          working_directory: << parameters.module >>
+      - run:
+          name: Mise config
+          command: mise config
+          working_directory: << parameters.module >>
+      - run:
           name: Install mise dependencies
           command: mise install --verbose
           working_directory: << parameters.module >>
