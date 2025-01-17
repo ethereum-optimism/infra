@@ -3,20 +3,42 @@ package proxyd
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	// Driver for psql
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
+
 	// Driver for in memory DB
 	_ "github.com/proullon/ramsql/driver"
 )
 
+const (
+	UniqueViolationErr = pq.ErrorCode("23505")
+)
+
+var (
+	ErrSecretDuplicated = errors.New("secret already exists")
+)
+
 type DynamicAuthenticator interface {
+	// Initialize is responsible for the storage backend initialization
+	// The method must be idempotent. It is called multiple times and
+	// the method should not produce error if backend is already
+	// initialized.
 	Initialize() error
+
+	// IsSecretValid returns an error when the secret is invalid.
+	// When the secret is valid the method must not return any error
 	IsSecretValid(secret string) error
+
+	// New Secret should add secret if it does not exist otherwise
+	// it must return the `ErrSecretDuplicated` error.
 	NewSecret(secret string) error
+
+	// Delete secret deletes secret from the storage backend.
+	// It may return error if secret does not exist but it is not mandatory
 	DeleteSecret(secret string) error
 }
 
@@ -24,6 +46,13 @@ type DynamicAuthenticator interface {
 // when new item is added(or periodically every 30 sec?)
 type psqlAuthenticator struct {
 	db *sql.DB
+}
+
+func IsErrorCode(err error, errcode pq.ErrorCode) bool {
+	if pgerr, ok := err.(*pq.Error); ok {
+		return pgerr.Code == errcode
+	}
+	return false
 }
 
 func (pa *psqlAuthenticator) IsSecretValid(secret string) error {
@@ -63,8 +92,8 @@ func (pa *psqlAuthenticator) NewSecret(secret string) error {
 
 	_, err := pa.db.Exec(insertSQL, secret)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key value violates unique constraint \"secrets_pkey\"") {
-			return fmt.Errorf("secret already exists")
+		if IsErrorCode(err, UniqueViolationErr) {
+			return ErrSecretDuplicated
 		}
 
 		return fmt.Errorf("failed to insert secret into postgresql: %w", err)
