@@ -43,7 +43,7 @@ func expectedResponse(
 	expectedResponseCode int,
 	expectedError bool,
 ) {
-	res, code1, err := client.SendRequest(makeSendRawTransaction(txHex1))
+	res, code1, err := client.SendRequest(makeSendRawTransaction(txHexAuth))
 
 	if !expectedError {
 		require.NoError(t, err)
@@ -57,6 +57,46 @@ func expectedResponse(
 	} else {
 		require.Contains(t, string(res), expectedMessage)
 	}
+}
+
+func TestNewSecretValidation(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("dynamic_authentication")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	adminClient, err := NewDynamicAuthClient("http://127.0.0.1:8545", "0xdeadbeef")
+	require.NoError(t, err)
+
+	secretEmpty := ""
+	secret11chars := "12345678901"
+	secret12chars := "123456789012"
+
+	err = adminClient.PutKey(secretEmpty)
+	require.Error(t, err)
+	require.ErrorContains(t, err, `expected 200, received 404`)
+
+	err = adminClient.PutKey(secret11chars)
+	require.Error(t, err)
+	require.ErrorContains(t, err, `expected 200, received 400`)
+
+	err = adminClient.PutKey(secret12chars)
+	require.NoError(t, err)
+
+	// Define clients
+	clientValidSecret := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret12chars))
+	clientInvalidSecret := NewProxydClient(fmt.Sprintf("http://127.0.0.1:8545/%s", secret11chars))
+
+	// Authentication enabled, invalid token provided
+	expectedResponse(t, clientInvalidSecret, emptyResponse, http.StatusUnauthorized, false)
+
+	// Authentication enabled, valid token provided
+	expectedResponse(t, clientValidSecret, validResponse, http.StatusOK, false)
 }
 
 func TestDynamicAuthenticationWhenStaticAuthenticationIsEnabled(t *testing.T) {
