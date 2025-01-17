@@ -678,11 +678,10 @@ workflows:
             - oplabs-gcr-release
   tag:
     when:
-      condition:
-        and: 
-          - << pipeline.parameters.run-tag-service >>
-          - << pipeline.parameters.tag-service--bump >>
-          - << pipeline.parameters.tag-service--service >>
+      and: 
+        - << pipeline.parameters.run-tag-service >>
+        - << pipeline.parameters.tag-service--bump >>
+        - << pipeline.parameters.tag-service--service >>
     jobs:
       - tag-service:
           context:
