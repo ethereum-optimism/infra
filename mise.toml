@@ -5,7 +5,7 @@ go = "1.21"
 
 # Go dependencies
 "ubi:golangci/golangci-lint" = "v1.63.4"
-"ubi:goreleaser/goreleaser-pro" = "v2.4.3-pro"
+"ubi:goreleaser/goreleaser-pro[exe=goreleaser]" = "v2.4.3-pro"
 
 [settings]
 # Needs to be enabled for hooks to work
