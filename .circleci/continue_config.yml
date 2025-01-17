@@ -420,8 +420,8 @@ jobs:
             gcloud auth configure-docker us-docker.pkg.dev
       - run:
           name: Run goreleaser
-          command: goreleaser release --clean -f << parameters.filename >>
-          working_directory: << parameters.module >>
+          command: |
+            goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
     
   tag-service:
     executor: default
