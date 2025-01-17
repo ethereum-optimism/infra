@@ -221,12 +221,14 @@ func NewServer(
 }
 
 func (s *Server) RPCListenAndServe(host string, port int) error {
+	adminApiHandler := NewAdminApiHandler(s.dynamicAuthenticator, s.adminToken)
+
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
 	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
 	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
-	hdlr.HandleFunc("/admin/keys/{rpc-auth-key}", s.HandleAdmin).Methods("PUT", "DELETE")
+	hdlr.Handle("/admin/keys/{rpc-auth-key}", adminApiHandler).Methods("PUT", "DELETE")
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 	})
@@ -274,103 +276,6 @@ func (s *Server) Shutdown() {
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
-}
-
-type adminResponse struct {
-	StatusCode int
-	Details    string
-}
-
-func (s *Server) HandleAdmin(w http.ResponseWriter, r *http.Request) {
-	writeResponse := func(statusCode int, response adminResponse) {
-		responseString, err := json.MarshalIndent(response, "", "    ")
-		if err != nil {
-			log.Error("failed to marshal response struct into string", "error", err)
-
-			statusCode = http.StatusInternalServerError
-			responseString = []byte("internal server error")
-		}
-
-		httpResponseCodesTotal.WithLabelValues(fmt.Sprintf("%d", statusCode)).Inc()
-		w.WriteHeader(statusCode)
-		if _, err := w.Write(responseString); err != nil {
-			log.Error("failed to send response for admin rpc", "error", err)
-		}
-	}
-
-	vars := mux.Vars(r)
-	secret := vars["rpc-auth-key"]
-
-	if s.dynamicAuthenticator == nil {
-		log.Warn("admin rpc endpoint called when dynamic authenticator disabled")
-		writeResponse(http.StatusUnauthorized, adminResponse{
-			StatusCode: http.StatusUnauthorized,
-			Details:    "admin rpc endpoint disabled",
-		})
-		return
-	}
-
-	if s.adminToken == "" {
-		log.Warn("admin rpc endpoint called when dynamic authenticator disabled")
-		writeResponse(http.StatusUnauthorized, adminResponse{
-			StatusCode: http.StatusUnauthorized,
-			Details:    "admin rpc endpoint disabled, missing admin token",
-		})
-		return
-	}
-
-	authToken := r.Header.Get("Authorization")
-	if !strings.Contains(authToken, s.adminToken) {
-		log.Warn("admin rpc endpoint called when dynamic authenticator disabled")
-		writeResponse(http.StatusUnauthorized, adminResponse{
-			StatusCode: http.StatusUnauthorized,
-			Details:    "invalid token",
-		})
-		return
-	}
-
-	if r.Method == "PUT" {
-		if err := s.dynamicAuthenticator.NewSecret(secret); err != nil {
-
-			log.Error(fmt.Sprintf("failed to add new secret(%s)", secret), "error", err)
-			writeResponse(http.StatusInternalServerError, adminResponse{
-				StatusCode: http.StatusInternalServerError,
-				Details:    fmt.Sprintf("internal server error: %s", err.Error()),
-			})
-			return
-		} else {
-			log.Info(fmt.Sprintf("new secret added(%s)", secret))
-			writeResponse(http.StatusOK, adminResponse{
-				StatusCode: http.StatusOK,
-				Details:    "new token added",
-			})
-			return
-		}
-
-	} else if r.Method == "DELETE" {
-		if err := s.dynamicAuthenticator.DeleteSecret(secret); err != nil {
-			log.Error(fmt.Sprintf("failed to delete secret(%s)", secret), "error", err)
-			writeResponse(http.StatusInternalServerError, adminResponse{
-				StatusCode: http.StatusInternalServerError,
-				Details:    fmt.Sprintf("internal server error: %s", err.Error()),
-			})
-			return
-		} else {
-			log.Info(fmt.Sprintf("secret deleted(%s)", secret))
-			writeResponse(http.StatusOK, adminResponse{
-				StatusCode: http.StatusOK,
-				Details:    "token deleted",
-			})
-			return
-		}
-	} else {
-		log.Error(fmt.Sprintf("an api called with invalid method(%s)", secret))
-		writeResponse(http.StatusBadRequest, adminResponse{
-			StatusCode: http.StatusBadRequest,
-			Details:    "Invalid HTTP method",
-		})
-		return
-	}
 }
 
 func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
