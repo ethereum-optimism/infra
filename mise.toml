@@ -10,4 +10,3 @@ go = "1.21"
 [settings]
 # Needs to be enabled for hooks to work
 experimental = true
-libgit2 = false
