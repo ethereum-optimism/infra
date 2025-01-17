@@ -683,14 +683,6 @@ workflows:
           module: <<matrix.module>>
           context:
             - oplabs-gcr-release
-  tag:
-    jobs:
       - tag-service:
           context:
             - circleci-repo-infra
-          # We only run the release workflow manually so we disable any push triggers
-          filters:
-            tags:
-              ignore: /.*/
-            branches:
-              ignore: /.*/
