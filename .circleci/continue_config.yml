@@ -25,6 +25,9 @@ parameters:
   run-build-cci-stats:
     type: boolean
     default: false
+  run-build-op-nat:
+    type: boolean
+    default: false
   run-all:
     type: boolean
     default: false
@@ -257,7 +260,6 @@ jobs:
                       --image-path="$IMAGE_PATH"\
                       --signer-logging-level="INFO"\
                       --attestor-key-id="//cloudkms.googleapis.com/v1/projects/$ATTESTOR_PROJECT_NAME/locations/global/keyRings/$ATTESTOR_NAME-key-ring/cryptoKeys/$ATTESTOR_NAME-key/cryptoKeyVersions/1"
-
 
   docker-tag-op-stack-release:
     parameters:
@@ -509,6 +511,16 @@ workflows:
           docker_name: cci-stats
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  op-nat:
+    when:
+      or: [<< pipeline.parameters.run-build-op-nat >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: op-nat-lint
+          module: op-nat
+      - go-test:
+          name: op-nat-tests
+          module: op-nat
   release:
     jobs:
       - log-config-results:
@@ -598,6 +610,7 @@ workflows:
                 - op-conductor-mon
                 - peer-mgmt-service
                 - cci-stats
+                - op-nat
           name: <<matrix.module>>-go-release
           filters:
             tags:
