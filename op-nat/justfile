@@ -1,22 +1,31 @@
 # TODO: just is not working as we depend on go.just
-
-import '../justfiles/go.just'
-
+#
+#
+# import '../justfiles/go.just'
+#
 # Build ldflags string
-_LDFLAGSSTRING := "'" + trim(
-    "-X main.GitCommit=" + GITCOMMIT + " " + \
-    "-X main.GitDate=" + GITDATE + " " + \
-    "-X main.Version=" + VERSION + " " + \
-    "") + "'"
+# _LDFLAGSSTRING := "'" + trim(
+#     "-X main.GitCommit=" + GITCOMMIT + " " + \
+#     "-X main.GitDate=" + GITDATE + " " + \
+#     "-X main.Version=" + VERSION + " " + \
+#     "") + "'"
 
 BINARY := "./bin/op-nat"
 
 # Build op-nat binary
-op-nat: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
+# op-nat: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
 
 # Clean build artifacts
 clean:
     rm -f {{BINARY}}
 
 # Run tests
-test: (go_test "./...")
+# test: (go_test "./...")
+
+# Run prometheus and grafana
+start-monitoring:
+    docker compose -f 'docker-compose.yml' up -d --build
+
+# Stop prometheus and grafana
+stop-monitoring:
+    docker compose -f 'docker-compose.yml' down
