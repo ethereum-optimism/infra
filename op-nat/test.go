@@ -3,7 +3,9 @@ package nat
 import (
 	"context"
 	"fmt"
+	"strconv"
 
+	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -18,7 +20,7 @@ type Test struct {
 func (t Test) Run(ctx context.Context, log log.Logger, cfg Config, params interface{}) (ValidatorResult, error) {
 	if t.Fn == nil {
 		return ValidatorResult{
-			Passed: false,
+			Result: ResultFailed,
 		}, fmt.Errorf("test function is nil")
 	}
 
@@ -29,13 +31,16 @@ func (t Test) Run(ctx context.Context, log log.Logger, cfg Config, params interf
 	}
 
 	log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams)
-	passed, err := t.Fn(ctx, log, cfg, testParams)
-	log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams, "passed", passed, "error", err)
+	res, err := t.Fn(ctx, log, cfg, testParams)
+	log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams, "result", strconv.FormatBool(res), "error", err)
+
+	metrics.RecordValidation("todo", t.Name(), t.Type(), strconv.FormatBool(res), err)
+
 	return ValidatorResult{
 		ID:     t.ID,
 		Type:   t.Type(),
 		Error:  err,
-		Passed: passed,
+		Result: ResultTypeFromBool(res),
 	}, err
 }
 
