@@ -26,7 +26,7 @@ func TestTest(t *testing.T) {
 		result, err := test.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.True(t, result.Passed)
+		assert.Equal(t, ResultPassed, result.Result)
 		assert.Equal(t, defaultParams, receivedParams)
 	})
 
@@ -45,7 +45,7 @@ func TestTest(t *testing.T) {
 		result, err := test.Run(context.Background(), log.New(), Config{}, customParams)
 
 		require.NoError(t, err)
-		assert.True(t, result.Passed)
+		assert.Equal(t, ResultPassed, result.Result)
 		assert.Equal(t, customParams, receivedParams)
 	})
 
@@ -54,28 +54,28 @@ func TestTest(t *testing.T) {
 			name         string
 			fnReturn     bool
 			fnErr        error
-			expectPassed bool
+			expectResult ResultType
 			expectErr    error
 		}{
 			{
 				name:         "returns true when Fn returns true",
 				fnReturn:     true,
 				fnErr:        nil,
-				expectPassed: true,
+				expectResult: ResultPassed,
 				expectErr:    nil,
 			},
 			{
 				name:         "returns false when Fn returns false",
 				fnReturn:     false,
 				fnErr:        nil,
-				expectPassed: false,
+				expectResult: ResultFailed,
 				expectErr:    nil,
 			},
 			{
 				name:         "propagates error from Fn",
 				fnReturn:     false,
 				fnErr:        assert.AnError,
-				expectPassed: false,
+				expectResult: ResultFailed,
 				expectErr:    assert.AnError,
 			},
 		}
@@ -95,7 +95,7 @@ func TestTest(t *testing.T) {
 					assert.Equal(t, tc.expectErr, err)
 				} else {
 					require.NoError(t, err)
-					assert.Equal(t, tc.expectPassed, result.Passed)
+					assert.Equal(t, tc.expectResult, result.Result)
 				}
 			})
 		}

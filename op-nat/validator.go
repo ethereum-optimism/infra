@@ -12,10 +12,40 @@ type Validator interface {
 	Type() string
 }
 
+type ResultType int
+
+const (
+	ResultFailed ResultType = iota
+	ResultPassed
+	ResultSkipped
+)
+
+// TODO: Temporary until test.Fn's return ValidatorResult
+func ResultTypeFromBool(b bool) ResultType {
+	if b {
+		return ResultPassed
+	}
+	return ResultFailed
+}
+
+// String provides a string representation of ResultType
+func (r ResultType) String() string {
+	switch r {
+	case ResultPassed:
+		return "passed"
+	case ResultFailed:
+		return "failed"
+	case ResultSkipped:
+		return "skipped"
+	default:
+		return "unknown"
+	}
+}
+
 type ValidatorResult struct {
 	ID         string
 	Type       string
-	Passed     bool
+	Result     ResultType
 	Error      error
 	SubResults []ValidatorResult
 }

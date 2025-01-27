@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -21,7 +22,8 @@ type Suite struct {
 // Suite-specific params are passed in as `_` because we haven't implemented them yet.
 func (s Suite) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{}) (ValidatorResult, error) {
 	log.Info("", "type", s.Type(), "id", s.Name())
-	allPassed := true
+	var overallResult ResultType = ResultPassed
+	hasSkipped := false
 	results := []ValidatorResult{}
 	var allErrors error
 	for _, test := range s.Tests {
@@ -29,17 +31,24 @@ func (s Suite) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{
 		params := s.TestsParams[test.ID]
 
 		res, err := test.Run(ctx, log, cfg, params)
-		if err != nil || !res.Passed {
-			allPassed = false
-			allErrors = errors.Join(allErrors, err)
+		allErrors = errors.Join(allErrors, err)
+		if res.Result == ResultFailed {
+			overallResult = ResultFailed
+		}
+		if res.Result == ResultSkipped {
+			hasSkipped = true
 		}
 		results = append(results, res)
 	}
-	log.Info("", "type", s.Type(), "id", s.Name(), "passed", allPassed, "error", allErrors)
+	if overallResult == ResultPassed && hasSkipped {
+		overallResult = ResultSkipped
+	}
+	log.Info("", "type", s.Type(), "id", s.Name(), "result", overallResult, "error", allErrors)
+	metrics.RecordValidation("todo", s.Name(), s.Type(), overallResult.String(), allErrors)
 	return ValidatorResult{
 		ID:         s.ID,
 		Type:       s.Type(),
-		Passed:     allPassed,
+		Result:     overallResult,
 		Error:      allErrors,
 		SubResults: results,
 	}, nil
