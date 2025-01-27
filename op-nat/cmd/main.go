@@ -10,6 +10,7 @@ import (
 
 	nat "github.com/ethereum-optimism/infra/op-nat"
 	"github.com/ethereum-optimism/infra/op-nat/flags"
+	"github.com/ethereum-optimism/infra/op-nat/service"
 	"github.com/ethereum-optimism/infra/op-nat/validators/gates"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
@@ -23,8 +24,6 @@ var (
 )
 
 func main() {
-	oplog.SetupDefaults()
-
 	app := cli.NewApp()
 	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Version = fmt.Sprintf("%s-%s-%s", Version, GitCommit, GitDate)
@@ -33,6 +32,12 @@ func main() {
 	app.Description = "op-nat tests networks"
 	app.Action = cliapp.LifecycleCmd(run)
 
+	// Start server
+	svc := service.New()
+	svc.Start(context.Background())
+	defer svc.Shutdown()
+
+	// Start CLI
 	ctx := ctxinterrupt.WithSignalWaiterMain(context.Background())
 	err := app.RunContext(ctx, os.Args)
 	if err != nil {

@@ -36,7 +36,7 @@ func TestSuite(t *testing.T) {
 		result, err := suite.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.True(t, result.Passed)
+		assert.Equal(t, ResultPassed, result.Result)
 		assert.Equal(t, []string{"test1", "test2"}, executionOrder)
 	})
 
@@ -61,7 +61,7 @@ func TestSuite(t *testing.T) {
 		result, err := suite.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.False(t, result.Passed)
+		assert.Equal(t, ResultFailed, result.Result)
 		assert.NoError(t, result.Error)
 	})
 
@@ -86,7 +86,7 @@ func TestSuite(t *testing.T) {
 		result, err := suite.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.False(t, result.Passed)
+		assert.Equal(t, ResultFailed, result.Result)
 		assert.Error(t, result.Error)
 	})
 }

@@ -112,6 +112,6 @@ func TestNATParameterization(t *testing.T) {
 		require.Len(t, nat.results, 1)
 		assert.Equal(t, "test-with-params", nat.results[0].ID)
 		assert.Equal(t, "Test", nat.results[0].Type)
-		assert.True(t, nat.results[0].Passed)
+		assert.Equal(t, ResultPassed, nat.results[0].Result)
 	})
 }

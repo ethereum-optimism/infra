@@ -31,7 +31,7 @@ func TestGate(t *testing.T) {
 		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.True(t, result.Passed)
+		assert.Equal(t, ResultPassed, result.Result)
 	})
 
 	t.Run("fails if any validator fails", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestGate(t *testing.T) {
 		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.False(t, result.Passed)
+		assert.Equal(t, ResultFailed, result.Result)
 	})
 
 	t.Run("doesnt stop on validator failure", func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestGate(t *testing.T) {
 		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
 
 		require.NoError(t, err)
-		assert.False(t, result.Passed)
+		assert.Equal(t, ResultFailed, result.Result)
 		assert.Equal(t, []string{"test1", "test2", "test3"}, executionOrder, "shouldnt stop on validator failure")
 	})
 }
