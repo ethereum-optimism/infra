@@ -7,7 +7,7 @@ import (
 )
 
 type Validator interface {
-	Run(ctx context.Context, log log.Logger, cfg Config, params interface{}) (ValidatorResult, error)
+	Run(ctx context.Context, log log.Logger, runID string, cfg Config, params interface{}) (ValidatorResult, error)
 	Name() string
 	Type() string
 }
@@ -32,11 +32,11 @@ func ResultTypeFromBool(b bool) ResultType {
 func (r ResultType) String() string {
 	switch r {
 	case ResultPassed:
-		return "passed"
+		return "pass"
 	case ResultFailed:
-		return "failed"
+		return "fail"
 	case ResultSkipped:
-		return "skipped"
+		return "skip"
 	default:
 		return "unknown"
 	}
@@ -47,5 +47,6 @@ type ValidatorResult struct {
 	Type       string
 	Result     ResultType
 	Error      error
+	RunID      string
 	SubResults []ValidatorResult
 }
