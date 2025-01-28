@@ -1,14 +1,19 @@
 package nat
 
 import (
-	// "context"
+	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"math/rand"
 	"os"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/infra/op-nat/flags"
+	"github.com/ethereum-optimism/infra/op-nat/network"
+	"github.com/ethereum-optimism/infra/op-nat/wallet"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type Config struct {
@@ -22,6 +27,12 @@ type Config struct {
 	SenderSecretKey     string `json:"-"`
 	ReceiverPublicKeys  []string
 	ReceiverPrivateKeys []string
+
+	Wallets []*wallet.Wallet
+
+	// Networks
+	L1  *network.Network
+	L2A *network.Network
 }
 
 func NewConfig(ctx *cli.Context, validators []Validator) (*Config, error) {
@@ -87,4 +98,54 @@ func parseManifest(manifestPath string) (*SuperchainManifest, error) {
 		return nil, fmt.Errorf("failed to unmarshal manifest: %w", err)
 	}
 	return &superchainManifest, nil
+
+}
+
+// GetNetworks returns all of the networks in an array
+func (c *Config) GetNetworks() []*network.Network {
+	return []*network.Network{
+		c.L1,
+		c.L2A,
+	}
+}
+
+// GetWallet will return a specifc wallet from the wallets array that matches a public key
+func (c *Config) GetWallet(pubKey string) *wallet.Wallet {
+	for _, w := range c.Wallets {
+		if w.Address().String() == pubKey {
+			return w
+		}
+	}
+	return nil
+}
+
+func (c *Config) GetRandomWallet() *wallet.Wallet {
+	randomIndex := rand.Intn(len(c.Wallets))
+	return c.Wallets[randomIndex]
+}
+
+// GetWalletWithBalance is used to find a wallet with a balance on a network
+func (c *Config) GetWalletWithBalance(ctx context.Context, network *network.Network, amount *big.Int) (*wallet.Wallet, error) {
+	for _, w := range c.Wallets {
+		balance, err := w.GetBalance(ctx, network)
+		if err != nil {
+			log.Error("error getting wallet balance",
+				"wallet", w.Address(),
+				"network", network.Name,
+			)
+			return nil, err
+		}
+		log.Info("",
+			"wallet", w.Address(),
+			"balance", balance,
+			"network", network.Name,
+		)
+		if balance.Cmp(amount) == 1 {
+			return w, nil
+		}
+	}
+	return nil, fmt.Errorf("no wallet found with balance %d on network %s",
+		amount,
+		network.Name,
+	)
 }
