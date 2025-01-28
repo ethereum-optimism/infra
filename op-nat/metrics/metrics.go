@@ -116,8 +116,5 @@ func RecordAcceptance(network string, runID string, result string) {
 }
 
 func isValidResult(result string) bool {
-	if slices.Contains(validResults, result) {
-		return true
-	}
-	return false
+	return slices.Contains(validResults, result)
 }
