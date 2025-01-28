@@ -35,7 +35,7 @@ type Config struct {
 	L2A *network.Network
 }
 
-func NewConfig(ctx *cli.Context, validators []Validator) (*Config, error) {
+func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Config, error) {
 	// Parse flags
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, fmt.Errorf("missing required flags: %w", err)
@@ -47,11 +47,11 @@ func NewConfig(ctx *cli.Context, validators []Validator) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse kurtosis-devnet manifest: %w", err)
 	}
 
-	l1RpcUrl := fmt.Sprintf("http://%s:%d", manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Host, manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Port)
+	// l1RpcUrl := fmt.Sprintf("https://%s:%d", manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Host, manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Port)
 
 	firstL2 := manifest.L2[0]
-	rpcURL := fmt.Sprintf("http://%s:%d", firstL2.Nodes[0].Services.EL.Endpoints["rpc"].Host, firstL2.Nodes[0].Services.EL.Endpoints["rpc"].Port)
-	senderSecretKey := firstL2.Wallets["l2Faucet"].PrivateKey
+	// rpcURL := fmt.Sprintf("https://%s:%d", firstL2.Nodes[0].Services.EL.Endpoints["rpc"].Host, firstL2.Nodes[0].Services.EL.Endpoints["rpc"].Port)
+
 	receiverPublicKeys := []string{
 		manifest.L1.Wallets["user-key-0"].Address,
 		manifest.L1.Wallets["user-key-1"].Address,
@@ -63,14 +63,42 @@ func NewConfig(ctx *cli.Context, validators []Validator) (*Config, error) {
 		manifest.L1.Wallets["user-key-2"].PrivateKey,
 	}
 
+	senderSecretKey := receiverPrivateKeys[2]
+
+	wallets := []*wallet.Wallet{}
+	for i, pKey := range receiverPrivateKeys {
+		w, err := wallet.NewWallet(pKey, fmt.Sprintf("user-%d", i))
+		if err != nil {
+			log.Warn("error creating wallet: %w", err)
+		}
+		wallets = append(wallets, w)
+	}
+
+	l1RpcUrl := fmt.Sprintf("https://%s", manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Host)
+
+	l2ARpc := fmt.Sprintf("https://%s", firstL2.Nodes[0].Services.EL.Endpoints["rpc"].Host)
+
+	l1, err := network.NewNetwork(ctx.Context, log, l1RpcUrl, "sepolia", big.NewInt(11155111))
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup l1 network")
+	}
+
+	l2A, err := network.NewNetwork(ctx.Context, log, l2ARpc, "alpaca-l2", big.NewInt(11155111100000))
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup l2a network")
+	}
+
 	return &Config{
 		SC:                  *manifest,
 		L1RPCUrl:            l1RpcUrl,
-		RPCURL:              rpcURL,
+		RPCURL:              l2ARpc,
 		SenderSecretKey:     senderSecretKey,
 		ReceiverPublicKeys:  receiverPublicKeys,
 		ReceiverPrivateKeys: receiverPrivateKeys,
 		Validators:          validators,
+		L1:                  l1,
+		L2A:                 l2A,
+		Wallets:             wallets,
 	}, nil
 }
 

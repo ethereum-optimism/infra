@@ -14,6 +14,9 @@ var NetworkGetBlockNumber = nat.Test{
 	Fn: func(ctx context.Context, log log.Logger, config nat.Config, _ interface{}) (bool, error) {
 
 		for _, network := range config.GetNetworks() {
+			log.Debug("getting block number on network",
+				"network", network.Name,
+			)
 			blockID, err := network.RPC.BlockNumber(ctx)
 			if err != nil {
 				return false, fmt.Errorf("failed to get block number")
