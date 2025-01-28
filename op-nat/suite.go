@@ -20,7 +20,7 @@ type Suite struct {
 // Run runs all the tests in the suite.
 // Returns the overall result of the suite and an error if any of the tests failed.
 // Suite-specific params are passed in as `_` because we haven't implemented them yet.
-func (s Suite) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{}) (ValidatorResult, error) {
+func (s Suite) Run(ctx context.Context, log log.Logger, runID string, cfg Config, _ interface{}) (ValidatorResult, error) {
 	log.Info("", "type", s.Type(), "id", s.Name())
 	var overallResult ResultType = ResultPassed
 	hasSkipped := false
@@ -30,7 +30,7 @@ func (s Suite) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{
 		// Get test-specific params
 		params := s.TestsParams[test.ID]
 
-		res, err := test.Run(ctx, log, cfg, params)
+		res, err := test.Run(ctx, log, runID, cfg, params)
 		allErrors = errors.Join(allErrors, err)
 		if res.Result == ResultFailed {
 			overallResult = ResultFailed
@@ -44,7 +44,7 @@ func (s Suite) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{
 		overallResult = ResultSkipped
 	}
 	log.Info("", "type", s.Type(), "id", s.Name(), "result", overallResult, "error", allErrors)
-	metrics.RecordValidation("todo", s.Name(), s.Type(), overallResult.String(), allErrors)
+	metrics.RecordValidation("todo", runID, s.Name(), s.Type(), overallResult.String())
 	return ValidatorResult{
 		ID:         s.ID,
 		Type:       s.Type(),

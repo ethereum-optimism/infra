@@ -20,7 +20,7 @@ type Gate struct {
 // Run runs all the tests in the gate.
 // Returns the overall result of the gate and an error if any of the tests failed.
 // Gate-specific params are passed in as `_` because we haven't implemented them yet.
-func (g Gate) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{}) (ValidatorResult, error) {
+func (g Gate) Run(ctx context.Context, log log.Logger, runID string, cfg Config, _ interface{}) (ValidatorResult, error) {
 	log.Info("", "type", g.Type(), "id", g.Name())
 	var overallResult ResultType = ResultPassed
 	hasSkipped := false
@@ -34,7 +34,7 @@ func (g Gate) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{}
 		// Get params
 		params := g.Params[validator.Name()]
 
-		res, err := validator.Run(ctx, log, cfg, params)
+		res, err := validator.Run(ctx, log, runID, cfg, params)
 		allErrors = errors.Join(allErrors, err)
 		if res.Result == ResultFailed {
 			overallResult = ResultFailed
@@ -48,7 +48,7 @@ func (g Gate) Run(ctx context.Context, log log.Logger, cfg Config, _ interface{}
 		overallResult = ResultSkipped
 	}
 	log.Info("", "type", g.Type(), "id", g.Name(), "result", overallResult, "error", allErrors)
-	metrics.RecordValidation("todo", g.Name(), g.Type(), overallResult.String(), allErrors)
+	metrics.RecordValidation("todo", runID, g.Name(), g.Type(), overallResult.String())
 	return ValidatorResult{
 		ID:         g.ID,
 		Type:       g.Type(),

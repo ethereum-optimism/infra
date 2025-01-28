@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
@@ -49,24 +50,25 @@ func (n *nat) Start(ctx context.Context) error {
 	n.log.Info("Starting OpNAT")
 	n.ctx = ctx
 	n.running.Store(true)
+	runID := uuid.New().String()
 
 	n.results = []ValidatorResult{}
 	for _, validator := range n.config.Validators {
-		n.log.Info("Running acceptance tests...")
+		n.log.Info("Running acceptance tests...", "run_id", runID)
 
 		// Get test-specific parameters if they exist
 		params := n.params[validator.Name()]
 
-		result, err := validator.Run(ctx, n.log, *n.config, params)
+		result, err := validator.Run(ctx, n.log, runID, *n.config, params)
 		n.log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
 		if err != nil {
 			n.log.Error("Error running validator", "validator", validator.Name(), "error", err)
 		}
 		n.results = append(n.results, result)
 	}
-	n.printResultsTable()
+	n.printResultsTable(runID)
 
-	n.log.Info("OpNAT finished")
+	n.log.Info("OpNAT finished", "run_id", runID)
 	return nil
 }
 
@@ -80,7 +82,7 @@ func (n *nat) Stopped() bool {
 	return n.running.Load()
 }
 
-func (n *nat) printResultsTable() {
+func (n *nat) printResultsTable(runID string) {
 	n.log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetStyle(table.StyleColoredBlackOnGreenWhite)
@@ -116,7 +118,7 @@ func (n *nat) printResultsTable() {
 	// Emit metrics
 	// TODO: This shouldn't be here; needs a refactor
 	// TODO: don't hardcode the network name
-	metrics.RecordAcceptance("op-kurtosis-1", overallResult.String(), overallErr)
+	metrics.RecordAcceptance("todo", runID, overallResult.String())
 }
 
 func appendResultRows(t table.Writer, result ValidatorResult) {

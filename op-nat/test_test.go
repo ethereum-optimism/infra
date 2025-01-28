@@ -23,7 +23,7 @@ func TestTest(t *testing.T) {
 			},
 		}
 
-		result, err := test.Run(context.Background(), log.New(), Config{}, nil)
+		result, err := test.Run(context.Background(), log.New(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -42,7 +42,7 @@ func TestTest(t *testing.T) {
 			},
 		}
 
-		result, err := test.Run(context.Background(), log.New(), Config{}, customParams)
+		result, err := test.Run(context.Background(), log.New(), "run1", Config{}, customParams)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -89,7 +89,7 @@ func TestTest(t *testing.T) {
 					},
 				}
 
-				result, err := test.Run(context.Background(), log.New(), Config{}, nil)
+				result, err := test.Run(context.Background(), log.New(), "run1", Config{}, nil)
 
 				if tc.expectErr != nil {
 					assert.Equal(t, tc.expectErr, err)
