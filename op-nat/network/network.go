@@ -22,6 +22,11 @@ type Network struct {
 }
 
 func NewNetwork(ctx context.Context, log log.Logger, addr, name string, chainId *big.Int) (*Network, error) {
+	log.Debug("Creating new network",
+		"name", name,
+		"chain_id", chainId.String(),
+		"rpc", addr,
+	)
 	client, err := ethclient.Dial(addr)
 	if err != nil {
 		return nil, err
