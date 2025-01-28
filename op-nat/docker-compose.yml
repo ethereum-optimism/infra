@@ -25,6 +25,20 @@ services:
     volumes:
       - ./metrics/testdata/grafana-data:/var/lib/grafana
 
+  op-nat:
+    container_name: op-nat
+    build: .
+    volumes:
+      - ./devnets:/devnets
+    command: ["--kurtosis.devnet.manifest", "/devnets/simple-devnet.json"]
+    depends_on:
+      - prometheus
+      - grafana
+    networks:
+      - monitoring
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 networks:
   monitoring:
     driver: bridge
