@@ -65,12 +65,12 @@ func TestRecordErrorDetails(t *testing.T) {
 
 func TestRecordValidation(t *testing.T) {
 	// Test various validation scenarios
-	RecordValidation("test-network", "validator1", "test", "pass", nil)
-	RecordValidation("test-network", "validator2", "test", "fail", errors.New("validation error"))
+	RecordValidation("test-network", "run1", "validator1", "test", "pass")
+	RecordValidation("test-network", "run1", "validator2", "test", "fail")
 }
 
 func TestRecordAcceptance(t *testing.T) {
 	// Test acceptance scenarios
-	RecordAcceptance("test-network", "pass", nil)
-	RecordAcceptance("test-network", "fail", errors.New("acceptance error"))
+	RecordAcceptance("test-network", "run1", "pass")
+	RecordAcceptance("test-network", "run1", "fail")
 }

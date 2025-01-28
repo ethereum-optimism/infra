@@ -21,6 +21,8 @@ clean:
 
 # Run tests
 # test: (go_test "./...")
+test:
+    go build ./... && go test -v ./...
 
 # Run prometheus and grafana
 start-monitoring:

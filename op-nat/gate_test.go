@@ -28,7 +28,7 @@ func TestGate(t *testing.T) {
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
+		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -52,7 +52,7 @@ func TestGate(t *testing.T) {
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
+		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
@@ -87,7 +87,7 @@ func TestGate(t *testing.T) {
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), Config{}, nil)
+		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)

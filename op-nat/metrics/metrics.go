@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -16,6 +17,7 @@ const (
 
 var (
 	Debug                bool = true
+	validResults              = []string{"pass", "fail", "skip"}
 	nonAlphanumericRegex      = regexp.MustCompile(`[^a-zA-Z ]+`)
 
 	errorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -32,6 +34,7 @@ var (
 		Help:      "Count of validations",
 	}, []string{
 		"network_name",
+		"run_id",
 		"name",
 		"type",
 		"result",
@@ -43,6 +46,7 @@ var (
 		Help:      "Count of acceptance tests",
 	}, []string{
 		"network_name",
+		"run_id",
 		"result",
 	})
 )
@@ -78,25 +82,39 @@ func RecordErrorDetails(label string, err error) {
 	RecordError(label)
 }
 
-func RecordValidation(network string, valName string, valType string, result string, valErr error) {
+func RecordValidation(network string, runID string, valName string, valType string, result string) {
+	if !isValidResult(result) {
+		log.Error("RecordValidation - invalid result", "result", result)
+		return
+	}
 	if Debug {
 		log.Debug("metric inc",
 			"m", "validations_total",
 			"network", network,
+			"run_id", runID,
 			"validator", valName,
 			"type", valType,
 			"result", result)
 	}
-	validationsTotal.WithLabelValues(network, valName, valType, result).Inc()
+	validationsTotal.WithLabelValues(network, runID, valName, valType, result).Inc()
 }
 
-func RecordAcceptance(network string, result string, err error) {
+func RecordAcceptance(network string, runID string, result string) {
+	if !isValidResult(result) {
+		log.Error("RecordAcceptance - invalid result", "result", result)
+		return
+	}
 	if Debug {
 		log.Debug("metric inc",
 			"m", "acceptances_total",
 			"network", network,
+			"run_id", runID,
 			"result", result,
-			"error", err)
+		)
 	}
-	acceptancesTotal.WithLabelValues(network, result).Inc()
+	acceptancesTotal.WithLabelValues(network, runID, result).Inc()
+}
+
+func isValidResult(result string) bool {
+	return slices.Contains(validResults, result)
 }
