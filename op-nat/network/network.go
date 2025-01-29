@@ -14,7 +14,6 @@ import (
 type Network struct {
 	ChainID *big.Int
 	Name    string
-	addr    string
 	// Addr is the Address the client is dialing
 	Addr string
 	RPC  *ethclient.Client
@@ -33,7 +32,7 @@ func NewNetwork(ctx context.Context, log log.Logger, addr, name string, chainId 
 	}
 	return &Network{
 		RPC:     client,
-		addr:    addr,
+		Addr:    addr,
 		Name:    name,
 		log:     log,
 		ChainID: chainId,

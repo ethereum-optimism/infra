@@ -48,11 +48,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		return nil, fmt.Errorf("failed to parse kurtosis-devnet manifest: %w", err)
 	}
 
-	receiverPublicKeys := []string{
-		manifest.L1.Wallets["user-key-0"].Address,
-		manifest.L1.Wallets["user-key-1"].Address,
-		manifest.L1.Wallets["user-key-2"].Address,
-	}
 	receiverPrivateKeys := []string{
 		manifest.L1.Wallets["user-key-0"].PrivateKey,
 		manifest.L1.Wallets["user-key-1"].PrivateKey,
@@ -96,28 +91,20 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 	}
 
 	return &Config{
-		SC:                  *manifest,
-		L1RPCUrl:            l1RpcUrl,
-		RPCURL:              l2ARpc,
-		SenderSecretKey:     senderSecretKey,
-		ReceiverPublicKeys:  receiverPublicKeys,
-		ReceiverPrivateKeys: receiverPrivateKeys,
-		Validators:          validators,
-		L1:                  l1,
-		L2A:                 l2A,
-		Wallets:             wallets,
+		SC:              *manifest,
+		L1RPCUrl:        l1RpcUrl,
+		RPCURL:          l2ARpc,
+		SenderSecretKey: senderSecretKey,
+		Validators:      validators,
+		L1:              l1,
+		L2A:             l2A,
+		Wallets:         wallets,
 	}, nil
 }
 
 func (c Config) Check() error {
 	if c.SenderSecretKey == "" {
 		return fmt.Errorf("missing sender secret key")
-	}
-	if len(c.ReceiverPublicKeys) == 0 {
-		return fmt.Errorf("missing receiver public keys")
-	}
-	if len(c.ReceiverPrivateKeys) == 0 {
-		return fmt.Errorf("missing receiver private keys")
 	}
 	return nil
 }
@@ -152,6 +139,11 @@ func (c *Config) GetWallet(pubKey string) *wallet.Wallet {
 		}
 	}
 	return nil
+}
+
+// GetAllWallets return all wallets in the config
+func (c *Config) GetAllWallets() []*wallet.Wallet {
+	return c.Wallets
 }
 
 func (c *Config) GetRandomWallet() *wallet.Wallet {
