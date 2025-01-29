@@ -17,11 +17,10 @@ all: build
 docker:
 	docker build ../ -f Dockerfile -t op-nat:latest
 
-build:
-    CGO_ENABLED=0 go build -o ./bin/op-nat ./cmd
-
 # Build op-nat binary
 # op-nat: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
+build:
+    CGO_ENABLED=0 go build -o ./bin/op-nat ./cmd
 
 # Clean build artifacts
 clean:
