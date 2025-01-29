@@ -75,7 +75,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		big.NewInt(int64(l1ID)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup l1 network: %s", err)
+		return nil, fmt.Errorf("failed to setup l1 network: %w", err)
 	}
 
 	l2AID, err := strconv.Atoi(manifest.L2[0].ID)
@@ -93,7 +93,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		big.NewInt(int64(l2AID)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup l2A network: %s", err)
+		return nil, fmt.Errorf("failed to setup l2A network: %w", err)
 	}
 
 	return &Config{

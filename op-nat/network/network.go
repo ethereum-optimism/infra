@@ -46,7 +46,7 @@ func NewNetwork(ctx context.Context, log log.Logger, name, addr string, secure b
 	}
 	return &Network{
 		RPC:     client,
-		Addr:    rpcEndpoint,
+		Addr:    addr,
 		Name:    name,
 		log:     log,
 		ChainID: chainId,
@@ -78,7 +78,7 @@ func (n *Network) PollForConfirmation(ctx context.Context, log log.Logger, confs
 	for i := 0; i < 10; i++ {
 		receipt, err := n.RPC.TransactionReceipt(context.Background(), txhash)
 		if err != nil {
-			log.Warn("error getting tx reciept for tx",
+			log.Warn("error getting tx receipt for tx",
 				"tx", txhash.String(),
 				"error", err,
 			)

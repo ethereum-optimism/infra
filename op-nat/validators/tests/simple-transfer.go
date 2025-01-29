@@ -31,11 +31,11 @@ var SimpleTransfer = nat.Test{
 
 		p := params.(SimpleTranferParams)
 		for _, network := range cfg.GetNetworks() {
-			sender, reciever, err := SetupSimpleTransferTest(ctx, log, network, cfg, p)
+			sender, receiver, err := SetupSimpleTransferTest(ctx, log, network, cfg, p)
 			if err != nil {
 				return false, err
 			}
-			pass, err := SimpleTransferTest(ctx, log, network, sender, reciever, p)
+			pass, err := SimpleTransferTest(ctx, log, network, sender, receiver, p)
 			if err != nil {
 				return false, errors.Wrapf(err, "error executing simple transfer for network: %s", network.Name)
 			}
@@ -55,21 +55,21 @@ func SetupSimpleTransferTest(ctx context.Context, log log.Logger, network *netwo
 		return nil, nil, err
 	}
 
-	// Ensure reciever is not equal to sender
+	// Ensure receiver is not equal to sender
 	for i := 0; i < 5; i++ {
-		reciever := cfg.GetRandomWallet()
-		if reciever.Address() == sender.Address() {
+		receiver := cfg.GetRandomWallet()
+		if receiver.Address() == sender.Address() {
 			continue
 		}
-		return sender, reciever, nil
+		return sender, receiver, nil
 	}
-	return nil, nil, errors.New("unable to find valid reciever wallet that did not match sender wallet")
+	return nil, nil, errors.New("unable to find valid receiver wallet that did not match sender wallet")
 
 }
 
-func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Network, sender, reciever *wallet.Wallet, p SimpleTranferParams) (bool, error) {
+func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Network, sender, receiver *wallet.Wallet, p SimpleTranferParams) (bool, error) {
 	// Make sure the accounts are unstuck before sending any transactions
-	if network == nil || sender == nil || reciever == nil {
+	if network == nil || sender == nil || receiver == nil {
 		return false, errors.New("error empty arguments provided for SimpleTransferTest")
 	}
 
@@ -78,29 +78,29 @@ func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Ne
 		return false, errors.Wrap(err, "error getting sender balance")
 	}
 
-	recieverBalancePre, err := reciever.GetBalance(ctx, network)
+	receiverBalancePre, err := receiver.GetBalance(ctx, network)
 	if err != nil {
-		return false, errors.Wrap(err, "error getting reciever balance")
+		return false, errors.Wrap(err, "error getting receiver balance")
 	}
 
 	log.Debug("user balances pre simple transfer test",
 		"sender", senderBalancePre.String(),
 		"sender_addr", sender.Address(),
-		"reciever", recieverBalancePre.String(),
-		"reciever_addr", reciever.Address(),
+		"receiver", receiverBalancePre.String(),
+		"receiver_addr", receiver.Address(),
 		"network", network.Name,
 		"transfer_value", p.TransferAmount.String(),
 	)
 
-	tx, err := sender.Send(ctx, network, &p.TransferAmount, reciever.Address())
+	tx, err := sender.Send(ctx, network, &p.TransferAmount, receiver.Address())
 	if err != nil {
 		return false, errors.Wrap(err, fmt.Sprintf("error sending simple transfer"+
 			"network: %s"+
 			"sender: %s"+
-			"reciever: %s",
+			"receiver: %s",
 			network.Name,
 			sender.Address(),
-			reciever.Address(),
+			receiver.Address(),
 		))
 	}
 
@@ -113,13 +113,13 @@ func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Ne
 		return false, errors.Wrap(err, "error getting sender balance")
 	}
 
-	recieverBalancePost, err := reciever.GetBalance(ctx, network)
+	receiverBalancePost, err := receiver.GetBalance(ctx, network)
 	if err != nil {
-		return false, errors.Wrap(err, "error getting reciever balance")
+		return false, errors.Wrap(err, "error getting receiver balance")
 	}
 
-	recieverDiff := new(big.Int)
-	recieverDiff.Sub(recieverBalancePost, recieverBalancePre)
+	receiverDiff := new(big.Int)
+	receiverDiff.Sub(receiverBalancePost, receiverBalancePre)
 
 	senderPostExpected := new(big.Int)
 	senderPostExpected.Sub(senderBalancePre, &p.TransferAmount)
@@ -127,15 +127,15 @@ func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Ne
 	log.Debug("user balances post simple transfer test",
 		"sender_post", senderBalancePost.String(),
 		"sender_post_expected", senderPostExpected.String(),
-		"reciever_post", recieverBalancePost.String(),
-		"reciever_diff", recieverDiff.String(),
+		"receiver_post", receiverBalancePost.String(),
+		"receiver_diff", receiverDiff.String(),
 		"transfer_amount", p.TransferAmount.String(),
 	)
 
 	// TODO: Improve the clarity of these checks
 	// If the difference is not the same return error
-	if p.TransferAmount.Cmp(recieverDiff) != 0 {
-		return false, errors.New("error reciever balance post transfer was incorrect")
+	if p.TransferAmount.Cmp(receiverDiff) != 0 {
+		return false, errors.New("error receiver balance post transfer was incorrect")
 	}
 
 	// If sender post to be greater than senderPostExpected fail the test
