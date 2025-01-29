@@ -9,6 +9,7 @@ type SuperchainManifest struct {
 
 type L1Config struct {
 	Name      string            `json:"name"`
+	ID        string            `json:"id"` // Not always in kurtosis-devnet
 	Nodes     []Node            `json:"nodes"`
 	Addresses L1Addresses       `json:"addresses"`
 	Wallets   map[string]Wallet `json:"wallets"`

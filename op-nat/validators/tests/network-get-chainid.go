@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	nat "github.com/ethereum-optimism/infra/op-nat"
 	"github.com/ethereum-optimism/infra/op-nat/network"
@@ -15,6 +16,14 @@ var NetworkGetChainID = nat.Test{
 	Fn: func(ctx context.Context, log log.Logger, config nat.Config, _ interface{}) (bool, error) {
 
 		for _, network := range config.GetNetworks() {
+
+			if (network.ChainID).Cmp(big.NewInt(0)) < 0 {
+				log.Info("chain_id is not set skipping/failing chain_id test",
+					"chain_id", network.ChainID,
+					"network", network.Name,
+				)
+				return false, nil
+			}
 			log.Info("validating network",
 				"addr", network.Addr,
 				"chain_id", network.ChainID,
@@ -38,10 +47,10 @@ func ValidateChainID(ctx context.Context, network *network.Network) (bool, error
 		)
 	}
 	if chainID == nil || (*network.ChainID).Cmp(chainID) != 0 {
-		return false, fmt.Errorf("failed to get expected chain id for network %s. Expected: %d. Got: %d",
+		return false, fmt.Errorf("failed to get expected chain id for network %s. Expected: %s. Got: %s",
 			network.Name,
-			*network.ChainID,
-			chainID,
+			network.ChainID.String(),
+			chainID.String(),
 		)
 	}
 	log.Debug("successfully got the chain id", "chain_id", chainID.String())
