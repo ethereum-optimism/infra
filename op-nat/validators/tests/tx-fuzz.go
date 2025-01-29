@@ -8,8 +8,6 @@ import (
 	"time"
 
 	nat "github.com/ethereum-optimism/infra/op-nat"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	ethparams "github.com/ethereum/go-ethereum/params"
 	"github.com/pkg/errors"
@@ -20,6 +18,7 @@ type TxFuzzParams struct {
 	NSlotsToRunFor     int
 	TxPerAccount       uint64
 	GenerateAccessList bool
+	MinBalance         *big.Int
 }
 
 // TxFuzz is a test that runs tx-fuzz.
@@ -30,10 +29,11 @@ var TxFuzz = nat.Test{
 		NSlotsToRunFor:     120, // Duration of the fuzzing
 		TxPerAccount:       3,
 		GenerateAccessList: false,
+		MinBalance:         big.NewInt(10 * ethparams.GWei),
 	},
 	Fn: func(ctx context.Context, log log.Logger, cfg nat.Config, params interface{}) (bool, error) {
 		p := params.(TxFuzzParams)
-		err := runBasicSpam(cfg, p)
+		err := runBasicSpam(ctx, log, cfg, p)
 		if err != nil {
 			return false, err
 		}
@@ -41,12 +41,13 @@ var TxFuzz = nat.Test{
 	},
 }
 
-func runBasicSpam(config nat.Config, params TxFuzzParams) error {
-	fuzzCfg, err := newConfig(config, params)
+func runBasicSpam(ctx context.Context, log log.Logger, config nat.Config, params TxFuzzParams) error {
+	fuzzCfg, err := newConfig(ctx, log, config, params)
 	if err != nil {
 		return err
 	}
-	airdropValue := new(big.Int).Mul(big.NewInt(int64((1+fuzzCfg.N)*1000000)), big.NewInt(ethparams.GWei))
+
+	airdropValue := big.NewInt(1 * ethparams.Wei)
 	return spam(fuzzCfg, spammer.SendBasicTransactions, airdropValue, params)
 }
 
@@ -68,31 +69,31 @@ func spam(config *spammer.Config, spamFn spammer.Spam, airdropValue *big.Int, pa
 	return nil
 }
 
-func newConfig(c nat.Config, p TxFuzzParams) (*spammer.Config, error) {
+func newConfig(ctx context.Context, log log.Logger, c nat.Config, p TxFuzzParams) (*spammer.Config, error) {
 	txPerAccount := p.TxPerAccount
 	genAccessList := p.GenerateAccessList
-	rpcURL := c.RPCURL
-	senderSecretKey := c.SenderSecretKey
-	receiverPublicKeys := c.ReceiverPublicKeys
+	rpcURL := c.L2A.Addr
 
-	// Faucet
-	faucet, err := crypto.ToECDSA(common.FromHex(senderSecretKey))
+	sender, err := c.GetWalletWithBalance(ctx, c.L2A, p.MinBalance)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to convert sender secret key to ECDSA")
-	}
-
-	// Private keys
-	keys := receiverPublicKeys
-	var privateKeys []*ecdsa.PrivateKey
-	for i := 0; i < len(keys); i++ {
-		privateKeys = append(privateKeys, crypto.ToECDSAUnsafe(common.FromHex(keys[i])))
+		log.Error("failed unable to find sender for tx spam",
+			"network", c.L2A.Name,
+			"min_balance", p.MinBalance,
+		)
+		return nil, errors.Wrap(err, "failed to find sender with min balance")
 	}
 
 	cfg, err := spammer.NewDefaultConfig(rpcURL, txPerAccount, genAccessList, rand.New(rand.NewSource(time.Now().UnixNano())))
 	if err != nil {
 		return nil, err
 	}
-	cfg = cfg.WithFaucet(faucet).WithKeys(privateKeys)
+
+	privKeys := []*ecdsa.PrivateKey{}
+	for _, w := range c.GetAllWallets() {
+		privKeys = append(privKeys, w.PrivateKeyESCDA)
+
+	}
+	cfg = cfg.WithFaucet(sender.PrivateKeyESCDA).WithKeys(privKeys)
 
 	return cfg, nil
 }
