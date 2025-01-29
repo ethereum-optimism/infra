@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-nat/wallet"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	ethparams "github.com/ethereum/go-ethereum/params"
 	"github.com/pkg/errors"
 )
 
@@ -28,8 +29,8 @@ var SimpleDeposit = nat.Test{
 	ID: "simple-deposit",
 	DefaultParams: SimpleDepositParams{
 		MaxBalanceChecks: 12,
-		DepositAmount:    *big.NewInt(1000),
-		MinL1Balance:     *big.NewInt(10000),
+		DepositAmount:    *big.NewInt(10 * ethparams.Wei),
+		MinL1Balance:     *big.NewInt(1 * ethparams.GWei),
 	},
 
 	Fn: func(ctx context.Context, log log.Logger, cfg nat.Config, params interface{}) (bool, error) {
@@ -114,6 +115,7 @@ func SimpleDepositTest(ctx context.Context, log log.Logger, l1, l2 *network.Netw
 	l2PostExpected := new(big.Int)
 	l2PostExpected.Add(&p.DepositAmount, l2Pre)
 
+	// Poll the L2 for a bit to see the deposit value
 	for i := 0; i < p.MaxBalanceChecks; i++ {
 		l1Post, err = wallet.GetBalance(ctx, l1)
 		if err != nil {

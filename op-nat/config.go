@@ -22,10 +22,6 @@ type Config struct {
 	SC         SuperchainManifest
 	Validators []Validator
 
-	// mix of chain config and tx-fuzz params - needs cleanup
-	ReceiverPublicKeys  []string
-	ReceiverPrivateKeys []string
-
 	Wallets []*wallet.Wallet
 
 	// Networks
