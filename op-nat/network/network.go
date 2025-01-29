@@ -2,6 +2,7 @@ package network
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -20,14 +21,27 @@ type Network struct {
 	log  log.Logger
 }
 
-func NewNetwork(ctx context.Context, log log.Logger, addr, name string, chainId *big.Int) (*Network, error) {
+func NewNetwork(ctx context.Context, log log.Logger, name, addr string, secure bool, chainId *big.Int) (*Network, error) {
+
+	prefix := "https://"
+	if !secure {
+		prefix = "http://"
+	}
+
+	rpcEndpoint := fmt.Sprintf("%s%s", prefix, addr)
+
 	log.Debug("Creating new network",
 		"name", name,
 		"chain_id", chainId.String(),
-		"rpc", addr,
+		"rpc", rpcEndpoint,
+		"secure", secure,
 	)
-	client, err := ethclient.Dial(addr)
+	client, err := ethclient.Dial(rpcEndpoint)
 	if err != nil {
+		log.Error("error creating ethclient for network",
+			"network", name,
+			"error", err,
+		)
 		return nil, err
 	}
 	return &Network{

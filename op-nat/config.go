@@ -20,8 +20,6 @@ import (
 type Config struct {
 	// Network config
 	SC         SuperchainManifest
-	L1RPCUrl   string
-	RPCURL     string
 	Validators []Validator
 
 	// mix of chain config and tx-fuzz params - needs cleanup
@@ -65,35 +63,44 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		wallets = append(wallets, w)
 	}
 
-	l1RpcUrl := fmt.Sprintf("https://%s", manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Host)
 	l1ID, err := strconv.Atoi(manifest.L1.ID)
 	if err != nil {
 		log.Warn("L1 Chain ID was not supplied, will skip l1 chain-id test")
 		l1ID = -1
 	}
-	l1, err := network.NewNetwork(ctx.Context, log, l1RpcUrl, manifest.L1.Name, big.NewInt(int64(l1ID)))
+
+	l1, err := network.NewNetwork(
+		ctx.Context,
+		log,
+		manifest.L1.Name,
+		manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Host,
+		manifest.L1.Nodes[0].Services.EL.Endpoints["rpc"].Secure,
+		big.NewInt(int64(l1ID)),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup l1 network")
+		return nil, fmt.Errorf("failed to setup l1 network: %s", err)
 	}
 
-	// Setup L2 A
-	L2A := manifest.L2[0]
-	l2ARpc := fmt.Sprintf("https://%s", L2A.Nodes[0].Services.EL.Endpoints["rpc"].Host)
-	l2AID, err := strconv.Atoi(L2A.ID)
+	l2AID, err := strconv.Atoi(manifest.L2[0].ID)
 	if err != nil {
-		// If there is no chain ID set to -1 and skip chain-id test
-		log.Warn("L2A Chain ID was not supplied, will skip l1 chain-id test")
+		log.Warn("L2A Chain ID was not supplied, will skip l2A chain-id test")
 		l2AID = -1
 	}
-	l2A, err := network.NewNetwork(ctx.Context, log, l2ARpc, L2A.Name, big.NewInt(int64(l2AID)))
+
+	l2A, err := network.NewNetwork(
+		ctx.Context,
+		log,
+		manifest.L2[0].Name,
+		manifest.L2[0].Nodes[0].Services.EL.Endpoints["rpc"].Host,
+		manifest.L2[0].Nodes[0].Services.EL.Endpoints["rpc"].Secure,
+		big.NewInt(int64(l2AID)),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup l2a network")
+		return nil, fmt.Errorf("failed to setup l2A network: %s", err)
 	}
 
 	return &Config{
 		SC:              *manifest,
-		L1RPCUrl:        l1RpcUrl,
-		RPCURL:          l2ARpc,
 		SenderSecretKey: senderSecretKey,
 		Validators:      validators,
 		L1:              l1,

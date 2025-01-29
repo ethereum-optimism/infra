@@ -39,8 +39,9 @@ type Service struct {
 }
 
 type Endpoint struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Secure bool   `json:"secure"`
 }
 
 type L2Services struct {
