@@ -46,7 +46,7 @@ func NewNetwork(ctx context.Context, log log.Logger, name, addr string, secure b
 	}
 	return &Network{
 		RPC:     client,
-		Addr:    addr,
+		Addr:    rpcEndpoint,
 		Name:    name,
 		log:     log,
 		ChainID: chainId,

@@ -23,7 +23,6 @@ type Config struct {
 	Validators []Validator
 
 	// mix of chain config and tx-fuzz params - needs cleanup
-	SenderSecretKey     string `json:"-"`
 	ReceiverPublicKeys  []string
 	ReceiverPrivateKeys []string
 
@@ -51,8 +50,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		manifest.L1.Wallets["user-key-1"].PrivateKey,
 		manifest.L1.Wallets["user-key-2"].PrivateKey,
 	}
-
-	senderSecretKey := receiverPrivateKeys[2]
 
 	wallets := []*wallet.Wallet{}
 	for i, pKey := range receiverPrivateKeys {
@@ -100,20 +97,12 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 	}
 
 	return &Config{
-		SC:              *manifest,
-		SenderSecretKey: senderSecretKey,
-		Validators:      validators,
-		L1:              l1,
-		L2A:             l2A,
-		Wallets:         wallets,
+		SC:         *manifest,
+		Validators: validators,
+		L1:         l1,
+		L2A:        l2A,
+		Wallets:    wallets,
 	}, nil
-}
-
-func (c Config) Check() error {
-	if c.SenderSecretKey == "" {
-		return fmt.Errorf("missing sender secret key")
-	}
-	return nil
 }
 
 func parseManifest(manifestPath string) (*SuperchainManifest, error) {

@@ -3,7 +3,6 @@ package nat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"sync/atomic"
 
@@ -31,9 +30,6 @@ type nat struct {
 func New(ctx context.Context, config *Config, log log.Logger, version string) (*nat, error) {
 	if config == nil {
 		return nil, errors.New("config is required")
-	}
-	if err := config.Check(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return &nat{

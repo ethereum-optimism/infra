@@ -8,9 +8,9 @@ import (
 var Alphanet = nat.Gate{
 	ID: "alphanet",
 	Validators: []nat.Validator{
-		suites.LoadTest,
 		suites.Network,
 		suites.DepositSuite,
 		suites.SimpleTransfer,
+		suites.LoadTest,
 	},
 }

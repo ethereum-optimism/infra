@@ -72,7 +72,6 @@ func spam(config *spammer.Config, spamFn spammer.Spam, airdropValue *big.Int, pa
 func newConfig(ctx context.Context, log log.Logger, c nat.Config, p TxFuzzParams) (*spammer.Config, error) {
 	txPerAccount := p.TxPerAccount
 	genAccessList := p.GenerateAccessList
-	rpcURL := c.L2A.Addr
 
 	sender, err := c.GetWalletWithBalance(ctx, c.L2A, p.MinBalance)
 	if err != nil {
@@ -83,7 +82,7 @@ func newConfig(ctx context.Context, log log.Logger, c nat.Config, p TxFuzzParams
 		return nil, errors.Wrap(err, "failed to find sender with min balance")
 	}
 
-	cfg, err := spammer.NewDefaultConfig(rpcURL, txPerAccount, genAccessList, rand.New(rand.NewSource(time.Now().UnixNano())))
+	cfg, err := spammer.NewDefaultConfig(c.L2A.Addr, txPerAccount, genAccessList, rand.New(rand.NewSource(time.Now().UnixNano())))
 	if err != nil {
 		return nil, err
 	}
