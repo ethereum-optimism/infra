@@ -48,16 +48,22 @@ func runBasicSpam(ctx context.Context, log log.Logger, config nat.Config, params
 	}
 
 	airdropValue := big.NewInt(1 * ethparams.Wei)
-	return spam(fuzzCfg, spammer.SendBasicTransactions, airdropValue, params)
+	return spam(fuzzCfg, log, spammer.SendBasicTransactions, airdropValue, params)
 }
 
-func spam(config *spammer.Config, spamFn spammer.Spam, airdropValue *big.Int, params TxFuzzParams) error {
+func spam(config *spammer.Config, log log.Logger, spamFn spammer.Spam, airdropValue *big.Int, params TxFuzzParams) error {
 	// Make sure the accounts are unstuck before sending any transactions
+	log.Debug("unstucking wallets")
 	if err := spammer.Unstuck(config); err != nil {
 		return err
 	}
 
 	for nSlots := 0; nSlots < params.NSlotsToRunFor; nSlots++ {
+		log.Info("airdropping to wallet",
+			"slot", nSlots,
+			"max_slots", params.NSlotsToRunFor,
+			"airdrop_value", airdropValue,
+		)
 		if err := spammer.Airdrop(config, airdropValue); err != nil {
 			return err
 		}
@@ -72,6 +78,12 @@ func spam(config *spammer.Config, spamFn spammer.Spam, airdropValue *big.Int, pa
 func newConfig(ctx context.Context, log log.Logger, c nat.Config, p TxFuzzParams) (*spammer.Config, error) {
 	txPerAccount := p.TxPerAccount
 	genAccessList := p.GenerateAccessList
+	network := c.L2A
+
+	log.Info("finding tx spam wallet on network",
+		"network", network.Name,
+		"addr", network.Addr,
+	)
 
 	sender, err := c.GetWalletWithBalance(ctx, c.L2A, p.MinBalance)
 	if err != nil {

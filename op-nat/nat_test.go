@@ -25,9 +25,7 @@ func TestNATParameterization(t *testing.T) {
 
 	// Create a basic config with our test
 	cfg := &Config{
-		Validators:          []Validator{test},
-		ReceiverPublicKeys:  []string{"0x0"},
-		ReceiverPrivateKeys: []string{"0x0"},
+		Validators: []Validator{test},
 	}
 	logger := log.New()
 
