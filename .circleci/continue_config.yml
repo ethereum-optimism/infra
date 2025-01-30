@@ -2,6 +2,15 @@ version: 2.1
 
 orbs:
   gcp-cli: circleci/gcp-cli@2.4.1
+  utils: ethereum-optimism/circleci-utils@0.0.12
+
+executors:
+  default:
+    machine:
+      image: ubuntu-2204:2024.08.1
+  builder:
+    docker:
+      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
 
 parameters:
   run-build-op-conductor-mon:
@@ -31,11 +40,58 @@ parameters:
   run-all:
     type: boolean
     default: false
-  vm-image:
+  # 
+  # 
+  # The following tags are defined more strictly in the parent pipeline
+  # so that when the pipeline is triggered manually, the user is forced
+  # to enter valid values and the UI parameter form is prepopulated.
+  # 
+  # 
+  run-tag-service:
+    type: boolean
+    default: false
+  tag-service--bump:
     type: string
-    default: ubuntu-2204:current
+    default: ""
+  tag-service--service:
+    type: string
+    default: ""
+  tag-service--prerelease:
+    type: boolean
+    default: false
 
 commands:
+  install-dependencies:
+    parameters:
+      module:
+        type: string
+        default: .
+    steps:
+      - run:
+          name: Install mise
+          command: curl https://mise.run | MISE_INSTALL_PATH=/home/circleci/bin/mise sh
+          working_directory: << parameters.module >>
+      - run:
+          name: Contents
+          command: ls -al
+          working_directory: << parameters.module >>
+      - run:
+          name: Activate mise
+          command: echo 'eval "$(mise activate bash)"' >> $BASH_ENV
+          working_directory: << parameters.module >>
+      - run:
+          name: Mise doctor
+          command: mise doctor
+          working_directory: << parameters.module >>
+      - run:
+          name: Mise config
+          command: mise config
+          working_directory: << parameters.module >>
+      - run:
+          name: Install mise dependencies
+          command: mise install --verbose
+          working_directory: << parameters.module >>
+
   gcp-oidc-authenticate:
     description: "Authenticate with GCP using a CircleCI OIDC token."
     parameters:
@@ -80,8 +136,7 @@ commands:
 
 jobs:
   log-config-results:
-    docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+    executor: builder
     environment:
       CURRENT_TAG: << pipeline.git.tag >>
     steps:
@@ -96,6 +151,7 @@ jobs:
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-tag-service: << pipeline.parameters.run-tag-service >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
             echo "Pipeline Trigger Information:"
@@ -165,8 +221,7 @@ jobs:
         description: Docker repo
         type: string
         default: "oplabs-tools-artifacts/images"
-    machine:
-      image: <<pipeline.parameters.vm-image>>
+    executor: default
     steps:
       - checkout
       - run:
@@ -212,8 +267,7 @@ jobs:
         description: Docker repo
         type: string
         default: "oplabs-tools-artifacts/images"
-    machine:
-      image: <<pipeline.parameters.vm-image>>
+    executor: default
     steps:
       - attach_workspace:
           at: /tmp/docker_images
@@ -292,10 +346,11 @@ jobs:
       module:
         description: Go Module Name
         type: string
-    docker:
-      - image: cimg/go:1.23
+    executor: default
     steps:
       - checkout
+      - install-dependencies:
+          module: << parameters.module >>
       - run:
           name: run generate
           command: |
@@ -363,24 +418,17 @@ jobs:
         description: Goreleaser config file
         default: .goreleaser.yaml
         type: string
-    docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
+    executor: default
     resource_class: large
     steps:
       - setup_remote_docker
+      - install-dependencies:
+          module: << parameters.module >>
       - gcp-cli/install
       - gcp-oidc-authenticate:
           gcp_cred_config_file_path: /root/gcp_cred_config.json
           oidc_token_file_path: /root/oidc_token.json
       - checkout
-      - run:
-          name: Install goreleaser pro
-          command: |
-            mkdir -p /tmp/goreleaser
-            cd /tmp/goreleaser
-            curl -L -o goreleaser.tgz https://github.com/goreleaser/goreleaser-pro/releases/download/v2.4.3-pro/goreleaser-pro_Linux_x86_64.tar.gz
-            tar -xzvf goreleaser.tgz
-            mv goreleaser /usr/local/bin/goreleaser
       - run:
           name: Configure Docker
           command: |
@@ -389,6 +437,39 @@ jobs:
           name: Run goreleaser
           command: |
             goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
+    
+  tag-service:
+    executor: default
+    parameters:
+      bump:
+        type: string
+      service:
+        type: string
+      prerelease:
+        type: boolean
+    steps:
+      - checkout
+      - run:
+          name: Fetch tags
+          command: git fetch --tags origin --force
+      - install-dependencies:
+          module: ops/tag-service
+      - utils/get-github-access-token:
+          output-token-name: INPUT_GITHUB_TOKEN
+      # This conditional step runs the prerelease command
+      - when:
+          condition: << parameters.prerelease >>
+          steps:
+            - run:
+                name: Prerelease << parameters.bump >> bump of << parameters.service >>
+                command: ops/tag-service/tag-service.py --bump="<< parameters.bump >>" --service="<< parameters.service >>" --pre-release
+      # This conditional step runs the release command
+      - unless:
+          condition: << parameters.prerelease >>
+          steps:
+            - run:
+                name: Release << parameters.bump >> bump of << parameters.service >>
+                command: ops/tag-service/tag-service.py --bump="<< parameters.bump >>" --service="<< parameters.service >>"
 
 workflows:
   logging:
@@ -620,3 +701,16 @@ workflows:
           module: <<matrix.module>>
           context:
             - oplabs-gcr-release
+  tag:
+    when:
+      and: 
+        - << pipeline.parameters.run-tag-service >>
+        - << pipeline.parameters.tag-service--bump >>
+        - << pipeline.parameters.tag-service--service >>
+    jobs:
+      - tag-service:
+          context:
+            - circleci-repo-infra
+          bump: << pipeline.parameters.tag-service--bump >>
+          service: << pipeline.parameters.tag-service--service >>
+          prerelease: << pipeline.parameters.tag-service--prerelease >>
