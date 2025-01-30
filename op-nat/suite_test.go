@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +57,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
@@ -83,7 +82,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)

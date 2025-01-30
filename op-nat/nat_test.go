@@ -12,7 +12,7 @@ import (
 func TestNATParameterization(t *testing.T) {
 	// Create a test that records its received parameters
 	var receivedParams interface{}
-	testFn := func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+	testFn := func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 		receivedParams = params
 		return true, nil
 	}

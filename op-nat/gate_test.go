@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,20 +14,20 @@ func TestGate(t *testing.T) {
 			Validators: []Validator{
 				&Test{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return true, nil
 					},
 				},
 				&Test{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return true, nil
 					},
 				},
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := gate.Run(context.Background(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -39,20 +38,20 @@ func TestGate(t *testing.T) {
 			Validators: []Validator{
 				&Test{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return true, nil
 					},
 				},
 				&Test{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return false, nil
 					},
 				},
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := gate.Run(context.Background(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
@@ -65,21 +64,21 @@ func TestGate(t *testing.T) {
 			Validators: []Validator{
 				&Test{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						executionOrder = append(executionOrder, "test1")
 						return true, nil
 					},
 				},
 				&Test{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						executionOrder = append(executionOrder, "test2")
 						return false, nil
 					},
 				},
 				&Test{
 					ID: "test3",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						executionOrder = append(executionOrder, "test3")
 						return true, nil
 					},
@@ -87,7 +86,7 @@ func TestGate(t *testing.T) {
 			},
 		}
 
-		result, err := gate.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := gate.Run(context.Background(), "run1", Config{}, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)

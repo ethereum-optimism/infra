@@ -45,7 +45,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 
 	wallets := []*wallet.Wallet{}
 	for i, w := range manifest.L1.Wallets {
-		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%d", i))
+		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%s", i))
 		if err != nil {
 			log.Warn("error creating wallet: %w", err)
 		}
