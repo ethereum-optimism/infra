@@ -112,6 +112,11 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     network_obj = get_network(network)
 
     sequencer = network_obj.get_sequencer_by_id(sequencer_id)
+    leader = network_obj.find_conductor_leader()
+    if leader is None:
+        print_error(f"Could not find current leader in network {network}")
+        raise typer.Exit(code=1)
+
     if sequencer is None:
         print_error(
             f"Sequencer ID {sequencer_id} not found in network {network}")
@@ -120,15 +125,15 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
         print_error(f"Sequencer {sequencer_id} is not a voter")
         raise typer.Exit(code=1)
 
-    healthy = sequencer.sequencer_healthy
-    if not healthy and not force:
-        print_error(f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
-        raise typer.Exit(code=1)
-
-    leader = network_obj.find_conductor_leader()
-    if leader is None:
-        print_error(f"Could not find current leader in network {network}")
-        raise typer.Exit(code=1)
+    if not force:
+        if not sequencer.sequencer_healthy:
+            print_error(f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
+            raise typer.Exit(code=1)
+        if not sequencer.conductor_active:
+            print_error(f"Target sequencer {sequencer_id} conductor is paused. Please run 'resume' command first.")
+            raise typer.Exit(code=1)
+        if not leader.conductor_active:
+            print_error(f"Current leader {leader.sequencer_id} conductor is paused. Please run 'resume' command first.")
 
     resp = requests.post(
         leader.conductor_rpc_url,
