@@ -3,11 +3,9 @@ package nat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"sync/atomic"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 
@@ -19,7 +17,6 @@ var _ cliapp.Lifecycle = &nat{}
 
 type nat struct {
 	ctx     context.Context
-	log     log.Logger
 	config  *Config
 	params  map[string]interface{}
 	version string
@@ -28,53 +25,49 @@ type nat struct {
 	running atomic.Bool
 }
 
-func New(ctx context.Context, config *Config, log log.Logger, version string) (*nat, error) {
+func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	if config == nil {
 		return nil, errors.New("config is required")
-	}
-	if err := config.Check(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return &nat{
 		ctx:     ctx,
 		config:  config,
 		params:  map[string]interface{}{},
-		log:     log,
 		version: version,
 	}, nil
 }
 
 // Run runs the acceptance tests and returns true if the tests pass
 func (n *nat) Start(ctx context.Context) error {
-	n.log.Info("Starting OpNAT")
+	n.config.Log.Info("Starting OpNAT")
 	n.ctx = ctx
 	n.running.Store(true)
 	runID := uuid.New().String()
 
 	n.results = []ValidatorResult{}
 	for _, validator := range n.config.Validators {
-		n.log.Info("Running acceptance tests...", "run_id", runID)
+		n.config.Log.Info("Running acceptance tests...", "run_id", runID)
 
 		// Get test-specific parameters if they exist
 		params := n.params[validator.Name()]
 
-		result, err := validator.Run(ctx, n.log, runID, *n.config, params)
-		n.log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
+		result, err := validator.Run(ctx, runID, *n.config, params)
+		n.config.Log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
 		if err != nil {
-			n.log.Error("Error running validator", "validator", validator.Name(), "error", err)
+			n.config.Log.Error("Error running validator", "validator", validator.Name(), "error", err)
 		}
 		n.results = append(n.results, result)
 	}
 	n.printResultsTable(runID)
 
-	n.log.Info("OpNAT finished", "run_id", runID)
+	n.config.Log.Info("OpNAT finished", "run_id", runID)
 	return nil
 }
 
 func (n *nat) Stop(ctx context.Context) error {
 	n.running.Store(false)
-	n.log.Info("OpNAT stopped")
+	n.config.Log.Info("OpNAT stopped")
 	return nil
 }
 
@@ -83,7 +76,7 @@ func (n *nat) Stopped() bool {
 }
 
 func (n *nat) printResultsTable(runID string) {
-	n.log.Info("Printing results...")
+	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetStyle(table.StyleColoredBlackOnGreenWhite)
 	t.SetOutputMirror(os.Stdout)

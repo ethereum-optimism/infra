@@ -2,12 +2,10 @@ package nat
 
 import (
 	"context"
-
-	"github.com/ethereum/go-ethereum/log"
 )
 
 type Validator interface {
-	Run(ctx context.Context, log log.Logger, runID string, cfg Config, params interface{}) (ValidatorResult, error)
+	Run(ctx context.Context, runID string, cfg Config, params interface{}) (ValidatorResult, error)
 	Name() string
 	Type() string
 }

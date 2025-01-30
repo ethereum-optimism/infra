@@ -9,6 +9,7 @@ type SuperchainManifest struct {
 
 type L1Config struct {
 	Name      string            `json:"name"`
+	ID        string            `json:"id"` // Not always in kurtosis-devnet, used for chain-id tests
 	Nodes     []Node            `json:"nodes"`
 	Addresses L1Addresses       `json:"addresses"`
 	Wallets   map[string]Wallet `json:"wallets"`
@@ -38,8 +39,9 @@ type Service struct {
 }
 
 type Endpoint struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Secure bool   `json:"secure"` // If true will add https to rpc urls
 }
 
 type L2Services struct {

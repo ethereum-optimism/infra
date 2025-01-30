@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 var _ Validator = &Test{}
@@ -13,10 +12,10 @@ var _ Validator = &Test{}
 type Test struct {
 	ID            string
 	DefaultParams interface{}
-	Fn            func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error)
+	Fn            func(ctx context.Context, config Config, params interface{}) (bool, error)
 }
 
-func (t Test) Run(ctx context.Context, log log.Logger, runID string, cfg Config, params interface{}) (ValidatorResult, error) {
+func (t Test) Run(ctx context.Context, runID string, config Config, params interface{}) (ValidatorResult, error) {
 	if t.Fn == nil {
 		return ValidatorResult{
 			Result: ResultFailed,
@@ -29,10 +28,10 @@ func (t Test) Run(ctx context.Context, log log.Logger, runID string, cfg Config,
 		testParams = params
 	}
 
-	log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams)
-	res, err := t.Fn(ctx, log, cfg, testParams)
+	config.Log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams)
+	res, err := t.Fn(ctx, config, testParams)
 	result := ResultTypeFromBool(res)
-	log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams, "result", result.String(), "error", err)
+	config.Log.Info("", "type", t.Type(), "id", t.Name(), "params", testParams, "result", result.String(), "error", err)
 
 	metrics.RecordValidation("todo", runID, t.Name(), t.Type(), result.String())
 

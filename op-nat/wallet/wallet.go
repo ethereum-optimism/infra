@@ -16,8 +16,8 @@ import (
 )
 
 type Wallet struct {
-	privateKeyESCDA *ecdsa.PrivateKey
-	privateKey      string
+	PrivateKeyESCDA *ecdsa.PrivateKey
+	PrivateKey      string
 	publicKey       string
 	address         common.Address
 	name            string
@@ -39,8 +39,8 @@ func NewWallet(privateKeyHex, name string) (*Wallet, error) {
 	address := crypto.PubkeyToAddress(*publicKey)
 
 	return &Wallet{
-		privateKeyESCDA: privateKey,
-		privateKey:      privateKeyHex,
+		PrivateKeyESCDA: privateKey,
+		PrivateKey:      privateKeyHex,
 		publicKey:       address.String(),
 		address:         address,
 		name:            name,
@@ -74,15 +74,19 @@ func (w *Wallet) Send(ctx context.Context, network *network.Network, amount *big
 	// 6. Estimate the gas limit:
 	gasLimit := uint64(2100000) // Standard gas limit for a simple ETH transfer
 
-	// 7. Create the transaction:
-	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, nil)
+	// Add 10% to the original value
+	gasTip := new(big.Int).Div(gasPrice, big.NewInt(10))
+	gasPriceTipped := new(big.Int).Add(gasPrice, gasTip)
+
+	// 7. Create the transaction, add 10% to the gasPrice
+	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPriceTipped, nil)
 
 	// 8. Sign the transaction:
 	chainID, err := network.RPC.NetworkID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get network ID: %w", err)
 	}
-	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), w.privateKeyESCDA)
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), w.PrivateKeyESCDA)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %w", err)
 	}
@@ -114,7 +118,7 @@ func (w *Wallet) Dump(ctx context.Context, log log.Logger, networks []network.Ne
 	}
 
 	log.Debug(fmt.Sprintf("-------------- Wallet: %s ---------------", w.name))
-	log.Debug(fmt.Sprintf("private key: %s", w.privateKey))
+	log.Debug(fmt.Sprintf("private key: %s", w.PrivateKey))
 	log.Debug(fmt.Sprintf("public key : %s", w.publicKey))
 	log.Debug(fmt.Sprintf("address    : %s", w.address))
 	for b := range balances {
