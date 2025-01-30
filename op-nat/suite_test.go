@@ -32,7 +32,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -57,7 +57,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
@@ -82,7 +82,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)

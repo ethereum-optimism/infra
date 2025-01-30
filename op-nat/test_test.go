@@ -4,9 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var testConfig = Config{Log: log.New()}
 
 func TestTest(t *testing.T) {
 	t.Run("uses default parameters", func(t *testing.T) {
@@ -22,7 +25,7 @@ func TestTest(t *testing.T) {
 			},
 		}
 
-		result, err := test.Run(context.Background(), "run1", Config{}, nil)
+		result, err := test.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -41,7 +44,7 @@ func TestTest(t *testing.T) {
 			},
 		}
 
-		result, err := test.Run(context.Background(), "run1", Config{}, customParams)
+		result, err := test.Run(context.Background(), "run1", testConfig, customParams)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -88,7 +91,7 @@ func TestTest(t *testing.T) {
 					},
 				}
 
-				result, err := test.Run(context.Background(), "run1", Config{}, nil)
+				result, err := test.Run(context.Background(), "run1", testConfig, nil)
 
 				if tc.expectErr != nil {
 					assert.Equal(t, tc.expectErr, err)

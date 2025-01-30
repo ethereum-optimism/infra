@@ -26,11 +26,11 @@ func TestNATParameterization(t *testing.T) {
 	// Create a basic config with our test
 	cfg := &Config{
 		Validators: []Validator{test},
+		Log:        log.New(),
 	}
-	logger := log.New()
 
 	t.Run("uses default parameters when none provided", func(t *testing.T) {
-		nat, err := New(context.Background(), cfg, logger, "test")
+		nat, err := New(context.Background(), cfg, "test")
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			err := nat.Stop(context.Background())
@@ -44,7 +44,7 @@ func TestNATParameterization(t *testing.T) {
 	})
 
 	t.Run("uses custom parameters when provided", func(t *testing.T) {
-		nat, err := New(context.Background(), cfg, logger, "test")
+		nat, err := New(context.Background(), cfg, "test")
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			err := nat.Stop(context.Background())
@@ -64,13 +64,13 @@ func TestNATParameterization(t *testing.T) {
 
 	t.Run("different test instances can have different parameters", func(t *testing.T) {
 		// Create two instances with different parameters
-		nat1, err := New(context.Background(), cfg, logger, "test1")
+		nat1, err := New(context.Background(), cfg, "test1")
 		require.NoError(t, err)
 		nat1.params = map[string]interface{}{
 			test.ID: map[string]string{"value": "instance1"},
 		}
 
-		nat2, err := New(context.Background(), cfg, logger, "test2")
+		nat2, err := New(context.Background(), cfg, "test2")
 		require.NoError(t, err)
 		nat2.params = map[string]interface{}{
 			test.ID: map[string]string{"value": "instance2"},
@@ -95,7 +95,7 @@ func TestNATParameterization(t *testing.T) {
 	})
 
 	t.Run("results are properly recorded", func(t *testing.T) {
-		nat, err := New(context.Background(), cfg, logger, "test")
+		nat, err := New(context.Background(), cfg, "test")
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			err := nat.Stop(context.Background())

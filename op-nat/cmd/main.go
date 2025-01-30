@@ -61,9 +61,9 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
-	log.Debug("Config", "config", cfg)
+	cfg.Log.Debug("Config", "config", cfg)
 
-	c, err := nat.New(ctx.Context, cfg, log, Version)
+	c, err := nat.New(ctx.Context, cfg, Version)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create nat: %w", err)
 	}
