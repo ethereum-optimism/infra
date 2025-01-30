@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,14 +17,14 @@ func TestSuite(t *testing.T) {
 			Tests: []Test{
 				{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						executionOrder = append(executionOrder, "test1")
 						return true, nil
 					},
 				},
 				{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						executionOrder = append(executionOrder, "test2")
 						return true, nil
 					},
@@ -33,7 +32,7 @@ func TestSuite(t *testing.T) {
 			},
 		}
 
-		result, err := suite.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultPassed, result.Result)
@@ -45,20 +44,20 @@ func TestSuite(t *testing.T) {
 			Tests: []Test{
 				{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return true, nil
 					},
 				},
 				{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return false, nil
 					},
 				},
 			},
 		}
 
-		result, err := suite.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
@@ -70,20 +69,20 @@ func TestSuite(t *testing.T) {
 			Tests: []Test{
 				{
 					ID: "test1",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return false, errors.New("test-error")
 					},
 				},
 				{
 					ID: "test2",
-					Fn: func(ctx context.Context, log log.Logger, cfg Config, params interface{}) (bool, error) {
+					Fn: func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
 						return true, nil
 					},
 				},
 			},
 		}
 
-		result, err := suite.Run(context.Background(), log.New(), "run1", Config{}, nil)
+		result, err := suite.Run(context.Background(), "run1", testConfig, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, ResultFailed, result.Result)
