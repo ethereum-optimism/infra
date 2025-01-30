@@ -27,15 +27,15 @@ var SimpleTransfer = nat.Test{
 		TransferAmount: *big.NewInt(1 * ethparams.GWei),
 		MinBalance:     *big.NewInt(10 * ethparams.GWei),
 	},
-	Fn: func(ctx context.Context, log log.Logger, cfg nat.Config, params interface{}) (bool, error) {
+	Fn: func(ctx context.Context, cfg nat.Config, params interface{}) (bool, error) {
 
 		p := params.(SimpleTranferParams)
 		for _, network := range cfg.GetNetworks() {
-			sender, receiver, err := SetupSimpleTransferTest(ctx, log, network, cfg, p)
+			sender, receiver, err := SetupSimpleTransferTest(ctx, network, cfg, p)
 			if err != nil {
 				return false, err
 			}
-			pass, err := SimpleTransferTest(ctx, log, network, sender, receiver, p)
+			pass, err := SimpleTransferTest(ctx, cfg.Log, network, sender, receiver, p)
 			if err != nil {
 				return false, errors.Wrapf(err, "error executing simple transfer for network: %s", network.Name)
 			}
@@ -48,7 +48,7 @@ var SimpleTransfer = nat.Test{
 	},
 }
 
-func SetupSimpleTransferTest(ctx context.Context, log log.Logger, network *network.Network, cfg nat.Config, p SimpleTranferParams) (*wallet.Wallet, *wallet.Wallet, error) {
+func SetupSimpleTransferTest(ctx context.Context, network *network.Network, cfg nat.Config, p SimpleTranferParams) (*wallet.Wallet, *wallet.Wallet, error) {
 
 	sender, err := cfg.GetWalletWithBalance(ctx, network, &p.MinBalance)
 	if err != nil {
@@ -104,7 +104,7 @@ func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Ne
 		))
 	}
 
-	if err := network.PollForConfirmation(ctx, log, uint64(2), tx.Hash()); err != nil {
+	if err := network.PollForConfirmations(ctx, 2, tx.Hash()); err != nil {
 		return false, errors.Wrap(err, "error polling for tx confirmation")
 	}
 
@@ -134,6 +134,7 @@ func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Ne
 
 	// TODO: Improve the clarity of these checks
 	// If the difference is not the same return error
+	// Maybe wrap these in readable functions
 	if p.TransferAmount.Cmp(receiverDiff) != 0 {
 		return false, errors.New("error receiver balance post transfer was incorrect")
 	}

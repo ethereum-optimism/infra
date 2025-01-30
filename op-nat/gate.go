@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 var _ Validator = &Gate{}
@@ -20,8 +19,8 @@ type Gate struct {
 // Run runs all the tests in the gate.
 // Returns the overall result of the gate and an error if any of the tests failed.
 // Gate-specific params are passed in as `_` because we haven't implemented them yet.
-func (g Gate) Run(ctx context.Context, log log.Logger, runID string, cfg Config, _ interface{}) (ValidatorResult, error) {
-	log.Info("", "type", g.Type(), "id", g.Name())
+func (g Gate) Run(ctx context.Context, runID string, config Config, _ interface{}) (ValidatorResult, error) {
+	config.Log.Info("", "type", g.Type(), "id", g.Name())
 	var overallResult ResultType = ResultPassed
 	hasSkipped := false
 	results := []ValidatorResult{}
@@ -34,7 +33,7 @@ func (g Gate) Run(ctx context.Context, log log.Logger, runID string, cfg Config,
 		// Get params
 		params := g.Params[validator.Name()]
 
-		res, err := validator.Run(ctx, log, runID, cfg, params)
+		res, err := validator.Run(ctx, runID, config, params)
 		allErrors = errors.Join(allErrors, err)
 		if res.Result == ResultFailed {
 			overallResult = ResultFailed
@@ -47,7 +46,7 @@ func (g Gate) Run(ctx context.Context, log log.Logger, runID string, cfg Config,
 	if overallResult == ResultPassed && hasSkipped {
 		overallResult = ResultSkipped
 	}
-	log.Info("", "type", g.Type(), "id", g.Name(), "result", overallResult, "error", allErrors)
+	config.Log.Info("", "type", g.Type(), "id", g.Name(), "result", overallResult, "error", allErrors)
 	metrics.RecordValidation("todo", runID, g.Name(), g.Type(), overallResult.String())
 	return ValidatorResult{
 		ID:         g.ID,

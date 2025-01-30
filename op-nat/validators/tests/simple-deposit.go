@@ -7,7 +7,6 @@ import (
 	"time"
 
 	nat "github.com/ethereum-optimism/infra/op-nat"
-	"github.com/ethereum-optimism/infra/op-nat/network"
 	"github.com/ethereum-optimism/infra/op-nat/wallet"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -33,31 +32,35 @@ var SimpleDeposit = nat.Test{
 		MinL1Balance:     *big.NewInt(1 * ethparams.GWei),
 	},
 
-	Fn: func(ctx context.Context, log log.Logger, cfg nat.Config, params interface{}) (bool, error) {
+	Fn: func(ctx context.Context, cfg nat.Config, params interface{}) (bool, error) {
 		p := params.(SimpleDepositParams)
-		wallet, err := SetupSimpleDepositTest(ctx, log, cfg, p)
+		wallet, err := SetupSimpleDepositTest(ctx, cfg, p)
 
 		l2ProxyPortal := common.HexToAddress(cfg.SC.L2[0].Addresses.OptimismPortalProxy)
 		if err != nil {
 			return false, err
 		}
-		return SimpleDepositTest(ctx, log, cfg.L1, cfg.L2A, wallet, l2ProxyPortal, p)
+		return SimpleDepositTest(ctx, cfg, wallet, l2ProxyPortal, p)
 	},
 }
 
-func SetupSimpleDepositTest(ctx context.Context, log log.Logger, config nat.Config, p SimpleDepositParams) (*wallet.Wallet, error) {
+func SetupSimpleDepositTest(ctx context.Context, config nat.Config, p SimpleDepositParams) (*wallet.Wallet, error) {
 
 	wallet, err := config.GetWalletWithBalance(ctx, config.L1, &p.MinL1Balance)
 	if err != nil {
 		return nil, errors.Wrap(err, "SetupSimpleDepositTest failed")
 	}
-	log.Debug("deposit wallet",
+	config.Log.Debug("deposit wallet",
 		"public", wallet.Address(),
 	)
 	return wallet, nil
 }
 
-func SimpleDepositTest(ctx context.Context, log log.Logger, l1, l2 *network.Network, wallet *wallet.Wallet, portal common.Address, p SimpleDepositParams) (bool, error) {
+func SimpleDepositTest(ctx context.Context, config nat.Config, wallet *wallet.Wallet, portal common.Address, p SimpleDepositParams) (bool, error) {
+
+	l1 := config.L1
+	l2 := config.L2A
+
 	if l1 == nil || wallet == nil || l2 == nil || len(portal) == 0 {
 		return false, errors.New("error empty arguments provided for SimpleDepositTest")
 	}
@@ -99,7 +102,7 @@ func SimpleDepositTest(ctx context.Context, log log.Logger, l1, l2 *network.Netw
 		"nonce", tx.Nonce(),
 	)
 
-	if err := l1.PollForConfirmation(ctx, log, 3, tx.Hash()); err != nil {
+	if err := l1.PollForConfirmations(ctx, 3, tx.Hash()); err != nil {
 		return false, errors.New("polling for deposit transaction confirmation timed out")
 	}
 

@@ -68,17 +68,30 @@ func (n *Network) DumpInfo(ctx context.Context) error {
 			"network", n.Name,
 			"err", err)
 	}
-	log.Info("Network Dump", "network", n.Name)
-	log.Info("Current block", "block", block)
-	log.Info("ChainID", "chain-id", chainID.String())
+	n.log.Info("Network Dump", "network", n.Name)
+	n.log.Info("Current block", "block", block)
+	n.log.Info("ChainID", "chain-id", chainID.String())
 	return nil
 }
 
-func (n *Network) PollForConfirmation(ctx context.Context, log log.Logger, confs uint64, txhash common.Hash) error {
+// PollForConfirmations waits until the transaction identified by `txhash` has been confirmed
+// at least `confs` times on the network. It continuously polls the network for the transaction's
+// confirmation status and returns an error if the context is canceled, the transaction is not found,
+// or the required number of confirmations is not achieved within the context's timeout.
+//
+// Parameters:
+//   - ctx:    Context for cancellation and timeout.
+//   - confs:  The minimum number of confirmations required for the transaction to be considered confirmed.
+//   - txhash: The hash of the transaction to monitor.
+//
+// Returns:
+//   - error:  An error if the transaction fails to achieve the required confirmations, the context is canceled,
+//     or the transaction is not found on the network.
+func (n *Network) PollForConfirmations(ctx context.Context, confs int, txhash common.Hash) error {
 	for i := 0; i < 10; i++ {
 		receipt, err := n.RPC.TransactionReceipt(context.Background(), txhash)
 		if err != nil {
-			log.Warn("error getting tx receipt for tx",
+			n.log.Warn("error getting tx receipt for tx",
 				"tx", txhash.String(),
 				"error", err,
 			)
@@ -89,7 +102,7 @@ func (n *Network) PollForConfirmation(ctx context.Context, log log.Logger, confs
 			// Get the current block number
 			blockNumber, err := n.RPC.BlockNumber(context.Background())
 			if err != nil {
-				log.Error("error getting block number",
+				n.log.Error("error getting block number",
 					"tx", txhash.String(),
 					"error", err,
 				)
@@ -97,22 +110,22 @@ func (n *Network) PollForConfirmation(ctx context.Context, log log.Logger, confs
 
 			// Calculate the number of confirmations
 			confirmations := blockNumber - receipt.BlockNumber.Uint64()
-			log.Debug("current confirmations",
+			n.log.Debug("current confirmations",
 				"confirmations", confirmations,
 				"required_confirmations", confs,
 				"tx", txhash,
 			)
 
 			// Check if the required number of confirmations has been reached
-			if confirmations >= confs {
-				log.Debug("transaction confirmed",
+			if confirmations >= uint64(confs) {
+				n.log.Debug("transaction confirmed",
 					"tx", txhash,
 					"confs", confirmations,
 				)
 				return nil
 			}
 		} else {
-			log.Debug("transaction not yet mined",
+			n.log.Debug("transaction not yet mined",
 				"tx", txhash,
 			)
 		}
