@@ -15,7 +15,7 @@ var LoadTest = nat.Suite{
 	},
 	TestsParams: map[string]interface{}{
 		"tx-fuzz": tests.TxFuzzParams{
-			NSlotsToRunFor:     1,
+			NSlotsToRunFor:     3,
 			TxPerAccount:       2,
 			GenerateAccessList: false,
 			MinBalance:         big.NewInt(10 * ethparams.GWei),

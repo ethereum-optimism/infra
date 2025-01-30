@@ -31,9 +31,9 @@ var TxFuzz = nat.Test{
 		GenerateAccessList: false,
 		MinBalance:         big.NewInt(10 * ethparams.GWei),
 	},
-	Fn: func(ctx context.Context, log log.Logger, cfg nat.Config, params interface{}) (bool, error) {
+	Fn: func(ctx context.Context, cfg nat.Config, params interface{}) (bool, error) {
 		p := params.(TxFuzzParams)
-		err := runBasicSpam(ctx, log, cfg, p)
+		err := runBasicSpam(ctx, cfg, p)
 		if err != nil {
 			return false, err
 		}
@@ -41,14 +41,14 @@ var TxFuzz = nat.Test{
 	},
 }
 
-func runBasicSpam(ctx context.Context, log log.Logger, config nat.Config, params TxFuzzParams) error {
-	fuzzCfg, err := newConfig(ctx, log, config, params)
+func runBasicSpam(ctx context.Context, config nat.Config, params TxFuzzParams) error {
+	fuzzCfg, err := newConfig(ctx, config, params)
 	if err != nil {
 		return err
 	}
 
 	airdropValue := big.NewInt(1 * ethparams.Wei)
-	return spam(fuzzCfg, log, spammer.SendBasicTransactions, airdropValue, params)
+	return spam(fuzzCfg, config.Log, spammer.SendBasicTransactions, airdropValue, params)
 }
 
 func spam(config *spammer.Config, log log.Logger, spamFn spammer.Spam, airdropValue *big.Int, params TxFuzzParams) error {
@@ -75,32 +75,32 @@ func spam(config *spammer.Config, log log.Logger, spamFn spammer.Spam, airdropVa
 	return nil
 }
 
-func newConfig(ctx context.Context, log log.Logger, c nat.Config, p TxFuzzParams) (*spammer.Config, error) {
+func newConfig(ctx context.Context, config nat.Config, p TxFuzzParams) (*spammer.Config, error) {
 	txPerAccount := p.TxPerAccount
 	genAccessList := p.GenerateAccessList
-	network := c.L2A
+	network := config.L2A
 
-	log.Info("finding tx spam wallet on network",
+	config.Log.Info("finding tx spam wallet on network",
 		"network", network.Name,
 		"addr", network.Addr,
 	)
 
-	sender, err := c.GetWalletWithBalance(ctx, c.L2A, p.MinBalance)
+	sender, err := config.GetWalletWithBalance(ctx, config.L2A, p.MinBalance)
 	if err != nil {
 		log.Error("failed unable to find sender for tx spam",
-			"network", c.L2A.Name,
+			"network", config.L2A.Name,
 			"min_balance", p.MinBalance,
 		)
 		return nil, errors.Wrap(err, "failed to find sender with min balance")
 	}
 
-	cfg, err := spammer.NewDefaultConfig(c.L2A.Addr, txPerAccount, genAccessList, rand.New(rand.NewSource(time.Now().UnixNano())))
+	cfg, err := spammer.NewDefaultConfig(config.L2A.Addr, txPerAccount, genAccessList, rand.New(rand.NewSource(time.Now().UnixNano())))
 	if err != nil {
 		return nil, err
 	}
 
 	privKeys := []*ecdsa.PrivateKey{}
-	for _, w := range c.GetAllWallets() {
+	for _, w := range config.Wallets {
 		privKeys = append(privKeys, w.PrivateKeyESCDA)
 
 	}

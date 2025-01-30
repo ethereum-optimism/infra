@@ -5,23 +5,22 @@ import (
 	"fmt"
 
 	nat "github.com/ethereum-optimism/infra/op-nat"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // NetworkGetBlockNumber is a test that checks if RPC call `BlockNumber` is working.
 var NetworkGetBlockNumber = nat.Test{
 	ID: "network-get-block-number",
-	Fn: func(ctx context.Context, log log.Logger, config nat.Config, _ interface{}) (bool, error) {
+	Fn: func(ctx context.Context, config nat.Config, _ interface{}) (bool, error) {
 
 		for _, network := range config.GetNetworks() {
-			log.Debug("getting block number on network",
+			config.Log.Debug("getting block number on network",
 				"network", network.Name,
 			)
 			blockID, err := network.RPC.BlockNumber(ctx)
 			if err != nil {
 				return false, fmt.Errorf("failed to get block number")
 			}
-			log.Debug("successfully got the block number", "blockNumber", blockID)
+			config.Log.Debug("successfully got the block number", "blockNumber", blockID)
 		}
 		return true, nil
 	},

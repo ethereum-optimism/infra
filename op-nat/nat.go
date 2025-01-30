@@ -55,7 +55,7 @@ func (n *nat) Start(ctx context.Context) error {
 		// Get test-specific parameters if they exist
 		params := n.params[validator.Name()]
 
-		result, err := validator.Run(ctx, n.log, runID, *n.config, params)
+		result, err := validator.Run(ctx, runID, *n.config, params)
 		n.log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
 		if err != nil {
 			n.log.Error("Error running validator", "validator", validator.Name(), "error", err)

@@ -27,6 +27,8 @@ type Config struct {
 	// Networks
 	L1  *network.Network
 	L2A *network.Network
+
+	Log log.Logger
 }
 
 func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Config, error) {
@@ -41,15 +43,9 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		return nil, fmt.Errorf("failed to parse kurtosis-devnet manifest: %w", err)
 	}
 
-	receiverPrivateKeys := []string{
-		manifest.L1.Wallets["user-key-0"].PrivateKey,
-		manifest.L1.Wallets["user-key-1"].PrivateKey,
-		manifest.L1.Wallets["user-key-2"].PrivateKey,
-	}
-
 	wallets := []*wallet.Wallet{}
-	for i, pKey := range receiverPrivateKeys {
-		w, err := wallet.NewWallet(pKey, fmt.Sprintf("user-%d", i))
+	for i, w := range manifest.L1.Wallets {
+		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%d", i))
 		if err != nil {
 			log.Warn("error creating wallet: %w", err)
 		}
@@ -98,6 +94,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 		L1:         l1,
 		L2A:        l2A,
 		Wallets:    wallets,
+		Log:        log,
 	}, nil
 }
 
@@ -123,27 +120,12 @@ func (c *Config) GetNetworks() []*network.Network {
 	}
 }
 
-// GetWallet will return a specifc wallet from the wallets array that matches a public key
-func (c *Config) GetWallet(pubKey string) *wallet.Wallet {
-	for _, w := range c.Wallets {
-		if w.Address().String() == pubKey {
-			return w
-		}
-	}
-	return nil
-}
-
-// GetAllWallets return all wallets in the config
-func (c *Config) GetAllWallets() []*wallet.Wallet {
-	return c.Wallets
-}
-
 func (c *Config) GetRandomWallet() *wallet.Wallet {
 	randomIndex := rand.Intn(len(c.Wallets))
 	return c.Wallets[randomIndex]
 }
 
-// GetWalletWithBalance is used to find a wallet with a balance on a network
+// GetWalletWithBalance is used to find a wallet with a balance of atleast amount on a network
 func (c *Config) GetWalletWithBalance(ctx context.Context, network *network.Network, amount *big.Int) (*wallet.Wallet, error) {
 	for _, w := range c.Wallets {
 		balance, err := w.GetBalance(ctx, network)
@@ -159,7 +141,8 @@ func (c *Config) GetWalletWithBalance(ctx context.Context, network *network.Netw
 			"balance", balance,
 			"network", network.Name,
 		)
-		if balance.Cmp(amount) == 1 {
+		// balance >= amount will return 0 or 1
+		if balance.Cmp(amount) >= 0 {
 			return w, nil
 		}
 	}
