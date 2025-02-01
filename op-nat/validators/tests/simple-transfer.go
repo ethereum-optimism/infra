@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type SimpleTranferParams struct {
+type SimpleTransferParams struct {
 	// TransferAmount is the amount of eth transferred
 	TransferAmount big.Int
 	// MinBalance is how much eth is required to run the test
@@ -23,13 +23,13 @@ type SimpleTranferParams struct {
 // SimpleTransfer is a test that runs a transfer on a network
 var SimpleTransfer = nat.Test{
 	ID: "simple-transfer",
-	DefaultParams: SimpleTranferParams{
+	DefaultParams: SimpleTransferParams{
 		TransferAmount: *big.NewInt(1 * ethparams.GWei),
 		MinBalance:     *big.NewInt(10 * ethparams.GWei),
 	},
 	Fn: func(ctx context.Context, cfg nat.Config, params interface{}) (bool, error) {
 
-		p := params.(SimpleTranferParams)
+		p := params.(SimpleTransferParams)
 		for _, network := range cfg.GetNetworks() {
 			sender, receiver, err := SetupSimpleTransferTest(ctx, network, cfg, p)
 			if err != nil {
@@ -48,7 +48,7 @@ var SimpleTransfer = nat.Test{
 	},
 }
 
-func SetupSimpleTransferTest(ctx context.Context, network *network.Network, cfg nat.Config, p SimpleTranferParams) (*wallet.Wallet, *wallet.Wallet, error) {
+func SetupSimpleTransferTest(ctx context.Context, network *network.Network, cfg nat.Config, p SimpleTransferParams) (*wallet.Wallet, *wallet.Wallet, error) {
 
 	sender, err := cfg.GetWalletWithBalance(ctx, network, &p.MinBalance)
 	if err != nil {
@@ -67,7 +67,7 @@ func SetupSimpleTransferTest(ctx context.Context, network *network.Network, cfg 
 
 }
 
-func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Network, sender, receiver *wallet.Wallet, p SimpleTranferParams) (bool, error) {
+func SimpleTransferTest(ctx context.Context, log log.Logger, network *network.Network, sender, receiver *wallet.Wallet, p SimpleTransferParams) (bool, error) {
 	// Make sure the accounts are unstuck before sending any transactions
 	if network == nil || sender == nil || receiver == nil {
 		return false, errors.New("error empty arguments provided for SimpleTransferTest")
