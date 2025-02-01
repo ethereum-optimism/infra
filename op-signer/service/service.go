@@ -18,7 +18,7 @@ import (
 
 type SignerService struct {
 	eth      *EthService
-	opsigner *OpsignerSerivce
+	opsigner *OpsignerService
 }
 
 type EthService struct {
@@ -27,7 +27,7 @@ type EthService struct {
 	provider provider.SignatureProvider
 }
 
-type OpsignerSerivce struct {
+type OpsignerService struct {
 	logger   log.Logger
 	config   SignerServiceConfig
 	provider provider.SignatureProvider
@@ -43,7 +43,7 @@ func NewSignerServiceWithProvider(
 	provider provider.SignatureProvider,
 ) *SignerService {
 	ethService := EthService{logger, config, provider}
-	opsignerService := OpsignerSerivce{logger, config, provider}
+	opsignerService := OpsignerService{logger, config, provider}
 	return &SignerService{&ethService, &opsignerService}
 }
 
@@ -166,7 +166,7 @@ func (s *EthService) SignTransaction(ctx context.Context, args signer.Transactio
 	return hexutil.Bytes(txraw), nil
 }
 
-func (s *OpsignerSerivce) SignBlockPayload(ctx context.Context, args signer.BlockPayloadArgs) (hexutil.Bytes, error) {
+func (s *OpsignerService) SignBlockPayload(ctx context.Context, args signer.BlockPayloadArgs) (hexutil.Bytes, error) {
 	clientInfo := ClientInfoFromContext(ctx)
 	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName, args.SenderAddress)
 	if err != nil {
