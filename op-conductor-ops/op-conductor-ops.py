@@ -97,10 +97,14 @@ def status(network: str):
                     print_error(
                         f": {sequencer.sequencer_id} does not have the correct voting status.")
                     display_correction = True
+                del membership[sequencer.sequencer_id]
             else:
                 print_warn(
                     f": {sequencer.sequencer_id} is not in the cluster")
                 display_correction = True
+        for sequencer_id in membership:
+            print_warn(
+                f": {sequencer_id} is in the cluster but not in the sequencer list. Remove using 'remove-server' command.")
         if display_correction:
             print_warn(
                 "Run 'update-cluster-membership' to correct membership issues")
@@ -276,13 +280,19 @@ def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bo
 def remove_server(network: str, sequencer_id: str):
     """Remove a sequencer from the cluster."""
     network_obj = get_network(network)
-    sequencer = network_obj.get_sequencer_by_id(sequencer_id)
-    if sequencer is None:
-        print_error(
-            f"sequencer ID {sequencer_id} not found in network {network}")
-        raise typer.Exit(code=1)
 
     leader = network_obj.find_conductor_leader()
+    if leader is None:
+        print_error(f"Could not find current leader in network {network}")
+        raise typer.Exit(code=1)
+
+    sequencer = network_obj.get_sequencer_by_id(sequencer_id)
+    if sequencer is None:
+        membership = {x["id"]: x for x in leader.cluster_membership()}
+        if sequencer_id not in membership:
+            print_error(
+                f"sequencer ID {sequencer_id} not found in network {network}")
+            raise typer.Exit(code=1)
 
     resp = requests.post(
         leader.conductor_rpc_url,
