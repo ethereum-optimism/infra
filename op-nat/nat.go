@@ -5,12 +5,17 @@ import (
 	"errors"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+)
+
+const (
+	runInterval = 1 * time.Hour
 )
 
 // nat implements the cliapp.Lifecycle interface.
@@ -45,16 +50,37 @@ func (n *nat) Start(ctx context.Context) error {
 	n.config.Log.Info("Starting OpNAT")
 	n.ctx = ctx
 	n.running.Store(true)
+
+	// Create a ticker for hourly runs
+	ticker := time.NewTicker(runInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start
+	n.runTests()
+
+	// Run on schedule until context is cancelled
+	for {
+		select {
+		case <-ticker.C:
+			n.runTests()
+		case <-ctx.Done():
+			n.config.Log.Info("Context cancelled, stopping OpNAT")
+			return nil
+		}
+	}
+}
+
+// runTests executes a single run of all validators
+func (n *nat) runTests() {
 	runID := uuid.New().String()
-
 	n.results = []ValidatorResult{}
-	for _, validator := range n.config.Validators {
-		n.config.Log.Info("Running acceptance tests...", "run_id", runID)
 
+	n.config.Log.Info("Running acceptance tests...", "run_id", runID)
+	for _, validator := range n.config.Validators {
 		// Get test-specific parameters if they exist
 		params := n.params[validator.Name()]
 
-		result, err := validator.Run(ctx, runID, *n.config, params)
+		result, err := validator.Run(n.ctx, runID, *n.config, params)
 		n.config.Log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
 		if err != nil {
 			n.config.Log.Error("Error running validator", "validator", validator.Name(), "error", err)
@@ -62,9 +88,7 @@ func (n *nat) Start(ctx context.Context) error {
 		n.results = append(n.results, result)
 	}
 	n.printResultsTable(runID)
-
-	n.config.Log.Info("OpNAT finished", "run_id", runID)
-	return nil
+	n.config.Log.Info("Test run finished", "run_id", runID)
 }
 
 // Stop stops the OpNAT service.
