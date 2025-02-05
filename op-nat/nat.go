@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
+// nat implements the cliapp.Lifecycle interface.
 var _ cliapp.Lifecycle = &nat{}
 
 type nat struct {
@@ -38,7 +39,8 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	}, nil
 }
 
-// Run runs the acceptance tests and returns true if the tests pass
+// Start runs the acceptance tests and returns true if the tests pass.
+// Start implements the cliapp.Lifecycle interface.
 func (n *nat) Start(ctx context.Context) error {
 	n.config.Log.Info("Starting OpNAT")
 	n.ctx = ctx
@@ -65,16 +67,21 @@ func (n *nat) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop stops the OpNAT service.
+// Stop implements the cliapp.Lifecycle interface.
 func (n *nat) Stop(ctx context.Context) error {
 	n.running.Store(false)
 	n.config.Log.Info("OpNAT stopped")
 	return nil
 }
 
+// Stopped returns true if the OpNAT service is stopped.
+// Stopped implements the cliapp.Lifecycle interface.
 func (n *nat) Stopped() bool {
 	return n.running.Load()
 }
 
+// printResultsTable prints the results of the acceptance tests to the console.
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
