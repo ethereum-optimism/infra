@@ -96,6 +96,7 @@ jobs:
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-build-op-nat: << pipeline.parameters.run-build-op-nat >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
             echo "Pipeline Trigger Information:"
@@ -141,6 +142,13 @@ jobs:
             else
               echo "op-ufm tag regex match: false"
             fi
+
+            if [[ $CURRENT_TAG =~ ^op-nat/v.* ]]; then
+              echo "op-nat tag regex match: true"
+            else
+              echo "op-nat tag regex match: false"
+            fi
+  
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -521,19 +529,25 @@ workflows:
       - go-test:
           name: op-nat-tests
           module: op-nat
+      - docker-build:
+          name: op-nat-docker-build
+          docker_file: op-nat/Dockerfile
+          docker_name: op-nat
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
   release:
     jobs:
       - log-config-results:
           filters:
             tags:
-              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(op-nat|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(op-nat|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -547,6 +561,7 @@ workflows:
                 - op-conductor-mon
                 - peer-mgmt-service
                 - cci-stats
+                - op-nat
           name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
@@ -569,6 +584,7 @@ workflows:
                 - op-conductor-mon
                 - peer-mgmt-service
                 - cci-stats
+                - op-nat
           name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
@@ -589,6 +605,7 @@ workflows:
                 - op-conductor-mon
                 - peer-mgmt-service
                 - cci-stats
+                - op-nat
           name: <<matrix.docker_name>>-docker-tag
           filters:
             tags:

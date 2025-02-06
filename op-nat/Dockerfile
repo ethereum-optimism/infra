@@ -1,8 +1,12 @@
 FROM golang:1.23.5-alpine3.21 AS builder
 
 WORKDIR /app
-COPY . .
+
+# Install dependencies first for better caching
 RUN apk add --no-cache just
+
+COPY op-nat/ .
+
 RUN just build
 
 FROM alpine:3.21
