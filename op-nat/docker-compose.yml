@@ -27,7 +27,9 @@ services:
 
   op-nat:
     container_name: op-nat
-    build: .
+    build:
+      context: ..
+      dockerfile: op-nat/Dockerfile
     volumes:
       - ./devnets:/devnets
     command: ["--kurtosis.devnet.manifest", "/devnets/simple-devnet.json"]
