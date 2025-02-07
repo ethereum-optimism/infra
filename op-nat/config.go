@@ -19,9 +19,10 @@ import (
 
 type Config struct {
 	// Network config
-	SC         SuperchainManifest
-	Validators []Validator
+	SC SuperchainManifest
 
+	// Test config
+	TestDir string
 	Wallets []*wallet.Wallet
 
 	// Networks
@@ -31,7 +32,7 @@ type Config struct {
 	Log log.Logger
 }
 
-func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Config, error) {
+func NewConfig(ctx *cli.Context, log log.Logger, testdir string) (*Config, error) {
 	// Parse flags
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, fmt.Errorf("missing required flags: %w", err)
@@ -89,12 +90,12 @@ func NewConfig(ctx *cli.Context, log log.Logger, validators []Validator) (*Confi
 	}
 
 	return &Config{
-		SC:         *manifest,
-		Validators: validators,
-		L1:         l1,
-		L2A:        l2A,
-		Wallets:    wallets,
-		Log:        log,
+		SC:      *manifest,
+		TestDir: testdir,
+		L1:      l1,
+		L2A:     l2A,
+		Wallets: wallets,
+		Log:     log,
 	}, nil
 }
 
