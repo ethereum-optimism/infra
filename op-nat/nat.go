@@ -9,7 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 
+	"github.com/ethereum-optimism/infra/op-nat/discovery"
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
+	"github.com/ethereum-optimism/infra/op-nat/runner"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -19,9 +21,9 @@ var _ cliapp.Lifecycle = &nat{}
 type nat struct {
 	ctx     context.Context
 	config  *Config
-	params  map[string]interface{}
 	version string
-	results []ValidatorResult
+	runner  runner.TestRunner
+	result  *runner.RunnerResult
 
 	running atomic.Bool
 }
@@ -31,11 +33,16 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		return nil, errors.New("config is required")
 	}
 
+	testRunner, err := runner.NewTestRunner(config.TestDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &nat{
 		ctx:     ctx,
 		config:  config,
-		params:  map[string]interface{}{},
 		version: version,
+		runner:  testRunner,
 	}, nil
 }
 
@@ -47,23 +54,29 @@ func (n *nat) Start(ctx context.Context) error {
 	n.running.Store(true)
 	runID := uuid.New().String()
 
-	n.results = []ValidatorResult{}
-	for _, validator := range n.config.Validators {
-		n.config.Log.Info("Running acceptance tests...", "run_id", runID)
-
-		// Get test-specific parameters if they exist
-		params := n.params[validator.Name()]
-
-		result, err := validator.Run(ctx, runID, *n.config, params)
-		n.config.Log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
-		if err != nil {
-			n.config.Log.Error("Error running validator", "validator", validator.Name(), "error", err)
-		}
-		n.results = append(n.results, result)
+	// Discovered tests
+	validators, err := discovery.DiscoverTests(n.config.TestDir)
+	if err != nil {
+		n.config.Log.Error("Error discovering tests", "error", err)
+		return err
 	}
-	n.printResultsTable(runID)
+	n.config.Log.Debug("Discovered test structure", "structure", discovery.ValidatorHierarchyString(validators))
 
+	n.config.Log.Info("Running acceptance tests...", "run_id", runID)
+
+	result, err := n.runner.RunAllTests()
+	if err != nil {
+		n.config.Log.Error("Error running tests", "error", err)
+		return err
+	}
+	n.result = result
+
+	n.printResultsTable(runID)
 	n.config.Log.Info("OpNAT finished", "run_id", runID)
+
+	if !result.Passed {
+		return errors.New("one or more tests failed")
+	}
 	return nil
 }
 
@@ -92,40 +105,43 @@ func (n *nat) printResultsTable(runID string) {
 	colConfigAutoMerge := table.ColumnConfig{AutoMerge: true}
 	t.SetColumnConfigs([]table.ColumnConfig{colConfigAutoMerge})
 
-	var overallResult ResultType = ResultPassed
-	var hasSkipped = false
-	var overallErr error
-	for _, res := range n.results {
-		appendResultRows(t, res)
-		overallErr = errors.Join(overallErr)
-		if res.Result == ResultFailed {
-			overallResult = ResultFailed
+	// Print gates and their results
+	for _, gate := range n.result.Gates {
+		t.AppendRow(table.Row{"Gate", gate.Metadata.ID, getResultString(gate.Passed), ""})
+
+		// Print suites in this gate
+		for _, suite := range gate.Suites {
+			t.AppendRow(table.Row{"Suite", suite.Metadata.ID, getResultString(suite.Passed), ""})
+
+			// Print tests in this suite
+			for _, test := range suite.Tests {
+				t.AppendRow(table.Row{"Test", test.Metadata.ID, getResultString(test.Passed), test.Error})
+			}
 		}
-		if res.Result == ResultSkipped {
-			hasSkipped = true
+
+		// Print direct gate tests
+		for _, test := range gate.Tests {
+			t.AppendRow(table.Row{"Test", test.Metadata.ID, getResultString(test.Passed), test.Error})
 		}
+
 		t.AppendSeparator()
 	}
-	if overallResult == ResultPassed && hasSkipped {
-		overallResult = ResultSkipped
-	}
-	t.AppendFooter([]interface{}{"SUMMARY", "", overallResult.String(), ""})
-	if overallResult == ResultFailed {
+
+	// Set overall style based on result
+	if !n.result.Passed {
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
 	}
+
+	t.AppendFooter(table.Row{"SUMMARY", "", getResultString(n.result.Passed), ""})
 	t.Render()
 
 	// Emit metrics
-	// TODO: This shouldn't be here; needs a refactor
-	// TODO: don't hardcode the network name
-	metrics.RecordAcceptance("todo", runID, overallResult.String())
+	metrics.RecordAcceptance("todo", runID, getResultString(n.result.Passed))
 }
 
-func appendResultRows(t table.Writer, result ValidatorResult) {
-	resultRows := []table.Row{}
-	resultRows = append(resultRows, table.Row{result.Type, result.ID, result.Result.String(), result.Error})
-	t.AppendRows(resultRows)
-	for _, subResult := range result.SubResults {
-		appendResultRows(t, subResult)
+func getResultString(passed bool) string {
+	if passed {
+		return "PASSED"
 	}
+	return "FAILED"
 }

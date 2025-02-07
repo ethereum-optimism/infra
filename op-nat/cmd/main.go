@@ -11,7 +11,6 @@ import (
 	nat "github.com/ethereum-optimism/infra/op-nat"
 	"github.com/ethereum-optimism/infra/op-nat/flags"
 	"github.com/ethereum-optimism/infra/op-nat/service"
-	"github.com/ethereum-optimism/infra/op-nat/validators/gates"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
@@ -51,12 +50,7 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 	oplog.SetGlobalLogHandler(log.Handler())
 	oplog.SetupDefaults()
 
-	// TODO: map validators from flags
-	var validators = []nat.Validator{
-		gates.Alphanet,
-	}
-
-	cfg, err := nat.NewConfig(ctx, log, validators)
+	cfg, err := nat.NewConfig(ctx, log, ctx.String("testdir"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}

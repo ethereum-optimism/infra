@@ -21,10 +21,17 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "KURTOSIS_DEVNET_MANIFEST"),
 		Usage:   "Path to the kurtosis-devnet manifest",
 	}
+	TestDir = &cli.StringFlag{
+		Name:    "testdir",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TESTDIR"),
+		Usage:   "Path to the test directory from which to discover tests",
+	}
 )
 
 var requiredFlags = []cli.Flag{
 	KurtosisDevnetManifest,
+	TestDir,
 }
 
 var optionalFlags = []cli.Flag{}
