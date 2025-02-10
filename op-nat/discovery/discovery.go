@@ -70,6 +70,20 @@ func discoverTests(configs []types.TestConfig, gateID string, suiteID string) ([
 	var tests []types.ValidatorMetadata
 
 	for _, cfg := range configs {
+		// If only package is specified (no name), treat it as run_all
+		if cfg.Name == "" {
+			tests = append(tests, types.ValidatorMetadata{
+				ID:      cfg.Package, // Use package as ID for run-all cases
+				Gate:    gateID,
+				Suite:   suiteID,
+				Package: cfg.Package,
+				RunAll:  true,
+				Type:    types.ValidatorTypeTest,
+			})
+			continue
+		}
+
+		// Normal case with specific test name
 		tests = append(tests, types.ValidatorMetadata{
 			ID:       cfg.Name,
 			Gate:     gateID,

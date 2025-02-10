@@ -153,11 +153,12 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) 
 		args = []string{"test", "./..."}
 	}
 
-	// Add test filter
-	args = append(args,
-		"-run", fmt.Sprintf("^%s$", metadata.FuncName), // Exact match for test name
-		"-v",
-	)
+	// Add test filter if not running all tests
+	if !metadata.RunAll {
+		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
+	}
+	// Always add verbose flag
+	args = append(args, "-v")
 
 	cmd := exec.Command("go", args...)
 	cmd.Dir = r.registry.GetConfig().WorkDir
@@ -167,7 +168,7 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Log the command being run and its working directory for debugging
+	// Log the command being run
 	fmt.Printf(" > Running test command: %s, dir: %s, package: %s\n",
 		metadata.FuncName, cmd.Dir, metadata.Package)
 	log.Debug("Running test command",
