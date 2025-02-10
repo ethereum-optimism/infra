@@ -73,16 +73,11 @@ type SuiteConfig struct {
 	Tests       []TestConfig `yaml:"tests"`
 }
 
-// TestConfig represents a single test or group of tests
+// TestConfig represents a test configuration
 type TestConfig struct {
-	Name     string            // The name of the test
-	Package  string            // The package containing the test
-	Funcs    []string          `yaml:"funcs,omitempty"`
-	All      bool              `yaml:"all,omitempty"`
-	Exclude  []string          `yaml:"exclude,omitempty"`
-	Prefix   string            `yaml:"prefix,omitempty"`
-	Alias    string            `yaml:"alias,omitempty"`
-	Timeouts map[string]string `yaml:"timeouts,omitempty"`
+	Name    string `yaml:"name,omitempty"`
+	Package string `yaml:"package"`
+	RunAll  bool   `yaml:"run_all,omitempty"`
 }
 
 // TestSource represents a source of tests (local or remote)
@@ -100,4 +95,5 @@ type ValidatorMetadata struct {
 	FuncName string
 	Package  string
 	Timeout  string
+	RunAll   bool
 }

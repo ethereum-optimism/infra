@@ -17,8 +17,10 @@ gates:
       kurtosis:
         description: "Kurtosis tests"
         tests:
-          - name: TestFindRPCEndpoints # github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
-            package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
+          - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
+
+    tests:
+      - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
 
       # devnet_system:
       #   description: "System tests"
