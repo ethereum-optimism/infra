@@ -6,33 +6,38 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegistry(t *testing.T) {
 	// Create test directory structure
 	tmpDir := t.TempDir()
-	configDir := filepath.Join(tmpDir, "config")
-	err := os.MkdirAll(configDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
+	configPath := filepath.Join(tmpDir, "validators.yaml")
 
 	// Create test validator config
 	validConfig := `
 gates:
   - id: test-gate
-    tests:
-      - id: test1
-        name: "Test 1"
+    description: "Test gate"
     suites:
       test-suite:
+        description: "Test suite"
         tests:
-          - id: suite-test1
-            name: "Suite Test 1"
+          - name: TestOne
+            package: "./testdata/package"
+    tests:
+      - name: TestTwo
+        package: "./testdata/package"
 `
-	err = os.WriteFile(filepath.Join(configDir, "validators.yaml"), []byte(validConfig), 0644)
-	if err != nil {
-		t.Fatal(err)
+	err := os.WriteFile(configPath, []byte(validConfig), 0644)
+	require.NoError(t, err)
+
+	baseConfig := Config{
+		Source: types.SourceConfig{
+			Location:   tmpDir,            // Directory containing the config
+			ConfigPath: "validators.yaml", // Just the filename
+		},
+		WorkDir: tmpDir,
 	}
 
 	t.Run("source loading", func(t *testing.T) {
@@ -42,14 +47,8 @@ gates:
 			wantErr bool
 		}{
 			{
-				name: "valid local source",
-				cfg: Config{
-					Source: types.SourceConfig{
-						Location:   tmpDir,
-						ConfigPath: "config/validators.yaml",
-					},
-					WorkDir: tmpDir,
-				},
+				name:    "valid local source",
+				cfg:     baseConfig,
 				wantErr: false,
 			},
 			{
@@ -73,93 +72,46 @@ gates:
 					return
 				}
 				if err == nil {
-					if r.sources[tt.cfg.Source.Location] == nil {
-						t.Error("source not loaded")
-					}
+					require.NotNil(t, r.GetConfig(), "config should be loaded")
+					require.NotNil(t, r.GetGate("test-gate"), "gate should be loaded")
 				}
 			})
 		}
 	})
 
 	t.Run("gate operations", func(t *testing.T) {
-		cfg := Config{
-			Source: types.SourceConfig{
-				Location:   tmpDir,
-				ConfigPath: "config/validators.yaml",
-			},
-			WorkDir: tmpDir,
-		}
-
-		r, err := NewRegistry(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		r, err := NewRegistry(baseConfig)
+		require.NoError(t, err)
 
 		t.Run("get existing gate", func(t *testing.T) {
 			gate := r.GetGate("test-gate")
-			if gate == nil {
-				t.Error("expected to find test-gate")
-			}
+			require.NotNil(t, gate, "expected to find test-gate")
+			require.Equal(t, "test-gate", gate.ID)
 		})
 
 		t.Run("get non-existent gate", func(t *testing.T) {
 			gate := r.GetGate("nonexistent-gate")
-			if gate != nil {
-				t.Error("expected nil for non-existent gate")
-			}
-		})
-
-		t.Run("add new gate", func(t *testing.T) {
-			gate := r.AddGate("new-gate")
-			if gate == nil {
-				t.Error("expected non-nil gate")
-			}
-			if gate.ID != "new-gate" {
-				t.Errorf("expected gate ID 'new-gate', got %s", gate.ID)
-			}
+			require.Nil(t, gate, "expected nil for non-existent gate")
 		})
 	})
 
 	t.Run("validate", func(t *testing.T) {
-		cfg := Config{
-			Source: types.SourceConfig{
-				Location:   tmpDir,
-				ConfigPath: "config/validators.yaml",
-			},
-			WorkDir: tmpDir,
-		}
+		r, err := NewRegistry(baseConfig)
+		require.NoError(t, err)
 
-		r, err := NewRegistry(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := r.Validate(); err != nil {
-			t.Errorf("Validate() returned error: %v", err)
-		}
+		err = r.Validate()
+		require.NoError(t, err)
 	})
 
 	t.Run("get config", func(t *testing.T) {
-		cfg := Config{
-			Source: types.SourceConfig{
-				Location:   tmpDir,
-				ConfigPath: "config/validators.yaml",
-			},
-			WorkDir: tmpDir,
-			Gate:    "test-gate",
-		}
+		cfg := baseConfig
+		cfg.Gate = "test-gate"
 
 		r, err := NewRegistry(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		gotCfg := r.GetConfig()
-		if gotCfg.Gate != cfg.Gate {
-			t.Errorf("GetConfig().Gate = %v, want %v", gotCfg.Gate, cfg.Gate)
-		}
-		if gotCfg.WorkDir != cfg.WorkDir {
-			t.Errorf("GetConfig().WorkDir = %v, want %v", gotCfg.WorkDir, cfg.WorkDir)
-		}
+		require.Equal(t, cfg.Gate, gotCfg.Gate)
+		require.Equal(t, cfg.WorkDir, gotCfg.WorkDir)
 	})
 }

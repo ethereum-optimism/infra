@@ -2,11 +2,14 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/op-nat/discovery"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
@@ -137,38 +140,113 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 
 // RunTest implements the TestRunner interface
 func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) {
+	log.Info("Running test", "validator", metadata.ID)
 	fmt.Printf(" > Running test: %s, gate: %s, suite: %s\n", metadata.ID, metadata.Gate, metadata.Suite)
-	result := &TestResult{
+
+	if metadata.RunAll {
+		return r.runAllTestsInPackage(metadata)
+	}
+	return r.runSingleTest(metadata)
+}
+
+// runAllTestsInPackage discovers and runs all tests in a package
+func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*TestResult, error) {
+	testNames, err := r.listTestsInPackage(metadata.Package)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf(" > Found %d tests in package %s\n", len(testNames), metadata.Package)
+	return r.runTestList(metadata, testNames)
+}
+
+// listTestsInPackage returns all test names in a package
+func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
+	listCmd := exec.Command("go", "test", pkg, "-list", "^Test")
+	listCmd.Dir = r.registry.GetConfig().WorkDir
+	var listOut bytes.Buffer
+	listCmd.Stdout = &listOut
+
+	if err := listCmd.Run(); err != nil {
+		return nil, fmt.Errorf("listing tests in package %s: %w", pkg, err)
+	}
+
+	var testNames []string
+	for _, line := range bytes.Split(listOut.Bytes(), []byte("\n")) {
+		testName := string(bytes.TrimSpace(line))
+		if isValidTestName(testName) {
+			testNames = append(testNames, testName)
+		}
+	}
+	return testNames, nil
+}
+
+// isValidTestName returns true if the name represents a valid test
+func isValidTestName(name string) bool {
+	return name != "" && name != "ok" && !strings.HasPrefix(name, "?")
+}
+
+// runTestList runs a list of tests and aggregates their results
+func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*TestResult, error) {
+	allPassed := true
+	var errors []string
+
+	for _, testName := range testNames {
+		passed, output := r.runIndividualTest(metadata.Package, testName)
+		if !passed {
+			allPassed = false
+			errors = append(errors, fmt.Sprintf("%s: %s", testName, output))
+		}
+	}
+
+	return &TestResult{
 		Metadata: metadata,
-		Passed:   false,
-	}
+		Passed:   allPassed,
+		Error:    r.formatErrors(errors),
+	}, nil
+}
 
-	// Build the test command with specific package
-	var args []string
-	if metadata.Package != "" {
-		// If package is specified, use it directly
-		args = []string{"test", metadata.Package}
-	} else {
-		// Otherwise search in working directory
-		args = []string{"test", "./..."}
-	}
+// runIndividualTest runs a single test and returns its result
+func (r *runner) runIndividualTest(pkg, testName string) (bool, string) {
+	fmt.Printf(" > Running individual test: %s\n", testName)
 
-	// Add test filter if not running all tests
-	if !metadata.RunAll {
-		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
-	}
-	// Always add verbose flag
-	args = append(args, "-v")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	cmd := exec.Command("go", args...)
+	cmd := exec.CommandContext(ctx, "go", "test", pkg,
+		"-run", fmt.Sprintf("^%s$", testName),
+		"-v")
 	cmd.Dir = r.registry.GetConfig().WorkDir
 
-	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Log the command being run
+	err := cmd.Run()
+	output := stdout.String() + stderr.String()
+	fmt.Print(output)
+
+	return err == nil, output
+}
+
+// formatErrors combines multiple test errors into a single error message
+func (r *runner) formatErrors(errors []string) string {
+	if len(errors) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Failed tests:\n%s", strings.Join(errors, "\n"))
+}
+
+// runSingleTest runs a specific test
+func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, error) {
+	args := r.buildTestArgs(metadata)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = r.registry.GetConfig().WorkDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
 	fmt.Printf(" > Running test command: %s, dir: %s, package: %s\n",
 		metadata.FuncName, cmd.Dir, metadata.Package)
 	log.Debug("Running test command",
@@ -176,22 +254,42 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) 
 		"package", metadata.Package,
 		"command", cmd.String())
 
-	// Run the test
 	err := cmd.Run()
+	output := stdout.String() + stderr.String()
+	fmt.Print(output)
+
 	if err != nil {
-		// Test failed but ran successfully
 		if _, ok := err.(*exec.ExitError); ok {
-			result.Error = stdout.String() + stderr.String()
-			return result, nil
+			return &TestResult{
+				Metadata: metadata,
+				Passed:   false,
+				Error:    output,
+			}, nil
 		}
-		// Something else went wrong
 		fmt.Printf(" > Error running test %s: %v\n", metadata.FuncName, err)
-		return result, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
+		return nil, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
 	}
 
-	// Test passed
-	result.Passed = true
-	return result, nil
+	return &TestResult{
+		Metadata: metadata,
+		Passed:   true,
+	}, nil
+}
+
+// buildTestArgs constructs the command line arguments for running a test
+func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
+	var args []string
+	if metadata.Package != "" {
+		args = []string{"test", metadata.Package}
+	} else {
+		args = []string{"test", "./..."}
+	}
+
+	if !metadata.RunAll {
+		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
+	}
+	args = append(args, "-v")
+	return args
 }
 
 // TestMain is the entry point for our test suite
@@ -242,16 +340,19 @@ func initializeResults() {
 	}
 
 	// Link suites to gates
-	for _, suite := range suiteResults {
-		if gate, exists := gateResults[suite.ID]; exists {
-			gate.Suites[suite.ID] = suite
+	for suiteID, suite := range suiteResults {
+		for _, v := range validators {
+			if v.Type == types.ValidatorTypeSuite && v.ID == suiteID {
+				if gate, exists := gateResults[v.Gate]; exists {
+					gate.Suites[suiteID] = suite
+				}
+				break
+			}
 		}
 	}
 
 	// Store in results
-	for _, gate := range gateResults {
-		results.Gates[gate.ID] = gate
-	}
+	results.Gates = gateResults
 }
 
 // RunTests is the main test runner function
