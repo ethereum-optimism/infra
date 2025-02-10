@@ -3,6 +3,7 @@ package registry
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/ethereum-optimism/infra/op-nat/types"
@@ -26,27 +27,30 @@ type Config struct {
 
 // NewRegistry creates a new registry instance
 func NewRegistry(cfg Config) (*Registry, error) {
+	// Load validator config
+	configPath := filepath.Join(cfg.Source.Location, cfg.Source.ConfigPath)
+	if _, err := os.Stat(configPath); err != nil {
+		return nil, fmt.Errorf("validator config not found at %s: %w", cfg.Source.ConfigPath, err)
+	}
+
 	// Add debug logging for path resolution
 	log.Debug("Creating registry with config",
 		"source.Location", cfg.Source.Location,
 		"source.ConfigPath", cfg.Source.ConfigPath,
 		"workDir", cfg.WorkDir)
 
-	// Verify the config file exists first
-	if _, err := os.Stat(cfg.Source.ConfigPath); err != nil {
-		return nil, fmt.Errorf("validator config not found at %s: %w", cfg.Source.ConfigPath, err)
+	// Create registry instance
+	r := &Registry{
+		config:  cfg,
+		sources: make(map[string]*types.TestSource),
 	}
 
-	// Create registry with the provided paths
-	return &Registry{
-		config: Config{
-			Source: types.SourceConfig{
-				Location:   cfg.Source.Location,
-				ConfigPath: cfg.Source.ConfigPath,
-			},
-			WorkDir: cfg.WorkDir,
-		},
-	}, nil
+	// Load the source immediately
+	if err := r.loadSource(cfg.Source); err != nil {
+		return nil, fmt.Errorf("failed to load source: %w", err)
+	}
+
+	return r, nil
 }
 
 // loadSource loads a test source and its configuration
@@ -54,8 +58,8 @@ func (r *Registry) loadSource(cfg types.SourceConfig) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Use the config path directly since it was already resolved in NewRegistry
-	configPath := cfg.ConfigPath
+	// Use the full path when reading the config file
+	configPath := filepath.Join(cfg.Location, cfg.ConfigPath)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -81,8 +85,8 @@ func (r *Registry) loadSource(cfg types.SourceConfig) error {
 			gateMap[gate.ID] = gate
 		}
 
-		for _, gate := range validatorConfig.Gates {
-			if err := gate.ResolveInherited(gateMap); err != nil {
+		for i := range validatorConfig.Gates {
+			if err := validatorConfig.Gates[i].ResolveInherited(gateMap); err != nil {
 				return fmt.Errorf("invalid gate inheritance: %w", err)
 			}
 		}
@@ -134,11 +138,14 @@ func (r *Registry) AddGate(id string) *types.GateConfig {
 
 // GetGate retrieves a gate by ID
 func (r *Registry) GetGate(id string) *types.GateConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	for _, source := range r.sources {
 		if source.Config != nil {
-			for _, gate := range source.Config.Gates {
-				if gate.ID == id {
-					return &gate
+			for i := range source.Config.Gates {
+				if source.Config.Gates[i].ID == id {
+					return &source.Config.Gates[i]
 				}
 			}
 		}
