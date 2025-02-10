@@ -3,10 +3,12 @@ package nat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/urfave/cli/v2"
@@ -22,8 +24,9 @@ type Config struct {
 	SC SuperchainManifest
 
 	// Test config
-	TestDir string
-	Wallets []*wallet.Wallet
+	TestDir         string
+	ValidatorConfig string
+	Wallets         []*wallet.Wallet
 
 	// Networks
 	L1  *network.Network
@@ -32,10 +35,27 @@ type Config struct {
 	Log log.Logger
 }
 
-func NewConfig(ctx *cli.Context, log log.Logger, testdir string) (*Config, error) {
+// NewConfig creates a new Config instance
+func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig string) (*Config, error) {
 	// Parse flags
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, fmt.Errorf("missing required flags: %w", err)
+	}
+	if testDir == "" {
+		return nil, errors.New("test directory is required")
+	}
+	if validatorConfig == "" {
+		return nil, errors.New("validator config path is required")
+	}
+
+	// Get absolute paths
+	absTestDir, err := filepath.Abs(testDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for test dir: %w", err)
+	}
+	absValidatorConfig, err := filepath.Abs(validatorConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
 	}
 
 	// Parse kurtosis-devnet manifest
@@ -46,9 +66,9 @@ func NewConfig(ctx *cli.Context, log log.Logger, testdir string) (*Config, error
 
 	wallets := []*wallet.Wallet{}
 	for i, w := range manifest.L1.Wallets {
-		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%s", i))
+		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%d", i))
 		if err != nil {
-			log.Warn("error creating wallet: %w", err)
+			log.Warn("error creating wallet", "err", err)
 		}
 		wallets = append(wallets, w)
 	}
@@ -90,12 +110,13 @@ func NewConfig(ctx *cli.Context, log log.Logger, testdir string) (*Config, error
 	}
 
 	return &Config{
-		SC:      *manifest,
-		TestDir: testdir,
-		L1:      l1,
-		L2A:     l2A,
-		Wallets: wallets,
-		Log:     log,
+		SC:              *manifest,
+		TestDir:         absTestDir,
+		ValidatorConfig: absValidatorConfig,
+		L1:              l1,
+		L2A:             l2A,
+		Wallets:         wallets,
+		Log:             log,
 	}, nil
 }
 

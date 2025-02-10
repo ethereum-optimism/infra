@@ -1,143 +1,125 @@
-// package discovery is used to discover tests in a directory and return their metadata.
-// The metadata is stored in the TestMetadata struct.
-//
-// The package uses the go/ast package to parse the tests and their metadata from the comments.
 package discovery
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"strings"
+	"os"
 
 	"github.com/ethereum-optimism/infra/op-nat/types"
-)
-
-const (
-	ValidatorPrefix = "//nat:validator "
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v3"
 )
 
 // DiscoverTests scans a directory for tests and their metadata
-func DiscoverTests(testDir string) ([]types.ValidatorMetadata, error) {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, testDir, nil, parser.ParseComments)
+func DiscoverTests(cfg Config) ([]types.ValidatorMetadata, error) {
+	log.Info("Discovering tests", "config", cfg.ConfigFile)
+	fmt.Println("Discovering tests", "config", cfg.ConfigFile)
+	if cfg.ConfigFile == "" {
+		return nil, errors.New("config file path is required")
+	}
+
+	log.Debug("Loading validator config", "path", cfg.ConfigFile)
+
+	// Read and parse the config file
+	data, err := os.ReadFile(cfg.ConfigFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse directory: %w", err)
+		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+
+	var validatorConfig types.ValidatorConfig
+	if err := yaml.Unmarshal(data, &validatorConfig); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+
+	// Convert slice to map for inheritance resolution
+	gateMap := make(map[string]types.GateConfig)
+	for _, gate := range validatorConfig.Gates {
+		gateMap[gate.ID] = gate
 	}
 
 	var validators []types.ValidatorMetadata
-	idMap := make(map[string]struct{})
 
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				funcDecl, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
+	// Process each gate using index for iteration
+	for i := range validatorConfig.Gates {
+		gate := &validatorConfig.Gates[i]
+		if err := gate.ResolveInherited(gateMap); err != nil {
+			return nil, fmt.Errorf("resolving gate %q: %w", gate.ID, err)
+		}
 
-				if funcDecl.Doc == nil {
-					continue
-				}
+		// Process direct gate tests
+		tests, err := discoverTests(gate.Tests, gate.ID, "")
+		if err != nil {
+			return nil, err
+		}
+		validators = append(validators, tests...)
 
-				if metadata := parseValidatorMetadata(funcDecl.Doc); metadata != nil {
-					// Check for ID collision
-					if _, exists := idMap[metadata.ID]; exists {
-						return nil, fmt.Errorf("duplicate validator ID found: %s", metadata.ID)
-					}
-					idMap[metadata.ID] = struct{}{}
-
-					metadata.FuncName = funcDecl.Name.String()
-					validators = append(validators, *metadata)
-				}
+		// Process suites
+		for suiteID, suite := range gate.Suites {
+			tests, err := discoverTests(suite.Tests, gate.ID, suiteID)
+			if err != nil {
+				return nil, err
 			}
+			validators = append(validators, tests...)
 		}
 	}
 
 	return validators, nil
 }
 
-func parseValidatorMetadata(doc *ast.CommentGroup) *types.ValidatorMetadata {
-	for _, comment := range doc.List {
-		if strings.HasPrefix(comment.Text, ValidatorPrefix) {
-			return parseValidatorTags(strings.TrimPrefix(comment.Text, ValidatorPrefix))
-		}
+func discoverTests(configs []types.TestConfig, gateID string, suiteID string) ([]types.ValidatorMetadata, error) {
+	var tests []types.ValidatorMetadata
+
+	for _, cfg := range configs {
+		tests = append(tests, types.ValidatorMetadata{
+			ID:       cfg.Name,
+			Gate:     gateID,
+			Suite:    suiteID,
+			FuncName: cfg.Name,
+			Package:  cfg.Package,
+			Type:     types.ValidatorTypeTest,
+		})
 	}
-	return nil
+
+	return tests, nil
 }
 
-func parseValidatorTags(comment string) *types.ValidatorMetadata {
-	metadata := &types.ValidatorMetadata{}
+func loadConfig(path string) (*types.ValidatorConfig, error) {
+	log.Debug("Reading validator config file", "path", path)
 
-	// Split the comment into individual tags
-	tags := strings.Fields(comment)
-
-	for _, tag := range tags {
-		parts := strings.Split(tag, ":")
-		if len(parts) != 2 {
-			continue
-		}
-
-		key, value := parts[0], parts[1]
-		switch key {
-		case "id":
-			metadata.ID = value
-		case "type":
-			switch value {
-			case "test":
-				metadata.Type = types.ValidatorTypeTest
-			case "suite":
-				metadata.Type = types.ValidatorTypeSuite
-			case "gate":
-				metadata.Type = types.ValidatorTypeGate
-			default:
-				// Invalid type, skip this validator
-				return nil
-			}
-		case "gate":
-			metadata.Gate = value
-		case "suite":
-			metadata.Suite = value
-		}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
-	// Validate the metadata
-	if !isValidMetadata(metadata) {
-		return nil
+	var cfg types.ValidatorConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
-	return metadata
+	return &cfg, nil
 }
 
-// isValidMetadata checks if the metadata is valid according to our rules
-func isValidMetadata(metadata *types.ValidatorMetadata) bool {
-	// Must have an ID and Type
-	if metadata.ID == "" || metadata.Type == "" {
-		return false
-	}
+func loadPackage(path string) (*Package, error) {
+	// Implementation here
+	return nil, nil
+}
 
-	// Validate based on type
-	switch metadata.Type {
-	case types.ValidatorTypeTest:
-		// Tests must belong to a gate
-		if metadata.Gate == "" {
-			return false
-		}
-		// Suite is optional for tests
-	case types.ValidatorTypeSuite:
-		// Suites must belong to a gate and should not have a parent suite
-		if metadata.Gate == "" || metadata.Suite != "" {
-			return false
-		}
-	case types.ValidatorTypeGate:
-		// Gates should not have parent gate or suite
-		if metadata.Gate != "" || metadata.Suite != "" {
-			return false
-		}
-	default:
-		return false
-	}
+func isTestFunction(name string) bool {
+	return true // Implement proper check
+}
 
-	return true
+func shouldIncludeTest(name string, cfg types.TestConfig) bool {
+	return true // Implement proper check
+}
+
+type Package struct {
+	Files []*File
+}
+
+type File struct {
+	Funcs []Function
+}
+
+type Function struct {
+	Name string
 }

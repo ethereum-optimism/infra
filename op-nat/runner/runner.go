@@ -1,19 +1,17 @@
 package runner
 
 import (
-	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-nat/discovery"
+	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // TestResult captures the outcome of a single test run
@@ -25,29 +23,29 @@ type TestResult struct {
 
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
-	Metadata types.ValidatorMetadata
-	Tests    []TestResult
-	Passed   bool
+	ID     string
+	Tests  []*TestResult
+	Passed bool
 }
 
 // GateResult captures aggregated results for a gate
 type GateResult struct {
-	Metadata types.ValidatorMetadata
-	Suites   []SuiteResult
-	Tests    []TestResult
-	Passed   bool
+	ID     string
+	Tests  []*TestResult
+	Suites map[string]*SuiteResult
+	Passed bool
 }
 
 // RunnerResult captures the complete test run results
 type RunnerResult struct {
-	Gates  []GateResult
+	Gates  map[string]*GateResult
 	Passed bool
 }
 
 var (
 	validators []types.ValidatorMetadata
 	results    = &RunnerResult{
-		Gates:  make([]GateResult, 0),
+		Gates:  make(map[string]*GateResult),
 		Passed: true,
 	}
 	resultsMu sync.Mutex
@@ -56,111 +54,152 @@ var (
 // TestRunner defines the interface for running acceptance tests
 type TestRunner interface {
 	RunAllTests() (*RunnerResult, error)
+	RunTest(metadata types.ValidatorMetadata) (*TestResult, error)
 }
 
-type testRunner struct {
-	testDir string
+type runner struct {
+	registry   *registry.Registry
+	validators []types.ValidatorMetadata
 }
 
 // NewTestRunner creates a new test runner instance
-func NewTestRunner(testDir string) (TestRunner, error) {
-	if testDir == "" {
-		return nil, errors.New("testDir is required")
-	}
-	return &testRunner{
-		testDir: testDir,
-	}, nil
-}
-
-// RunAllTests implements the TestRunner interface
-func (r *testRunner) RunAllTests() (*RunnerResult, error) {
-	var err error
-	validators, err = discovery.DiscoverTests(r.testDir)
+func NewTestRunner(reg *registry.Registry) (TestRunner, error) {
+	// Discover tests once during initialization
+	validators, err := discovery.DiscoverTests(discovery.Config{
+		ConfigFile: reg.GetConfig().Source.ConfigPath,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover tests: %w", err)
 	}
 
-	// Initialize results structure
-	initializeResults()
+	return &runner{
+		registry:   reg,
+		validators: validators,
+	}, nil
+}
 
-	// Create test arguments to run only our discovered tests
-	var testArgs []string
-	for _, v := range validators {
-		if v.Type == types.ValidatorTypeTest {
-			testArgs = append(testArgs, "-test.run", v.FuncName)
+// RunAllTests implements the TestRunner interface
+func (r *runner) RunAllTests() (*RunnerResult, error) {
+	log.Debug("Running all tests")
+	result := &RunnerResult{
+		Gates: make(map[string]*GateResult),
+	}
+
+	for _, validator := range r.validators {
+		fmt.Printf("Running test: %s, gate: %s, suite: %s\n", validator.ID, validator.Gate, validator.Suite)
+		log.Debug("Running test", "validator", validator.ID)
+		// Process test based on its gate
+		gateResult, exists := result.Gates[validator.Gate]
+		if !exists {
+			gateResult = &GateResult{
+				ID:     validator.Gate,
+				Tests:  make([]*TestResult, 0),
+				Suites: make(map[string]*SuiteResult),
+				Passed: true,
+			}
+			result.Gates[validator.Gate] = gateResult
 		}
+
+		testResult, err := r.RunTest(validator)
+		if err != nil {
+			fmt.Printf("Error running test %s: %v\n", validator.ID, err)
+			return nil, fmt.Errorf("running test %s: %w", validator.ID, err)
+		}
+		log.Debug("Test result", "validator", validator.ID, "result", testResult)
+
+		// Add test to appropriate collection
+		if validator.Suite != "" {
+			suiteResult, exists := gateResult.Suites[validator.Suite]
+			if !exists {
+				suiteResult = &SuiteResult{
+					ID:     validator.Suite,
+					Tests:  make([]*TestResult, 0),
+					Passed: true,
+				}
+				gateResult.Suites[validator.Suite] = suiteResult
+			}
+			suiteResult.Tests = append(suiteResult.Tests, testResult)
+			suiteResult.Passed = suiteResult.Passed && testResult.Passed
+		} else {
+			gateResult.Tests = append(gateResult.Tests, testResult)
+		}
+		gateResult.Passed = gateResult.Passed && testResult.Passed
 	}
 
-	// Get absolute path to test directory
-	absTestDir, err := filepath.Abs(r.testDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path: %w", err)
+	// Calculate final pass/fail
+	result.Passed = true
+	for _, gate := range result.Gates {
+		result.Passed = result.Passed && gate.Passed
 	}
 
-	// Set up the test command with the full package path
-	cmd := exec.Command("go", append([]string{"test", "-v", "./..."}, testArgs...)...)
-	cmd.Dir = absTestDir
+	return result, nil
+}
+
+// RunTest implements the TestRunner interface
+func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) {
+	fmt.Printf(" > Running test: %s, gate: %s, suite: %s\n", metadata.ID, metadata.Gate, metadata.Suite)
+	result := &TestResult{
+		Metadata: metadata,
+		Passed:   false,
+	}
+
+	// Build the test command with specific package
+	var args []string
+	if metadata.Package != "" {
+		// If package is specified, use it directly
+		args = []string{"test", metadata.Package}
+	} else {
+		// Otherwise search in working directory
+		args = []string{"test", "./..."}
+	}
+
+	// Add test filter
+	args = append(args,
+		"-run", fmt.Sprintf("^%s$", metadata.FuncName), // Exact match for test name
+		"-v",
+	)
+
+	cmd := exec.Command("go", args...)
+	cmd.Dir = r.registry.GetConfig().WorkDir
 
 	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Run the tests
-	err = cmd.Run()
+	// Log the command being run and its working directory for debugging
+	fmt.Printf(" > Running test command: %s, dir: %s, package: %s\n",
+		metadata.FuncName, cmd.Dir, metadata.Package)
+	log.Debug("Running test command",
+		"dir", cmd.Dir,
+		"package", metadata.Package,
+		"command", cmd.String())
+
+	// Run the test
+	err := cmd.Run()
 	if err != nil {
-		// Print stderr for debugging
-		fmt.Printf("Test stderr output:\n%s\n", stderr.String())
-
-		// Check if it's just test failures (exit status 1) or a more serious error
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			return nil, fmt.Errorf("failed to run tests: %w\nstderr: %s", err, stderr.String())
+		// Test failed but ran successfully
+		if _, ok := err.(*exec.ExitError); ok {
+			result.Error = stdout.String() + stderr.String()
+			return result, nil
 		}
+		// Something else went wrong
+		fmt.Printf(" > Error running test %s: %v\n", metadata.FuncName, err)
+		return result, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
 	}
 
-	// Parse test output and update results
-	scanner := bufio.NewScanner(&stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "--- PASS:") || strings.Contains(line, "--- FAIL:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				testName := parts[2]
-				passed := strings.Contains(line, "--- PASS:")
-
-				// Find corresponding validator and update results
-				for _, v := range validators {
-					if v.FuncName == testName {
-						result := TestResult{
-							Metadata: v,
-							Passed:   passed,
-							Error:    "", // Could parse error from output if needed
-						}
-						resultsMu.Lock()
-						updateResults(result)
-						resultsMu.Unlock()
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Check for scanner errors
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading test output: %w", err)
-	}
-
-	// Process results
-	processResults()
-
-	return results, nil
+	// Test passed
+	result.Passed = true
+	return result, nil
 }
 
 // TestMain is the entry point for our test suite
 func TestMain(m *testing.M) {
 	var err error
-	validators, err = discovery.DiscoverTests(".")
+	validators, err = discovery.DiscoverTests(discovery.Config{
+		ConfigFile:   "./validators.yaml",
+		ValidatorDir: ".",
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -187,30 +226,30 @@ func initializeResults() {
 		switch v.Type {
 		case types.ValidatorTypeGate:
 			gateResults[v.ID] = &GateResult{
-				Metadata: v,
-				Suites:   make([]SuiteResult, 0),
-				Tests:    make([]TestResult, 0),
-				Passed:   true,
+				ID:     v.ID,
+				Tests:  make([]*TestResult, 0),
+				Suites: make(map[string]*SuiteResult),
+				Passed: true,
 			}
 		case types.ValidatorTypeSuite:
 			suiteResults[v.ID] = &SuiteResult{
-				Metadata: v,
-				Tests:    make([]TestResult, 0),
-				Passed:   true,
+				ID:     v.ID,
+				Tests:  make([]*TestResult, 0),
+				Passed: true,
 			}
 		}
 	}
 
 	// Link suites to gates
 	for _, suite := range suiteResults {
-		if gate, exists := gateResults[suite.Metadata.Gate]; exists {
-			gate.Suites = append(gate.Suites, *suite)
+		if gate, exists := gateResults[suite.ID]; exists {
+			gate.Suites[suite.ID] = suite
 		}
 	}
 
 	// Store in results
 	for _, gate := range gateResults {
-		results.Gates = append(results.Gates, *gate)
+		results.Gates[gate.ID] = gate
 	}
 }
 
@@ -243,16 +282,16 @@ func RunTests(t *testing.T) {
 func updateResults(result TestResult) {
 	// Find the appropriate gate and suite
 	for i, gate := range results.Gates {
-		if gate.Metadata.ID == result.Metadata.Gate {
+		if gate.ID == result.Metadata.Gate {
 			if result.Metadata.Suite == "" {
 				// Test belongs directly to gate
-				results.Gates[i].Tests = append(results.Gates[i].Tests, result)
+				results.Gates[i].Tests = append(results.Gates[i].Tests, &result)
 				results.Gates[i].Passed = results.Gates[i].Passed && result.Passed
 			} else {
 				// Test belongs to a suite
 				for j, suite := range gate.Suites {
-					if suite.Metadata.ID == result.Metadata.Suite {
-						results.Gates[i].Suites[j].Tests = append(results.Gates[i].Suites[j].Tests, result)
+					if suite.ID == result.Metadata.Suite {
+						results.Gates[i].Suites[j].Tests = append(results.Gates[i].Suites[j].Tests, &result)
 						results.Gates[i].Suites[j].Passed = results.Gates[i].Suites[j].Passed && result.Passed
 					}
 				}
@@ -267,4 +306,68 @@ func updateResults(result TestResult) {
 func processResults() {
 	// This could emit metrics, write to a file, etc.
 	// For now, we'll just use the results stored in the global variable
+}
+
+// RunGate runs all tests in a specific gate
+func (r *runner) RunGate(gate string) error {
+	cfg := r.registry.GetConfig()
+
+	validators, err := discovery.DiscoverTests(discovery.Config{
+		ConfigFile:   cfg.Source.ConfigPath,
+		ValidatorDir: cfg.WorkDir,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to discover tests: %w", err)
+	}
+
+	// Initialize results structure
+	initializeResults()
+
+	// Filter tests for this gate
+	var testArgs []string
+	for _, v := range validators {
+		if v.Gate == gate && v.Type == types.ValidatorTypeTest {
+			testArgs = append(testArgs, "-test.run", v.FuncName)
+		}
+	}
+
+	if len(testArgs) == 0 {
+		return fmt.Errorf("no tests found for gate %s", gate)
+	}
+
+	// Run the tests
+	result, err := r.RunAllTests()
+	if err != nil {
+		return err
+	}
+
+	// Check if the gate passed
+	for _, g := range result.Gates {
+		if g.ID == gate {
+			if !g.Passed {
+				return fmt.Errorf("gate %s failed", gate)
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("gate %s not found in results", gate)
+}
+
+// GetValidators returns all validators in the test run
+func (r *RunnerResult) GetValidators() []types.ValidatorMetadata {
+	var validators []types.ValidatorMetadata
+	for _, gate := range r.Gates {
+		// Add gate tests
+		for _, test := range gate.Tests {
+			validators = append(validators, test.Metadata)
+		}
+		// Add suite tests
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				validators = append(validators, test.Metadata)
+			}
+		}
+	}
+	return validators
 }

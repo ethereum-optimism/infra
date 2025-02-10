@@ -2,214 +2,132 @@ package nat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNATParameterization(t *testing.T) {
-	t.Parallel()
+func setupTestDir(t *testing.T) string {
+	tmpDir := t.TempDir()
 
-	// Create a test factory that creates a new test instance with its own received params
-	makeTest := func() (*Test, *interface{}) {
-		var receivedParams interface{}
-		testFn := func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
-			receivedParams = params
-			return true, nil
-		}
+	// Create test validator config
+	validConfig := `
+gates:
+  - id: test-gate
+    tests:
+      - name: test1
+        package: github.com/ethereum-optimism/infra/op-nat/validators
+    suites:
+      test-suite:
+        tests:
+          - name: suite-test1
+            package: github.com/ethereum-optimism/infra/op-nat/validators
+`
+	// Write directly to validators.yaml in the root directory
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "validators.yaml"),
+		[]byte(validConfig),
+		0644,
+	))
 
-		test := &Test{
-			ID:            "test-with-params",
-			DefaultParams: map[string]string{"value": "default"},
-			Fn:            testFn,
-		}
-		return test, &receivedParams
-	}
+	// Create validators directory
+	validatorsDir := filepath.Join(tmpDir, "validators")
+	require.NoError(t, os.MkdirAll(validatorsDir, 0755))
 
-	t.Run("uses default parameters when none provided", func(t *testing.T) {
-		test, receivedParams := makeTest()
-		cfg := &Config{
-			Validators: []Validator{test},
-			Log:        log.New(),
-		}
+	// Create a test file
+	testFile := `
+package validators
 
-		nat, err := New(context.Background(), cfg, "test")
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			err := nat.Stop(context.Background())
-			require.NoError(t, err)
-		})
+import "testing"
 
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
+func TestExample(t *testing.T) {
+	// This is a passing test
+}
+`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(validatorsDir, "example_test.go"),
+		[]byte(testFile),
+		0644,
+	))
 
-		assert.Equal(t, test.DefaultParams, *receivedParams)
-	})
-
-	t.Run("uses custom parameters when provided", func(t *testing.T) {
-		test, receivedParams := makeTest()
-		cfg := &Config{
-			Validators: []Validator{test},
-			Log:        log.New(),
-		}
-
-		nat, err := New(context.Background(), cfg, "test")
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			err := nat.Stop(context.Background())
-			require.NoError(t, err)
-		})
-
-		customParams := map[string]string{"value": "custom"}
-		nat.params = map[string]interface{}{
-			test.ID: customParams,
-		}
-
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
-
-		assert.Equal(t, customParams, *receivedParams)
-	})
-
-	t.Run("different test instances can have different parameters", func(t *testing.T) {
-		test, receivedParams := makeTest()
-		cfg := &Config{
-			Validators: []Validator{test},
-			Log:        log.New(),
-		}
-
-		// Create two instances with different parameters
-		nat1, err := New(context.Background(), cfg, "test1")
-		require.NoError(t, err)
-		nat1.params = map[string]interface{}{
-			test.ID: map[string]string{"value": "instance1"},
-		}
-
-		nat2, err := New(context.Background(), cfg, "test2")
-		require.NoError(t, err)
-		nat2.params = map[string]interface{}{
-			test.ID: map[string]string{"value": "instance2"},
-		}
-
-		t.Cleanup(func() {
-			err := nat1.Stop(context.Background())
-			require.NoError(t, err)
-			err = nat2.Stop(context.Background())
-			require.NoError(t, err)
-		})
-
-		// Run first instance
-		err = nat1.Start(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"value": "instance1"}, *receivedParams)
-
-		// Run second instance
-		err = nat2.Start(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"value": "instance2"}, *receivedParams)
-	})
-
-	t.Run("results are properly recorded", func(t *testing.T) {
-		test, _ := makeTest()
-		cfg := &Config{
-			Validators: []Validator{test},
-			Log:        log.New(),
-		}
-
-		nat, err := New(context.Background(), cfg, "test")
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			err := nat.Stop(context.Background())
-			require.NoError(t, err)
-		})
-		nat.params = make(map[string]interface{})
-
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
-
-		require.Len(t, nat.results, 1)
-		assert.Equal(t, "test-with-params", nat.results[0].ID)
-		assert.Equal(t, "Test", nat.results[0].Type)
-		assert.Equal(t, ResultPassed, nat.results[0].Result)
-	})
+	return tmpDir
 }
 
-func TestGateValidatorParameters(t *testing.T) {
-	// Create a mock Gate validator that checks its parameters
-	mockGate := &mockGateValidator{
-		name: "test-gate",
-		runFn: func(ctx context.Context, runID string, cfg Config, params interface{}) (ValidatorResult, error) {
-			// Verify params are passed correctly
-			gateParams, ok := params.(map[string]interface{})
-			if !ok {
-				t.Fatal("expected params to be map[string]interface{}")
-			}
+func makeTestConfig(t *testing.T) *Config {
+	return &Config{
+		TestDir: setupTestDir(t),
+		Log:     testlog.Logger(t, log.LvlDebug),
+	}
+}
 
-			threshold, ok := gateParams["threshold"].(float64)
-			if !ok {
-				t.Fatal("expected threshold parameter to be float64")
-			}
-			if threshold != 0.8 {
-				t.Errorf("expected threshold to be 0.8, got %f", threshold)
-			}
-
-			return ValidatorResult{
-				Type:   "gate",
-				ID:     "test-gate",
-				Result: ResultPassed,
-			}, nil
+func TestNat(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlInfo)
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+	}{
+		{
+			name: "basic test",
+			config: &Config{
+				TestDir: setupTestDir(t),
+				Log:     logger,
+			},
+		},
+		{
+			name: "missing config dir",
+			config: &Config{
+				TestDir: t.TempDir(), // Empty directory
+				Log:     logger,
+			},
+			wantErr: true,
+		},
+		{
+			name: "nonexistent dir",
+			config: &Config{
+				TestDir: "/nonexistent",
+				Log:     logger,
+			},
+			wantErr: true,
 		},
 	}
 
-	// Create NAT config with our mock validator
-	cfg := &Config{
-		Log:        testlog.Logger(t, log.LvlInfo),
-		Validators: []Validator{mockGate},
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, err := New(context.Background(), tt.config, "test")
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 
-	// Create NAT instance
+			err = n.Start(context.Background())
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, n.result, "Expected result to be set")
+			require.True(t, n.result.Passed, "Expected tests to pass")
+		})
+	}
+}
+
+func TestNat_Stop(t *testing.T) {
+	cfg := makeTestConfig(t)
 	n, err := New(context.Background(), cfg, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	// Set parameters for the Gate validator
-	n.params["test-gate"] = map[string]interface{}{
-		"threshold": 0.8,
-	}
-
-	// Run NAT
-	err = n.Start(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify results
-	if len(n.results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(n.results))
-	}
-	if n.results[0].Result != ResultPassed {
-		t.Errorf("expected test to pass, got %s", n.results[0].Result)
-	}
+	// Test Stop
+	err = n.Stop(context.Background())
+	require.NoError(t, err)
+	require.False(t, n.running.Load(), "Expected running to be false after stop")
 }
 
-// mockGateValidator implements the Validator interface for testing
-type mockGateValidator struct {
-	name  string
-	runFn func(context.Context, string, Config, interface{}) (ValidatorResult, error)
-}
-
-func (m *mockGateValidator) Name() string {
-	return m.name
-}
-
-func (m *mockGateValidator) Type() string {
-	return "gate"
-}
-
-func (m *mockGateValidator) Run(ctx context.Context, runID string, cfg Config, params interface{}) (ValidatorResult, error) {
-	return m.runFn(ctx, runID, cfg, params)
-}
+// Remove TestNATParameterization and TestGateValidatorParameters as they're testing
+// the old implementation. We'll need to create new tests that work with the registry-based
+// architecture.
