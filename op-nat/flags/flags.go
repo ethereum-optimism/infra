@@ -27,14 +27,31 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TESTDIR"),
 		Usage:   "Path to the test directory from which to discover tests",
 	}
+	ValidatorConfig = &cli.StringFlag{
+		Name:     "validator-config",
+		Value:    "",
+		Required: true,
+		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATOR_CONFIG"),
+		Usage:    "Path to validator config (required)",
+	}
+	Gate = &cli.StringFlag{
+		Name:     "gate",
+		Value:    "",
+		Required: true,
+		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
+		Usage:    "Gate to run (alphanet or betanet)",
+	}
 )
 
 var requiredFlags = []cli.Flag{
 	KurtosisDevnetManifest,
 	TestDir,
+	ValidatorConfig,
+	Gate,
 }
 
-var optionalFlags = []cli.Flag{}
+var optionalFlags []cli.Flag
+var Flags []cli.Flag
 
 func init() {
 	optionalFlags = append(optionalFlags, oprpc.CLIFlags(EnvVarPrefix)...)
@@ -45,8 +62,6 @@ func init() {
 
 	Flags = append(requiredFlags, optionalFlags...)
 }
-
-var Flags []cli.Flag
 
 func CheckRequired(ctx *cli.Context) error {
 	for _, f := range requiredFlags {

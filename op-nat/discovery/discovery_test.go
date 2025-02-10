@@ -1,147 +1,117 @@
 package discovery
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ethereum-optimism/infra/op-nat/types"
 )
 
-func TestParseTestTags(t *testing.T) {
+func TestDiscoverTests(t *testing.T) {
+	// Create test directory structure
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	// Create test validator config
+	validConfig := `
+gates:
+  - id: test-gate
+    tests:
+      - name: test1
+        package: github.com/ethereum-optimism/infra/op-nat/validators
+    suites:
+      test-suite:
+        tests:
+          - name: suite-test1
+            package: github.com/ethereum-optimism/infra/op-nat/validators
+`
+	configPath := filepath.Join(configDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(validConfig), 0644))
+
 	tests := []struct {
 		name    string
-		comment string
-		want    *types.ValidatorMetadata
+		cfg     Config
+		wantErr bool
 	}{
 		{
-			name:    "valid_full_metadata",
-			comment: "id:test1 type:test gate:gate1 suite:suite1",
-			want: &types.ValidatorMetadata{
-				ID:    "test1",
-				Type:  types.ValidatorTypeTest,
-				Gate:  "gate1",
-				Suite: "suite1",
+			name: "valid config",
+			cfg: Config{
+				ConfigFile:   configPath,
+				ValidatorDir: tmpDir,
 			},
 		},
 		{
-			name:    "valid_gate",
-			comment: "id:gate1 type:gate",
-			want: &types.ValidatorMetadata{
-				ID:   "gate1",
-				Type: types.ValidatorTypeGate,
+			name: "missing config file",
+			cfg: Config{
+				ConfigFile:   "nonexistent.yaml",
+				ValidatorDir: tmpDir,
 			},
+			wantErr: true,
 		},
 		{
-			name:    "valid_suite",
-			comment: "id:suite1 type:suite gate:gate1",
-			want: &types.ValidatorMetadata{
-				ID:   "suite1",
-				Type: types.ValidatorTypeSuite,
-				Gate: "gate1",
+			name: "empty config file path",
+			cfg: Config{
+				ValidatorDir: tmpDir,
 			},
+			wantErr: true,
 		},
 		{
-			name:    "malformed_tag_is_skipped",
-			comment: "id:test1 type:test gate:gate1 badtag suite:suite1",
-			want: &types.ValidatorMetadata{
-				ID:    "test1",
-				Type:  types.ValidatorTypeTest,
-				Gate:  "gate1",
-				Suite: "suite1",
+			name: "empty validator dir",
+			cfg: Config{
+				ConfigFile: configPath,
 			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseValidatorTags(tt.comment)
-			assert.Equal(t, tt.want, got)
+			validators, err := DiscoverTests(tt.cfg)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.NotEmpty(t, validators)
+
+			// Check discovered validators
+			if tt.name == "valid config" {
+				require.Len(t, validators, 2) // One direct test and one suite test
+
+				// Check direct test
+				require.Equal(t, "test1", validators[0].ID)
+				require.Equal(t, "test-gate", validators[0].Gate)
+				require.Empty(t, validators[0].Suite)
+
+				// Check suite test
+				require.Equal(t, "suite-test1", validators[1].ID)
+				require.Equal(t, "test-gate", validators[1].Gate)
+				require.Equal(t, "test-suite", validators[1].Suite)
+			}
 		})
 	}
 }
 
-func TestDiscoverTests(t *testing.T) {
-	validators, err := DiscoverTests("testdata/validators")
+func TestLoadConfig(t *testing.T) {
+	// Create test config file
+	tmpDir := t.TempDir()
+	validConfig := `
+gates:
+  - id: test-gate
+    tests:
+      - name: test1
+        package: github.com/ethereum-optimism/infra/op-nat/validators
+`
+	configPath := filepath.Join(tmpDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(validConfig), 0644))
+
+	cfg, err := loadConfig(configPath)
 	require.NoError(t, err)
-	require.Len(t, validators, 4, "Should find 4 validators")
-	output := ValidatorHierarchyString(validators)
-	t.Log(output)
-
-	// Map validators by ID for easier testing
-	validatorMap := make(map[string]types.ValidatorMetadata)
-	for _, v := range validators {
-		validatorMap[v.ID] = v
-	}
-
-	// Verify gate
-	gate, exists := validatorMap["gate1"]
-	require.True(t, exists)
-	assert.Equal(t, types.ValidatorTypeGate, gate.Type)
-	assert.Empty(t, gate.Gate)
-	assert.Empty(t, gate.Suite)
-
-	// Verify suite
-	suite, exists := validatorMap["suite1"]
-	require.True(t, exists)
-	assert.Equal(t, types.ValidatorTypeSuite, suite.Type)
-	assert.Equal(t, "gate1", suite.Gate)
-	assert.Empty(t, suite.Suite)
-
-	// Verify tests
-	test1, exists := validatorMap["test1"]
-	require.True(t, exists)
-	assert.Equal(t, types.ValidatorTypeTest, test1.Type)
-	assert.Equal(t, "gate1", test1.Gate)
-	assert.Equal(t, "suite1", test1.Suite)
-
-	test2, exists := validatorMap["test2"]
-	require.True(t, exists)
-	assert.Equal(t, types.ValidatorTypeTest, test2.Type)
-	assert.Equal(t, "gate1", test2.Gate)
-	assert.Empty(t, test2.Suite)
-}
-
-func TestDiscoverAndRunTests(t *testing.T) {
-	// Discover tests from testdata directory
-	discoveredValidators, err := DiscoverTests("testdata/validators")
-	require.NoError(t, err)
-	require.Len(t, discoveredValidators, 4, "should discover 4 validators")
-
-	// Verify the structure of discovered validators
-	var gate, suite, testInSuite, testDirect types.ValidatorMetadata
-
-	for _, v := range discoveredValidators {
-		switch v.ID {
-		case "gate1":
-			gate = v
-		case "suite1":
-			suite = v
-		case "test1":
-			testInSuite = v
-		case "test2":
-			testDirect = v
-		}
-	}
-
-	// Verify gate
-	assert.Equal(t, types.ValidatorTypeGate, gate.Type)
-	assert.Empty(t, gate.Gate)
-	assert.Empty(t, gate.Suite)
-
-	// Verify suite
-	assert.Equal(t, types.ValidatorTypeSuite, suite.Type)
-	assert.Equal(t, "gate1", suite.Gate)
-	assert.Empty(t, suite.Suite)
-
-	// Verify test in suite
-	assert.Equal(t, types.ValidatorTypeTest, testInSuite.Type)
-	assert.Equal(t, "gate1", testInSuite.Gate)
-	assert.Equal(t, "suite1", testInSuite.Suite)
-
-	// Verify direct test
-	assert.Equal(t, types.ValidatorTypeTest, testDirect.Type)
-	assert.Equal(t, "gate1", testDirect.Gate)
-	assert.Empty(t, testDirect.Suite)
+	require.NotNil(t, cfg)
+	require.Len(t, cfg.Gates, 1)
+	require.Equal(t, "test-gate", cfg.Gates[0].ID)
+	require.Len(t, cfg.Gates[0].Tests, 1)
+	require.Equal(t, "test1", cfg.Gates[0].Tests[0].Name)
 }
