@@ -17,18 +17,18 @@ import (
 )
 
 var (
-	Version   = "v0.0.1"
+	Version   = "v0.1.0"
 	GitCommit = ""
 	GitDate   = ""
 )
 
 func main() {
 	app := cli.NewApp()
-	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Version = fmt.Sprintf("%s-%s-%s", Version, GitCommit, GitDate)
 	app.Name = "op-nat"
 	app.Usage = "Optimism Network Acceptance Tester Service"
 	app.Description = "op-nat tests networks"
+	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Action = cliapp.LifecycleCmd(run)
 
 	// Start server
@@ -50,17 +50,36 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 	oplog.SetGlobalLogHandler(log.Handler())
 	oplog.SetupDefaults()
 
-	cfg, err := nat.NewConfig(ctx, log, ctx.String("testdir"))
+	// Initialize the service with both paths
+	cfg, err := nat.NewConfig(
+		ctx,
+		log,
+		ctx.String("testdir"),
+		ctx.String("validator-config"),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
 	cfg.Log.Debug("Config", "config", cfg)
 
-	c, err := nat.New(ctx.Context, cfg, Version)
+	natService, err := nat.New(ctx.Context, cfg, Version)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create nat: %w", err)
 	}
 
-	return c, nil
+	return natService, nil
+}
+
+func mustGetwd() string {
+	pwd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	return pwd
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

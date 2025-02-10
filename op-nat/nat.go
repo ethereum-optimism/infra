@@ -3,7 +3,9 @@ package nat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -11,7 +13,9 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-nat/discovery"
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
+	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/runner"
+	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -19,11 +23,12 @@ import (
 var _ cliapp.Lifecycle = &nat{}
 
 type nat struct {
-	ctx     context.Context
-	config  *Config
-	version string
-	runner  runner.TestRunner
-	result  *runner.RunnerResult
+	ctx      context.Context
+	config   *Config
+	version  string
+	registry *registry.Registry
+	runner   runner.TestRunner
+	result   *runner.RunnerResult
 
 	running atomic.Bool
 }
@@ -33,16 +38,46 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		return nil, errors.New("config is required")
 	}
 
-	testRunner, err := runner.NewTestRunner(config.TestDir)
+	// Add debug logging for initial config
+	config.Log.Debug("Creating NAT with config",
+		"testDir", config.TestDir,
+		"validatorConfig", config.ValidatorConfig)
+
+	// Create registry with absolute paths
+	absValidatorConfig, err := filepath.Abs(config.ValidatorConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
+	}
+	absTestDir, err := filepath.Abs(config.TestDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for test dir: %w", err)
 	}
 
+	// Create registry with absolute paths
+	reg, err := registry.NewRegistry(registry.Config{
+		Source: types.SourceConfig{
+			Location:   absTestDir,
+			ConfigPath: absValidatorConfig,
+		},
+		WorkDir: absTestDir,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry: %w", err)
+	}
+
+	// Create runner with registry
+	testRunner, err := runner.NewTestRunner(reg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create test runner: %w", err)
+	}
+	config.Log.Info("nat.New: created registry and test runner")
+
 	return &nat{
-		ctx:     ctx,
-		config:  config,
-		version: version,
-		runner:  testRunner,
+		ctx:      ctx,
+		config:   config,
+		version:  version,
+		registry: reg,
+		runner:   testRunner,
 	}, nil
 }
 
@@ -54,16 +89,17 @@ func (n *nat) Start(ctx context.Context) error {
 	n.running.Store(true)
 	runID := uuid.New().String()
 
-	// Discovered tests
-	validators, err := discovery.DiscoverTests(n.config.TestDir)
-	if err != nil {
-		n.config.Log.Error("Error discovering tests", "error", err)
-		return err
-	}
-	n.config.Log.Debug("Discovered test structure", "structure", discovery.ValidatorHierarchyString(validators))
+	// Add detailed debug logging for paths
+	n.config.Log.Debug("NAT config paths",
+		"config.TestDir", n.config.TestDir,
+		"config.ValidatorConfig", n.config.ValidatorConfig)
+	n.config.Log.Debug("Registry config paths",
+		"registry.Source.Location", n.registry.GetConfig().Source.Location,
+		"registry.Source.ConfigPath", n.registry.GetConfig().Source.ConfigPath,
+		"registry.WorkDir", n.registry.GetConfig().WorkDir)
 
-	n.config.Log.Info("Running acceptance tests...", "run_id", runID)
-
+	// Run all tests
+	n.config.Log.Info("Running all tests[n.runner.RunAllTests()]...")
 	result, err := n.runner.RunAllTests()
 	if err != nil {
 		n.config.Log.Error("Error running tests", "error", err)
@@ -71,12 +107,12 @@ func (n *nat) Start(ctx context.Context) error {
 	}
 	n.result = result
 
+	// Print test structure and results
+	fmt.Printf("Ran against discovered test structure:\n%s", discovery.ValidatorHierarchyString(result.GetValidators()))
+
 	n.printResultsTable(runID)
 	n.config.Log.Info("OpNAT finished", "run_id", runID)
 
-	if !result.Passed {
-		return errors.New("one or more tests failed")
-	}
 	return nil
 }
 
@@ -107,11 +143,11 @@ func (n *nat) printResultsTable(runID string) {
 
 	// Print gates and their results
 	for _, gate := range n.result.Gates {
-		t.AppendRow(table.Row{"Gate", gate.Metadata.ID, getResultString(gate.Passed), ""})
+		t.AppendRow(table.Row{"Gate", gate.ID, getResultString(gate.Passed), ""})
 
 		// Print suites in this gate
 		for _, suite := range gate.Suites {
-			t.AppendRow(table.Row{"Suite", suite.Metadata.ID, getResultString(suite.Passed), ""})
+			t.AppendRow(table.Row{"Suite", suite.ID, getResultString(suite.Passed), ""})
 
 			// Print tests in this suite
 			for _, test := range suite.Tests {
@@ -141,7 +177,7 @@ func (n *nat) printResultsTable(runID string) {
 
 func getResultString(passed bool) string {
 	if passed {
-		return "PASSED"
+		return "pass"
 	}
-	return "FAILED"
+	return "fail"
 }

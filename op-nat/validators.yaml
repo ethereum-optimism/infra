@@ -1,0 +1,35 @@
+# Validator configuration file for op-nat
+# TODO: Move this to the optimism monorepo
+gates:
+  - id: alphanet
+    description: "Alphanet validation gate"
+    
+    # Test suites under the gate
+    suites:
+      interop_smoke:
+        description: "Basic network functionality tests"
+        tests:
+          - name: TestInteropSystemNoop # github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+            package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+          - name: FuzzDetectNonBijectivity # github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+            package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+
+      kurtosis:
+        description: "Kurtosis tests"
+        tests:
+          - name: TestFindRPCEndpoints # github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
+            package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
+
+      # devnet_system:
+      #   description: "System tests"
+      #   tests:
+      #     - name: TestWallet
+      #       package: github.com/ethereum-optimism/optimism/devnet-sdk/system
+    #       - name: TestChainUser
+
+    # tests:
+    #   - name: TestInteropSystemNoop
+    #     package: interop
+    #   - name: TestSmokeTestFailure
+    #     package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+    #   - name: FuzzDetectNonBijectivity
