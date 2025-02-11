@@ -26,6 +26,7 @@ type Config struct {
 	// Test config
 	TestDir         string
 	ValidatorConfig string
+	TargetGate      string
 	Wallets         []*wallet.Wallet
 
 	// Networks
@@ -36,7 +37,7 @@ type Config struct {
 }
 
 // NewConfig creates a new Config instance
-func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig string) (*Config, error) {
+func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig string, gate string) (*Config, error) {
 	// Parse flags
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, fmt.Errorf("missing required flags: %w", err)
@@ -46,6 +47,9 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	}
 	if validatorConfig == "" {
 		return nil, errors.New("validator config path is required")
+	}
+	if gate == "" {
+		return nil, errors.New("gate is required")
 	}
 
 	// Get absolute paths
@@ -113,6 +117,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		SC:              *manifest,
 		TestDir:         absTestDir,
 		ValidatorConfig: absValidatorConfig,
+		TargetGate:      gate,
 		L1:              l1,
 		L2A:             l2A,
 		Wallets:         wallets,

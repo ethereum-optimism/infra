@@ -113,6 +113,10 @@ func TestDirectToGate(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Passed)
 	assert.Empty(t, result.Error)
+	assert.Equal(t, "test1", result.Metadata.ID)
+	assert.Equal(t, "test-gate", result.Metadata.Gate)
+	assert.Equal(t, ".", result.Metadata.Package)
+	assert.False(t, result.Metadata.RunAll)
 }
 
 func TestRunTest_RunAll(t *testing.T) {
@@ -128,6 +132,10 @@ func TestRunTest_RunAll(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Passed)
 	assert.Empty(t, result.Error)
+	assert.Equal(t, "all-tests", result.Metadata.ID)
+	assert.Equal(t, "test-gate", result.Metadata.Gate)
+	assert.Equal(t, "./feature", result.Metadata.Package)
+	assert.True(t, result.Metadata.RunAll)
 }
 
 func TestRunAllTests(t *testing.T) {

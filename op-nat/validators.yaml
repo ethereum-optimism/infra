@@ -14,10 +14,10 @@ gates:
           - name: FuzzDetectNonBijectivity # github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
             package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
 
-    #   kurtosis:
-    #     description: "Kurtosis tests"
-    #     tests:
-    #       - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
+      kurtosis:
+        description: "Kurtosis tests"
+        tests:
+          - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
 
     # tests:
     #   - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
