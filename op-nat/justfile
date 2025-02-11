@@ -29,7 +29,7 @@ clean:
 # Run tests
 # test: (go_test "./...")
 test:
-    go build ./... && go test -v ./...
+    go build ./... && go test -count=1 -v ./...
 
 # Run prometheus and grafana
 start-monitoring:

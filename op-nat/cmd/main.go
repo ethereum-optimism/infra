@@ -70,16 +70,3 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 
 	return natService, nil
 }
-
-func mustGetwd() string {
-	pwd, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	return pwd
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}

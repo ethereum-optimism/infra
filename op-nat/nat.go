@@ -5,17 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 
-	"github.com/ethereum-optimism/infra/op-nat/discovery"
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/runner"
-	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -44,29 +41,26 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		"validatorConfig", config.ValidatorConfig)
 
 	// Create registry with absolute paths
-	absValidatorConfig, err := filepath.Abs(config.ValidatorConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
-	}
-	absTestDir, err := filepath.Abs(config.TestDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path for test dir: %w", err)
-	}
+	// absValidatorConfig, err := filepath.Abs(config.ValidatorConfig)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
+	// }
 
 	// Create registry with absolute paths
 	reg, err := registry.NewRegistry(registry.Config{
-		Source: types.SourceConfig{
-			Location:   absTestDir,
-			ConfigPath: absValidatorConfig,
-		},
-		WorkDir: absTestDir,
+		Log:                 config.Log,
+		ValidatorConfigFile: config.ValidatorConfig,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry: %w", err)
 	}
 
 	// Create runner with registry
-	testRunner, err := runner.NewTestRunner(reg)
+	testRunner, err := runner.NewTestRunner(runner.Config{
+		Registry: reg,
+		WorkDir:  config.TestDir,
+		Log:      config.Log,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
 	}
@@ -93,10 +87,6 @@ func (n *nat) Start(ctx context.Context) error {
 	n.config.Log.Debug("NAT config paths",
 		"config.TestDir", n.config.TestDir,
 		"config.ValidatorConfig", n.config.ValidatorConfig)
-	n.config.Log.Debug("Registry config paths",
-		"registry.Source.Location", n.registry.GetConfig().Source.Location,
-		"registry.Source.ConfigPath", n.registry.GetConfig().Source.ConfigPath,
-		"registry.WorkDir", n.registry.GetConfig().WorkDir)
 
 	// Run all tests
 	n.config.Log.Info("Running all tests[n.runner.RunAllTests()]...")
@@ -106,9 +96,6 @@ func (n *nat) Start(ctx context.Context) error {
 		return err
 	}
 	n.result = result
-
-	// Print test structure and results
-	fmt.Printf("Ran against discovered test structure:\n%s", discovery.ValidatorHierarchyString(result.GetValidators()))
 
 	n.printResultsTable(runID)
 	n.config.Log.Info("OpNAT finished", "run_id", runID)
