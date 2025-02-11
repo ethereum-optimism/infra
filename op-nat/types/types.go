@@ -5,13 +5,6 @@ import (
 	"time"
 )
 
-// SourceConfig defines where to find tests
-type SourceConfig struct {
-	Location   string
-	Version    string
-	ConfigPath string
-}
-
 // ValidatorConfig represents the complete test configuration
 type ValidatorConfig struct {
 	Gates    []GateConfig `yaml:"gates"`
@@ -29,39 +22,52 @@ type GateConfig struct {
 	Suites      map[string]SuiteConfig `yaml:"suites,omitempty"`
 }
 
+// ResolveInherited processes inheritance relationships between gates by merging
+// test configurations from parent gates into the current gate.
+//
+// The function implements an inheritance mechanism where a gate can inherit tests
+// and suites from other gates specified in its 'Inherits' field. The inheritance
+// rules are:
+// - Suites: Parent suites are only inherited if they don't exist in the child gate
+// - Tests: All parent tests are appended to the child gate's tests
 func (g *GateConfig) ResolveInherited(gates map[string]GateConfig) error {
 	if len(g.Inherits) == 0 {
 		return nil
 	}
 
-	// Create new maps to avoid modifying during iteration
+	// Create new collections to store the merged configurations
+	// This prevents modifying maps while iterating over them
 	mergedSuites := make(map[string]SuiteConfig)
 	var mergedTests []TestConfig
 
-	// First copy our own config
+	// First copy the current gate's own configurations
+	// This ensures the current gate's configs take precedence
 	for k, v := range g.Suites {
 		mergedSuites[k] = v
 	}
 	mergedTests = append(mergedTests, g.Tests...)
 
-	// Then merge in inherited configs
+	// Process each parent gate specified in the Inherits field
 	for _, inheritFrom := range g.Inherits {
 		parent, ok := gates[inheritFrom]
 		if !ok {
 			return fmt.Errorf("gate %q inherits from non-existent gate %q", g.ID, inheritFrom)
 		}
 
-		// Merge suites (parent suites don't override our own)
+		// Merge suites from parent, but only if they don't already exist
+		// This implements the "child overrides parent" behavior for suites
 		for k, v := range parent.Suites {
 			if _, exists := mergedSuites[k]; !exists {
 				mergedSuites[k] = v
 			}
 		}
 
-		// Append tests
+		// Append all tests from the parent
+		// Unlike suites, all parent tests are included
 		mergedTests = append(mergedTests, parent.Tests...)
 	}
 
+	// Update the gate's configuration with the merged results
 	g.Suites = mergedSuites
 	g.Tests = mergedTests
 	return nil
@@ -78,13 +84,6 @@ type TestConfig struct {
 	Name    string `yaml:"name,omitempty"`
 	Package string `yaml:"package"`
 	RunAll  bool   `yaml:"run_all,omitempty"`
-}
-
-// TestSource represents a source of tests (local or remote)
-type TestSource struct {
-	Location string
-	Version  string
-	Config   *ValidatorConfig
 }
 
 type ValidatorMetadata struct {
