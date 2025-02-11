@@ -57,9 +57,10 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 
 	// Create runner with registry
 	testRunner, err := runner.NewTestRunner(runner.Config{
-		Registry: reg,
-		WorkDir:  config.TestDir,
-		Log:      config.Log,
+		Registry:   reg,
+		WorkDir:    config.TestDir,
+		Log:        config.Log,
+		TargetGate: config.TargetGate,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
