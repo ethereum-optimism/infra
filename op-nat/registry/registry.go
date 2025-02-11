@@ -133,6 +133,20 @@ func (r *Registry) GetValidators() []types.ValidatorMetadata {
 	return r.validators
 }
 
+// GetValidatorsByGate returns validators for a specific gate
+func (r *Registry) GetValidatorsByGate(gateID string) []types.ValidatorMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var validators []types.ValidatorMetadata
+	for _, validator := range r.validators {
+		if validator.Gate == gateID {
+			validators = append(validators, validator)
+		}
+	}
+	return validators
+}
+
 // GetConfig returns the registry configuration
 func (r *Registry) GetConfig() Config {
 	return r.config

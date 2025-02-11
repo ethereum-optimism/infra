@@ -54,8 +54,9 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 	cfg, err := nat.NewConfig(
 		ctx,
 		log,
-		ctx.String("testdir"),
-		ctx.String("validator-config"),
+		ctx.String(flags.TestDir.Name),
+		ctx.String(flags.ValidatorConfig.Name),
+		ctx.String(flags.Gate.Name),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)

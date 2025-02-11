@@ -32,14 +32,14 @@ var (
 		Value:    "",
 		Required: true,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATOR_CONFIG"),
-		Usage:    "Path to validator config (required)",
+		Usage:    "Path to validator config (eg. 'validators.yaml')",
 	}
 	Gate = &cli.StringFlag{
 		Name:     "gate",
 		Value:    "",
 		Required: true,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
-		Usage:    "Gate to run (alphanet or betanet)",
+		Usage:    "Gate to run (eg. 'alphanet')",
 	}
 )
 

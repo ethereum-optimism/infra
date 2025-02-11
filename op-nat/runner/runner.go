@@ -55,9 +55,10 @@ type runner struct {
 }
 
 type Config struct {
-	Registry *registry.Registry
-	WorkDir  string
-	Log      log.Logger
+	Registry   *registry.Registry
+	TargetGate string
+	WorkDir    string
+	Log        log.Logger
 }
 
 // NewTestRunner creates a new test runner instance
@@ -72,10 +73,21 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.Log = log.New()
 		cfg.Log.Error("No logger provided, using default")
 	}
+	cfg.Log.Info("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir)
+
+	var validators []types.ValidatorMetadata
+	if len(cfg.TargetGate) > 0 {
+		validators = cfg.Registry.GetValidatorsByGate(cfg.TargetGate)
+	} else {
+		validators = cfg.Registry.GetValidators()
+	}
+	if len(validators) == 0 {
+		return nil, fmt.Errorf("no validators found")
+	}
 
 	return &runner{
 		registry:   cfg.Registry,
-		validators: cfg.Registry.GetValidators(),
+		validators: validators,
 		workDir:    cfg.WorkDir,
 		log:        cfg.Log,
 	}, nil
@@ -224,7 +236,7 @@ func (r *runner) runIndividualTest(pkg, testName string) (bool, string) {
 
 	err := cmd.Run()
 	output := stdout.String() + stderr.String()
-	fmt.Print(output)
+	r.log.Debug("runIndividualTest()", "output", output)
 
 	return err == nil, output
 }
