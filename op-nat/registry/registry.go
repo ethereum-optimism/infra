@@ -3,7 +3,6 @@ package registry
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/ethereum-optimism/infra/op-nat/types"
@@ -13,112 +12,125 @@ import (
 
 // Registry manages test sources and their configurations
 type Registry struct {
-	config  Config
-	sources map[string]*types.TestSource
-	mu      sync.RWMutex
+	config     Config
+	validators []types.ValidatorMetadata
+	mu         sync.RWMutex
 }
 
 // Config contains registry configuration
 type Config struct {
-	Source  types.SourceConfig
-	Gate    string
-	WorkDir string
+	Log                 log.Logger
+	ValidatorConfigFile string
 }
 
 // NewRegistry creates a new registry instance
 func NewRegistry(cfg Config) (*Registry, error) {
-	// Load validator config
-	configPath := filepath.Join(cfg.Source.Location, cfg.Source.ConfigPath)
-	if _, err := os.Stat(configPath); err != nil {
-		return nil, fmt.Errorf("validator config not found at %s: %w", cfg.Source.ConfigPath, err)
+	if cfg.ValidatorConfigFile == "" {
+		return nil, fmt.Errorf("validator config file is required")
 	}
-
-	// Add debug logging for path resolution
-	log.Debug("Creating registry with config",
-		"source.Location", cfg.Source.Location,
-		"source.ConfigPath", cfg.Source.ConfigPath,
-		"workDir", cfg.WorkDir)
+	if cfg.Log == nil {
+		cfg.Log = log.New()
+		cfg.Log.Error("No logger provided, using default")
+	}
 
 	// Create registry instance
 	r := &Registry{
-		config:  cfg,
-		sources: make(map[string]*types.TestSource),
+		config: cfg,
 	}
 
-	// Load the source immediately
-	if err := r.loadSource(cfg.Source); err != nil {
+	// Load the source
+	if err := r.loadValidators(cfg.ValidatorConfigFile); err != nil {
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
+
+	cfg.Log.Debug("Registry loaded", "len(validators)", len(r.validators))
 
 	return r, nil
 }
 
-// loadSource loads a test source and its configuration
-func (r *Registry) loadSource(cfg types.SourceConfig) error {
+// loadValidators loads a test source and its configuration
+func (r *Registry) loadValidators(cfgPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Use the full path when reading the config file
-	configPath := filepath.Join(cfg.Location, cfg.ConfigPath)
-
-	data, err := os.ReadFile(configPath)
+	// Load the validator config
+	validatorConfig, err := loadConfig(cfgPath)
 	if err != nil {
-		return fmt.Errorf("failed to read config file at path %s: %w", configPath, err)
-	}
-
-	var validatorConfig types.ValidatorConfig
-	if err := yaml.Unmarshal(data, &validatorConfig); err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	// Store the source
-	r.sources[cfg.Location] = &types.TestSource{
-		Location: cfg.Location,
-		Version:  cfg.Version,
-		Config:   &validatorConfig,
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	// Resolve gate inheritance
-	if validatorConfig.Gates != nil {
-		gateMap := make(map[string]types.GateConfig)
-		for _, gate := range validatorConfig.Gates {
-			gateMap[gate.ID] = gate
-		}
+	if err := r.validateGateInheritance(validatorConfig); err != nil {
+		return fmt.Errorf("failed to resolve gate inheritance: %w", err)
+	}
 
-		for i := range validatorConfig.Gates {
-			if err := validatorConfig.Gates[i].ResolveInherited(gateMap); err != nil {
-				return fmt.Errorf("invalid gate inheritance: %w", err)
-			}
+	// Convert config into test metadata (moved from discovery)
+	validators, err := r.discoverTests(validatorConfig)
+	if err != nil {
+		return fmt.Errorf("failed to discover tests: %w", err)
+	}
+
+	r.validators = validators
+
+	return nil
+}
+
+// validateGateInheritance checks gate inheritance resolution
+func (r *Registry) validateGateInheritance(config *types.ValidatorConfig) error {
+	if config.Gates == nil {
+		return nil
+	}
+
+	gateMap := make(map[string]types.GateConfig)
+	for _, gate := range config.Gates {
+		gateMap[gate.ID] = gate
+	}
+
+	// Check for circular inheritance before resolving
+	for _, gate := range config.Gates {
+		if err := r.checkCircularInheritance(gate.ID, gate.Inherits, gateMap, make(map[string]bool)); err != nil {
+			return fmt.Errorf("circular inheritance detected: %w", err)
+		}
+	}
+
+	// Resolve inheritance
+	for i := range config.Gates {
+		if err := config.Gates[i].ResolveInherited(gateMap); err != nil {
+			return fmt.Errorf("invalid gate inheritance: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// Validate checks that all configured tests exist and are valid
-func (r *Registry) Validate() error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+// checkCircularInheritance detects circular dependencies in gate inheritance
+func (r *Registry) checkCircularInheritance(currentID string, inherits []string, gateMap map[string]types.GateConfig, visited map[string]bool) error {
+	if visited[currentID] {
+		return fmt.Errorf("circular inheritance detected at gate %s", currentID)
+	}
 
-	for _, source := range r.sources {
-		if source.Config == nil {
-			continue
+	visited[currentID] = true
+	defer delete(visited, currentID) // Clean up after checking this branch
+
+	for _, inheritedID := range inherits {
+		inherited, exists := gateMap[inheritedID]
+		if !exists {
+			return fmt.Errorf("gate %s inherits from non-existent gate %s", currentID, inheritedID)
 		}
 
-		// Check for circular gate inheritance
-		gateMap := make(map[string]types.GateConfig)
-		for _, gate := range source.Config.Gates {
-			gateMap[gate.ID] = gate
-		}
-
-		for _, gate := range source.Config.Gates {
-			if err := gate.ResolveInherited(gateMap); err != nil {
-				return fmt.Errorf("invalid gate inheritance: %w", err)
-			}
+		if err := r.checkCircularInheritance(inheritedID, inherited.Inherits, gateMap, visited); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// GetValidators returns all discovered validators
+func (r *Registry) GetValidators() []types.ValidatorMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.validators
 }
 
 // GetConfig returns the registry configuration
@@ -126,50 +138,77 @@ func (r *Registry) GetConfig() Config {
 	return r.config
 }
 
-// AddGate creates a new gate and adds it to the registry
-func (r *Registry) AddGate(id string) *types.GateConfig {
-	gate := &types.GateConfig{
-		ID:     id,
-		Tests:  []types.TestConfig{},
-		Suites: make(map[string]types.SuiteConfig),
+// loadConfig loads a validator config from a file
+func loadConfig(path string) (*types.ValidatorConfig, error) {
+	log.Debug("Reading validator config file", "path", path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config file: %w", err)
 	}
-	return gate
+
+	var cfg types.ValidatorConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+
+	return &cfg, nil
 }
 
-// GetGate retrieves a gate by ID
-func (r *Registry) GetGate(id string) *types.GateConfig {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+// Move discovery.DiscoverTests to be a private method
+func (r *Registry) discoverTests(validatorConfig *types.ValidatorConfig) ([]types.ValidatorMetadata, error) {
+	var validators []types.ValidatorMetadata
 
-	for _, source := range r.sources {
-		if source.Config != nil {
-			for i := range source.Config.Gates {
-				if source.Config.Gates[i].ID == id {
-					return &source.Config.Gates[i]
-				}
+	for i := range validatorConfig.Gates {
+		gate := &validatorConfig.Gates[i]
+
+		// Process direct gate tests
+		tests, err := r.discoverTestsInConfig(gate.Tests, gate.ID, "")
+		if err != nil {
+			return nil, err
+		}
+		validators = append(validators, tests...)
+
+		// Process suites
+		for suiteID, suite := range gate.Suites {
+			tests, err := r.discoverTestsInConfig(suite.Tests, gate.ID, suiteID)
+			if err != nil {
+				return nil, err
 			}
+			validators = append(validators, tests...)
 		}
 	}
-	return nil
+
+	return validators, nil
 }
 
-// Gate represents a collection of tests and suites
-type Gate struct {
-	name   string
-	tests  []string
-	suites map[string]*Suite
-}
+func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID string, suiteID string) ([]types.ValidatorMetadata, error) {
+	var tests []types.ValidatorMetadata
 
-// Suite represents a collection of related tests
-type Suite struct {
-	name  string
-	tests []string
-}
+	for _, cfg := range configs {
+		// If only package is specified (no name), treat it as "run all"
+		if cfg.Name == "" {
+			tests = append(tests, types.ValidatorMetadata{
+				ID:      cfg.Package, // Use package as ID for run-all cases
+				Gate:    gateID,
+				Suite:   suiteID,
+				Package: cfg.Package,
+				RunAll:  true,
+				Type:    types.ValidatorTypeTest,
+			})
+			continue
+		}
 
-func mustGetwd() string {
-	pwd, err := os.Getwd()
-	if err != nil {
-		panic(err)
+		// Normal case with specific test name
+		tests = append(tests, types.ValidatorMetadata{
+			ID:       cfg.Name,
+			Gate:     gateID,
+			Suite:    suiteID,
+			FuncName: cfg.Name,
+			Package:  cfg.Package,
+			Type:     types.ValidatorTypeTest,
+		})
 	}
-	return pwd
+
+	return tests, nil
 }
