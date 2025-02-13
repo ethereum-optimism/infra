@@ -19,19 +19,14 @@ gates:
         tests:
           - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
 
-    # tests:
-    #   - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis
-
-      # devnet_system:
-      #   description: "System tests"
-      #   tests:
-      #     - name: TestWallet
-      #       package: github.com/ethereum-optimism/optimism/devnet-sdk/system
-    #       - name: TestChainUser
-
-    # tests:
-    #   - name: TestInteropSystemNoop
-    #     package: interop
-    #   - name: TestSmokeTestFailure
-    #     package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
-    #   - name: FuzzDetectNonBijectivity
+  - id: betanet
+    description: "Betanet validation gate"
+    inherits: ["alphanet"]
+    suites:
+      devnet_system:
+        description: "System tests"
+        tests:
+          - name: TestWallet
+            package: github.com/ethereum-optimism/optimism/devnet-sdk/system
+          - name: TestChainUser
+            package: github.com/ethereum-optimism/optimism/devnet-sdk/system
