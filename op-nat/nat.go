@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
@@ -99,6 +101,7 @@ func (n *nat) Start(ctx context.Context) error {
 	n.result = result
 
 	n.printResultsTable(runID)
+	fmt.Println(n.result.String())
 	n.config.Log.Info("OpNAT finished", "run_id", runID)
 
 	return nil
@@ -122,50 +125,151 @@ func (n *nat) Stopped() bool {
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
-	t.SetStyle(table.StyleColoredBlackOnGreenWhite)
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle("NAT Results")
-	t.AppendHeader(table.Row{"Type", "ID", "Result", "Error"})
-	colConfigAutoMerge := table.ColumnConfig{AutoMerge: true}
-	t.SetColumnConfigs([]table.ColumnConfig{colConfigAutoMerge})
+	t.SetTitle(fmt.Sprintf("NAT Results (%s)", formatDuration(n.result.Duration)))
+
+	// Configure columns
+	t.AppendHeader(table.Row{
+		"Type", "ID", "Duration", "Tests", "Passed", "Failed", "Skipped", "Status", "Error",
+	})
+
+	// Set column configurations for better readability
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Name: "Type", AutoMerge: true},
+		{Name: "ID", WidthMax: 50},
+		{Name: "Duration", Align: text.AlignRight},
+		{Name: "Tests", Align: text.AlignRight},
+		{Name: "Passed", Align: text.AlignRight},
+		{Name: "Failed", Align: text.AlignRight},
+		{Name: "Skipped", Align: text.AlignRight},
+	})
 
 	// Print gates and their results
 	for _, gate := range n.result.Gates {
-		t.AppendRow(table.Row{"Gate", gate.ID, getResultString(gate.Passed), ""})
+		// Gate row - show test counts but no "1" in Tests column
+		t.AppendRow(table.Row{
+			"Gate",
+			gate.ID,
+			formatDuration(gate.Duration),
+			"-", // Don't count gate as a test
+			gate.Stats.Passed,
+			gate.Stats.Failed,
+			gate.Stats.Skipped,
+			getResultString(gate.Passed),
+			"",
+		})
 
 		// Print suites in this gate
-		for _, suite := range gate.Suites {
-			t.AppendRow(table.Row{"Suite", suite.ID, getResultString(suite.Passed), ""})
+		for suiteName, suite := range gate.Suites {
+			t.AppendRow(table.Row{
+				"Suite",
+				fmt.Sprintf("├── %s", suiteName),
+				formatDuration(suite.Duration),
+				"-", // Don't count suite as a test
+				suite.Stats.Passed,
+				suite.Stats.Failed,
+				suite.Stats.Skipped,
+				getResultString(suite.Passed),
+				"",
+			})
 
 			// Print tests in this suite
-			for _, test := range suite.Tests {
-				t.AppendRow(table.Row{"Test", test.Metadata.ID, getResultString(test.Passed), test.Error})
+			i := 0
+			for testName, test := range suite.Tests {
+				prefix := "│   ├──"
+				if i == len(suite.Tests)-1 {
+					prefix = "│   └──"
+				}
+				t.AppendRow(table.Row{
+					"Test",
+					fmt.Sprintf("%s %s", prefix, testName),
+					formatDuration(test.Duration),
+					"1", // Count actual test
+					boolToInt(test.Passed),
+					boolToInt(!test.Passed),
+					0,
+					getResultString(test.Passed),
+					test.Error,
+				})
+				i++
 			}
 		}
 
 		// Print direct gate tests
-		for _, test := range gate.Tests {
-			t.AppendRow(table.Row{"Test", test.Metadata.ID, getResultString(test.Passed), test.Error})
+		i := 0
+		for testName, test := range gate.Tests {
+			prefix := "├──"
+			if i == len(gate.Tests)-1 && len(gate.Suites) == 0 {
+				prefix = "└──"
+			}
+			t.AppendRow(table.Row{
+				"Test",
+				fmt.Sprintf("%s %s", prefix, testName),
+				formatDuration(test.Duration),
+				"1", // Count actual test
+				boolToInt(test.Passed),
+				boolToInt(!test.Passed),
+				0,
+				getResultString(test.Passed),
+				test.Error,
+			})
+			i++
 		}
 
 		t.AppendSeparator()
 	}
 
 	// Set overall style based on result
-	if !n.result.Passed {
+	if n.result.Passed {
+		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
+	} else {
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
 	}
 
-	t.AppendFooter(table.Row{"SUMMARY", "", getResultString(n.result.Passed), ""})
+	// Add summary footer
+	t.AppendFooter(table.Row{
+		"TOTAL",
+		"",
+		formatDuration(n.result.Duration),
+		n.result.Stats.Total, // Show total number of actual tests
+		n.result.Stats.Passed,
+		n.result.Stats.Failed,
+		n.result.Stats.Skipped,
+		getResultString(n.result.Passed),
+		"",
+	})
+
 	t.Render()
 
 	// Emit metrics
-	metrics.RecordAcceptance("todo", runID, getResultString(n.result.Passed))
+	metrics.RecordAcceptance(
+		"todo",
+		runID,
+		getResultString(n.result.Passed),
+		n.result.Stats.Total,
+		n.result.Stats.Passed,
+		n.result.Stats.Failed,
+		n.result.Duration,
+	)
 }
 
+// Helper function to convert bool to int
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// getResultString returns a colored string representing the test result
 func getResultString(passed bool) string {
 	if passed {
-		return "pass"
+		return "✓ pass"
 	}
-	return "fail"
+	return "✗ fail"
+}
+
+// Helper function to format duration to seconds with 1 decimal place
+func formatDuration(d time.Duration) string {
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }
