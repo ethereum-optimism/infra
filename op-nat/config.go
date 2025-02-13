@@ -63,7 +63,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	}
 
 	// Parse kurtosis-devnet manifest
-	manifest, err := parseManifest(ctx.String(flags.KurtosisDevnetManifest.Name))
+	manifest, err := parseManifest(ctx.String(flags.Manifest.Name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kurtosis-devnet manifest: %w", err)
 	}

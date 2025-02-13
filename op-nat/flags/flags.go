@@ -15,11 +15,11 @@ import (
 const EnvVarPrefix = "OP_NAT"
 
 var (
-	KurtosisDevnetManifest = &cli.StringFlag{
-		Name:    "kurtosis.devnet.manifest",
+	Manifest = &cli.StringFlag{
+		Name:    "manifest",
 		Value:   "",
-		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "KURTOSIS_DEVNET_MANIFEST"),
-		Usage:   "Path to the kurtosis-devnet manifest",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "MANIFEST"),
+		Usage:   "Path to the devnet manifest",
 	}
 	TestDir = &cli.StringFlag{
 		Name:    "testdir",
@@ -28,11 +28,11 @@ var (
 		Usage:   "Path to the test directory from which to discover tests",
 	}
 	ValidatorConfig = &cli.StringFlag{
-		Name:     "validator-config",
+		Name:     "validators",
 		Value:    "",
 		Required: true,
-		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATOR_CONFIG"),
-		Usage:    "Path to validator config (eg. 'validators.yaml')",
+		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATORS"),
+		Usage:    "Path to validator config file (eg. 'validators.yaml')",
 	}
 	Gate = &cli.StringFlag{
 		Name:     "gate",
@@ -44,7 +44,7 @@ var (
 )
 
 var requiredFlags = []cli.Flag{
-	KurtosisDevnetManifest,
+	Manifest,
 	TestDir,
 	ValidatorConfig,
 	Gate,
