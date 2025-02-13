@@ -69,3 +69,11 @@ The reviewer's job is to check that the PR:
 
 1. All CI checks MUST pass.
 1. At least one code owner must approve.
+
+### Contributions Related to Spelling and Grammar
+
+At this time, we will not be accepting contributions that primarily fix
+spelling, stylistic or grammatical errors in documentation, code or elsewhere.
+
+Pull Requests that ignore this guideline will be closed,
+and may be aggregated into new Pull Requests without attribution.
