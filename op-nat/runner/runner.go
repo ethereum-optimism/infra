@@ -16,7 +16,7 @@ import (
 // TestResult captures the outcome of a single test run
 type TestResult struct {
 	Metadata types.ValidatorMetadata
-	Passed   bool
+	Status   string
 	Error    string
 	Duration time.Duration // Track test execution time
 }
@@ -26,7 +26,7 @@ type SuiteResult struct {
 	ID          string
 	Description string
 	Tests       map[string]*TestResult // Map test names to results
-	Passed      bool
+	Status      string                 // Change from Passed bool to Status string
 	Duration    time.Duration
 	Stats       ResultStats
 }
@@ -37,7 +37,7 @@ type GateResult struct {
 	Description string
 	Tests       map[string]*TestResult  // Direct gate tests
 	Suites      map[string]*SuiteResult // Test suites
-	Passed      bool
+	Status      string                  // Change from Passed bool to Status string
 	Duration    time.Duration
 	Stats       ResultStats
 	Inherited   []string // Track which gates this inherits from
@@ -46,7 +46,7 @@ type GateResult struct {
 // RunnerResult captures the complete test run results
 type RunnerResult struct {
 	Gates    map[string]*GateResult
-	Passed   bool
+	Status   string // Change from Passed bool to Status string
 	Duration time.Duration
 	Stats    ResultStats
 }
@@ -128,7 +128,7 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 	}
 
 	result.Duration = time.Since(start)
-	result.Passed = result.Stats.Failed == 0
+	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
 
 	return result, nil
@@ -182,7 +182,7 @@ func (r *runner) processGate(gateName string, validators []types.ValidatorMetada
 	}
 
 	gateResult.Duration = time.Since(gateStart)
-	gateResult.Passed = gateResult.Stats.Failed == 0
+	gateResult.Status = determineGateStatus(gateResult)
 	gateResult.Stats.EndTime = time.Now()
 
 	return nil
@@ -235,10 +235,37 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 	}
 
 	suiteResult.Duration = time.Since(suiteStart)
-	suiteResult.Passed = suiteResult.Stats.Failed == 0
+	suiteResult.Status = determineSuiteStatus(suiteResult)
 	suiteResult.Stats.EndTime = time.Now()
 
 	return nil
+}
+
+// determineSuiteStatus determines the overall status of a suite based on its tests
+func determineSuiteStatus(suite *SuiteResult) string {
+	if len(suite.Tests) == 0 {
+		return types.TestStatusSkip
+	}
+
+	allSkipped := true
+	anyFailed := false
+
+	for _, test := range suite.Tests {
+		if test.Status != types.TestStatusSkip {
+			allSkipped = false
+		}
+		if test.Status == types.TestStatusFail {
+			anyFailed = true
+		}
+	}
+
+	if allSkipped {
+		return types.TestStatusSkip
+	}
+	if anyFailed {
+		return types.TestStatusFail
+	}
+	return types.TestStatusPass
 }
 
 // processDirectTests handles the execution of direct gate tests
@@ -314,20 +341,20 @@ func isValidTestName(name string) bool {
 
 // runTestList runs a list of tests and aggregates their results
 func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*TestResult, error) {
-	allPassed := true
+	var result string = types.TestStatusPass
 	var errors []string
 
 	for _, testName := range testNames {
 		passed, output := r.runIndividualTest(metadata.Package, testName)
 		if !passed {
-			allPassed = false
+			result = types.TestStatusFail
 			errors = append(errors, fmt.Sprintf("%s: %s", testName, output))
 		}
 	}
 
 	return &TestResult{
 		Metadata: metadata,
-		Passed:   allPassed,
+		Status:   result,
 		Error:    r.formatErrors(errors),
 	}, nil
 }
@@ -383,11 +410,20 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, e
 	output := stdout.String() + stderr.String()
 	fmt.Print(output)
 
+	// Check for skipped tests in output
+	if strings.Contains(output, "--- SKIP:") {
+		return &TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusSkip,
+			Error:    output,
+		}, nil
+	}
+
 	if err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
 			return &TestResult{
 				Metadata: metadata,
-				Passed:   false,
+				Status:   types.TestStatusFail,
 				Error:    output,
 			}, nil
 		}
@@ -397,7 +433,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, e
 
 	return &TestResult{
 		Metadata: metadata,
-		Passed:   true,
+		Status:   types.TestStatusPass,
 	}, nil
 }
 
@@ -442,7 +478,7 @@ func (r *runner) RunGate(gate string) error {
 	// Check if the gate passed
 	for _, g := range result.Gates {
 		if g.ID == gate {
-			if !g.Passed {
+			if g.Status != types.TestStatusPass {
 				return fmt.Errorf("gate %s failed", gate)
 			}
 			return nil
@@ -484,13 +520,14 @@ func (r *RunnerResult) String() string {
 
 	for gateName, gate := range r.Gates {
 		b.WriteString(fmt.Sprintf("\nGate: %s (%s)\n", gateName, formatDuration(gate.Duration)))
-		b.WriteString(fmt.Sprintf("├── Passed: %v\n", gate.Passed))
-		b.WriteString(fmt.Sprintf("├── Tests: %d passed, %d failed\n",
-			gate.Stats.Passed, gate.Stats.Failed))
+		b.WriteString(fmt.Sprintf("├── Status: %s\n", gate.Status))
+		b.WriteString(fmt.Sprintf("├── Tests: %d passed, %d failed, %d skipped\n",
+			gate.Stats.Passed, gate.Stats.Failed, gate.Stats.Skipped))
 
 		// Print direct gate tests
 		for testName, test := range gate.Tests {
-			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [pass=%v]\n", testName, formatDuration(test.Duration), test.Passed))
+			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [status=%s]\n",
+				testName, formatDuration(test.Duration), test.Status))
 			if test.Error != "" {
 				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error))
 			}
@@ -499,13 +536,14 @@ func (r *RunnerResult) String() string {
 		// Print suites
 		for suiteName, suite := range gate.Suites {
 			b.WriteString(fmt.Sprintf("└── Suite: %s (%s)\n", suiteName, formatDuration(suite.Duration)))
-			b.WriteString(fmt.Sprintf("    ├── Passed: %v\n", suite.Passed))
-			b.WriteString(fmt.Sprintf("    ├── Tests: %d passed, %d failed\n",
-				suite.Stats.Passed, suite.Stats.Failed))
+			b.WriteString(fmt.Sprintf("    ├── Status: %s\n", suite.Status))
+			b.WriteString(fmt.Sprintf("    ├── Tests: %d passed, %d failed, %d skipped\n",
+				suite.Stats.Passed, suite.Stats.Failed, suite.Stats.Skipped))
 
 			// Print suite tests
 			for testName, test := range suite.Tests {
-				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [pass=%v]\n", testName, formatDuration(test.Duration), test.Passed))
+				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [status=%s]\n",
+					testName, formatDuration(test.Duration), test.Status))
 				if test.Error != "" {
 					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error))
 				}
@@ -515,35 +553,108 @@ func (r *RunnerResult) String() string {
 	return b.String()
 }
 
-// Helper method to update stats at all levels
+// updateStats updates statistics at all levels
 func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *TestResult) {
 	// Update test suite stats if applicable
 	if suite != nil {
-		// Only increment total for actual tests
 		suite.Stats.Total++
-		if test.Passed {
+		switch test.Status {
+		case types.TestStatusPass:
 			suite.Stats.Passed++
-		} else {
+		case types.TestStatusFail:
 			suite.Stats.Failed++
+		case types.TestStatusSkip:
+			suite.Stats.Skipped++
 		}
 		suite.Duration += test.Duration
 	}
 
-	// Update gate stats - only count actual tests
+	// Update gate stats
 	gate.Stats.Total++
-	if test.Passed {
+	switch test.Status {
+	case types.TestStatusPass:
 		gate.Stats.Passed++
-	} else {
+	case types.TestStatusFail:
 		gate.Stats.Failed++
+	case types.TestStatusSkip:
+		gate.Stats.Skipped++
 	}
 	gate.Duration += test.Duration
 
-	// Update overall stats - only count actual tests
+	// Update overall stats
 	r.Stats.Total++
-	if test.Passed {
+	switch test.Status {
+	case types.TestStatusPass:
 		r.Stats.Passed++
-	} else {
+	case types.TestStatusFail:
 		r.Stats.Failed++
+	case types.TestStatusSkip:
+		r.Stats.Skipped++
 	}
 	r.Duration += test.Duration
+}
+
+// determineGateStatus determines the overall status of a gate based on its tests and suites
+func determineGateStatus(gate *GateResult) string {
+	if len(gate.Tests) == 0 && len(gate.Suites) == 0 {
+		return types.TestStatusSkip
+	}
+
+	allSkipped := true
+	anyFailed := false
+
+	// Check direct tests
+	for _, test := range gate.Tests {
+		if test.Status != types.TestStatusSkip {
+			allSkipped = false
+		}
+		if test.Status == types.TestStatusFail {
+			anyFailed = true
+		}
+	}
+
+	// Check suites
+	for _, suite := range gate.Suites {
+		if suite.Status != types.TestStatusSkip {
+			allSkipped = false
+		}
+		if suite.Status == types.TestStatusFail {
+			anyFailed = true
+		}
+	}
+
+	if allSkipped {
+		return types.TestStatusSkip
+	}
+	if anyFailed {
+		return types.TestStatusFail
+	}
+	return types.TestStatusPass
+}
+
+// determineRunnerStatus determines the overall status of the test run
+func determineRunnerStatus(result *RunnerResult) string {
+	if len(result.Gates) == 0 {
+		return types.TestStatusSkip
+	}
+
+	allSkipped := true
+	anyFailed := false
+
+	for _, gate := range result.Gates {
+		if gate.Status != types.TestStatusSkip {
+			allSkipped = false
+		}
+		if gate.Status == types.TestStatusFail {
+			anyFailed = true
+		}
+	}
+
+	if allSkipped {
+		return types.TestStatusSkip
+	}
+	if anyFailed {
+		return types.TestStatusFail
+	}
+	return types.TestStatusPass
 }
