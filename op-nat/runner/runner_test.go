@@ -111,7 +111,7 @@ func TestDirectToGate(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.True(t, result.Passed)
+	assert.Equal(t, types.TestStatusPass, result.Status)
 	assert.Empty(t, result.Error)
 	assert.Equal(t, "test1", result.Metadata.ID)
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
@@ -130,7 +130,7 @@ func TestRunTest_RunAll(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.True(t, result.Passed)
+	assert.Equal(t, types.TestStatusPass, result.Status)
 	assert.Empty(t, result.Error)
 	assert.Equal(t, "all-tests", result.Metadata.ID)
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
@@ -144,12 +144,12 @@ func TestRunAllTests(t *testing.T) {
 	// Run all tests
 	result, err := r.RunAllTests()
 	require.NoError(t, err)
-	assert.True(t, result.Passed)
+	assert.Equal(t, types.TestStatusPass, result.Status)
 
 	// Verify structure
 	require.Contains(t, result.Gates, "test-gate", "should have test-gate")
 	gate := result.Gates["test-gate"]
-	assert.True(t, gate.Passed)
+	assert.Equal(t, types.TestStatusPass, gate.Status)
 
 	// Verify gate has both direct tests and suites
 	assert.NotEmpty(t, gate.Tests, "should have direct tests")
@@ -158,7 +158,7 @@ func TestRunAllTests(t *testing.T) {
 	// Verify suite structure
 	require.Contains(t, gate.Suites, "test-suite", "should have test-suite")
 	suite := gate.Suites["test-suite"]
-	assert.True(t, suite.Passed)
+	assert.Equal(t, types.TestStatusPass, suite.Status)
 	assert.NotEmpty(t, suite.Tests, "suite should have tests")
 }
 
@@ -406,4 +406,162 @@ func TestSuiteTwo(t *testing.T) {
 		require.NotNil(t, suiteTwo)
 		assert.Len(t, suiteTwo.Tests, 2, "suite-two should have two tests")
 	})
+}
+
+// Add a new test for skipped tests
+func TestRunTest_SkippedTest(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	// Create a test file with a skipped test
+	testContent := []byte(`
+package main
+
+import "testing"
+
+func TestSkipped(t *testing.T) {
+	t.Skip("Skipping this test")
+}
+`)
+	err := os.WriteFile(filepath.Join(r.workDir, "skip_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	result, err := r.RunTest(types.ValidatorMetadata{
+		ID:       "skip-test",
+		Gate:     "test-gate",
+		FuncName: "TestSkipped",
+		Package:  ".",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, types.TestStatusSkip, result.Status)
+	assert.Contains(t, result.Error, "--- SKIP:")
+}
+
+func TestStatusDetermination(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func() *GateResult
+		expected string
+	}{
+		{
+			name: "all tests passed",
+			setup: func() *GateResult {
+				return &GateResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusPass},
+						"test2": {Status: types.TestStatusPass},
+					},
+				}
+			},
+			expected: types.TestStatusPass,
+		},
+		{
+			name: "all tests skipped",
+			setup: func() *GateResult {
+				return &GateResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusSkip},
+						"test2": {Status: types.TestStatusSkip},
+					},
+				}
+			},
+			expected: types.TestStatusSkip,
+		},
+		{
+			name: "mixed results with failure",
+			setup: func() *GateResult {
+				return &GateResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusPass},
+						"test2": {Status: types.TestStatusFail},
+						"test3": {Status: types.TestStatusSkip},
+					},
+				}
+			},
+			expected: types.TestStatusFail,
+		},
+		{
+			name: "mixed results without failure",
+			setup: func() *GateResult {
+				return &GateResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusPass},
+						"test2": {Status: types.TestStatusSkip},
+					},
+				}
+			},
+			expected: types.TestStatusPass,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate := tt.setup()
+			status := determineGateStatus(gate)
+			assert.Equal(t, tt.expected, status)
+		})
+	}
+}
+
+func TestSuiteStatusDetermination(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func() *SuiteResult
+		expected string
+	}{
+		{
+			name: "empty suite",
+			setup: func() *SuiteResult {
+				return &SuiteResult{
+					Tests: make(map[string]*TestResult),
+				}
+			},
+			expected: types.TestStatusSkip,
+		},
+		{
+			name: "all tests passed",
+			setup: func() *SuiteResult {
+				return &SuiteResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusPass},
+						"test2": {Status: types.TestStatusPass},
+					},
+				}
+			},
+			expected: types.TestStatusPass,
+		},
+		{
+			name: "all tests skipped",
+			setup: func() *SuiteResult {
+				return &SuiteResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusSkip},
+						"test2": {Status: types.TestStatusSkip},
+					},
+				}
+			},
+			expected: types.TestStatusSkip,
+		},
+		{
+			name: "mixed results",
+			setup: func() *SuiteResult {
+				return &SuiteResult{
+					Tests: map[string]*TestResult{
+						"test1": {Status: types.TestStatusPass},
+						"test2": {Status: types.TestStatusSkip},
+						"test3": {Status: types.TestStatusFail},
+					},
+				}
+			},
+			expected: types.TestStatusFail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suite := tt.setup()
+			status := determineSuiteStatus(suite)
+			assert.Equal(t, tt.expected, status)
+		})
+	}
 }

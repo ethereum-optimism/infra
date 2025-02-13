@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/runner"
+	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -37,18 +38,10 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		return nil, errors.New("config is required")
 	}
 
-	// Add debug logging for initial config
 	config.Log.Debug("Creating NAT with config",
 		"testDir", config.TestDir,
 		"validatorConfig", config.ValidatorConfig)
 
-	// Create registry with absolute paths
-	// absValidatorConfig, err := filepath.Abs(config.ValidatorConfig)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
-	// }
-
-	// Create registry with absolute paths
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
 		ValidatorConfigFile: config.ValidatorConfig,
@@ -155,7 +148,7 @@ func (n *nat) printResultsTable(runID string) {
 			gate.Stats.Passed,
 			gate.Stats.Failed,
 			gate.Stats.Skipped,
-			getResultString(gate.Passed),
+			getResultString(gate.Status),
 			"",
 		})
 
@@ -169,7 +162,7 @@ func (n *nat) printResultsTable(runID string) {
 				suite.Stats.Passed,
 				suite.Stats.Failed,
 				suite.Stats.Skipped,
-				getResultString(suite.Passed),
+				getResultString(suite.Status),
 				"",
 			})
 
@@ -185,10 +178,10 @@ func (n *nat) printResultsTable(runID string) {
 					fmt.Sprintf("%s %s", prefix, testName),
 					formatDuration(test.Duration),
 					"1", // Count actual test
-					boolToInt(test.Passed),
-					boolToInt(!test.Passed),
-					0,
-					getResultString(test.Passed),
+					boolToInt(test.Status == types.TestStatusPass),
+					boolToInt(test.Status == types.TestStatusFail),
+					boolToInt(test.Status == types.TestStatusSkip),
+					getResultString(test.Status),
 					test.Error,
 				})
 				i++
@@ -207,10 +200,10 @@ func (n *nat) printResultsTable(runID string) {
 				fmt.Sprintf("%s %s", prefix, testName),
 				formatDuration(test.Duration),
 				"1", // Count actual test
-				boolToInt(test.Passed),
-				boolToInt(!test.Passed),
-				0,
-				getResultString(test.Passed),
+				boolToInt(test.Status == types.TestStatusPass),
+				boolToInt(test.Status == types.TestStatusFail),
+				boolToInt(test.Status == types.TestStatusSkip),
+				getResultString(test.Status),
 				test.Error,
 			})
 			i++
@@ -219,9 +212,11 @@ func (n *nat) printResultsTable(runID string) {
 		t.AppendSeparator()
 	}
 
-	// Set overall style based on result
-	if n.result.Passed {
+	// Update the table style setting based on result status
+	if n.result.Status == types.TestStatusPass {
 		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
+	} else if n.result.Status == types.TestStatusSkip {
+		t.SetStyle(table.StyleColoredBlackOnYellowWhite)
 	} else {
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
 	}
@@ -235,7 +230,7 @@ func (n *nat) printResultsTable(runID string) {
 		n.result.Stats.Passed,
 		n.result.Stats.Failed,
 		n.result.Stats.Skipped,
-		getResultString(n.result.Passed),
+		getResultString(n.result.Status),
 		"",
 	})
 
@@ -245,7 +240,7 @@ func (n *nat) printResultsTable(runID string) {
 	metrics.RecordAcceptance(
 		"todo",
 		runID,
-		getResultString(n.result.Passed),
+		getResultString(n.result.Status),
 		n.result.Stats.Total,
 		n.result.Stats.Passed,
 		n.result.Stats.Failed,
@@ -262,11 +257,15 @@ func boolToInt(b bool) int {
 }
 
 // getResultString returns a colored string representing the test result
-func getResultString(passed bool) string {
-	if passed {
+func getResultString(status string) string {
+	switch status {
+	case types.TestStatusPass:
 		return "✓ pass"
+	case types.TestStatusSkip:
+		return "- skip"
+	default:
+		return "✗ fail"
 	}
-	return "✗ fail"
 }
 
 // Helper function to format duration to seconds with 1 decimal place

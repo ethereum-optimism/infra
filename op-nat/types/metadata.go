@@ -7,3 +7,10 @@ const (
 	ValidatorTypeSuite = "suite"
 	ValidatorTypeGate  = "gate"
 )
+
+// Test status types
+const (
+	TestStatusPass = "pass"
+	TestStatusFail = "fail"
+	TestStatusSkip = "skip"
+)
