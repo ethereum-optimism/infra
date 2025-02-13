@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -18,7 +19,7 @@ const (
 
 var (
 	Debug                bool = true
-	validResults              = []string{"pass", "fail", "skip"}
+	validResults              = []string{types.TestStatusPass, types.TestStatusFail, types.TestStatusSkip}
 	nonAlphanumericRegex      = regexp.MustCompile(`[^a-zA-Z ]+`)
 
 	errorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
