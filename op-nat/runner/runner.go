@@ -18,27 +18,47 @@ type TestResult struct {
 	Metadata types.ValidatorMetadata
 	Passed   bool
 	Error    string
+	Duration time.Duration // Track test execution time
 }
 
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
-	ID     string
-	Tests  []*TestResult
-	Passed bool
+	ID          string
+	Description string
+	Tests       map[string]*TestResult // Map test names to results
+	Passed      bool
+	Duration    time.Duration
+	Stats       ResultStats
 }
 
 // GateResult captures aggregated results for a gate
 type GateResult struct {
-	ID     string
-	Tests  []*TestResult
-	Suites map[string]*SuiteResult
-	Passed bool
+	ID          string
+	Description string
+	Tests       map[string]*TestResult  // Direct gate tests
+	Suites      map[string]*SuiteResult // Test suites
+	Passed      bool
+	Duration    time.Duration
+	Stats       ResultStats
+	Inherited   []string // Track which gates this inherits from
 }
 
 // RunnerResult captures the complete test run results
 type RunnerResult struct {
-	Gates  map[string]*GateResult
-	Passed bool
+	Gates    map[string]*GateResult
+	Passed   bool
+	Duration time.Duration
+	Stats    ResultStats
+}
+
+// ResultStats tracks test statistics at each level
+type ResultStats struct {
+	Total     int
+	Passed    int
+	Failed    int
+	Skipped   int
+	StartTime time.Time
+	EndTime   time.Time
 }
 
 // TestRunner defines the interface for running acceptance tests
@@ -95,68 +115,163 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 
 // RunAllTests implements the TestRunner interface
 func (r *runner) RunAllTests() (*RunnerResult, error) {
+	start := time.Now()
 	r.log.Debug("Running all tests")
+
 	result := &RunnerResult{
 		Gates: make(map[string]*GateResult),
+		Stats: ResultStats{StartTime: start},
 	}
 
-	for _, validator := range r.validators {
-		r.log.Debug("Running test", "validator", validator.ID)
-		// Process test based on its gate
-		gateResult, exists := result.Gates[validator.Gate]
-		if !exists {
-			gateResult = &GateResult{
-				ID:     validator.Gate,
-				Tests:  make([]*TestResult, 0),
-				Suites: make(map[string]*SuiteResult),
-				Passed: true,
-			}
-			result.Gates[validator.Gate] = gateResult
-		}
-
-		testResult, err := r.RunTest(validator)
-		if err != nil {
-			r.log.Error("Error running test", "validator", validator.ID, "error", err)
-			return nil, fmt.Errorf("running test %s: %w", validator.ID, err)
-		}
-		r.log.Debug("Test result", "validator", validator.ID, "result", testResult)
-
-		// Add test to appropriate collection
-		if validator.Suite != "" {
-			suiteResult, exists := gateResult.Suites[validator.Suite]
-			if !exists {
-				suiteResult = &SuiteResult{
-					ID:     validator.Suite,
-					Tests:  make([]*TestResult, 0),
-					Passed: true,
-				}
-				gateResult.Suites[validator.Suite] = suiteResult
-			}
-			suiteResult.Tests = append(suiteResult.Tests, testResult)
-			suiteResult.Passed = suiteResult.Passed && testResult.Passed
-		} else {
-			gateResult.Tests = append(gateResult.Tests, testResult)
-		}
-		gateResult.Passed = gateResult.Passed && testResult.Passed
+	if err := r.processAllGates(result); err != nil {
+		return nil, err
 	}
 
-	// Calculate final pass/fail
-	result.Passed = true
-	for _, gate := range result.Gates {
-		result.Passed = result.Passed && gate.Passed
-	}
+	result.Duration = time.Since(start)
+	result.Passed = result.Stats.Failed == 0
+	result.Stats.EndTime = time.Now()
 
 	return result, nil
 }
 
+// processAllGates handles the execution of all gates
+func (r *runner) processAllGates(result *RunnerResult) error {
+	// Group validators by gate
+	gateValidators := r.groupValidatorsByGate()
+
+	// Process each gate
+	for gateName, validators := range gateValidators {
+		if err := r.processGate(gateName, validators, result); err != nil {
+			return fmt.Errorf("processing gate %s: %w", gateName, err)
+		}
+	}
+	return nil
+}
+
+// groupValidatorsByGate organizes validators into their respective gates
+func (r *runner) groupValidatorsByGate() map[string][]types.ValidatorMetadata {
+	gateValidators := make(map[string][]types.ValidatorMetadata)
+	for _, validator := range r.validators {
+		gateValidators[validator.Gate] = append(gateValidators[validator.Gate], validator)
+	}
+	return gateValidators
+}
+
+// processGate handles the execution of a single gate and its tests
+func (r *runner) processGate(gateName string, validators []types.ValidatorMetadata, result *RunnerResult) error {
+	gateStart := time.Now()
+	gateResult := &GateResult{
+		ID:     gateName,
+		Tests:  make(map[string]*TestResult),
+		Suites: make(map[string]*SuiteResult),
+		Stats:  ResultStats{StartTime: gateStart},
+	}
+	result.Gates[gateName] = gateResult
+
+	// Split validators into suites and direct tests
+	suiteValidators, directTests := r.categorizeValidators(validators)
+
+	// Process suites first
+	if err := r.processSuites(suiteValidators, gateResult, result); err != nil {
+		return err
+	}
+
+	// Then process direct gate tests
+	if err := r.processDirectTests(directTests, gateResult, result); err != nil {
+		return err
+	}
+
+	gateResult.Duration = time.Since(gateStart)
+	gateResult.Passed = gateResult.Stats.Failed == 0
+	gateResult.Stats.EndTime = time.Now()
+
+	return nil
+}
+
+// categorizeValidators splits validators into suite tests and direct gate tests
+func (r *runner) categorizeValidators(validators []types.ValidatorMetadata) (map[string][]types.ValidatorMetadata, []types.ValidatorMetadata) {
+	suiteValidators := make(map[string][]types.ValidatorMetadata)
+	var directTests []types.ValidatorMetadata
+
+	for _, validator := range validators {
+		if validator.Suite != "" {
+			suiteValidators[validator.Suite] = append(suiteValidators[validator.Suite], validator)
+		} else {
+			directTests = append(directTests, validator)
+		}
+	}
+	return suiteValidators, directTests
+}
+
+// processSuites handles the execution of all suites in a gate
+func (r *runner) processSuites(suiteValidators map[string][]types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+	for suiteName, suiteTests := range suiteValidators {
+		if err := r.processSuite(suiteName, suiteTests, gateResult, result); err != nil {
+			return fmt.Errorf("processing suite %s: %w", suiteName, err)
+		}
+	}
+	return nil
+}
+
+// processSuite handles the execution of a single suite
+func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+	suiteStart := time.Now()
+	suiteResult := &SuiteResult{
+		ID:    suiteName,
+		Tests: make(map[string]*TestResult),
+		Stats: ResultStats{StartTime: suiteStart},
+	}
+	gateResult.Suites[suiteName] = suiteResult
+
+	// Run all tests in the suite
+	for _, validator := range suiteTests {
+		testResult, err := r.RunTest(validator)
+		if err != nil {
+			return fmt.Errorf("running test %s: %w", validator.ID, err)
+		}
+
+		suiteResult.Tests[validator.FuncName] = testResult
+		result.updateStats(gateResult, suiteResult, testResult)
+	}
+
+	suiteResult.Duration = time.Since(suiteStart)
+	suiteResult.Passed = suiteResult.Stats.Failed == 0
+	suiteResult.Stats.EndTime = time.Now()
+
+	return nil
+}
+
+// processDirectTests handles the execution of direct gate tests
+func (r *runner) processDirectTests(directTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+	for _, validator := range directTests {
+		testResult, err := r.RunTest(validator)
+		if err != nil {
+			return fmt.Errorf("running test %s: %w", validator.ID, err)
+		}
+
+		gateResult.Tests[validator.FuncName] = testResult
+		result.updateStats(gateResult, nil, testResult)
+	}
+	return nil
+}
+
 // RunTest implements the TestRunner interface
 func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) {
-	r.log.Info("Running test", "validator", metadata.ID, "gate", metadata.Gate, "suite", metadata.Suite)
+	start := time.Now()
+	r.log.Info("Running test", "validator", metadata.ID)
 
+	var result *TestResult
+	var err error
 	if metadata.RunAll {
-		return r.runAllTestsInPackage(metadata)
+		result, err = r.runAllTestsInPackage(metadata)
+	} else {
+		result, err = r.runSingleTest(metadata)
 	}
-	return r.runSingleTest(metadata)
+
+	if result != nil {
+		result.Duration = time.Since(start)
+	}
+	return result, err
 }
 
 // runAllTestsInPackage discovers and runs all tests in a package
@@ -353,4 +468,82 @@ func (r *RunnerResult) GetValidators() []types.ValidatorMetadata {
 		}
 	}
 	return validators
+}
+
+// formatDuration formats the duration to seconds with 1 decimal place
+func formatDuration(d time.Duration) string {
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// String returns a formatted string representation of the test results
+func (r *RunnerResult) String() string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Test Run Results (%s):\n", formatDuration(r.Duration)))
+	b.WriteString(fmt.Sprintf("Total: %d, Passed: %d, Failed: %d, Skipped: %d\n",
+		r.Stats.Total, r.Stats.Passed, r.Stats.Failed, r.Stats.Skipped))
+
+	for gateName, gate := range r.Gates {
+		b.WriteString(fmt.Sprintf("\nGate: %s (%s)\n", gateName, formatDuration(gate.Duration)))
+		b.WriteString(fmt.Sprintf("├── Passed: %v\n", gate.Passed))
+		b.WriteString(fmt.Sprintf("├── Tests: %d passed, %d failed\n",
+			gate.Stats.Passed, gate.Stats.Failed))
+
+		// Print direct gate tests
+		for testName, test := range gate.Tests {
+			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [pass=%v]\n", testName, formatDuration(test.Duration), test.Passed))
+			if test.Error != "" {
+				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error))
+			}
+		}
+
+		// Print suites
+		for suiteName, suite := range gate.Suites {
+			b.WriteString(fmt.Sprintf("└── Suite: %s (%s)\n", suiteName, formatDuration(suite.Duration)))
+			b.WriteString(fmt.Sprintf("    ├── Passed: %v\n", suite.Passed))
+			b.WriteString(fmt.Sprintf("    ├── Tests: %d passed, %d failed\n",
+				suite.Stats.Passed, suite.Stats.Failed))
+
+			// Print suite tests
+			for testName, test := range suite.Tests {
+				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [pass=%v]\n", testName, formatDuration(test.Duration), test.Passed))
+				if test.Error != "" {
+					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error))
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+// Helper method to update stats at all levels
+func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *TestResult) {
+	// Update test suite stats if applicable
+	if suite != nil {
+		// Only increment total for actual tests
+		suite.Stats.Total++
+		if test.Passed {
+			suite.Stats.Passed++
+		} else {
+			suite.Stats.Failed++
+		}
+		suite.Duration += test.Duration
+	}
+
+	// Update gate stats - only count actual tests
+	gate.Stats.Total++
+	if test.Passed {
+		gate.Stats.Passed++
+	} else {
+		gate.Stats.Failed++
+	}
+	gate.Duration += test.Duration
+
+	// Update overall stats - only count actual tests
+	r.Stats.Total++
+	if test.Passed {
+		r.Stats.Passed++
+	} else {
+		r.Stats.Failed++
+	}
+	r.Duration += test.Duration
 }

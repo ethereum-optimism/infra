@@ -4,6 +4,7 @@ import (
 	"errors"
 	"regexp"
 	"testing"
+	"time"
 )
 
 func TestErrToLabel(t *testing.T) {
@@ -71,6 +72,6 @@ func TestRecordValidation(t *testing.T) {
 
 func TestRecordAcceptance(t *testing.T) {
 	// Test acceptance scenarios
-	RecordAcceptance("test-network", "run1", "pass")
-	RecordAcceptance("test-network", "run1", "fail")
+	RecordAcceptance("test-network", "run1", "pass", 1, 1, 0, time.Second)
+	RecordAcceptance("test-network", "run1", "fail", 1, 0, 1, time.Second)
 }
