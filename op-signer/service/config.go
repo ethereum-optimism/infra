@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/ethereum-optimism/infra/op-signer/service/provider"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"gopkg.in/yaml.v3"
@@ -29,7 +30,8 @@ func (c AuthConfig) MaxValueToInt() *big.Int {
 }
 
 type SignerServiceConfig struct {
-	Auth []AuthConfig `yaml:"auth"`
+	ProviderType provider.ProviderType `yaml:"provider"`
+	Auth         []AuthConfig          `yaml:"auth"`
 }
 
 func ReadConfig(path string) (SignerServiceConfig, error) {
@@ -41,6 +43,16 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return config, err
 	}
+
+	// Default to GCP if Provider is empty to avoid breaking changes
+	if config.ProviderType == "" {
+		config.ProviderType = provider.KeyProviderGCP
+	}
+
+	if !config.ProviderType.IsValid() {
+		return config, fmt.Errorf("invalid provider '%s' in config. Must be 'AWS' or 'GCP'", config.ProviderType)
+	}
+
 	for _, authConfig := range config.Auth {
 		for _, toAddress := range authConfig.ToAddresses {
 			if _, err := hexutil.Decode(toAddress); err != nil {
