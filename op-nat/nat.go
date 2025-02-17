@@ -3,13 +3,19 @@ package nat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
+	"github.com/ethereum-optimism/infra/op-nat/registry"
+	"github.com/ethereum-optimism/infra/op-nat/runner"
+	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -17,11 +23,12 @@ import (
 var _ cliapp.Lifecycle = &nat{}
 
 type nat struct {
-	ctx     context.Context
-	config  *Config
-	params  map[string]interface{}
-	version string
-	results []ValidatorResult
+	ctx      context.Context
+	config   *Config
+	version  string
+	registry *registry.Registry
+	runner   runner.TestRunner
+	result   *runner.RunnerResult
 
 	running atomic.Bool
 }
@@ -31,11 +38,36 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		return nil, errors.New("config is required")
 	}
 
+	config.Log.Debug("Creating NAT with config",
+		"testDir", config.TestDir,
+		"validatorConfig", config.ValidatorConfig)
+
+	reg, err := registry.NewRegistry(registry.Config{
+		Log:                 config.Log,
+		ValidatorConfigFile: config.ValidatorConfig,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry: %w", err)
+	}
+
+	// Create runner with registry
+	testRunner, err := runner.NewTestRunner(runner.Config{
+		Registry:   reg,
+		WorkDir:    config.TestDir,
+		Log:        config.Log,
+		TargetGate: config.TargetGate,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create test runner: %w", err)
+	}
+	config.Log.Info("nat.New: created registry and test runner")
+
 	return &nat{
-		ctx:     ctx,
-		config:  config,
-		params:  map[string]interface{}{},
-		version: version,
+		ctx:      ctx,
+		config:   config,
+		version:  version,
+		registry: reg,
+		runner:   testRunner,
 	}, nil
 }
 
@@ -47,23 +79,24 @@ func (n *nat) Start(ctx context.Context) error {
 	n.running.Store(true)
 	runID := uuid.New().String()
 
-	n.results = []ValidatorResult{}
-	for _, validator := range n.config.Validators {
-		n.config.Log.Info("Running acceptance tests...", "run_id", runID)
+	// Add detailed debug logging for paths
+	n.config.Log.Debug("NAT config paths",
+		"config.TestDir", n.config.TestDir,
+		"config.ValidatorConfig", n.config.ValidatorConfig)
 
-		// Get test-specific parameters if they exist
-		params := n.params[validator.Name()]
-
-		result, err := validator.Run(ctx, runID, *n.config, params)
-		n.config.Log.Info("Completed validator", "validator", validator.Name(), "type", validator.Type(), "result", result.Result.String(), "error", err)
-		if err != nil {
-			n.config.Log.Error("Error running validator", "validator", validator.Name(), "error", err)
-		}
-		n.results = append(n.results, result)
+	// Run all tests
+	n.config.Log.Info("Running all tests[n.runner.RunAllTests()]...")
+	result, err := n.runner.RunAllTests()
+	if err != nil {
+		n.config.Log.Error("Error running tests", "error", err)
+		return err
 	}
-	n.printResultsTable(runID)
+	n.result = result
 
+	n.printResultsTable(runID)
+	fmt.Println(n.result.String())
 	n.config.Log.Info("OpNAT finished", "run_id", runID)
+
 	return nil
 }
 
@@ -85,47 +118,157 @@ func (n *nat) Stopped() bool {
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
-	t.SetStyle(table.StyleColoredBlackOnGreenWhite)
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle("NAT Results")
-	t.AppendHeader(table.Row{"Type", "ID", "Result", "Error"})
-	colConfigAutoMerge := table.ColumnConfig{AutoMerge: true}
-	t.SetColumnConfigs([]table.ColumnConfig{colConfigAutoMerge})
+	t.SetTitle(fmt.Sprintf("NAT Results (%s)", formatDuration(n.result.Duration)))
 
-	var overallResult ResultType = ResultPassed
-	var hasSkipped = false
-	var overallErr error
-	for _, res := range n.results {
-		appendResultRows(t, res)
-		overallErr = errors.Join(overallErr)
-		if res.Result == ResultFailed {
-			overallResult = ResultFailed
+	// Configure columns
+	t.AppendHeader(table.Row{
+		"Type", "ID", "Duration", "Tests", "Passed", "Failed", "Skipped", "Status", "Error",
+	})
+
+	// Set column configurations for better readability
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Name: "Type", AutoMerge: true},
+		{Name: "ID", WidthMax: 50},
+		{Name: "Duration", Align: text.AlignRight},
+		{Name: "Tests", Align: text.AlignRight},
+		{Name: "Passed", Align: text.AlignRight},
+		{Name: "Failed", Align: text.AlignRight},
+		{Name: "Skipped", Align: text.AlignRight},
+	})
+
+	// Print gates and their results
+	for _, gate := range n.result.Gates {
+		// Gate row - show test counts but no "1" in Tests column
+		t.AppendRow(table.Row{
+			"Gate",
+			gate.ID,
+			formatDuration(gate.Duration),
+			"-", // Don't count gate as a test
+			gate.Stats.Passed,
+			gate.Stats.Failed,
+			gate.Stats.Skipped,
+			getResultString(gate.Status),
+			"",
+		})
+
+		// Print suites in this gate
+		for suiteName, suite := range gate.Suites {
+			t.AppendRow(table.Row{
+				"Suite",
+				fmt.Sprintf("├── %s", suiteName),
+				formatDuration(suite.Duration),
+				"-", // Don't count suite as a test
+				suite.Stats.Passed,
+				suite.Stats.Failed,
+				suite.Stats.Skipped,
+				getResultString(suite.Status),
+				"",
+			})
+
+			// Print tests in this suite
+			i := 0
+			for testName, test := range suite.Tests {
+				prefix := "│   ├──"
+				if i == len(suite.Tests)-1 {
+					prefix = "│   └──"
+				}
+				t.AppendRow(table.Row{
+					"Test",
+					fmt.Sprintf("%s %s", prefix, testName),
+					formatDuration(test.Duration),
+					"1", // Count actual test
+					boolToInt(test.Status == types.TestStatusPass),
+					boolToInt(test.Status == types.TestStatusFail),
+					boolToInt(test.Status == types.TestStatusSkip),
+					getResultString(test.Status),
+					test.Error,
+				})
+				i++
+			}
 		}
-		if res.Result == ResultSkipped {
-			hasSkipped = true
+
+		// Print direct gate tests
+		i := 0
+		for testName, test := range gate.Tests {
+			prefix := "├──"
+			if i == len(gate.Tests)-1 && len(gate.Suites) == 0 {
+				prefix = "└──"
+			}
+			t.AppendRow(table.Row{
+				"Test",
+				fmt.Sprintf("%s %s", prefix, testName),
+				formatDuration(test.Duration),
+				"1", // Count actual test
+				boolToInt(test.Status == types.TestStatusPass),
+				boolToInt(test.Status == types.TestStatusFail),
+				boolToInt(test.Status == types.TestStatusSkip),
+				getResultString(test.Status),
+				test.Error,
+			})
+			i++
 		}
+
 		t.AppendSeparator()
 	}
-	if overallResult == ResultPassed && hasSkipped {
-		overallResult = ResultSkipped
-	}
-	t.AppendFooter([]interface{}{"SUMMARY", "", overallResult.String(), ""})
-	if overallResult == ResultFailed {
+
+	// Update the table style setting based on result status
+	if n.result.Status == types.TestStatusPass {
+		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
+	} else if n.result.Status == types.TestStatusSkip {
+		t.SetStyle(table.StyleColoredBlackOnYellowWhite)
+	} else {
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
 	}
+
+	// Add summary footer
+	t.AppendFooter(table.Row{
+		"TOTAL",
+		"",
+		formatDuration(n.result.Duration),
+		n.result.Stats.Total, // Show total number of actual tests
+		n.result.Stats.Passed,
+		n.result.Stats.Failed,
+		n.result.Stats.Skipped,
+		getResultString(n.result.Status),
+		"",
+	})
+
 	t.Render()
 
 	// Emit metrics
-	// TODO: This shouldn't be here; needs a refactor
-	// TODO: don't hardcode the network name
-	metrics.RecordAcceptance("todo", runID, overallResult.String())
+	metrics.RecordAcceptance(
+		"todo",
+		runID,
+		getResultString(n.result.Status),
+		n.result.Stats.Total,
+		n.result.Stats.Passed,
+		n.result.Stats.Failed,
+		n.result.Duration,
+	)
 }
 
-func appendResultRows(t table.Writer, result ValidatorResult) {
-	resultRows := []table.Row{}
-	resultRows = append(resultRows, table.Row{result.Type, result.ID, result.Result.String(), result.Error})
-	t.AppendRows(resultRows)
-	for _, subResult := range result.SubResults {
-		appendResultRows(t, subResult)
+// Helper function to convert bool to int
+func boolToInt(b bool) int {
+	if b {
+		return 1
 	}
+	return 0
+}
+
+// getResultString returns a colored string representing the test result
+func getResultString(status string) string {
+	switch status {
+	case types.TestStatusPass:
+		return "✓ pass"
+	case types.TestStatusSkip:
+		return "- skip"
+	default:
+		return "✗ fail"
+	}
+}
+
+// Helper function to format duration to seconds with 1 decimal place
+func formatDuration(d time.Duration) string {
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }

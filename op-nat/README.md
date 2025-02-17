@@ -1,54 +1,69 @@
 # Network Acceptance Tester (NAT)
 NAT is a tool to run checks against a network to determine if it is ready for production. It helps ensure your network meets all necessary requirements before deployment.
+The checks it runs are standard Go tests.
 
 ## Concepts
 
-### Validators
-NAT uses "validators" as its core building blocks. These come in three types:
+### Test Discovery
+NAT discovers tests. You simply need to provide a path to a directory containing your tests. NAT will discover all tests within that directory and also those within any subdirectories.
+
+### Test Grouping
 1. **Test** - An individual check that validates a specific aspect of your network
 2. **Suite** - A logical grouping of related tests
 3. **Gate** - A high-level collection of suites and/or tests that represent a complete validation scenario
 
-All validators are located in the `validators` directory and are written in Go.
 
 ## Contributing
 
 Please note that this project is under active development and the API may evolve. We welcome all contributions and appreciate your interest in improving NAT!
 
-### Adding a new validator
-Adding a new validator is straightforward! Create a new file in the `validators` directory using one of these Go structs: `nat.Test`, `nat.Suite`, or `nat.Gate`.
+### Adding a new test/suite/gate
+All tests, suites, and gates are defined in a `validators.yaml` file. The filename is not important.
+For an example `validators.yaml`, see [example-validators.yaml](./example-validators.yaml).
 
-Here's a template to get you started:
+**Gate**
+A gate is a collection of suites and/or tests that represent a complete validation scenario. A gate can inherit from one or more other gates.
 
-```go
-type MyValidatorParams struct {
-    // Your validator parameters here
-}
-
-var MyValidator = nat.Test{
-    ID: "my-validator",
-    DefaultParams: MyValidatorParams{
-        // Default parameter values
-    },
-    Fn: func(ctx context.Context, log log.Logger, config nat.Config, _ interface{}) (bool, error) {
-        // Your validation logic here
-        return true, nil
-    },
-}
+```yaml
+# Example gate definition
+- id: alphanet
+  description: "Alphanet validation gate"
+  inherits: ["localnet"]
+  suites:
+    - id: interop
+      description: "Interop suite"
+      tests:
+        - id: TestInteropSystem
 ```
 
-The parameters are optional, but if you provide them, you must provide a `DefaultParams` struct.
+**Suite**
+A suite is a collection of tests that validate a specific aspect of your network. It's a convenience mechanism for grouping tests together.
 
-#### Key Components:
-* `ID`: A unique identifier for your validator
-* `DefaultParams`: Optional default parameters for your validator
-* `Fn`: The main validation function that returns a pass/fail result and any errors
+```yaml
+# Example suite definition
+- id: interop
+  description: "Interop suite"
+  tests:
+    - id: TestInteropSystem
+```
 
-#### Naming Conventions
-To maintain consistency:
-* Use lowercase with hyphens for validator IDs
-* If your validator belongs to a suite, prefix its ID with the suite name (e.g., `network-get-chainid`)
-* Avoid using "test/suite/gate" in names as it's already implied by the package
+**Test**
+A test is a single check that validates a specific aspect of your network.
+A description is optional.
+A package is optional. If not provided, the test will be searched for. This lengthens the runtime, so we recommend providing the package.
+If a package is provided and no name is provided, NAT runs all tests in the package.
+
+```yaml
+# Run test 'TestInteropSystem' in package 'github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop'
+- name: TestInteropSystem
+  description: "Test the interop system"
+  package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+```
+
+```yaml
+# Run all tests in package 'github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop'
+- package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
+```
 
 ## Development
 
@@ -57,9 +72,24 @@ To maintain consistency:
 * [Just](https://just.systems/)
 
 ### Getting Started
-Launch NAT with these simple steps:
-1. `just build`
-2. `./bin/op-nat --kurtosis.devnet.manifest=../kurtosis-devnet/tests/interop-devnet.json`
+Build the binary:
+```bash
+just build
+```
+
+Run tests:
+```bash
+just test
+```
+
+Run NAT:
+```bash
+go run cmd/main.go \
+  --gate betanet \                  # The gate to run
+  --testdir ../../optimism/ \       # Path to the directory containing your tests
+  --manifest devnet.json \          # Path to the devnet manifest
+  --validators validators.yaml \    # Path to the validator definitions
+```
 
 Want to monitor your validation runs? Start our local monitoring stack:
 ```bash

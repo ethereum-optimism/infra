@@ -5,7 +5,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -17,7 +19,7 @@ const (
 
 var (
 	Debug                bool = true
-	validResults              = []string{"pass", "fail", "skip"}
+	validResults              = []string{types.TestStatusPass, types.TestStatusFail, types.TestStatusSkip}
 	nonAlphanumericRegex      = regexp.MustCompile(`[^a-zA-Z ]+`)
 
 	errorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -40,14 +42,50 @@ var (
 		"result",
 	})
 
-	acceptancesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	acceptanceResults = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
-		Name:      "acceptances_total",
-		Help:      "Count of acceptance tests",
+		Name:      "acceptance_results",
+		Help:      "Result of acceptance tests",
 	}, []string{
 		"network_name",
 		"run_id",
 		"result",
+	})
+
+	acceptanceTestTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "acceptance_test_total",
+		Help:      "Total number of acceptance tests",
+	}, []string{
+		"network_name",
+		"run_id",
+	})
+
+	acceptanceTestPassed = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "acceptance_test_passed",
+		Help:      "Number of passed acceptance tests",
+	}, []string{
+		"network_name",
+		"run_id",
+	})
+
+	acceptanceTestFailed = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "acceptance_test_failed",
+		Help:      "Number of failed acceptance tests",
+	}, []string{
+		"network_name",
+		"run_id",
+	})
+
+	acceptanceTestDuration = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "acceptance_test_duration",
+		Help:      "Duration of acceptance tests",
+	}, []string{
+		"network_name",
+		"run_id",
 	})
 )
 
@@ -99,20 +137,20 @@ func RecordValidation(network string, runID string, valName string, valType stri
 	validationsTotal.WithLabelValues(network, runID, valName, valType, result).Inc()
 }
 
-func RecordAcceptance(network string, runID string, result string) {
-	if !isValidResult(result) {
-		log.Error("RecordAcceptance - invalid result", "result", result)
-		return
-	}
-	if Debug {
-		log.Debug("metric inc",
-			"m", "acceptances_total",
-			"network", network,
-			"run_id", runID,
-			"result", result,
-		)
-	}
-	acceptancesTotal.WithLabelValues(network, runID, result).Inc()
+func RecordAcceptance(
+	network string,
+	runID string,
+	result string,
+	total int,
+	passed int,
+	failed int,
+	duration time.Duration,
+) {
+	acceptanceResults.WithLabelValues(network, runID, result).Set(1)
+	acceptanceTestTotal.WithLabelValues(network, runID).Set(float64(total))
+	acceptanceTestPassed.WithLabelValues(network, runID).Set(float64(passed))
+	acceptanceTestFailed.WithLabelValues(network, runID).Set(float64(failed))
+	acceptanceTestDuration.WithLabelValues(network, runID).Set(duration.Seconds())
 }
 
 func isValidResult(result string) bool {
