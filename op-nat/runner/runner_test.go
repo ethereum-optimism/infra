@@ -256,28 +256,6 @@ func TestFormatErrors(t *testing.T) {
 	}
 }
 
-// Add a helper function to create a temporary test file
-func createTempTestFile(t *testing.T) string {
-	dir := t.TempDir()
-	content := []byte(`
-package test
-
-import "testing"
-
-func TestOne(t *testing.T) {
-	t.Log("Test one running")
-}
-
-func TestTwo(t *testing.T) {
-	t.Log("Test two running")
-}
-`)
-	testFile := filepath.Join(dir, "temp_test.go")
-	err := os.WriteFile(testFile, content, 0644)
-	require.NoError(t, err)
-	return dir
-}
-
 func TestGate(t *testing.T) {
 	t.Run("gate with direct tests", func(t *testing.T) {
 		configContent := []byte(`

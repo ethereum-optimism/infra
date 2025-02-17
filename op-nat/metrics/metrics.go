@@ -42,16 +42,6 @@ var (
 		"result",
 	})
 
-	acceptancesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: MetricsNamespace,
-		Name:      "acceptances_total",
-		Help:      "Count of acceptance tests",
-	}, []string{
-		"network_name",
-		"run_id",
-		"result",
-	})
-
 	acceptanceResults = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "acceptance_results",
