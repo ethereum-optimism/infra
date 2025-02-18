@@ -1,12 +1,10 @@
 package nat
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,23 +13,19 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-nat/flags"
 	"github.com/ethereum-optimism/infra/op-nat/network"
-	"github.com/ethereum-optimism/infra/op-nat/wallet"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 type Config struct {
 	// Network config
-	SC SuperchainManifest
+	SC  SuperchainManifest
+	L1  *network.Network
+	L2A *network.Network
 
 	// Test config
 	TestDir         string
 	ValidatorConfig string
 	TargetGate      string
-	Wallets         []*wallet.Wallet
-
-	// Networks
-	L1  *network.Network
-	L2A *network.Network
 
 	Log log.Logger
 }
@@ -66,15 +60,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	manifest, err := parseManifest(ctx.String(flags.Manifest.Name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kurtosis-devnet manifest: %w", err)
-	}
-
-	wallets := []*wallet.Wallet{}
-	for i, w := range manifest.L1.Wallets {
-		w, err := wallet.NewWallet(w.PrivateKey, fmt.Sprintf("user-key-%s", i))
-		if err != nil {
-			log.Warn("error creating wallet", "err", err)
-		}
-		wallets = append(wallets, w)
 	}
 
 	l1ID, err := strconv.Atoi(manifest.L1.ID)
@@ -120,7 +105,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		TargetGate:      gate,
 		L1:              l1,
 		L2A:             l2A,
-		Wallets:         wallets,
 		Log:             log,
 	}, nil
 }
@@ -137,44 +121,4 @@ func parseManifest(manifestPath string) (*SuperchainManifest, error) {
 	}
 	return &superchainManifest, nil
 
-}
-
-// GetNetworks returns all of the networks in an array
-func (c *Config) GetNetworks() []*network.Network {
-	return []*network.Network{
-		c.L1,
-		c.L2A,
-	}
-}
-
-func (c *Config) GetRandomWallet() *wallet.Wallet {
-	randomIndex := rand.Intn(len(c.Wallets))
-	return c.Wallets[randomIndex]
-}
-
-// GetWalletWithBalance is used to find a wallet with a balance of atleast amount on a network
-func (c *Config) GetWalletWithBalance(ctx context.Context, network *network.Network, amount *big.Int) (*wallet.Wallet, error) {
-	for _, w := range c.Wallets {
-		balance, err := w.GetBalance(ctx, network)
-		if err != nil {
-			log.Error("error getting wallet balance",
-				"wallet", w.Address(),
-				"network", network.Name,
-			)
-			return nil, err
-		}
-		log.Info("",
-			"wallet", w.Address(),
-			"balance", balance,
-			"network", network.Name,
-		)
-		// balance >= amount will return 0 or 1
-		if balance.Cmp(amount) >= 0 {
-			return w, nil
-		}
-	}
-	return nil, fmt.Errorf("no wallet found with balance %d on network %s",
-		amount,
-		network.Name,
-	)
 }
