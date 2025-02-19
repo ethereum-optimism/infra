@@ -36,7 +36,7 @@ gates:
       interop:
         description: "Basic network functionality tests"
         tests:
-          - name: TestInteropSystemNoop
+          - name: TestSystemWrapETH
             package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
           - name: FuzzDetectNonBijectivity
             package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
