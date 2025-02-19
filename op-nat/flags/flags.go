@@ -15,12 +15,6 @@ import (
 const EnvVarPrefix = "OP_NAT"
 
 var (
-	Manifest = &cli.StringFlag{
-		Name:    "manifest",
-		Value:   "",
-		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "MANIFEST"),
-		Usage:   "Path to the devnet manifest",
-	}
 	TestDir = &cli.StringFlag{
 		Name:    "testdir",
 		Value:   "",
@@ -44,7 +38,6 @@ var (
 )
 
 var requiredFlags = []cli.Flag{
-	Manifest,
 	TestDir,
 	ValidatorConfig,
 	Gate,
