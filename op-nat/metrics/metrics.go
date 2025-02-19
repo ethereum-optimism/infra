@@ -52,7 +52,7 @@ var (
 		"result",
 	})
 
-	acceptanceTestTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	acceptanceTestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "acceptance_test_total",
 		Help:      "Total number of acceptance tests",
@@ -61,7 +61,7 @@ var (
 		"run_id",
 	})
 
-	acceptanceTestPassed = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	acceptanceTestPassed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "acceptance_test_passed",
 		Help:      "Number of passed acceptance tests",
@@ -70,7 +70,7 @@ var (
 		"run_id",
 	})
 
-	acceptanceTestFailed = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	acceptanceTestFailed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "acceptance_test_failed",
 		Help:      "Number of failed acceptance tests",
@@ -147,9 +147,9 @@ func RecordAcceptance(
 	duration time.Duration,
 ) {
 	acceptanceResults.WithLabelValues(network, runID, result).Set(1)
-	acceptanceTestTotal.WithLabelValues(network, runID).Set(float64(total))
-	acceptanceTestPassed.WithLabelValues(network, runID).Set(float64(passed))
-	acceptanceTestFailed.WithLabelValues(network, runID).Set(float64(failed))
+	acceptanceTestTotal.WithLabelValues(network, runID).Add(float64(total))
+	acceptanceTestPassed.WithLabelValues(network, runID).Add(float64(passed))
+	acceptanceTestFailed.WithLabelValues(network, runID).Add(float64(failed))
 	acceptanceTestDuration.WithLabelValues(network, runID).Set(duration.Seconds())
 }
 
