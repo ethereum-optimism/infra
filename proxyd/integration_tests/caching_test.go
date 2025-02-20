@@ -29,8 +29,6 @@ func TestCaching(t *testing.T) {
 	hdlr.SetRoute("eth_getTransactionReceipt", "999", "eth_getTransactionReceipt")
 	hdlr.SetRoute("debug_getRawReceipts", "999", "debug_getRawReceipts")
 	/* not cacheable */
-	hdlr.SetRoute("eth_getBlockByNumber", "999", "eth_getBlockByNumber")
-	hdlr.SetRoute("eth_blockNumber", "999", "eth_blockNumber")
 	hdlr.SetRoute("eth_call", "999", "eth_call")
 
 	backend := NewMockBackend(hdlr)
@@ -92,27 +90,6 @@ func TestCaching(t *testing.T) {
 		},
 		/* not cacheable */
 		{
-			"eth_getBlockByNumber",
-			[]interface{}{
-				"0x1",
-				true,
-			},
-			"{\"jsonrpc\": \"2.0\", \"result\": \"eth_getBlockByNumber\", \"id\": 999}",
-			2,
-		},
-		{
-			"eth_getTransactionReceipt",
-			[]interface{}{"0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5"},
-			"{\"jsonrpc\": \"2.0\", \"result\": \"eth_getTransactionReceipt\", \"id\": 999}",
-			2,
-		},
-		{
-			"eth_getTransactionByHash",
-			[]interface{}{"0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b"},
-			"{\"jsonrpc\": \"2.0\", \"result\": \"eth_getTransactionByHash\", \"id\": 999}",
-			2,
-		},
-		{
 			"eth_call",
 			[]interface{}{
 				struct {
@@ -123,12 +100,6 @@ func TestCaching(t *testing.T) {
 				"0x60",
 			},
 			"{\"jsonrpc\": \"2.0\", \"result\": \"eth_call\", \"id\": 999}",
-			2,
-		},
-		{
-			"eth_blockNumber",
-			nil,
-			"{\"jsonrpc\": \"2.0\", \"result\": \"eth_blockNumber\", \"id\": 999}",
 			2,
 		},
 		{
@@ -170,6 +141,26 @@ func TestCaching(t *testing.T) {
 			backend.Reset()
 		})
 	}
+
+	t.Run("eth_getBlockByNumber should only be cached for 3 seconds", func(t *testing.T) {
+		backend.Reset()
+		hdlr.SetRoute("eth_getBlockByNumber", "999", "eth_getBlockByNumber")
+
+		resRaw, _, err := client.SendRPC("eth_getBlockByNumber", []interface{}{"0x123", "false"})
+		require.NoError(t, err)
+		resCache, _, err := client.SendRPC("eth_getBlockByNumber", []interface{}{"0x123", "false"})
+		require.NoError(t, err)
+		RequireEqualJSON(t, []byte("{\"id\":999,\"jsonrpc\":\"2.0\",\"result\":\"eth_getBlockByNumber\"}"), resRaw)
+		RequireEqualJSON(t, resRaw, resCache)
+		require.Equal(t, 1, countRequests(backend, "eth_getBlockByNumber"))
+
+		// fast forward 4 seconds and make the same request
+		redis.FastForward(4 * time.Second)
+		resCache, _, err = client.SendRPC("eth_getBlockByNumber", []interface{}{"0x123", "false"})
+		require.NoError(t, err)
+		require.Equal(t, 2, countRequests(backend, "eth_getBlockByNumber"))
+		RequireEqualJSON(t, []byte("{\"id\":999,\"jsonrpc\":\"2.0\",\"result\":\"eth_getBlockByNumber\"}"), resCache)
+	})
 
 	t.Run("nil responses should not be cached", func(t *testing.T) {
 		hdlr.SetRoute("eth_getBlockByHash", "999", nil)
