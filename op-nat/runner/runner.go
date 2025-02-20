@@ -68,6 +68,7 @@ type runner struct {
 	workDir    string // Directory for running tests
 	log        log.Logger
 	runID      string
+	timeout    time.Duration // Add timeout configuration
 }
 
 type Config struct {
@@ -75,6 +76,7 @@ type Config struct {
 	TargetGate string
 	WorkDir    string
 	Log        log.Logger
+	Timeout    time.Duration // Add timeout configuration
 }
 
 // NewTestRunner creates a new test runner instance
@@ -101,11 +103,16 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		return nil, fmt.Errorf("no validators found")
 	}
 
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 5 * time.Minute // Default timeout
+	}
+
 	return &runner{
 		registry:   cfg.Registry,
 		validators: validators,
 		workDir:    cfg.WorkDir,
 		log:        cfg.Log,
+		timeout:    cfg.Timeout,
 	}, nil
 }
 
@@ -317,15 +324,20 @@ func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*types.
 
 // listTestsInPackage returns all test names in a package
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
-	listCmd := exec.Command("go", "test", pkg, "-list", "^Test")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Shorter timeout for listing
+	defer cancel()
+
+	listCmd := exec.CommandContext(ctx, "go", "test", pkg, "-list", "^Test")
 	listCmd.Dir = r.workDir
 	var listOut, listOutErr bytes.Buffer
 	listCmd.Stdout = &listOut
 	listCmd.Stderr = &listOutErr
 
 	if err := listCmd.Run(); err != nil {
-		fmt.Println(listOutErr.String())
-		return nil, fmt.Errorf("listing tests in package %s: %w", pkg, err)
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("listing tests timed out after 30s")
+		}
+		return nil, fmt.Errorf("listing tests in package %s: %w\n%s", pkg, err, listOutErr.String())
 	}
 
 	var testNames []string
@@ -349,10 +361,18 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 	var errors []string
 
 	for _, testName := range testNames {
-		passed, output := r.runIndividualTest(metadata.Package, testName)
-		if !passed {
+		// Create a new metadata instance for this specific test
+		testMetadata := metadata
+		testMetadata.FuncName = testName
+
+		testResult, err := r.runSingleTest(testMetadata)
+		if err != nil {
+			return nil, err
+		}
+
+		if testResult.Status == types.TestStatusFail {
 			result = types.TestStatusFail
-			errors = append(errors, fmt.Sprintf("%s: %s", testName, output))
+			errors = append(errors, fmt.Sprintf("%s: %s", testName, testResult.Error))
 		}
 	}
 
@@ -363,100 +383,88 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 	}, nil
 }
 
-// runIndividualTest runs a single test and returns its result
-func (r *runner) runIndividualTest(pkg, testName string) (bool, string) {
-	r.log.Debug("Running individual test", "testName", testName)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "go", "test", pkg,
-		"-count", "1", // disable caching
-		"-run", fmt.Sprintf("^%s$", testName),
-		"-v")
-	cmd.Dir = r.workDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	output := stdout.String() + stderr.String()
-	r.log.Debug("runIndividualTest",
-		"pkg", pkg,
-		"testName", testName,
-		"stdout", stdout.String(),
-		"stderr", stderr.String())
-
-	return err == nil, output
-}
-
-// formatErrors combines multiple test errors into a single error message
-func (r *runner) formatErrors(errors []string) string {
-	if len(errors) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("Failed tests:\n%s", strings.Join(errors, "\n"))
-}
-
 // runSingleTest runs a specific test
 func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
+	defer cancel()
+
 	args := r.buildTestArgs(metadata)
-	cmd := exec.Command("go", args...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = r.workDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	log.Debug("Running test command",
+	r.log.Debug("Running test command",
 		"dir", cmd.Dir,
 		"package", metadata.Package,
-		"command", cmd.String())
+		"command", cmd.String(),
+		"timeout", r.timeout)
 
-	err := cmd.Run()
-	output := stdout.String() + stderr.String()
-	fmt.Printf("----------\nstdout: %s\n----------\nstderr: %s\n----------\n", stdout.String(), stderr.String())
-
-	// Check for skipped tests in output
-	if strings.Contains(output, "--- SKIP:") {
-		return &types.TestResult{
-			Metadata: metadata,
-			Status:   types.TestStatusSkip,
-			Error:    output,
-		}, nil
-	}
-
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return &types.TestResult{
-				Metadata: metadata,
-				Status:   types.TestStatusFail,
-				Error:    output,
-			}, nil
-		}
-		fmt.Printf(" > Error running test %s: %v\n", metadata.FuncName, err)
-		return nil, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
-	}
-
-	return &types.TestResult{
+	result := types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass,
-	}, nil
+		Error:    stdout.String(),
+	}
+
+	err := cmd.Run()
+
+	// Check for timeout
+	if ctx.Err() == context.DeadlineExceeded {
+		result.Status = types.TestStatusFail
+		result.Error = fmt.Sprintf("test timed out after %v", r.timeout)
+		return &result, nil
+	}
+
+	// Check if the command failed to run
+	if err != nil {
+		r.log.Debug("runSingleTest - test did not complete successfully", "name", metadata.FuncName, "error", err)
+		if _, ok := err.(*exec.ExitError); ok {
+			result.Status = types.TestStatusFail
+			result.Error = stderr.String()
+			return &result, err
+		}
+		return &result, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
+	}
+
+	r.log.Debug("runSingleTest",
+		"gate", metadata.Gate,
+		"suite", metadata.Suite,
+		"pkg", metadata.Package,
+		"testName", metadata.FuncName,
+		"stdout", stdout.String(),
+		"stderr", stderr.String(),
+	)
+
+	// Check for skipped tests in output
+	if strings.Contains(stdout.String(), "--- SKIP:") {
+		result.Status = types.TestStatusSkip
+	}
+
+	return &result, nil
 }
 
 // buildTestArgs constructs the command line arguments for running a test
 func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
-	var args []string
+	var args []string = []string{"test"}
+
+	// Run all tests in a package, or a particular test in a package
 	if metadata.Package != "" {
-		args = []string{"test", metadata.Package}
+		args = append(args, metadata.Package)
 	} else {
-		args = []string{"test", "./..."}
+		args = append(args, "./...")
 	}
 
+	// Run a specific test in a package
 	if !metadata.RunAll {
 		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
 	}
+
+	// Disable caching
+	args = append(args, "-count", "1")
+
+	// Enable verbose output
 	args = append(args, "-v")
 	return args
 }
@@ -665,4 +673,12 @@ func determineRunnerStatus(result *RunnerResult) types.TestStatus {
 		return types.TestStatusFail
 	}
 	return types.TestStatusPass
+}
+
+// formatErrors combines multiple test errors into a single error message
+func (r *runner) formatErrors(errors []string) string {
+	if len(errors) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Failed tests:\n%s", strings.Join(errors, "\n"))
 }
