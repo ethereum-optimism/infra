@@ -14,8 +14,8 @@ const (
 // TestResult captures the outcome of a single test run
 type TestResult struct {
 	Metadata ValidatorMetadata
-	Status   TestStatus // Must be one of TestStatusPass, TestStatusFail, or TestStatusSkip
-	Error    string
+	Status   TestStatus
+	Error    error         // Changed from string to error
 	Duration time.Duration // Track test execution time
 }
 
