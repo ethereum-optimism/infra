@@ -112,7 +112,7 @@ func TestDirectToGate(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusPass, result.Status)
-	assert.Empty(t, result.Error)
+	assert.Nil(t, result.Error)
 	assert.Equal(t, "test1", result.Metadata.ID)
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
 	assert.Equal(t, ".", result.Metadata.Package)
@@ -412,7 +412,7 @@ func TestSkipped(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusSkip, result.Status)
-	//assert.Contains(t, result.Stdout, "--- SKIP:")
+	assert.Nil(t, result.Error)
 }
 
 func TestStatusDetermination(t *testing.T) {
