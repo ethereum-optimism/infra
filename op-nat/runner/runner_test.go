@@ -419,13 +419,13 @@ func TestStatusDetermination(t *testing.T) {
 	tests := []struct {
 		name     string
 		setup    func() *GateResult
-		expected string
+		expected types.TestStatus
 	}{
 		{
 			name: "all tests passed",
 			setup: func() *GateResult {
 				return &GateResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusPass},
 						"test2": {Status: types.TestStatusPass},
 					},
@@ -437,7 +437,7 @@ func TestStatusDetermination(t *testing.T) {
 			name: "all tests skipped",
 			setup: func() *GateResult {
 				return &GateResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusSkip},
 						"test2": {Status: types.TestStatusSkip},
 					},
@@ -449,7 +449,7 @@ func TestStatusDetermination(t *testing.T) {
 			name: "mixed results with failure",
 			setup: func() *GateResult {
 				return &GateResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusPass},
 						"test2": {Status: types.TestStatusFail},
 						"test3": {Status: types.TestStatusSkip},
@@ -462,7 +462,7 @@ func TestStatusDetermination(t *testing.T) {
 			name: "mixed results without failure",
 			setup: func() *GateResult {
 				return &GateResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusPass},
 						"test2": {Status: types.TestStatusSkip},
 					},
@@ -485,13 +485,13 @@ func TestSuiteStatusDetermination(t *testing.T) {
 	tests := []struct {
 		name     string
 		setup    func() *SuiteResult
-		expected string
+		expected types.TestStatus
 	}{
 		{
 			name: "empty suite",
 			setup: func() *SuiteResult {
 				return &SuiteResult{
-					Tests: make(map[string]*TestResult),
+					Tests: make(map[string]*types.TestResult),
 				}
 			},
 			expected: types.TestStatusSkip,
@@ -500,7 +500,7 @@ func TestSuiteStatusDetermination(t *testing.T) {
 			name: "all tests passed",
 			setup: func() *SuiteResult {
 				return &SuiteResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusPass},
 						"test2": {Status: types.TestStatusPass},
 					},
@@ -512,7 +512,7 @@ func TestSuiteStatusDetermination(t *testing.T) {
 			name: "all tests skipped",
 			setup: func() *SuiteResult {
 				return &SuiteResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusSkip},
 						"test2": {Status: types.TestStatusSkip},
 					},
@@ -524,7 +524,7 @@ func TestSuiteStatusDetermination(t *testing.T) {
 			name: "mixed results",
 			setup: func() *SuiteResult {
 				return &SuiteResult{
-					Tests: map[string]*TestResult{
+					Tests: map[string]*types.TestResult{
 						"test1": {Status: types.TestStatusPass},
 						"test2": {Status: types.TestStatusSkip},
 						"test3": {Status: types.TestStatusFail},
