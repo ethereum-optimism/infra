@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/google/uuid"
 )
 
 // TestResult captures the outcome of a single test run
@@ -49,6 +51,7 @@ type RunnerResult struct {
 	Status   string // Change from Passed bool to Status string
 	Duration time.Duration
 	Stats    ResultStats
+	RunID    string
 }
 
 // ResultStats tracks test statistics at each level
@@ -72,6 +75,7 @@ type runner struct {
 	validators []types.ValidatorMetadata
 	workDir    string // Directory for running tests
 	log        log.Logger
+	runID      string
 }
 
 type Config struct {
@@ -115,8 +119,12 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 
 // RunAllTests implements the TestRunner interface
 func (r *runner) RunAllTests() (*RunnerResult, error) {
+	r.runID = uuid.New().String()
+	defer func() {
+		r.runID = ""
+	}()
 	start := time.Now()
-	r.log.Debug("Running all tests")
+	r.log.Debug("Running all tests", "run_id", r.runID)
 
 	result := &RunnerResult{
 		Gates: make(map[string]*GateResult),
@@ -130,7 +138,7 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 	result.Duration = time.Since(start)
 	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
-
+	result.RunID = r.runID
 	return result, nil
 }
 
@@ -298,6 +306,10 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) 
 	if result != nil {
 		result.Duration = time.Since(start)
 	}
+
+	// TODO: handle network
+	// https://github.com/ethereum-optimism/infra/issues/193
+	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type, result.Status)
 	return result, err
 }
 
