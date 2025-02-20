@@ -93,6 +93,9 @@ func (n *nat) Start(ctx context.Context) error {
 
 	n.printResultsTable(result.RunID)
 	fmt.Println(n.result.String())
+	if n.result.Status == types.TestStatusFail {
+		printGandalf()
+	}
 	n.config.Log.Info("OpNAT finished", "run_id", result.RunID)
 
 	return nil
