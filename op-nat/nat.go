@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 
@@ -77,7 +76,6 @@ func (n *nat) Start(ctx context.Context) error {
 	n.config.Log.Info("Starting OpNAT")
 	n.ctx = ctx
 	n.running.Store(true)
-	runID := uuid.New().String()
 
 	// Add detailed debug logging for paths
 	n.config.Log.Debug("NAT config paths",
@@ -93,9 +91,9 @@ func (n *nat) Start(ctx context.Context) error {
 	}
 	n.result = result
 
-	n.printResultsTable(runID)
+	n.printResultsTable(result.RunID)
 	fmt.Println(n.result.String())
-	n.config.Log.Info("OpNAT finished", "run_id", runID)
+	n.config.Log.Info("OpNAT finished", "run_id", result.RunID)
 
 	return nil
 }
