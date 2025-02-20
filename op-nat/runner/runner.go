@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"errors"
+
 	"github.com/ethereum-optimism/infra/op-nat/metrics"
 	"github.com/ethereum-optimism/infra/op-nat/registry"
 	"github.com/ethereum-optimism/infra/op-nat/types"
@@ -358,10 +360,9 @@ func isValidTestName(name string) bool {
 // runTestList runs a list of tests and aggregates their results
 func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
 	var result types.TestStatus = types.TestStatusPass
-	var errors []string
+	var testErrors []error
 
 	for _, testName := range testNames {
-		// Create a new metadata instance for this specific test
 		testMetadata := metadata
 		testMetadata.FuncName = testName
 
@@ -372,14 +373,16 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 
 		if testResult.Status == types.TestStatusFail {
 			result = types.TestStatusFail
-			errors = append(errors, fmt.Sprintf("%s: %s", testName, testResult.Error))
+			if testResult.Error != nil {
+				testErrors = append(testErrors, fmt.Errorf("%s: %w", testName, testResult.Error))
+			}
 		}
 	}
 
 	return &types.TestResult{
 		Metadata: metadata,
 		Status:   result,
-		Error:    r.formatErrors(errors),
+		Error:    errors.Join(testErrors...),
 	}, nil
 }
 
@@ -405,7 +408,6 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	result := types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass,
-		Error:    stdout.String(),
 	}
 
 	err := cmd.Run()
@@ -413,17 +415,17 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	// Check for timeout
 	if ctx.Err() == context.DeadlineExceeded {
 		result.Status = types.TestStatusFail
-		result.Error = fmt.Sprintf("test timed out after %v", r.timeout)
+		result.Error = fmt.Errorf("test timed out after %v", r.timeout)
 		return &result, nil
 	}
 
 	// Check if the command failed to run
 	if err != nil {
 		r.log.Debug("runSingleTest - test did not complete successfully", "name", metadata.FuncName, "error", err)
-		if _, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.Status = types.TestStatusFail
-			result.Error = stderr.String()
-			return &result, err
+			result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), stderr.String())
+			return &result, nil
 		}
 		return &result, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
 	}
@@ -544,8 +546,8 @@ func (r *RunnerResult) String() string {
 		for testName, test := range gate.Tests {
 			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [status=%s]\n",
 				testName, formatDuration(test.Duration), test.Status))
-			if test.Error != "" {
-				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error))
+			if test.Error != nil {
+				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error.Error()))
 			}
 		}
 
@@ -560,8 +562,8 @@ func (r *RunnerResult) String() string {
 			for testName, test := range suite.Tests {
 				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [status=%s]\n",
 					testName, formatDuration(test.Duration), test.Status))
-				if test.Error != "" {
-					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error))
+				if test.Error != nil {
+					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error.Error()))
 				}
 			}
 		}
