@@ -15,20 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// TestResult captures the outcome of a single test run
-type TestResult struct {
-	Metadata types.ValidatorMetadata
-	Status   string
-	Error    string
-	Duration time.Duration // Track test execution time
-}
-
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
 	ID          string
 	Description string
-	Tests       map[string]*TestResult // Map test names to results
-	Status      string                 // Change from Passed bool to Status string
+	Tests       map[string]*types.TestResult
+	Status      types.TestStatus
 	Duration    time.Duration
 	Stats       ResultStats
 }
@@ -37,18 +29,18 @@ type SuiteResult struct {
 type GateResult struct {
 	ID          string
 	Description string
-	Tests       map[string]*TestResult  // Direct gate tests
-	Suites      map[string]*SuiteResult // Test suites
-	Status      string                  // Change from Passed bool to Status string
+	Tests       map[string]*types.TestResult
+	Suites      map[string]*SuiteResult
+	Status      types.TestStatus
 	Duration    time.Duration
 	Stats       ResultStats
-	Inherited   []string // Track which gates this inherits from
+	Inherited   []string
 }
 
 // RunnerResult captures the complete test run results
 type RunnerResult struct {
 	Gates    map[string]*GateResult
-	Status   string // Change from Passed bool to Status string
+	Status   types.TestStatus
 	Duration time.Duration
 	Stats    ResultStats
 	RunID    string
@@ -67,7 +59,7 @@ type ResultStats struct {
 // TestRunner defines the interface for running acceptance tests
 type TestRunner interface {
 	RunAllTests() (*RunnerResult, error)
-	RunTest(metadata types.ValidatorMetadata) (*TestResult, error)
+	RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error)
 }
 
 type runner struct {
@@ -170,7 +162,7 @@ func (r *runner) processGate(gateName string, validators []types.ValidatorMetada
 	gateStart := time.Now()
 	gateResult := &GateResult{
 		ID:     gateName,
-		Tests:  make(map[string]*TestResult),
+		Tests:  make(map[string]*types.TestResult),
 		Suites: make(map[string]*SuiteResult),
 		Stats:  ResultStats{StartTime: gateStart},
 	}
@@ -226,7 +218,7 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 	suiteStart := time.Now()
 	suiteResult := &SuiteResult{
 		ID:    suiteName,
-		Tests: make(map[string]*TestResult),
+		Tests: make(map[string]*types.TestResult),
 		Stats: ResultStats{StartTime: suiteStart},
 	}
 	gateResult.Suites[suiteName] = suiteResult
@@ -250,7 +242,7 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 }
 
 // determineSuiteStatus determines the overall status of a suite based on its tests
-func determineSuiteStatus(suite *SuiteResult) string {
+func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
 	if len(suite.Tests) == 0 {
 		return types.TestStatusSkip
 	}
@@ -291,11 +283,11 @@ func (r *runner) processDirectTests(directTests []types.ValidatorMetadata, gateR
 }
 
 // RunTest implements the TestRunner interface
-func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) {
+func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	start := time.Now()
 	r.log.Info("Running test", "validator", metadata.ID)
 
-	var result *TestResult
+	var result *types.TestResult
 	var err error
 	if metadata.RunAll {
 		result, err = r.runAllTestsInPackage(metadata)
@@ -309,12 +301,12 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*TestResult, error) 
 
 	// TODO: handle network
 	// https://github.com/ethereum-optimism/infra/issues/193
-	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type, result.Status)
+	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), result.Status)
 	return result, err
 }
 
 // runAllTestsInPackage discovers and runs all tests in a package
-func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*TestResult, error) {
+func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	testNames, err := r.listTestsInPackage(metadata.Package)
 	if err != nil {
 		return nil, err
@@ -352,8 +344,8 @@ func isValidTestName(name string) bool {
 }
 
 // runTestList runs a list of tests and aggregates their results
-func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*TestResult, error) {
-	var result string = types.TestStatusPass
+func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
+	var result types.TestStatus = types.TestStatusPass
 	var errors []string
 
 	for _, testName := range testNames {
@@ -364,7 +356,7 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		}
 	}
 
-	return &TestResult{
+	return &types.TestResult{
 		Metadata: metadata,
 		Status:   result,
 		Error:    r.formatErrors(errors),
@@ -390,7 +382,11 @@ func (r *runner) runIndividualTest(pkg, testName string) (bool, string) {
 
 	err := cmd.Run()
 	output := stdout.String() + stderr.String()
-	r.log.Debug("runIndividualTest()", "output", output)
+	r.log.Debug("runIndividualTest",
+		"pkg", pkg,
+		"testName", testName,
+		"stdout", stdout.String(),
+		"stderr", stderr.String())
 
 	return err == nil, output
 }
@@ -404,7 +400,7 @@ func (r *runner) formatErrors(errors []string) string {
 }
 
 // runSingleTest runs a specific test
-func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, error) {
+func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	args := r.buildTestArgs(metadata)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = r.workDir
@@ -420,11 +416,11 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, e
 
 	err := cmd.Run()
 	output := stdout.String() + stderr.String()
-	fmt.Print(output)
+	fmt.Printf("----------\nstdout: %s\n----------\nstderr: %s\n----------\n", stdout.String(), stderr.String())
 
 	// Check for skipped tests in output
 	if strings.Contains(output, "--- SKIP:") {
-		return &TestResult{
+		return &types.TestResult{
 			Metadata: metadata,
 			Status:   types.TestStatusSkip,
 			Error:    output,
@@ -433,7 +429,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, e
 
 	if err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
-			return &TestResult{
+			return &types.TestResult{
 				Metadata: metadata,
 				Status:   types.TestStatusFail,
 				Error:    output,
@@ -443,7 +439,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*TestResult, e
 		return nil, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
 	}
 
-	return &TestResult{
+	return &types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass,
 	}, nil
@@ -566,7 +562,7 @@ func (r *RunnerResult) String() string {
 }
 
 // updateStats updates statistics at all levels
-func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *TestResult) {
+func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *types.TestResult) {
 	// Update test suite stats if applicable
 	if suite != nil {
 		suite.Stats.Total++
@@ -607,7 +603,7 @@ func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *T
 }
 
 // determineGateStatus determines the overall status of a gate based on its tests and suites
-func determineGateStatus(gate *GateResult) string {
+func determineGateStatus(gate *GateResult) types.TestStatus {
 	if len(gate.Tests) == 0 && len(gate.Suites) == 0 {
 		return types.TestStatusSkip
 	}
@@ -645,7 +641,7 @@ func determineGateStatus(gate *GateResult) string {
 }
 
 // determineRunnerStatus determines the overall status of the test run
-func determineRunnerStatus(result *RunnerResult) string {
+func determineRunnerStatus(result *RunnerResult) types.TestStatus {
 	if len(result.Gates) == 0 {
 		return types.TestStatusSkip
 	}

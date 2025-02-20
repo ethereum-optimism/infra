@@ -238,7 +238,7 @@ func (n *nat) printResultsTable(runID string) {
 	metrics.RecordAcceptance(
 		"todo",
 		runID,
-		getResultString(n.result.Status),
+		string(n.result.Status),
 		n.result.Stats.Total,
 		n.result.Stats.Passed,
 		n.result.Stats.Failed,
@@ -255,7 +255,7 @@ func boolToInt(b bool) int {
 }
 
 // getResultString returns a colored string representing the test result
-func getResultString(status string) string {
+func getResultString(status types.TestStatus) string {
 	switch status {
 	case types.TestStatusPass:
 		return "✓ pass"

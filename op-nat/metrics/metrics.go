@@ -19,7 +19,7 @@ const (
 
 var (
 	Debug                bool = true
-	validResults              = []string{types.TestStatusPass, types.TestStatusFail, types.TestStatusSkip}
+	validResults              = []types.TestStatus{types.TestStatusPass, types.TestStatusFail, types.TestStatusSkip}
 	nonAlphanumericRegex      = regexp.MustCompile(`[^a-zA-Z ]+`)
 
 	errorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -120,7 +120,7 @@ func RecordErrorDetails(label string, err error) {
 	RecordError(label)
 }
 
-func RecordValidation(network string, runID string, valName string, valType string, result string) {
+func RecordValidation(network string, runID string, valName string, valType string, result types.TestStatus) {
 	if !isValidResult(result) {
 		log.Error("RecordValidation - invalid result", "result", result)
 		return
@@ -134,7 +134,7 @@ func RecordValidation(network string, runID string, valName string, valType stri
 			"type", valType,
 			"result", result)
 	}
-	validationsTotal.WithLabelValues(network, runID, valName, valType, result).Inc()
+	validationsTotal.WithLabelValues(network, runID, valName, valType, string(result)).Inc()
 }
 
 func RecordAcceptance(
@@ -153,6 +153,6 @@ func RecordAcceptance(
 	acceptanceTestDuration.WithLabelValues(network, runID).Set(duration.Seconds())
 }
 
-func isValidResult(result string) bool {
+func isValidResult(result types.TestStatus) bool {
 	return slices.Contains(validResults, result)
 }
