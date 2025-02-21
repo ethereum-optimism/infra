@@ -35,6 +35,12 @@ var (
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
 		Usage:    "Gate to run (eg. 'alphanet')",
 	}
+	GoBinary = &cli.StringFlag{
+		Name:    "go-binary",
+		Value:   "go",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "GO_BINARY"),
+		Usage:   "Path to the Go binary to use for running tests",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -43,7 +49,9 @@ var requiredFlags = []cli.Flag{
 	Gate,
 }
 
-var optionalFlags []cli.Flag
+var optionalFlags = []cli.Flag{
+	GoBinary,
+}
 var Flags []cli.Flag
 
 func init() {

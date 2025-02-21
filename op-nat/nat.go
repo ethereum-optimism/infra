@@ -55,6 +55,7 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		WorkDir:    config.TestDir,
 		Log:        config.Log,
 		TargetGate: config.TargetGate,
+		GoBinary:   config.GoBinary,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
