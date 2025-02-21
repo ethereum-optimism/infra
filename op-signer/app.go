@@ -266,11 +266,11 @@ func ClientSign(action SignActionType) func(cliCtx *cli.Context) error {
 				return fmt.Errorf("failed to unmarshal block payload-hash argument: %w", err)
 			}
 			var chainID eth.ChainID
-			if err := payloadHash.UnmarshalText([]byte(chainIDStr)); err != nil {
+			if err := chainID.UnmarshalText([]byte(chainIDStr)); err != nil {
 				return fmt.Errorf("failed to unmarshal block chain-ID argument: %w", err)
 			}
 			var domain eth.Bytes32
-			if err := payloadHash.UnmarshalText([]byte(domainStr)); err != nil {
+			if err := domain.UnmarshalText([]byte(domainStr)); err != nil {
 				return fmt.Errorf("failed to unmarshal block domain argument: %w", err)
 			}
 			var signature eth.Bytes65
