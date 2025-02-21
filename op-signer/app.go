@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,14 +19,15 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
+	"github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum-optimism/optimism/op-service/tls/certman"
 
-	"github.com/ethereum-optimism/infra/op-signer/client"
 	"github.com/ethereum-optimism/infra/op-signer/service"
 )
 
@@ -201,19 +203,28 @@ func MainAppAction(version string) cliapp.LifecycleAction {
 type SignActionType string
 
 const (
-	SignTransaction  SignActionType = "transaction"
-	SignBlockPayload SignActionType = "block_payload"
+	SignTransaction    SignActionType = "transaction"
+	SignBlockPayload   SignActionType = "block_payload"
+	SignBlockPayloadV2 SignActionType = "block_payloadV2"
 )
 
-func ClientSign(version string, action SignActionType) func(cliCtx *cli.Context) error {
+func ClientSign(action SignActionType) func(cliCtx *cli.Context) error {
 	return func(cliCtx *cli.Context) error {
-		cfg := NewConfig(cliCtx)
+		ctx := cliCtx.Context
+
+		cfg := signer.ReadCLIConfig(cliCtx)
 		if err := cfg.Check(); err != nil {
 			return fmt.Errorf("invalid CLI flags: %w", err)
 		}
 
-		l := oplog.NewLogger(os.Stdout, cfg.LogConfig)
+		logCfg := oplog.ReadCLIConfig(cliCtx)
+		l := oplog.NewLogger(os.Stdout, logCfg)
 		oplog.SetGlobalLogHandler(l.Handler())
+
+		cl, err := signer.NewSignerClient(l, cfg.Endpoint, cfg.Headers, cfg.TLSConfig)
+		if err != nil {
+			return err
+		}
 
 		switch action {
 		case SignTransaction:
@@ -226,47 +237,64 @@ func ClientSign(version string, action SignActionType) func(cliCtx *cli.Context)
 				return errors.New("failed to decode transaction argument")
 			}
 
-			client, err := client.NewSignerClient(l, cfg.ClientEndpoint, cfg.TLSConfig)
-			if err != nil {
-				return err
-			}
-
 			tx := &types.Transaction{}
 			if err := tx.UnmarshalBinary(txraw); err != nil {
 				return fmt.Errorf("failed to unmarshal transaction argument: %w", err)
 			}
-
-			tx, err = client.SignTransaction(context.Background(), tx)
+			chainID := tx.ChainId()
+			sender, err := types.LatestSignerForChainID(chainID).Sender(tx)
+			if err != nil {
+				return fmt.Errorf("failed to determine tx sender: %w", err)
+			}
+			tx, err = cl.SignTransaction(ctx, chainID, sender, tx)
 			if err != nil {
 				return err
 			}
 
-			result, _ := tx.MarshalJSON()
+			result, _ := json.MarshalIndent(tx, "  ", "  ")
 			fmt.Println(string(result))
 
-		case SignBlockPayload:
-			blockPayloadHash := cliCtx.Args().Get(0)
-			if blockPayloadHash == "" {
-				return errors.New("no block payload argument was provided")
+		case SignBlockPayload, SignBlockPayloadV2:
+			if count := cliCtx.Args().Len(); count != 3 {
+				return fmt.Errorf("expected 3 arguments, but got: %d", count)
 			}
-
-			client, err := client.NewSignerClient(l, cfg.ClientEndpoint, cfg.TLSConfig)
+			payloadHashStr := cliCtx.Args().Get(0)
+			chainIDStr := cliCtx.Args().Get(1)
+			domainStr := cliCtx.Args().Get(2)
+			var payloadHash common.Hash
+			if err := payloadHash.UnmarshalText([]byte(payloadHashStr)); err != nil {
+				return fmt.Errorf("failed to unmarshal block payload-hash argument: %w", err)
+			}
+			var chainID eth.ChainID
+			if err := payloadHash.UnmarshalText([]byte(chainIDStr)); err != nil {
+				return fmt.Errorf("failed to unmarshal block chain-ID argument: %w", err)
+			}
+			var domain eth.Bytes32
+			if err := payloadHash.UnmarshalText([]byte(domainStr)); err != nil {
+				return fmt.Errorf("failed to unmarshal block domain argument: %w", err)
+			}
+			var signature eth.Bytes65
+			var err error
+			switch action {
+			case SignBlockPayload:
+				signature, err = cl.SignBlockPayload(ctx, &signer.BlockPayloadArgs{
+					Domain:        domain,
+					ChainID:       chainID.ToBig(),
+					PayloadHash:   payloadHash[:],
+					SenderAddress: nil,
+				})
+			case SignBlockPayloadV2:
+				signature, err = cl.SignBlockPayloadV2(ctx, &signer.BlockPayloadArgsV2{
+					Domain:        domain,
+					ChainID:       chainID,
+					PayloadHash:   payloadHash,
+					SenderAddress: nil,
+				})
+			}
 			if err != nil {
 				return err
 			}
-
-			signingHash := common.Hash{}
-			if err := signingHash.UnmarshalText([]byte(blockPayloadHash)); err != nil {
-				return fmt.Errorf("failed to unmarshal block payload argument: %w", err)
-			}
-
-			signature, err := client.SignBlockPayload(context.Background(), signingHash)
-			if err != nil {
-				return err
-			}
-
-			fmt.Println(string(signature[:]))
-
+			fmt.Println(signature.String())
 		case "":
 			return errors.New("no action was provided")
 		}
