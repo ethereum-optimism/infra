@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/ethereum-optimism/infra/op-signer/service/provider"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	clientSigner "github.com/ethereum-optimism/optimism/op-service/signer"
 )
 
@@ -199,43 +200,68 @@ func TestSignBlockPayload(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	blockPayloadArgs := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte("c0ffee"), &sender)
-	signingHash, err := blockPayloadArgs.ToSigningHash()
+	payloadHash := clientSigner.PayloadHash([]byte("c0ffee"))
+	blockPayloadArgs := clientSigner.BlockPayloadArgs{
+		Domain:        [32]byte{},
+		ChainID:       big.NewInt(1),
+		PayloadHash:   payloadHash[:],
+		SenderAddress: &sender,
+	}
+
+	msg, err := blockPayloadArgs.Message()
 	require.NoError(t, err)
+	signingHash := msg.ToSigningHash()
+
+	blockPayloadArgsV2 := clientSigner.BlockPayloadArgsV2{
+		Domain:        msg.Domain,
+		ChainID:       msg.ChainID,
+		PayloadHash:   msg.PayloadHash,
+		SenderAddress: blockPayloadArgs.SenderAddress,
+	}
 
 	signature, err := crypto.Sign(signingHash.Bytes(), priv)
 	require.NoError(t, err)
 
-	missingChainId := clientSigner.NewBlockPayloadArgs([32]byte{}, nil, []byte("c0ffee"), &sender)
+	missingChainId := blockPayloadArgs
+	missingChainId.ChainID = nil
+	missingChainIdV2 := blockPayloadArgsV2
+	missingChainIdV2.ChainID = eth.ChainID{}
 
-	missingPayloadHash := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte{}, &sender)
+	missingPayloadHash := blockPayloadArgs
 	missingPayloadHash.PayloadHash = nil
+	missingPayloadHashV2 := blockPayloadArgsV2
+	missingPayloadHashV2.PayloadHash = common.Hash{}
 
 	random := common.HexToAddress("1234")
-	invalidSender := clientSigner.NewBlockPayloadArgs([32]byte{}, big.NewInt(1), []byte("c0ffee"), &random)
+	invalidSender := blockPayloadArgs
+	invalidSender.SenderAddress = &random
+	invalidSenderV2 := blockPayloadArgsV2
+	invalidSenderV2.SenderAddress = &random
 
 	tests := []struct {
 		testName    string
 		args        clientSigner.BlockPayloadArgs
+		argsV2      clientSigner.BlockPayloadArgsV2
 		signingHash []byte
 		clientName  string
 		wantKeyName string
 		wantErrCode int
 	}{
-		{"happy path", *blockPayloadArgs, signingHash.Bytes(), "client.oplabs.co", "keyName", 0},
-		{"happy path - different client and key", *blockPayloadArgs, signingHash.Bytes(), "alt-client.oplabs.co", "altKeyName", 0},
+		{"happy path", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "client.oplabs.co", "keyName", 0},
+		{"happy path - different client and key", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "alt-client.oplabs.co", "altKeyName", 0},
 
-		{"chainId not specified", *missingChainId, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
-		{"invalid chainId", *blockPayloadArgs, signingHash.Bytes(), "invalid-chainId-client.oplabs.co", "keyName", -32013},
-		{"payload hash not specified", *missingPayloadHash, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
+		{"chainId not specified", missingChainId, missingChainIdV2, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
+		{"invalid chainId", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "invalid-chainId-client.oplabs.co", "keyName", -32013},
+		{"payload hash not specified", missingPayloadHash, missingPayloadHashV2, signingHash.Bytes(), "client.oplabs.co", "keyName", -32012},
 
-		{"unspecified sender", *blockPayloadArgs, signingHash.Bytes(), "unspecified-sender-client.oplabs.co", "keyName", 403},
-		{"invalid sender", *invalidSender, signingHash.Bytes(), "client.oplabs.co", "keyName", 403},
-		{"client not authorized", *blockPayloadArgs, signingHash.Bytes(), "forbidden-client.oplabs.co", "keyName", 403},
-		{"client empty", *blockPayloadArgs, signingHash.Bytes(), "", "", 403},
+		{"unspecified sender", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "unspecified-sender-client.oplabs.co", "keyName", 403},
+		{"invalid sender", invalidSender, invalidSenderV2, signingHash.Bytes(), "client.oplabs.co", "keyName", 403},
+		{"client not authorized", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "forbidden-client.oplabs.co", "keyName", 403},
+		{"client empty", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "", "", 403},
 	}
 	for _, tt := range tests {
-		t.Run(tt.testName, func(t *testing.T) {
+
+		runCase := func(t *testing.T, fn func(ctx context.Context, service *SignerService) (resp *eth.Bytes65, err error)) {
 			mockSignatureProvider := provider.NewMockSignatureProvider(ctrl)
 			service := NewSignerServiceWithProvider(log.Root(), blockPayloadConfig, mockSignatureProvider)
 
@@ -245,7 +271,9 @@ func TestSignBlockPayload(t *testing.T) {
 					SignDigest(ctx, tt.wantKeyName, tt.signingHash).
 					Return(signature, nil)
 			}
-			resp, err := service.opsigner.SignBlockPayload(ctx, tt.args)
+
+			resp, err := fn(ctx, service)
+
 			if tt.wantErrCode == 0 {
 				assert.Nil(t, err)
 				if assert.NotNil(t, resp) {
@@ -265,6 +293,19 @@ func TestSignBlockPayload(t *testing.T) {
 					assert.Fail(t, "returned error is not an rpc.Error or rpc.HTTPError")
 				}
 			}
+		}
+
+		t.Run(tt.testName, func(t *testing.T) {
+			t.Run("V1", func(t *testing.T) {
+				runCase(t, func(ctx context.Context, service *SignerService) (resp *eth.Bytes65, err error) {
+					return service.opsigner.SignBlockPayload(ctx, tt.args)
+				})
+			})
+			t.Run("V2", func(t *testing.T) {
+				runCase(t, func(ctx context.Context, service *SignerService) (resp *eth.Bytes65, err error) {
+					return service.opsigner.SignBlockPayloadV2(ctx, tt.argsV2)
+				})
+			})
 		})
 	}
 }

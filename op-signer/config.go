@@ -33,18 +33,6 @@ func CLIFlags(envPrefix string) []cli.Flag {
 	return flags
 }
 
-func ClientSignCLIFlags(envPrefix string) []cli.Flag {
-	flags := []cli.Flag{
-		&cli.StringFlag{
-			Name:    ClientEndpointFlagName,
-			Usage:   "Signer endpoint the client will connect to",
-			Value:   "http://localhost:8080",
-			EnvVars: opservice.PrefixEnvVar(envPrefix, "CLIENT_ENDPOINT"),
-		},
-	}
-	return flags
-}
-
 type Config struct {
 	ClientEndpoint    string
 	ServiceConfigPath string

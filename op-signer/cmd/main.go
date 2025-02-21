@@ -11,6 +11,7 @@ import (
 	signer "github.com/ethereum-optimism/infra/op-signer"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	clsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 )
 
 var (
@@ -35,15 +36,21 @@ func main() {
 			Subcommands: []*cli.Command{
 				{
 					Name:   string(signer.SignTransaction),
-					Usage:  "sign a transaction",
-					Action: signer.ClientSign(Version, signer.SignTransaction),
-					Flags:  cliapp.ProtectFlags(signer.ClientSignCLIFlags("SIGNER")),
+					Usage:  "sign a transaction, 1 arg: a hex-encoded tx",
+					Action: signer.ClientSign(signer.SignTransaction),
+					Flags:  cliapp.ProtectFlags(clsigner.CLIFlags("OP_SIGNER", "CLIENT")),
 				},
 				{
 					Name:   string(signer.SignBlockPayload),
-					Usage:  "sign a block payload",
-					Action: signer.ClientSign(Version, signer.SignBlockPayload),
-					Flags:  cliapp.ProtectFlags(signer.ClientSignCLIFlags("SIGNER")),
+					Usage:  "sign a block payload using V1 API, 3 args: payloadHash, chainID, domain",
+					Action: signer.ClientSign(signer.SignBlockPayload),
+					Flags:  cliapp.ProtectFlags(clsigner.CLIFlags("OP_SIGNER", "CLIENT")),
+				},
+				{
+					Name:   string(signer.SignBlockPayloadV2),
+					Usage:  "sign a block payload using V2 API, 3 args: payloadHash, chainID, domain",
+					Action: signer.ClientSign(signer.SignBlockPayloadV2),
+					Flags:  cliapp.ProtectFlags(clsigner.CLIFlags("OP_SIGNER", "CLIENT")),
 				},
 			},
 		},
