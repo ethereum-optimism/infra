@@ -34,7 +34,7 @@ services:
       dockerfile: op-nat/Dockerfile
     volumes:
       - ./devnets:/devnets
-    command: ["--kurtosis.devnet.manifest", "/devnets/simple-devnet.json", "--log.level", "debug"]
+    command: ["--gate", "localnet", "--manifest", "/devnets/simple-devnet.json", "--testdir", "../../optimism", "--validators", "example-validators.yaml", "--log.level", "debug"]
     depends_on:
       - prometheus
       - grafana
