@@ -15,6 +15,7 @@ type Config struct {
 	TestDir         string
 	ValidatorConfig string
 	TargetGate      string
+	GoBinary        string
 
 	Log log.Logger
 }
@@ -49,6 +50,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		TestDir:         absTestDir,
 		ValidatorConfig: absValidatorConfig,
 		TargetGate:      gate,
+		GoBinary:        ctx.String(flags.GoBinary.Name),
 		Log:             log,
 	}, nil
 }

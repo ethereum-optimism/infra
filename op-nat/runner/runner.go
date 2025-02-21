@@ -70,7 +70,8 @@ type runner struct {
 	workDir    string // Directory for running tests
 	log        log.Logger
 	runID      string
-	timeout    time.Duration // Add timeout configuration
+	timeout    time.Duration // Test timeout
+	goBinary   string        // Path to the Go binary
 }
 
 type Config struct {
@@ -78,7 +79,8 @@ type Config struct {
 	TargetGate string
 	WorkDir    string
 	Log        log.Logger
-	Timeout    time.Duration // Add timeout configuration
+	Timeout    time.Duration // Test timeout
+	GoBinary   string        // path to the Go binary
 }
 
 // NewTestRunner creates a new test runner instance
@@ -109,12 +111,17 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.Timeout = 5 * time.Minute // Default timeout
 	}
 
+	if cfg.GoBinary == "" {
+		cfg.GoBinary = "go" // Default to "go" if not specified
+	}
+
 	return &runner{
 		registry:   cfg.Registry,
 		validators: validators,
 		workDir:    cfg.WorkDir,
 		log:        cfg.Log,
 		timeout:    cfg.Timeout,
+		goBinary:   cfg.GoBinary,
 	}, nil
 }
 
@@ -329,7 +336,7 @@ func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Shorter timeout for listing
 	defer cancel()
 
-	listCmd := exec.CommandContext(ctx, "go", "test", pkg, "-list", "^Test")
+	listCmd := exec.CommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
 	listCmd.Dir = r.workDir
 	var listOut, listOutErr bytes.Buffer
 	listCmd.Stdout = &listOut
@@ -392,7 +399,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	defer cancel()
 
 	args := r.buildTestArgs(metadata)
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := exec.CommandContext(ctx, r.goBinary, args...)
 	cmd.Dir = r.workDir
 
 	var stdout, stderr bytes.Buffer
@@ -403,7 +410,8 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		"dir", cmd.Dir,
 		"package", metadata.Package,
 		"command", cmd.String(),
-		"timeout", r.timeout)
+		"timeout", r.timeout,
+		"goBinary", r.goBinary)
 
 	result := types.TestResult{
 		Metadata: metadata,
