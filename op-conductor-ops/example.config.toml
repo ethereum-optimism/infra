@@ -31,7 +31,7 @@ node_rpc_url = "https://op-network-1-sequencer-0-op-node"
 voting = true
 
 [sequencers.op-network-1-sequencer-1]
-raft_addr = "op-network-1-sequencer-1-op-conductor-raft.50050"
+raft_addr = "op-network-1-sequencer-1-op-conductor-raft:50050"
 conductor_rpc_url = "https://op-network-1-sequencer-1-op-conductor"
 node_rpc_url = "https://op-network-1-sequencer-1-op-node"
 voting = false
