@@ -17,7 +17,7 @@ type FrontendRateLimiter interface {
 	//
 	// No error will be returned if the limit could not be taken
 	// as a result of the requestor being over the limit.
-	Take(ctx context.Context, key string) (bool, error)
+	Take(ctx context.Context, key string, amount int) (bool, error)
 }
 
 // limitedKeys is a wrapper around a map that stores a truncated
@@ -36,16 +36,12 @@ func newLimitedKeys(t int64) *limitedKeys {
 	}
 }
 
-func (l *limitedKeys) Take(key string, max int) bool {
+func (l *limitedKeys) Take(key string, amount, max int) bool {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
-	val, ok := l.keys[key]
-	if !ok {
-		l.keys[key] = 0
-		val = 0
-	}
-	l.keys[key] = val + 1
-	return val < max
+	val := l.keys[key] + amount
+	l.keys[key] = val
+	return val <= max
 }
 
 // MemoryFrontendRateLimiter is a rate limiter that stores
@@ -70,7 +66,7 @@ func NewMemoryFrontendRateLimit(dur time.Duration, max int) FrontendRateLimiter 
 	}
 }
 
-func (m *MemoryFrontendRateLimiter) Take(ctx context.Context, key string) (bool, error) {
+func (m *MemoryFrontendRateLimiter) Take(ctx context.Context, key string, amount int) (bool, error) {
 	m.mtx.Lock()
 	// Create truncated timestamp
 	truncTS := truncateNow(m.dur)
@@ -86,7 +82,7 @@ func (m *MemoryFrontendRateLimiter) Take(ctx context.Context, key string) (bool,
 
 	m.mtx.Unlock()
 
-	return limiter.Take(key, m.max), nil
+	return limiter.Take(key, amount, m.max), nil
 }
 
 // RedisFrontendRateLimiter is a rate limiter that stores data in Redis.
@@ -108,12 +104,12 @@ func NewRedisFrontendRateLimiter(r redis.UniversalClient, dur time.Duration, max
 	}
 }
 
-func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string) (bool, error) {
+func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string, amount int) (bool, error) {
 	var incr *redis.IntCmd
 	truncTS := truncateNow(r.dur)
 	fullKey := fmt.Sprintf("rate_limit:%s:%s:%d", r.prefix, key, truncTS)
 	_, err := r.r.Pipelined(ctx, func(pipe redis.Pipeliner) error {
-		incr = pipe.Incr(ctx, fullKey)
+		incr = pipe.IncrBy(ctx, fullKey, int64(amount))
 		pipe.PExpire(ctx, fullKey, r.dur-time.Millisecond)
 		return nil
 	})
@@ -122,14 +118,14 @@ func (r *RedisFrontendRateLimiter) Take(ctx context.Context, key string) (bool, 
 		return false, err
 	}
 
-	return incr.Val()-1 < int64(r.max), nil
+	return incr.Val() <= int64(r.max), nil
 }
 
 type noopFrontendRateLimiter struct{}
 
 var NoopFrontendRateLimiter = &noopFrontendRateLimiter{}
 
-func (n *noopFrontendRateLimiter) Take(ctx context.Context, key string) (bool, error) {
+func (n *noopFrontendRateLimiter) Take(ctx context.Context, key string, amount int) (bool, error) {
 	return true, nil
 }
 
@@ -155,9 +151,9 @@ func NewFallbackRateLimiter(primary FrontendRateLimiter, secondary FrontendRateL
 	}
 }
 
-func (r *FallbackRateLimiter) Take(ctx context.Context, key string) (bool, error) {
-	if ok, err := r.primary.Take(ctx, key); err != nil {
-		return r.secondary.Take(ctx, key)
+func (r *FallbackRateLimiter) Take(ctx context.Context, key string, amount int) (bool, error) {
+	if ok, err := r.primary.Take(ctx, key, amount); err != nil {
+		return r.secondary.Take(ctx, key, amount)
 	} else {
 		return ok, err
 	}
