@@ -131,20 +131,25 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 		ClientCAs:      caCertPool,
 		ClientAuth:     tls.VerifyClientCertIfGiven, // necessary for k8s healthz probes, but we check the cert in service/auth.go
 	}
-	serverTlsConfig := &oprpc.ServerTLSConfig{
+	serverTlsConfig := &httputil.ServerTLSConfig{
 		Config:    tlsConfig,
 		CLIConfig: &cfg.TLSConfig,
 	}
 
 	rpcCfg := cfg.RPCConfig
-	s.rpc = oprpc.NewServer(
-		rpcCfg.ListenAddr,
-		rpcCfg.ListenPort,
-		s.version,
-		oprpc.WithLogger(s.log),
-		oprpc.WithTLSConfig(serverTlsConfig),
-		oprpc.WithMiddleware(service.NewAuthMiddleware()),
-		oprpc.WithHTTPRecorder(opmetrics.NewPromHTTPRecorder(s.registry, "signer")),
+	s.rpc = oprpc.ServerFromConfig(
+		&oprpc.ServerConfig{
+			Host: rpcCfg.ListenAddr,
+			Port: rpcCfg.ListenPort,
+			RpcOptions: []oprpc.Option{
+				oprpc.WithMiddleware(service.NewAuthMiddleware()),
+				oprpc.WithHTTPRecorder(opmetrics.NewPromHTTPRecorder(s.registry, "signer")),
+				oprpc.WithLogger(s.log),
+			},
+			HttpOptions: []httputil.Option{
+				httputil.WithServerTLS(serverTlsConfig),
+			},
+		},
 	)
 
 	serviceCfg, err := service.ReadConfig(cfg.ServiceConfigPath)
