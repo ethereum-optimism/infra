@@ -81,8 +81,8 @@ github.com/envoyproxy/go-control-plane v0.9.10-0.20210907150352-cf90f659a021/go.
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/ethereum-optimism/op-geth v1.101500.2-rc.1 h1:CCQtyKKobjMbK9jYd676YbH6Xcvntdn6jIOxFTCb5B8=
 github.com/ethereum-optimism/op-geth v1.101500.2-rc.1/go.mod h1:OMpyVMMy5zpAAHlR5s/aGbXRk+7cIKczUEIJj54APbY=
-github.com/ethereum-optimism/optimism v1.11.3-0.20250227141522-48b645a69aa4 h1:5yNGINxEMKNcw+jWd6ydv+UGBGEuSAARb+1YCpvAJuo=
-github.com/ethereum-optimism/optimism v1.11.3-0.20250227141522-48b645a69aa4/go.mod h1:tjdwXgEUi2UsbwYMjBxJBVuxXgYsCCmkX9mk9Aa6TfA=
+github.com/ethereum-optimism/optimism v1.11.3-0.20250228011426-e453fdff5b4f h1:OE/vI0CPQwVSJ0E1r6x2gSNFCPr8ESFglP16crrhBTI=
+github.com/ethereum-optimism/optimism v1.11.3-0.20250228011426-e453fdff5b4f/go.mod h1:tjdwXgEUi2UsbwYMjBxJBVuxXgYsCCmkX9mk9Aa6TfA=
 github.com/ethereum/c-kzg-4844 v1.0.0 h1:0X1LBXxaEtYD9xsyj9B9ctQEZIpnvVDeoBx8aHEwTNA=
 github.com/ethereum/c-kzg-4844 v1.0.0/go.mod h1:VewdlzQmpT5QSrVhbBuGoCdFJkpaJlO1aQputP83wc0=
 github.com/ethereum/go-verkle v0.2.2 h1:I2W0WjnrFUIzzVPwm8ykY+7pL2d4VhlsePn4j7cnFk8=
