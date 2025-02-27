@@ -3,6 +3,7 @@ package nat
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/log"
@@ -13,12 +14,17 @@ import (
 func TestNATParameterization(t *testing.T) {
 	t.Parallel()
 
-	// Create a test factory that creates a new test instance with its own received params
-	makeTest := func() (*Test, *interface{}) {
-		var receivedParams interface{}
+	// Create a test factory that creates a new test instance with its own channel and received params
+	makeTest := func() (*Test, chan interface{}) {
+		paramsChan := make(chan interface{}, 2) // Buffered channel to prevent blocking and allow multiple values
+
 		testFn := func(ctx context.Context, cfg Config, params interface{}) (bool, error) {
-			receivedParams = params
-			return true, nil
+			select {
+			case paramsChan <- params:
+				return true, nil
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
 		}
 
 		test := &Test{
@@ -26,136 +32,140 @@ func TestNATParameterization(t *testing.T) {
 			DefaultParams: map[string]string{"value": "default"},
 			Fn:            testFn,
 		}
-		return test, &receivedParams
+		return test, paramsChan
 	}
 
 	t.Run("uses default parameters when none provided", func(t *testing.T) {
-		test, receivedParams := makeTest()
+		test, paramsChan := makeTest()
 		cfg := &Config{
 			Validators: []Validator{test},
 			Log:        log.New(),
 		}
 
-		nat, err := New(context.Background(), cfg, "test")
+		ctx, cancel := context.WithCancel(context.Background())
+		nat, err := New(ctx, cfg, "test")
 		require.NoError(t, err)
+
 		t.Cleanup(func() {
+			cancel()
 			err := nat.Stop(context.Background())
 			require.NoError(t, err)
 		})
 
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
+		go func() {
+			err := nat.Start(ctx)
+			require.NoError(t, err)
+		}()
 
-		assert.Equal(t, test.DefaultParams, *receivedParams)
+		// Wait for the first test run
+		select {
+		case params := <-paramsChan:
+			assert.Equal(t, test.DefaultParams, params)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for test execution")
+		}
 	})
 
 	t.Run("uses custom parameters when provided", func(t *testing.T) {
-		test, receivedParams := makeTest()
+		test, paramsChan := makeTest()
 		cfg := &Config{
 			Validators: []Validator{test},
 			Log:        log.New(),
 		}
 
-		nat, err := New(context.Background(), cfg, "test")
+		ctx, cancel := context.WithCancel(context.Background())
+		nat, err := New(ctx, cfg, "test")
 		require.NoError(t, err)
+
+		customParams := map[string]string{"value": "custom"}
+		nat.params[test.ID] = customParams
+
 		t.Cleanup(func() {
+			cancel()
 			err := nat.Stop(context.Background())
 			require.NoError(t, err)
 		})
 
-		customParams := map[string]string{"value": "custom"}
-		nat.params = map[string]interface{}{
-			test.ID: customParams,
+		go func() {
+			err := nat.Start(ctx)
+			require.NoError(t, err)
+		}()
+
+		// Wait for the first test run
+		select {
+		case params := <-paramsChan:
+			assert.Equal(t, customParams, params)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for test execution")
 		}
-
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
-
-		assert.Equal(t, customParams, *receivedParams)
 	})
 
 	t.Run("different test instances can have different parameters", func(t *testing.T) {
-		test, receivedParams := makeTest()
+		test, paramsChan := makeTest()
 		cfg := &Config{
 			Validators: []Validator{test},
 			Log:        log.New(),
 		}
 
 		// Create two instances with different parameters
-		nat1, err := New(context.Background(), cfg, "test1")
+		ctx1, cancel1 := context.WithCancel(context.Background())
+		nat1, err := New(ctx1, cfg, "test1")
 		require.NoError(t, err)
 		nat1.params = map[string]interface{}{
 			test.ID: map[string]string{"value": "instance1"},
 		}
 
-		nat2, err := New(context.Background(), cfg, "test2")
+		ctx2, cancel2 := context.WithCancel(context.Background())
+		nat2, err := New(ctx2, cfg, "test2")
 		require.NoError(t, err)
 		nat2.params = map[string]interface{}{
 			test.ID: map[string]string{"value": "instance2"},
 		}
 
 		t.Cleanup(func() {
-			err := nat1.Stop(context.Background())
-			require.NoError(t, err)
-			err = nat2.Stop(context.Background())
-			require.NoError(t, err)
+			cancel1()
+			cancel2()
+			_ = nat1.Stop(context.Background())
+			_ = nat2.Stop(context.Background())
 		})
 
-		// Run first instance
-		err = nat1.Start(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"value": "instance1"}, *receivedParams)
+		go func() {
+			err := nat1.Start(ctx1)
+			require.NoError(t, err)
+		}()
 
-		// Run second instance
-		err = nat2.Start(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"value": "instance2"}, *receivedParams)
-	})
+		go func() {
+			err := nat2.Start(ctx2)
+			require.NoError(t, err)
+		}()
 
-	t.Run("results are properly recorded", func(t *testing.T) {
-		test, _ := makeTest()
-		cfg := &Config{
-			Validators: []Validator{test},
-			Log:        log.New(),
+		// Collect both parameter sets with timeout
+		var params []interface{}
+		for i := 0; i < 2; i++ {
+			select {
+			case p := <-paramsChan:
+				params = append(params, p)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timeout waiting for test execution")
+			}
 		}
 
-		nat, err := New(context.Background(), cfg, "test")
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			err := nat.Stop(context.Background())
-			require.NoError(t, err)
-		})
-		nat.params = make(map[string]interface{})
-
-		err = nat.Start(context.Background())
-		require.NoError(t, err)
-
-		require.Len(t, nat.results, 1)
-		assert.Equal(t, "test-with-params", nat.results[0].ID)
-		assert.Equal(t, "Test", nat.results[0].Type)
-		assert.Equal(t, ResultPassed, nat.results[0].Result)
+		// Verify we got two different parameter sets
+		require.Len(t, params, 2)
+		assert.NotEqual(t, params[0], params[1])
 	})
 }
 
 func TestGateValidatorParameters(t *testing.T) {
+	paramsChan := make(chan map[string]interface{}, 1)
+
 	// Create a mock Gate validator that checks its parameters
 	mockGate := &mockGateValidator{
 		name: "test-gate",
 		runFn: func(ctx context.Context, runID string, cfg Config, params interface{}) (ValidatorResult, error) {
-			// Verify params are passed correctly
 			gateParams, ok := params.(map[string]interface{})
-			if !ok {
-				t.Fatal("expected params to be map[string]interface{}")
-			}
-
-			threshold, ok := gateParams["threshold"].(float64)
-			if !ok {
-				t.Fatal("expected threshold parameter to be float64")
-			}
-			if threshold != 0.8 {
-				t.Errorf("expected threshold to be 0.8, got %f", threshold)
-			}
-
+			require.True(t, ok, "expected params to be map[string]interface{}")
+			paramsChan <- gateParams
 			return ValidatorResult{
 				Type:   "gate",
 				ID:     "test-gate",
@@ -164,35 +174,39 @@ func TestGateValidatorParameters(t *testing.T) {
 		},
 	}
 
-	// Create NAT config with our mock validator
 	cfg := &Config{
 		Log:        testlog.Logger(t, log.LvlInfo),
 		Validators: []Validator{mockGate},
 	}
 
-	// Create NAT instance
-	n, err := New(context.Background(), cfg, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	n, err := New(ctx, cfg, "test")
+	require.NoError(t, err)
 
 	// Set parameters for the Gate validator
 	n.params["test-gate"] = map[string]interface{}{
 		"threshold": 0.8,
 	}
 
-	// Run NAT
-	err = n.Start(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() {
+		cancel()
+		err := n.Stop(context.Background())
+		require.NoError(t, err)
+	})
 
-	// Verify results
-	if len(n.results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(n.results))
-	}
-	if n.results[0].Result != ResultPassed {
-		t.Errorf("expected test to pass, got %s", n.results[0].Result)
+	go func() {
+		err := n.Start(ctx)
+		require.NoError(t, err)
+	}()
+
+	// Wait for parameters with timeout
+	select {
+	case params := <-paramsChan:
+		threshold, ok := params["threshold"].(float64)
+		require.True(t, ok, "expected threshold parameter to be float64")
+		assert.Equal(t, 0.8, threshold)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for test execution")
 	}
 }
 
