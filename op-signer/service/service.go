@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/holiman/uint256"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ethereum-optimism/infra/op-signer/service/provider"
@@ -91,7 +92,7 @@ func (s *EthService) SignTransaction(ctx context.Context, args signer.Transactio
 	if len(authConfig.ToAddresses) > 0 && !containsNormalized(authConfig.ToAddresses, args.To.Hex()) {
 		return nil, &UnauthorizedTransactionError{"to address not authorized"}
 	}
-	if len(authConfig.MaxValue) > 0 && args.Value.ToInt().Cmp(authConfig.MaxValueToInt()) > 0 {
+	if len(authConfig.MaxValue) > 0 && ((*uint256.Int)(args.Value)).ToBig().Cmp(authConfig.MaxValueToInt()) > 0 {
 		return nil, &UnauthorizedTransactionError{"value exceeds maximum"}
 	}
 
