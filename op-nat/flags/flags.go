@@ -15,19 +15,44 @@ import (
 const EnvVarPrefix = "OP_NAT"
 
 var (
-	KurtosisDevnetManifest = &cli.StringFlag{
-		Name:    "kurtosis.devnet.manifest",
+	TestDir = &cli.StringFlag{
+		Name:    "testdir",
 		Value:   "",
-		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "KURTOSIS_DEVNET_MANIFEST"),
-		Usage:   "Path to the kurtosis-devnet manifest",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TESTDIR"),
+		Usage:   "Path to the test directory from which to discover tests",
+	}
+	ValidatorConfig = &cli.StringFlag{
+		Name:     "validators",
+		Value:    "",
+		Required: true,
+		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATORS"),
+		Usage:    "Path to validator config file (eg. 'validators.yaml')",
+	}
+	Gate = &cli.StringFlag{
+		Name:     "gate",
+		Value:    "",
+		Required: true,
+		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
+		Usage:    "Gate to run (eg. 'alphanet')",
+	}
+	GoBinary = &cli.StringFlag{
+		Name:    "go-binary",
+		Value:   "go",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "GO_BINARY"),
+		Usage:   "Path to the Go binary to use for running tests",
 	}
 )
 
 var requiredFlags = []cli.Flag{
-	KurtosisDevnetManifest,
+	TestDir,
+	ValidatorConfig,
+	Gate,
 }
 
-var optionalFlags = []cli.Flag{}
+var optionalFlags = []cli.Flag{
+	GoBinary,
+}
+var Flags []cli.Flag
 
 func init() {
 	optionalFlags = append(optionalFlags, oprpc.CLIFlags(EnvVarPrefix)...)
@@ -38,8 +63,6 @@ func init() {
 
 	Flags = append(requiredFlags, optionalFlags...)
 }
-
-var Flags []cli.Flag
 
 func CheckRequired(ctx *cli.Context) error {
 	for _, f := range requiredFlags {
