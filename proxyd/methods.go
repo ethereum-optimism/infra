@@ -17,10 +17,11 @@ type RPCMethodHandler interface {
 }
 
 type StaticMethodHandler struct {
-	cache     Cache
-	m         sync.RWMutex
-	filterGet func(*RPCReq) bool
-	filterPut func(*RPCReq, *RPCRes) bool
+	cache      Cache
+	m          sync.RWMutex
+	shortLived bool
+	filterGet  func(*RPCReq) bool
+	filterPut  func(*RPCReq, *RPCRes) bool
 }
 
 func (e *StaticMethodHandler) key(req *RPCReq) string {
@@ -83,7 +84,7 @@ func (e *StaticMethodHandler) PutRPCMethod(ctx context.Context, req *RPCReq, res
 	key := e.key(req)
 	value := mustMarshalJSON(res.Result)
 
-	err := e.cache.Put(ctx, key, string(value))
+	err := e.cache.Put(ctx, key, string(value), e.shortLived)
 	if err != nil {
 		log.Error("error putting into cache", "key", key, "method", req.Method, "err", err)
 		return err
