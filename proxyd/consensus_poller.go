@@ -186,7 +186,7 @@ func (ah *PollerAsyncHandler) Init() {
 	go func() {
 		for {
 			timer := time.NewTimer(ah.cp.interval)
-			log.Info("updating backend group consensus")
+
 			ah.cp.UpdateBackendGroupConsensus(ah.ctx)
 
 			select {
