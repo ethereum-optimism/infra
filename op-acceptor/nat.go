@@ -11,10 +11,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 
-	"github.com/ethereum-optimism/infra/op-nat/metrics"
-	"github.com/ethereum-optimism/infra/op-nat/registry"
-	"github.com/ethereum-optimism/infra/op-nat/runner"
-	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
+	"github.com/ethereum-optimism/infra/op-acceptor/registry"
+	"github.com/ethereum-optimism/infra/op-acceptor/runner"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -74,7 +74,7 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 // Start runs the acceptance tests and returns true if the tests pass.
 // Start implements the cliapp.Lifecycle interface.
 func (n *nat) Start(ctx context.Context) error {
-	n.config.Log.Info("Starting OpNAT")
+	n.config.Log.Info("Starting op-acceptor")
 	n.ctx = ctx
 	n.running.Store(true)
 
@@ -97,20 +97,20 @@ func (n *nat) Start(ctx context.Context) error {
 	if n.result.Status == types.TestStatusFail {
 		printGandalf()
 	}
-	n.config.Log.Info("OpNAT finished", "run_id", result.RunID)
+	n.config.Log.Info("op-acceptor finished", "run_id", result.RunID)
 
 	return nil
 }
 
-// Stop stops the OpNAT service.
+// Stop stops the op-acceptor service.
 // Stop implements the cliapp.Lifecycle interface.
 func (n *nat) Stop(ctx context.Context) error {
 	n.running.Store(false)
-	n.config.Log.Info("OpNAT stopped")
+	n.config.Log.Info("op-acceptor stopped")
 	return nil
 }
 
-// Stopped returns true if the OpNAT service is stopped.
+// Stopped returns true if the op-acceptor service is stopped.
 // Stopped implements the cliapp.Lifecycle interface.
 func (n *nat) Stopped() bool {
 	return n.running.Load()
@@ -121,7 +121,7 @@ func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle(fmt.Sprintf("NAT Results (%s)", formatDuration(n.result.Duration)))
+	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (%s)", formatDuration(n.result.Duration)))
 
 	// Configure columns
 	t.AppendHeader(table.Row{

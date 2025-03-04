@@ -12,7 +12,7 @@ import (
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 )
 
-const EnvVarPrefix = "OP_NAT"
+const EnvVarPrefix = "OP_ACCEPTOR"
 
 var (
 	TestDir = &cli.StringFlag{

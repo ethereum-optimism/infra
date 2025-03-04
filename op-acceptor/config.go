@@ -7,7 +7,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ethereum-optimism/infra/op-nat/flags"
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum/go-ethereum/log"
 )
 

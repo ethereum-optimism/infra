@@ -1,4 +1,4 @@
-# Example validator configuration file for op-nat
+# Example validator configuration file for op-acceptor
 
 gates:
   - id: localnet

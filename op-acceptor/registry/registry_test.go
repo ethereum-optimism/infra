@@ -78,7 +78,7 @@ gates:
   - id: test-gate
     tests:
       - name: TestNATFortyTwo
-        package: github.com/ethereum-optimism/infra/op-nat/validators
+        package: github.com/ethereum-optimism/infra/op-acceptor/validators
 `
 	configPath := filepath.Join(tmpDir, "validators.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(validConfig), 0644))
@@ -190,12 +190,12 @@ gates:
   - id: test-gate
     tests:
       - name: test1
-        package: github.com/ethereum-optimism/infra/op-nat/validators
+        package: github.com/ethereum-optimism/infra/op-acceptor/validators
     suites:
       test-suite:
         tests:
           - name: suite-test1
-            package: github.com/ethereum-optimism/infra/op-nat/validators
+            package: github.com/ethereum-optimism/infra/op-acceptor/validators
 `
 	err := os.WriteFile(configPath, []byte(validConfig), 0644)
 	require.NoError(t, err)

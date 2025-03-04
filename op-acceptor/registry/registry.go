@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"gopkg.in/yaml.v3"
 )

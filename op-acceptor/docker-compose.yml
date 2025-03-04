@@ -25,16 +25,18 @@ services:
     volumes:
       - ./metrics/testdata/grafana-data:/var/lib/grafana
 
-  op-nat:
-    container_name: op-nat
+  op-acceptor:
+    container_name: op-acceptor
     ports:
       - "7300:7300"
     build:
       context: ..
-      dockerfile: op-nat/Dockerfile
+      dockerfile: op-acceptor/Dockerfile
     volumes:
       - ./devnets:/devnets
-    command: ["--gate", "localnet", "--manifest", "/devnets/simple-devnet.json", "--testdir", "../../optimism", "--validators", "example-validators.yaml", "--log.level", "debug"]
+    environment:
+      - DEVNET_ENV_URL=/devnets/simple-devnet.json
+    command: ["--gate", "localnet", "--testdir", "../../optimism", "--validators", "example-validators.yaml", "--log.level", "debug"]
     depends_on:
       - prometheus
       - grafana
@@ -42,6 +44,13 @@ services:
       - monitoring
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7300"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
 networks:
   monitoring:

@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/ethereum-optimism/infra/op-nat/metrics"
+	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum/go-ethereum/log"
 )
 

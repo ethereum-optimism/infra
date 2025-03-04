@@ -8,9 +8,9 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/urfave/cli/v2"
 
-	nat "github.com/ethereum-optimism/infra/op-nat"
-	"github.com/ethereum-optimism/infra/op-nat/flags"
-	"github.com/ethereum-optimism/infra/op-nat/service"
+	nat "github.com/ethereum-optimism/infra/op-acceptor"
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
+	"github.com/ethereum-optimism/infra/op-acceptor/service"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
@@ -25,9 +25,9 @@ var (
 func main() {
 	app := cli.NewApp()
 	app.Version = fmt.Sprintf("%s-%s-%s", Version, GitCommit, GitDate)
-	app.Name = "op-nat"
+	app.Name = "op-acceptor"
 	app.Usage = "Optimism Network Acceptance Tester Service"
-	app.Description = "op-nat tests networks"
+	app.Description = "op-acceptor tests networks"
 	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Action = cliapp.LifecycleCmd(run)
 

@@ -5,7 +5,7 @@ WORKDIR /app
 # Install dependencies first for better caching
 RUN apk add --no-cache just
 
-COPY op-nat/ .
+COPY op-acceptor/ .
 
 RUN just build
 
@@ -16,8 +16,9 @@ RUN addgroup -S app && adduser -S app -G app && \
     mkdir -p /devnets && \
     chown -R app:app /devnets
 
-COPY --from=builder /app/bin/op-nat /app/
+COPY --from=builder /app/bin/op-acceptor /app/
+COPY op-acceptor/example-validators.yaml /app/
 USER app
 
 VOLUME /devnets
-ENTRYPOINT ["/app/op-nat"]
+ENTRYPOINT ["/app/op-acceptor"]

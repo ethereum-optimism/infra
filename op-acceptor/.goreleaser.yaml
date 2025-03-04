@@ -3,7 +3,7 @@
 
 version: 2
 
-project_name: op-nat
+project_name: op-acceptor
 
 before:
   hooks:
@@ -13,7 +13,7 @@ before:
 builds:
   - id: main
     main: ./cmd/main
-    binary: bin/op-nat
+    binary: bin/op-acceptor
     env:
       - CGO_ENABLED=0
     goos:
@@ -54,5 +54,5 @@ release:
   make_latest: false
 
 monorepo:
-  tag_prefix: op-nat/
-  dir: op-nat
+  tag_prefix: op-acceptor/
+  dir: op-acceptor

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ethereum-optimism/infra/op-nat/registry"
-	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/registry"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

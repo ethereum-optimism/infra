@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum-optimism/infra/op-nat/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"

@@ -1,4 +1,4 @@
-module github.com/ethereum-optimism/infra/op-nat
+module github.com/ethereum-optimism/infra/op-acceptor
 
 go 1.23.5
 

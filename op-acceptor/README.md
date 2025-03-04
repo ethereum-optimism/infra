@@ -1,11 +1,11 @@
-# Network Acceptance Tester (NAT)
-NAT is a tool to run checks against a network to determine if it is ready for production. It helps ensure your network meets all necessary requirements before deployment.
+# Network Acceptance Tester (op-acceptor)
+op-acceptor is a tool to run checks against a network to determine if it is ready for production. It helps ensure your network meets all necessary requirements before deployment.
 The checks it runs are standard Go tests.
 
 ## Concepts
 
 ### Test Discovery
-NAT discovers tests. You simply need to provide a path to a directory containing your tests. NAT will discover all tests within that directory and also those within any subdirectories.
+op-acceptor discovers tests. You simply need to provide a path to a directory containing your tests. op-acceptor will discover all tests within that directory and also those within any subdirectories.
 
 ### Test Grouping
 1. **Test** - An individual check that validates a specific aspect of your network
@@ -15,7 +15,7 @@ NAT discovers tests. You simply need to provide a path to a directory containing
 
 ## Contributing
 
-Please note that this project is under active development and the API may evolve. We welcome all contributions and appreciate your interest in improving NAT!
+Please note that this project is under active development and the API may evolve. We welcome all contributions and appreciate your interest in improving op-acceptor!
 
 ### Adding a new test/suite/gate
 All tests, suites, and gates are defined in a `validators.yaml` file. The filename is not important.
@@ -51,7 +51,7 @@ A suite is a collection of tests that validate a specific aspect of your network
 A test is a single check that validates a specific aspect of your network.
 A description is optional.
 A package is optional. If not provided, the test will be searched for. This lengthens the runtime, so we recommend providing the package.
-If a package is provided and no name is provided, NAT runs all tests in the package.
+If a package is provided and no name is provided, op-acceptor runs all tests in the package.
 
 ```yaml
 # Run test 'TestInteropSystem' in package 'github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop'
@@ -82,18 +82,18 @@ Run tests:
 just test
 ```
 
-Run NAT:
+Run op-acceptor:
 ```bash
+DEVNET_ENV_URL=devnets/alpaca-devnet.json # path to the devnet manifest
 go run cmd/main.go \
   --gate betanet \                  # The gate to run
   --testdir ../../optimism/ \       # Path to the directory containing your tests
-  --manifest devnet.json \          # Path to the devnet manifest
   --validators validators.yaml \    # Path to the validator definitions
 ```
 
 Want to monitor your validation runs? Start our local monitoring stack:
 ```bash
-just start-monitoring  # Launches Prometheus and Grafana alongside NAT
+just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 ```
 
 ### Future Development
@@ -103,4 +103,4 @@ We track our public roadmap and issues on [Github](https://github.com/ethereum-o
 * Contribute improvements
 * Join discussions
 
-Your feedback and contributions help make NAT better for everyone!
+Your feedback and contributions help make op-acceptor better for everyone!

@@ -10,17 +10,17 @@
 #     "-X main.Version=" + VERSION + " " + \
 #     "") + "'"
 
-BINARY := "./bin/op-nat"
+BINARY := "./bin/op-acceptor"
 
 all: build
 
 docker:
-	docker build ../ -f Dockerfile -t op-nat:latest
+	docker build ../ -f Dockerfile -t op-acceptor:latest
 
-# Build op-nat binary
-# op-nat: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
+# Build op-acceptor binary
+# op-acceptor: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
 build:
-    CGO_ENABLED=0 go build -o ./bin/op-nat ./cmd
+    CGO_ENABLED=0 go build -o ./bin/op-acceptor ./cmd
 
 # Clean build artifacts
 clean:
