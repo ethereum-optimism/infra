@@ -22,7 +22,7 @@ workflows:
             op-ufm/.* run-build-op-ufm true
             proxyd/.* run-build-proxyd true
             cci-stats/.* run-build-cci-stats true
-            op-nat/.* run-build-op-nat true
+            op-acceptor/.* run-build-op-acceptor true
             .circleci/.* run-all true
             .github/.* run-all true
           filters:
