@@ -780,14 +780,14 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	}
 
+	rpcRequestsTotal.Inc()
+
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
 		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
-
-	rpcRequestsTotal.Inc()
 
 	ch := make(chan BackendGroupRPCResponse)
 	go func() {
