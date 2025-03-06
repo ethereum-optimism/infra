@@ -9,7 +9,7 @@
     "dist/*"
   ],
   "scripts": {
-    "start": "ts-node ./src/service",
+    "start": "ts-node ./src/service.ts",
     "test:coverage": "echo 'No tests defined.'",
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf ./dist ./tsconfig.tsbuildinfo",
@@ -32,11 +32,46 @@
     "url": "https://github.com/ethereum-optimism/infra.git"
   },
   "dependencies": {
-    "@eth-optimism/common-ts": "0.8.1",
-    "@eth-optimism/core-utils": "0.12.0",
-    "@ethersproject/abstract-provider": "^5.7.0"
+    "@eth-optimism/common-ts": "^0.8.9",
+    "@eth-optimism/core-utils": "^0.13.2",
+    "@ethersproject/abstract-provider": "^5.8.0",
+    "jiti": "*"
   },
   "devDependencies": {
-    "ts-node": "^10.9.1"
+    "@babel/core": "^7.11.0",
+    "@babel/eslint-parser": "^7.26.8",
+    "@types/chai": "^4.2.18",
+    "@types/chai-as-promised": "^7.1.4",
+    "@types/mocha": "^8.2.2",
+    "@types/node": "^12.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "chai": "^4.2.0",
+    "copyfiles": "^2.4.1",
+    "depcheck": "^1.4.3",
+    "doctoc": "^2.2.0",
+    "eslint": "9.21.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.22.1",
+    "eslint-plugin-jsdoc": "^50.6.3",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prefer-arrow": "^1.2.3",
+    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-promise": "^7.2.1",
+    "eslint-plugin-react": "^7.24.0",
+    "eslint-plugin-unicorn": "57.0.0",
+    "husky": "^6.0.0",
+    "lint-staged": "^11.0.0",
+    "markdownlint": "^0.37.4",
+    "markdownlint-cli2": "^0.17.2",
+    "mkdirp": "^1.0.4",
+    "mocha": "^11.1.0",
+    "nyc": "^17.1.0",
+    "patch-package": "^8.0.0",
+    "prettier": "^2.8.0",
+    "ts-mocha": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
   }
 }
