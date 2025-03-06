@@ -12,8 +12,8 @@ before:
 
 builds:
   - id: main
-    main: ./cmd/main
-    binary: bin/op-acceptor
+    main: ./cmd
+    binary: op-acceptor
     env:
       - CGO_ENABLED=0
     goos:
