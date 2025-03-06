@@ -28,6 +28,9 @@ parameters:
   run-build-op-acceptor:
     type: boolean
     default: false
+  run-build-rhc:
+    type: boolean
+    default: false
   run-all:
     type: boolean
     default: false
@@ -97,6 +100,7 @@ jobs:
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-build-op-acceptor: << pipeline.parameters.run-build-op-acceptor >>"
+            echo "run-build-rhc: << pipeline.parameters.run-build-rhc >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
             echo "Pipeline Trigger Information:"
@@ -148,7 +152,13 @@ jobs:
             else
               echo "op-acceptor tag regex match: false"
             fi
-  
+
+            if [[ $CURRENT_TAG =~ ^replica-healthcheck/v.* ]]; then
+              echo "replica-healthcheck tag regex match: true"
+            else
+              echo "replica-healthcheck tag regex match: false"
+            fi
+
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -535,19 +545,29 @@ workflows:
           docker_name: op-acceptor
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  replica-healthcheck:
+    when:
+      or: [<< pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - docker-build:
+          name: replica-healthcheck-docker-build
+          docker_file: replica-healthcheck/Dockerfile
+          docker_name: replica-healthcheck
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
   release:
     jobs:
       - log-config-results:
           filters:
             tags:
-              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -562,6 +582,7 @@ workflows:
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
@@ -585,6 +606,7 @@ workflows:
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
@@ -606,6 +628,7 @@ workflows:
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-tag
           filters:
             tags:
