@@ -151,6 +151,7 @@ type Backend struct {
 	stripTrailingXFF     bool
 	proxydIP             string
 
+	skipIsSyncingCheck bool
 	skipPeerCountCheck bool
 	forcedCandidate    bool
 
@@ -234,6 +235,12 @@ func WithStrippedTrailingXFF() BackendOpt {
 func WithProxydIP(ip string) BackendOpt {
 	return func(b *Backend) {
 		b.proxydIP = ip
+	}
+}
+
+func WithSkipIsSyncingCheck(skipIsSyncingCheck bool) BackendOpt {
+	return func(b *Backend) {
+		b.skipIsSyncingCheck = skipIsSyncingCheck
 	}
 }
 

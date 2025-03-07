@@ -77,6 +77,8 @@ client_key_file = ""
 # Specified the target method to get receipts, default "debug_getRawReceipts"
 # See https://github.com/ethereum-optimism/optimism/blob/186e46a47647a51a658e699e9ff047d39444c2de/op-node/sources/receipts.go#L186-L253
 consensus_receipts_target = "eth_getBlockReceipts"
+# Allow backends to skip eth_syncing checks, default false
+# skip_is_syncing_check = false
 
 [backends.alchemy]
 rpc_url = ""

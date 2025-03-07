@@ -110,6 +110,8 @@ type BackendConfig struct {
 
 	Weight int `toml:"weight"`
 
+	SkipIsSyncingCheck bool `toml:"skip_is_syncing_check"`
+
 	ConsensusSkipPeerCountCheck bool   `toml:"consensus_skip_peer_count"`
 	ConsensusForcedCandidate    bool   `toml:"consensus_forced_candidate"`
 	ConsensusReceiptsTarget     string `toml:"consensus_receipts_target"`
