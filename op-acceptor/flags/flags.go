@@ -2,6 +2,7 @@ package flags
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -41,6 +42,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "GO_BINARY"),
 		Usage:   "Path to the Go binary to use for running tests",
 	}
+	RunInterval = &cli.DurationFlag{
+		Name:    "run-interval",
+		Value:   time.Hour,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RUN_INTERVAL"),
+		Usage:   "Interval between test runs when running continuously (e.g. '1h', '30m')",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -51,6 +58,7 @@ var requiredFlags = []cli.Flag{
 
 var optionalFlags = []cli.Flag{
 	GoBinary,
+	RunInterval,
 }
 var Flags []cli.Flag
 

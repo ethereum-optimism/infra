@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -16,6 +17,7 @@ type Config struct {
 	ValidatorConfig string
 	TargetGate      string
 	GoBinary        string
+	RunInterval     time.Duration // Interval between test runs
 
 	Log log.Logger
 }
@@ -51,6 +53,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		ValidatorConfig: absValidatorConfig,
 		TargetGate:      gate,
 		GoBinary:        ctx.String(flags.GoBinary.Name),
+		RunInterval:     ctx.Duration(flags.RunInterval.Name),
 		Log:             log,
 	}, nil
 }

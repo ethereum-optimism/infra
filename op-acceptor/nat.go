@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 // nat implements the cliapp.Lifecycle interface.
 var _ cliapp.Lifecycle = &nat{}
 
+// nat is a Network Acceptance Tester that runs tests.
 type nat struct {
 	ctx      context.Context
 	config   *Config
@@ -30,6 +32,8 @@ type nat struct {
 	result   *runner.RunnerResult
 
 	running atomic.Bool
+	done    chan struct{}
+	wg      sync.WaitGroup
 }
 
 func New(ctx context.Context, config *Config, version string) (*nat, error) {
@@ -39,7 +43,8 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 
 	config.Log.Debug("Creating NAT with config",
 		"testDir", config.TestDir,
-		"validatorConfig", config.ValidatorConfig)
+		"validatorConfig", config.ValidatorConfig,
+		"runInterval", config.RunInterval)
 
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
@@ -68,23 +73,68 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 		version:  version,
 		registry: reg,
 		runner:   testRunner,
+		done:     make(chan struct{}),
 	}, nil
 }
 
-// Start runs the acceptance tests and returns true if the tests pass.
+// Start runs the acceptance tests periodically at the configured interval.
 // Start implements the cliapp.Lifecycle interface.
 func (n *nat) Start(ctx context.Context) error {
-	n.config.Log.Info("Starting op-acceptor")
 	n.ctx = ctx
+	n.done = make(chan struct{})
 	n.running.Store(true)
 
-	// Add detailed debug logging for paths
+	n.config.Log.Info("Starting op-acceptor", "interval", n.config.RunInterval)
 	n.config.Log.Debug("NAT config paths",
 		"config.TestDir", n.config.TestDir,
 		"config.ValidatorConfig", n.config.ValidatorConfig)
 
-	// Run all tests
-	n.config.Log.Info("Running all tests[n.runner.RunAllTests()]...")
+	// Run tests immediately on startup
+	err := n.runTests()
+	if err != nil {
+		return err
+	}
+
+	// Start a goroutine for periodic test execution
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		n.config.Log.Debug("Starting periodic test runner goroutine", "interval", n.config.RunInterval)
+
+		for {
+			select {
+			case <-time.After(n.config.RunInterval):
+				// Check if we should still be running
+				if !n.running.Load() {
+					n.config.Log.Debug("Service stopped, exiting periodic test runner")
+					return
+				}
+
+				// Run tests
+				n.config.Log.Info("Running periodic tests")
+				if err := n.runTests(); err != nil {
+					n.config.Log.Error("Error running periodic tests", "error", err)
+				}
+				n.config.Log.Info("Test run interval", "interval", n.config.RunInterval)
+
+			case <-n.done:
+				n.config.Log.Debug("Done signal received, stopping periodic test runner")
+				return
+
+			case <-ctx.Done():
+				n.config.Log.Debug("Context canceled, stopping periodic test runner")
+				n.running.Store(false)
+				return
+			}
+		}
+	}()
+	n.config.Log.Debug("op-acceptor started successfully")
+	return nil
+}
+
+// runTests runs all tests and processes the results
+func (n *nat) runTests() error {
+	n.config.Log.Info("Running all tests...")
 	result, err := n.runner.RunAllTests()
 	if err != nil {
 		n.config.Log.Error("Error running tests", "error", err)
@@ -97,23 +147,36 @@ func (n *nat) Start(ctx context.Context) error {
 	if n.result.Status == types.TestStatusFail {
 		printGandalf()
 	}
-	n.config.Log.Info("op-acceptor finished", "run_id", result.RunID)
-
+	n.config.Log.Info("Test run completed", "run_id", result.RunID, "status", n.result.Status)
 	return nil
 }
 
 // Stop stops the op-acceptor service.
 // Stop implements the cliapp.Lifecycle interface.
 func (n *nat) Stop(ctx context.Context) error {
+	n.config.Log.Info("Stopping op-acceptor")
+
+	// Check if we're already stopped
+	if !n.running.Load() {
+		n.config.Log.Debug("Service already stopped, nothing to do")
+		return nil
+	}
+
+	// Update running state first to prevent new test runs
 	n.running.Store(false)
-	n.config.Log.Info("op-acceptor stopped")
+
+	// Signal goroutines to exit
+	n.config.Log.Debug("Sending done signal to goroutines")
+	close(n.done)
+
+	n.config.Log.Info("op-acceptor stopped successfully")
 	return nil
 }
 
 // Stopped returns true if the op-acceptor service is stopped.
 // Stopped implements the cliapp.Lifecycle interface.
 func (n *nat) Stopped() bool {
-	return n.running.Load()
+	return !n.running.Load()
 }
 
 // printResultsTable prints the results of the acceptance tests to the console.
@@ -273,4 +336,27 @@ func getResultString(status types.TestStatus) string {
 // Helper function to format duration to seconds with 1 decimal place
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// WaitForShutdown blocks until all goroutines have terminated.
+// This is useful in tests to ensure complete cleanup before moving to the next test.
+func (n *nat) WaitForShutdown(ctx context.Context) error {
+	n.config.Log.Debug("Waiting for all goroutines to terminate")
+
+	// Create a channel that will be closed when the WaitGroup is done
+	done := make(chan struct{})
+	go func() {
+		n.wg.Wait()
+		close(done)
+	}()
+
+	// Wait for either WaitGroup completion or context expiration
+	select {
+	case <-done:
+		n.config.Log.Debug("All goroutines terminated successfully")
+		return nil
+	case <-ctx.Done():
+		n.config.Log.Warn("Timed out waiting for goroutines to terminate", "error", ctx.Err())
+		return ctx.Err()
+	}
 }
