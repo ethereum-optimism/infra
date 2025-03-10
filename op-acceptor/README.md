@@ -96,6 +96,15 @@ Want to monitor your validation runs? Start our local monitoring stack:
 just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 ```
 
+### Create a release
+Releases are created by pushing tags which triggers a CircleCI pipeline.
+Create an annotated tag (with a semantic version) and push it.
+
+```
+git tag -a op-acceptor/v0.1.0-rc.1 -m "Initial release candidate for op-acceptor"
+git push origin op-acceptor/v0.1.0-rc.1
+```
+
 ### Future Development
 We track our public roadmap and issues on [Github](https://github.com/ethereum-optimism/infra/issues). Feel free to:
 * Submit bug reports
