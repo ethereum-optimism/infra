@@ -25,6 +25,7 @@ type MockBackend struct {
 	server   *httptest.Server
 	mtx      sync.RWMutex
 	requests []*RecordedRequest
+	polls    []*RecordedRequest
 }
 
 func SingleResponseHandler(code int, response string) http.HandlerFunc {
@@ -222,14 +223,15 @@ func (m *MockBackend) Close() {
 
 func (m *MockBackend) SetHandler(handler http.Handler) {
 	m.mtx.Lock()
+	defer m.mtx.Unlock()
 	m.handler = handler
-	m.mtx.Unlock()
 }
 
 func (m *MockBackend) Reset() {
 	m.mtx.Lock()
+	defer m.mtx.Unlock()
 	m.requests = nil
-	m.mtx.Unlock()
+	m.polls = nil
 }
 
 func (m *MockBackend) Requests() []*RecordedRequest {
@@ -240,21 +242,36 @@ func (m *MockBackend) Requests() []*RecordedRequest {
 	return out
 }
 
+func (m *MockBackend) Polls() []*RecordedRequest {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+	out := make([]*RecordedRequest, len(m.polls))
+	copy(out, m.polls)
+	return out
+}
+
 func (m *MockBackend) wrappedHandler(w http.ResponseWriter, r *http.Request) {
 	m.mtx.Lock()
+	defer m.mtx.Unlock()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		panic(err)
 	}
+	var req proxyd.RPCReq
+	_ = json.Unmarshal(body, &req)
 	clone := r.Clone(context.Background())
 	clone.Body = io.NopCloser(bytes.NewReader(body))
-	m.requests = append(m.requests, &RecordedRequest{
+	rr := &RecordedRequest{
 		Method:  r.Method,
 		Headers: r.Header.Clone(),
 		Body:    body,
-	})
+	}
+	if string(req.ID) == proxyd.PollerRequestId {
+		m.polls = append(m.polls, rr)
+	} else {
+		m.requests = append(m.requests, rr)
+	}
 	m.handler.ServeHTTP(w, clone)
-	m.mtx.Unlock()
 }
 
 type MockWSBackend struct {
@@ -308,8 +325,8 @@ func (m *MockWSBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	m.connsMu.Lock()
+	defer m.connsMu.Unlock()
 	m.conns = append(m.conns, conn)
-	m.connsMu.Unlock()
 }
 
 func (m *MockWSBackend) URL() string {
@@ -320,8 +337,8 @@ func (m *MockWSBackend) Close() {
 	m.server.Close()
 
 	m.connsMu.Lock()
+	defer m.connsMu.Unlock()
 	for _, conn := range m.conns {
 		conn.Close()
 	}
-	m.connsMu.Unlock()
 }
