@@ -194,13 +194,16 @@ func (n *nat) printResultsTable(runID string) {
 	// Set column configurations for better readability
 	t.SetColumnConfigs([]table.ColumnConfig{
 		{Name: "Type", AutoMerge: true},
-		{Name: "ID", WidthMax: 50},
+		{Name: "ID", WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 		{Name: "Duration", Align: text.AlignRight},
 		{Name: "Tests", Align: text.AlignRight},
 		{Name: "Passed", Align: text.AlignRight},
 		{Name: "Failed", Align: text.AlignRight},
 		{Name: "Skipped", Align: text.AlignRight},
 	})
+
+	// Add flag to show individual tests for packages
+	showIndividualTests := true
 
 	// Print gates and their results
 	for _, gate := range n.result.Gates {
@@ -238,9 +241,14 @@ func (n *nat) printResultsTable(runID string) {
 				if i == len(suite.Tests)-1 {
 					prefix = "│   └──"
 				}
+
+				// Get a display name for the test
+				displayName := types.GetTestDisplayName(testName, test.Metadata)
+
+				// Display the test result
 				t.AppendRow(table.Row{
 					"Test",
-					fmt.Sprintf("%s %s", prefix, testName),
+					fmt.Sprintf("%s %s", prefix, displayName),
 					formatDuration(test.Duration),
 					"1", // Count actual test
 					boolToInt(test.Status == types.TestStatusPass),
@@ -249,6 +257,31 @@ func (n *nat) printResultsTable(runID string) {
 					getResultString(test.Status),
 					test.Error,
 				})
+
+				// Display individual sub-tests if present (for package tests)
+				if len(test.SubTests) > 0 && showIndividualTests {
+					j := 0
+					for subTestName, subTest := range test.SubTests {
+						subPrefix := "│   │   ├──"
+						if j == len(test.SubTests)-1 {
+							subPrefix = "│   │   └──"
+						}
+
+						t.AppendRow(table.Row{
+							"SubTest",
+							fmt.Sprintf("%s %s", subPrefix, subTestName),
+							formatDuration(subTest.Duration),
+							"1", // Count actual test
+							boolToInt(subTest.Status == types.TestStatusPass),
+							boolToInt(subTest.Status == types.TestStatusFail),
+							boolToInt(subTest.Status == types.TestStatusSkip),
+							getResultString(subTest.Status),
+							subTest.Error,
+						})
+						j++
+					}
+				}
+
 				i++
 			}
 		}
@@ -260,9 +293,14 @@ func (n *nat) printResultsTable(runID string) {
 			if i == len(gate.Tests)-1 && len(gate.Suites) == 0 {
 				prefix = "└──"
 			}
+
+			// Get a display name for the test
+			displayName := types.GetTestDisplayName(testName, test.Metadata)
+
+			// Display the test result
 			t.AppendRow(table.Row{
 				"Test",
-				fmt.Sprintf("%s %s", prefix, testName),
+				fmt.Sprintf("%s %s", prefix, displayName),
 				formatDuration(test.Duration),
 				"1", // Count actual test
 				boolToInt(test.Status == types.TestStatusPass),
@@ -271,6 +309,31 @@ func (n *nat) printResultsTable(runID string) {
 				getResultString(test.Status),
 				test.Error,
 			})
+
+			// Display individual sub-tests if present (for package tests)
+			if len(test.SubTests) > 0 && showIndividualTests {
+				j := 0
+				for subTestName, subTest := range test.SubTests {
+					subPrefix := "    ├──"
+					if j == len(test.SubTests)-1 {
+						subPrefix = "    └──"
+					}
+
+					t.AppendRow(table.Row{
+						"SubTest",
+						fmt.Sprintf("%s %s", subPrefix, subTestName),
+						formatDuration(subTest.Duration),
+						"1", // Count actual test
+						boolToInt(subTest.Status == types.TestStatusPass),
+						boolToInt(subTest.Status == types.TestStatusFail),
+						boolToInt(subTest.Status == types.TestStatusSkip),
+						getResultString(subTest.Status),
+						subTest.Error,
+					})
+					j++
+				}
+			}
+
 			i++
 		}
 

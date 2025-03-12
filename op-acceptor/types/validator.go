@@ -36,3 +36,14 @@ type ValidatorMetadata struct {
 	Timeout  string
 	RunAll   bool
 }
+
+// GetName returns a name for the validator based on available fields
+func (v ValidatorMetadata) GetName() string {
+	if v.FuncName != "" {
+		return v.FuncName
+	}
+	if v.Package != "" {
+		return v.Package
+	}
+	return v.ID
+}
