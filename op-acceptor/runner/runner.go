@@ -361,13 +361,26 @@ func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 
 // isValidTestName returns true if the name represents a valid test
 func isValidTestName(name string) bool {
-	return name != "" && name != "ok" && !strings.HasPrefix(name, "?")
+	// Reject empty or specific strings like "ok" and strings with question marks
+	if name == "" || name == "ok" || strings.HasPrefix(name, "?") {
+		return false
+	}
+
+	// Filter out lines that start with "ok" and have the package name and timing info
+	// Example: "ok github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis 0.335s"
+	if strings.HasPrefix(name, "ok ") && strings.Contains(name, ".") && strings.HasSuffix(name, "s") {
+		return false
+	}
+
+	return true
 }
 
 // runTestList runs a list of tests and aggregates their results
 func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
 	var result types.TestStatus = types.TestStatusPass
 	var testErrors []error
+	var totalDuration time.Duration
+	testResults := make(map[string]*types.TestResult)
 
 	for _, testName := range testNames {
 		testMetadata := metadata
@@ -377,6 +390,10 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		if err != nil {
 			return nil, err
 		}
+
+		// Store the individual test result
+		testResults[testName] = testResult
+		totalDuration += testResult.Duration
 
 		if testResult.Status == types.TestStatusFail {
 			result = types.TestStatusFail
@@ -390,6 +407,8 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		Metadata: metadata,
 		Status:   result,
 		Error:    errors.Join(testErrors...),
+		Duration: totalDuration,
+		SubTests: testResults,
 	}, nil
 }
 
@@ -552,10 +571,30 @@ func (r *RunnerResult) String() string {
 
 		// Print direct gate tests
 		for testName, test := range gate.Tests {
+			// Get a display name for the test
+			displayName := types.GetTestDisplayName(testName, test.Metadata)
+
 			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [status=%s]\n",
-				testName, formatDuration(test.Duration), test.Status))
+				displayName, formatDuration(test.Duration), test.Status))
 			if test.Error != nil {
 				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error.Error()))
+			}
+
+			// Print subtests if present
+			if len(test.SubTests) > 0 {
+				i := 0
+				for subTestName, subTest := range test.SubTests {
+					prefix := "│       ├──"
+					if i == len(test.SubTests)-1 {
+						prefix = "│       └──"
+					}
+					b.WriteString(fmt.Sprintf("│       %s Test: %s (%s) [status=%s]\n",
+						prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+					if subTest.Error != nil {
+						b.WriteString(fmt.Sprintf("│       │       └── Error: %s\n", subTest.Error.Error()))
+					}
+					i++
+				}
 			}
 		}
 
@@ -568,10 +607,30 @@ func (r *RunnerResult) String() string {
 
 			// Print suite tests
 			for testName, test := range suite.Tests {
+				// Get a display name for the test
+				displayName := types.GetTestDisplayName(testName, test.Metadata)
+
 				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [status=%s]\n",
-					testName, formatDuration(test.Duration), test.Status))
+					displayName, formatDuration(test.Duration), test.Status))
 				if test.Error != nil {
 					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error.Error()))
+				}
+
+				// Print subtests if present
+				if len(test.SubTests) > 0 {
+					i := 0
+					for subTestName, subTest := range test.SubTests {
+						prefix := "│       ├──"
+						if i == len(test.SubTests)-1 {
+							prefix = "│       └──"
+						}
+						b.WriteString(fmt.Sprintf("    │       %s Test: %s (%s) [status=%s]\n",
+							prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+						if subTest.Error != nil {
+							b.WriteString(fmt.Sprintf("    │       │       └── Error: %s\n", subTest.Error.Error()))
+						}
+						i++
+					}
 				}
 			}
 		}
@@ -618,6 +677,49 @@ func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *t
 		r.Stats.Skipped++
 	}
 	r.Duration += test.Duration
+
+	// Update stats for SubTests if they exist
+	if len(test.SubTests) > 0 {
+		for _, subTest := range test.SubTests {
+			// Update the global stats with this sub-test
+			r.Stats.Total++
+			switch subTest.Status {
+			case types.TestStatusPass:
+				r.Stats.Passed++
+			case types.TestStatusFail:
+				r.Stats.Failed++
+			case types.TestStatusSkip:
+				r.Stats.Skipped++
+			}
+			r.Duration += subTest.Duration
+
+			// Update gate stats
+			gate.Stats.Total++
+			switch subTest.Status {
+			case types.TestStatusPass:
+				gate.Stats.Passed++
+			case types.TestStatusFail:
+				gate.Stats.Failed++
+			case types.TestStatusSkip:
+				gate.Stats.Skipped++
+			}
+			gate.Duration += subTest.Duration
+
+			// Update suite stats
+			if suite != nil {
+				suite.Stats.Total++
+				switch subTest.Status {
+				case types.TestStatusPass:
+					suite.Stats.Passed++
+				case types.TestStatusFail:
+					suite.Stats.Failed++
+				case types.TestStatusSkip:
+					suite.Stats.Skipped++
+				}
+				suite.Duration += subTest.Duration
+			}
+		}
+	}
 }
 
 // determineGateStatus determines the overall status of a gate based on its tests and suites
