@@ -268,7 +268,7 @@ func (n *nat) printResultsTable(runID string) {
 						}
 
 						t.AppendRow(table.Row{
-							"SubTest",
+							"",
 							fmt.Sprintf("%s %s", subPrefix, subTestName),
 							formatDuration(subTest.Duration),
 							"1", // Count actual test
@@ -320,7 +320,7 @@ func (n *nat) printResultsTable(runID string) {
 					}
 
 					t.AppendRow(table.Row{
-						"SubTest",
+						"",
 						fmt.Sprintf("%s %s", subPrefix, subTestName),
 						formatDuration(subTest.Duration),
 						"1", // Count actual test

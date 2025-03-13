@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
@@ -714,4 +715,215 @@ gates:
 	assert.Equal(t, 0, suite.Stats.Passed, "no tests should pass")
 	assert.Equal(t, 2, suite.Stats.Failed, "all tests should fail")
 	assert.Equal(t, 0, suite.Stats.Skipped, "no tests should be skipped")
+}
+
+func TestMultiplePackageTests(t *testing.T) {
+	// Setup tests in two different packages
+	packageOneContent := []byte(`
+package pkg1_test
+
+import "testing"
+
+func TestPkg1One(t *testing.T) {
+	t.Log("Test pkg1 one running")
+}
+
+func TestPkg1Two(t *testing.T) {
+	t.Log("Test pkg1 two running")
+}
+`)
+
+	packageTwoContent := []byte(`
+package pkg2_test
+
+import "testing"
+
+func TestPkg2One(t *testing.T) {
+	t.Log("Test pkg2 one running")
+}
+
+func TestPkg2Two(t *testing.T) {
+	t.Log("Test pkg2 two running")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: multi-package-gate
+    description: "Gate with multiple package tests"
+    suites:
+      multi-package-suite:
+        description: "Suite with multiple package tests"
+        tests:
+          - package: "./pkg1"
+            run_all: true
+          - package: "./pkg2"
+            run_all: true
+`)
+
+	// Setup the test runner with multiple packages
+	r := setupTestRunner(t, nil, configContent) // Using nil for the default package
+
+	// Create directories for each package
+	pkg1Dir := filepath.Join(r.workDir, "pkg1")
+	pkg2Dir := filepath.Join(r.workDir, "pkg2")
+
+	err := os.Mkdir(pkg1Dir, 0755)
+	require.NoError(t, err)
+	err = os.Mkdir(pkg2Dir, 0755)
+	require.NoError(t, err)
+
+	// Write the test files
+	err = os.WriteFile(filepath.Join(pkg1Dir, "pkg1_test.go"), packageOneContent, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(pkg2Dir, "pkg2_test.go"), packageTwoContent, 0644)
+	require.NoError(t, err)
+
+	// Run all tests
+	result, err := r.RunAllTests()
+	require.NoError(t, err)
+
+	// Verify structure
+	require.Contains(t, result.Gates, "multi-package-gate", "should have multi-package-gate")
+	gate := result.Gates["multi-package-gate"]
+	assert.Equal(t, types.TestStatusPass, gate.Status, "gate status should be pass")
+
+	// Verify suite structure
+	require.Contains(t, gate.Suites, "multi-package-suite", "should have multi-package-suite")
+	suite := gate.Suites["multi-package-suite"]
+	assert.Equal(t, types.TestStatusPass, suite.Status, "suite status should be pass")
+
+	// Verify tests in the suite
+	assert.Len(t, suite.Tests, 2, "should have two tests (one for each package)")
+
+	// Verify each package test has its own subtests
+	var pkg1Test, pkg2Test *types.TestResult
+	for _, test := range suite.Tests {
+		if strings.Contains(test.Metadata.Package, "pkg1") {
+			pkg1Test = test
+		} else if strings.Contains(test.Metadata.Package, "pkg2") {
+			pkg2Test = test
+		}
+	}
+
+	require.NotNil(t, pkg1Test, "pkg1 test should exist")
+	require.NotNil(t, pkg2Test, "pkg2 test should exist")
+
+	// Verify each package test has subtests
+	assert.Len(t, pkg1Test.SubTests, 2, "pkg1 should have 2 subtests")
+	assert.Len(t, pkg2Test.SubTests, 2, "pkg2 should have 2 subtests")
+
+	// Verify subtests in pkg1
+	assert.Contains(t, pkg1Test.SubTests, "TestPkg1One", "should have TestPkg1One subtest")
+	assert.Contains(t, pkg1Test.SubTests, "TestPkg1Two", "should have TestPkg1Two subtest")
+
+	// Verify subtests in pkg2
+	assert.Contains(t, pkg2Test.SubTests, "TestPkg2One", "should have TestPkg2One subtest")
+	assert.Contains(t, pkg2Test.SubTests, "TestPkg2Two", "should have TestPkg2Two subtest")
+
+	// Verify the stats
+	assert.Equal(t, 6, result.Stats.Total, "stats should include all tests (2 packages + 4 subtests)")
+	assert.Equal(t, 6, result.Stats.Passed, "all tests should be passing")
+}
+
+func TestMultiplePackageTestsInGate(t *testing.T) {
+	// Setup tests in two different packages
+	packageOneContent := []byte(`
+package pkg1_test
+
+import "testing"
+
+func TestPkg1One(t *testing.T) {
+	t.Log("Test pkg1 one running")
+}
+
+func TestPkg1Two(t *testing.T) {
+	t.Log("Test pkg1 two running")
+}
+`)
+
+	packageTwoContent := []byte(`
+package pkg2_test
+
+import "testing"
+
+func TestPkg2One(t *testing.T) {
+	t.Log("Test pkg2 one running")
+}
+
+func TestPkg2Two(t *testing.T) {
+	t.Log("Test pkg2 two running")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: direct-package-gate
+    description: "Gate with multiple package tests as direct tests"
+    tests:
+      - package: "./pkg1"
+        run_all: true
+      - package: "./pkg2"
+        run_all: true
+`)
+
+	// Setup the test runner with multiple packages
+	r := setupTestRunner(t, nil, configContent) // Using nil for the default package
+
+	// Create directories for each package
+	pkg1Dir := filepath.Join(r.workDir, "pkg1")
+	pkg2Dir := filepath.Join(r.workDir, "pkg2")
+
+	err := os.Mkdir(pkg1Dir, 0755)
+	require.NoError(t, err)
+	err = os.Mkdir(pkg2Dir, 0755)
+	require.NoError(t, err)
+
+	// Write the test files
+	err = os.WriteFile(filepath.Join(pkg1Dir, "pkg1_test.go"), packageOneContent, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(pkg2Dir, "pkg2_test.go"), packageTwoContent, 0644)
+	require.NoError(t, err)
+
+	// Run all tests
+	result, err := r.RunAllTests()
+	require.NoError(t, err)
+
+	// Verify structure
+	require.Contains(t, result.Gates, "direct-package-gate", "should have direct-package-gate")
+	gate := result.Gates["direct-package-gate"]
+	assert.Equal(t, types.TestStatusPass, gate.Status, "gate status should be pass")
+
+	// Verify tests in the gate
+	assert.Len(t, gate.Tests, 2, "should have two tests (one for each package)")
+	assert.Empty(t, gate.Suites, "should not have any suites")
+
+	// Verify each package test has its own subtests
+	var pkg1Test, pkg2Test *types.TestResult
+	for _, test := range gate.Tests {
+		if strings.Contains(test.Metadata.Package, "pkg1") {
+			pkg1Test = test
+		} else if strings.Contains(test.Metadata.Package, "pkg2") {
+			pkg2Test = test
+		}
+	}
+
+	require.NotNil(t, pkg1Test, "pkg1 test should exist")
+	require.NotNil(t, pkg2Test, "pkg2 test should exist")
+
+	// Verify each package test has subtests
+	assert.Len(t, pkg1Test.SubTests, 2, "pkg1 should have 2 subtests")
+	assert.Len(t, pkg2Test.SubTests, 2, "pkg2 should have 2 subtests")
+
+	// Verify subtests in pkg1
+	assert.Contains(t, pkg1Test.SubTests, "TestPkg1One", "should have TestPkg1One subtest")
+	assert.Contains(t, pkg1Test.SubTests, "TestPkg1Two", "should have TestPkg1Two subtest")
+
+	// Verify subtests in pkg2
+	assert.Contains(t, pkg2Test.SubTests, "TestPkg2One", "should have TestPkg2One subtest")
+	assert.Contains(t, pkg2Test.SubTests, "TestPkg2Two", "should have TestPkg2Two subtest")
+
+	// Verify the stats
+	assert.Equal(t, 6, result.Stats.Total, "stats should include all tests (2 packages + 4 subtests)")
+	assert.Equal(t, 6, result.Stats.Passed, "all tests should be passing")
 }
