@@ -658,7 +658,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
-	return context.WithValue(ctx, ContextKeyReqID, randStr(10))
+	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
