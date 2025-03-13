@@ -33,9 +33,11 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, errors.New("must define at least one RPC method mapping")
 	}
 
-	for authKey := range config.Authentication {
-		if authKey == "none" {
-			return nil, nil, errors.New("cannot use none as an auth key")
+	if config.Authentication != nil {
+		if secret, ok := config.Authentication["secret"]; ok {
+			if secret == "none" {
+				return nil, nil, errors.New("cannot use none as an auth key")
+			}
 		}
 	}
 
@@ -193,7 +195,6 @@ func Start(config *Config) (*Server, func(), error) {
 			opts = append(opts, WithStrippedTrailingXFF())
 		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
-		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
@@ -285,16 +286,26 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var resolvedAuth map[string]string
+	var authenticatedPaths map[string]string
+	var authURL string
 
 	if config.Authentication != nil {
-		resolvedAuth = make(map[string]string)
-		for secret, alias := range config.Authentication {
+		// Check if auth_url is specified in the authentication map
+		if urlVal, ok := config.Authentication["auth_url"]; ok {
+			authURL = urlVal
+		}
+
+		// Check for traditional secret-based auth
+		if secret, ok := config.Authentication["secret"]; ok {
+			if authURL != "" {
+				return nil, nil, errors.New("cannot specify both auth_url and secrets")
+			}
+			authenticatedPaths = make(map[string]string)
 			resolvedSecret, err := ReadFromEnvOrConfig(secret)
 			if err != nil {
 				return nil, nil, err
 			}
-			resolvedAuth[resolvedSecret] = alias
+			authenticatedPaths[resolvedSecret] = "default"
 		}
 	}
 
@@ -343,7 +354,7 @@ func Start(config *Config) (*Server, func(), error) {
 		NewStringSetFromStrings(config.WSMethodWhitelist),
 		config.RPCMethodMappings,
 		config.Server.MaxBodySizeBytes,
-		resolvedAuth,
+		authenticatedPaths,
 		secondsToDuration(config.Server.TimeoutSeconds),
 		config.Server.MaxUpstreamBatchSize,
 		config.Server.EnableXServedByHeader,
@@ -354,6 +365,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
+		authURL,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

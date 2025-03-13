@@ -50,6 +50,13 @@ const (
 
 var emptyArrayResponse = json.RawMessage("[]")
 
+type AuthCallbackRequest struct {
+	Headers    map[string][]string `json:"headers"`
+	Path       string              `json:"path"`
+	Body       string              `json:"body"`
+	RemoteAddr string              `json:"remote_addr"`
+}
+
 type Server struct {
 	BackendGroups          map[string]*BackendGroup
 	wsBackendGroup         *BackendGroup
@@ -76,6 +83,7 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
+	authURL                string
 }
 
 type limiterFunc func(method string) bool
@@ -99,6 +107,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
+	authURL string,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -191,6 +200,7 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
+		authURL:                authURL,
 	}, nil
 }
 
@@ -628,7 +638,17 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
 	}
 
-	if len(s.authenticatedPaths) > 0 {
+	if s.authURL != "" {
+		// Use external authentication service
+		alias, err := s.performAuthCallback(r, authorization)
+		if err != nil {
+			log.Error("auth callback failed", "err", err)
+			w.WriteHeader(http.StatusUnauthorized)
+			return nil
+		}
+		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
+	} else if len(s.authenticatedPaths) > 0 {
+		// Fallback to traditional auth
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
 			log.Info("blocked unauthorized request", "authorization", authorization)
 			httpResponseCodesTotal.WithLabelValues("401").Inc()
@@ -638,12 +658,36 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
+	return context.WithValue(ctx, ContextKeyReqID, randStr(10))
+}
 
-	return context.WithValue(
-		ctx,
-		ContextKeyReqID, // nolint:staticcheck
-		randStr(10),
-	)
+func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
+	if s.authURL == "" {
+		return "", fmt.Errorf("no auth URL configured")
+	}
+
+	// Create auth request with API key in path
+	authURL := fmt.Sprintf("%s/%s", s.authURL, apiKey)
+	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, r.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// Forward headers
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("auth callback failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("auth callback failed with status: %d", resp.StatusCode)
+	}
+
+	return apiKey, nil
 }
 
 func randStr(l int) string {
