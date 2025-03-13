@@ -762,7 +762,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 			)
 			continue
 		}
-		if !bs.inSync {
+		if !be.skipIsSyncingCheck && !bs.inSync {
 			continue
 		}
 		if bs.lastUpdate.Add(cp.maxUpdateThreshold).Before(time.Now()) {
