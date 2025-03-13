@@ -80,6 +80,12 @@ consensus_receipts_target = "eth_getBlockReceipts"
 # Allow backends to skip eth_syncing checks, default false
 # skip_is_syncing_check = false
 
+# Allow backends safe and finalized block to drift backward up to the threshold.
+# Default is 0, meaning no drift is allowed e.g. newSafe >= oldSafe and newFinalized >= oldFinalized
+# Drift allows newSafe >= (oldSafe - safe_block_drift_threshold) and newFinalized >= (oldFinalized - finalized_block_drift_threshold)
+# safe_block_drift_threshold = 0
+# finalized_block_drift_threshold = 0
+
 [backends.alchemy]
 rpc_url = ""
 ws_url = ""
