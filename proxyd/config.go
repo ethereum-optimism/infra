@@ -112,6 +112,9 @@ type BackendConfig struct {
 
 	SkipIsSyncingCheck bool `toml:"skip_is_syncing_check"`
 
+	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
+	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
+
 	ConsensusSkipPeerCountCheck bool   `toml:"consensus_skip_peer_count"`
 	ConsensusForcedCandidate    bool   `toml:"consensus_forced_candidate"`
 	ConsensusReceiptsTarget     string `toml:"consensus_receipts_target"`
