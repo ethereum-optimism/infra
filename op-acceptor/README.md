@@ -112,9 +112,13 @@ Releases are created by pushing tags which triggers a CircleCI pipeline.
 Create an annotated tag (with a semantic version) and push it.
 
 ```
-git tag -a op-acceptor/v0.1.0-rc.1 -m "Initial release candidate for op-acceptor"
-git push origin op-acceptor/v0.1.0-rc.1
+VERSION=v0.1.4
+
+git tag -a op-acceptor/$VERSION -m "Some useful summary of changes"
+git push origin op-acceptor/$VERSION
 ```
+
+To find the latest version use: `git tag --list`
 
 ### Future Development
 We track our public roadmap and issues on [Github](https://github.com/ethereum-optimism/infra/issues). Feel free to:
