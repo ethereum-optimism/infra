@@ -2,7 +2,6 @@ package flags
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -44,9 +43,9 @@ var (
 	}
 	RunInterval = &cli.DurationFlag{
 		Name:    "run-interval",
-		Value:   time.Hour,
+		Value:   0,
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RUN_INTERVAL"),
-		Usage:   "Interval between test runs when running continuously (e.g. '1h', '30m')",
+		Usage:   "Interval between test runs (e.g. '1h', '30m'). Set to 0 or omit for run-once mode.",
 	}
 )
 
