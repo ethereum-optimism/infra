@@ -117,6 +117,8 @@ backends = ["alchemy"]
 # is provided. Note that you will need to quote the environment variable
 # in order for it to be value TOML, e.g. "$FOO_AUTH_KEY" = "foo_alias".
 secret = "test"
+# URL for external authentication service (optional)
+auth_url = "https://api.developer.coinbase.com/rpc/v1/base"
 
 # Mapping of methods to backend groups.
 [rpc_method_mappings]
