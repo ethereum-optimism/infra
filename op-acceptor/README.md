@@ -91,6 +91,17 @@ go run cmd/main.go \
   --validators validators.yaml \    # Path to the validator definitions
 ```
 
+By default, op-acceptor will run tests once and then exit, which is ideal for CI/CD pipelines and one-off testing.
+
+If you want to run tests periodically (for continuous monitoring), specify a run interval:
+```bash
+go run cmd/main.go \
+  --gate betanet \
+  --testdir ../../optimism/ \
+  --validators validators.yaml \
+  --run-interval=1h                 # Run tests every hour
+```
+
 Want to monitor your validation runs? Start our local monitoring stack:
 ```bash
 just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor

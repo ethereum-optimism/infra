@@ -293,3 +293,41 @@ func TestNAT_Context_Cancellation(t *testing.T) {
 	assert.Equal(t, execCountBeforeCancel, mockRunner.execCount.Load(),
 		"No additional test executions should occur after context cancellation")
 }
+
+// TestNAT_RunOnceMode tests that NAT runs once and triggers shutdown in run-once mode
+func TestNAT_RunOnceMode(t *testing.T) {
+	// Setup
+	mockRunner, service, ctx, cancel := setupTest(t)
+	defer teardownTest(t, service, cancel)
+
+	// Set run-once mode
+	service.config.RunOnce = true
+
+	// Create expected result
+	result := &runner.RunnerResult{
+		Status: types.TestStatusPass,
+		RunID:  "test-run-id",
+	}
+
+	// Monitor for shutdown signal
+	shutdownCalled := false
+	service.shutdownCallback = func(err error) {
+		shutdownCalled = true
+	}
+
+	// Expect RunAllTests to be called once
+	mockRunner.On("RunAllTests").Return(result, nil).Once()
+
+	// Start the service
+	err := service.Start(ctx)
+	require.NoError(t, err)
+
+	// Allow time for the delayed shutdown to occur
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify exactly one execution occurred and shutdown was called
+	assert.Equal(t, int32(1), mockRunner.execCount.Load(),
+		"Expected exactly one test execution")
+	assert.True(t, shutdownCalled,
+		"Expected shutdown to be called in run-once mode")
+}

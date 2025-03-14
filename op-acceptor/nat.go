@@ -34,9 +34,11 @@ type nat struct {
 	running atomic.Bool
 	done    chan struct{}
 	wg      sync.WaitGroup
+
+	shutdownCallback func(error) // Callback to signal application shutdown
 }
 
-func New(ctx context.Context, config *Config, version string) (*nat, error) {
+func New(ctx context.Context, config *Config, version string, shutdownCallback func(error)) (*nat, error) {
 	if config == nil {
 		return nil, errors.New("config is required")
 	}
@@ -44,7 +46,8 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	config.Log.Debug("Creating NAT with config",
 		"testDir", config.TestDir,
 		"validatorConfig", config.ValidatorConfig,
-		"runInterval", config.RunInterval)
+		"runInterval", config.RunInterval,
+		"runOnce", config.RunOnce)
 
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
@@ -68,12 +71,13 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	config.Log.Info("nat.New: created registry and test runner")
 
 	return &nat{
-		ctx:      ctx,
-		config:   config,
-		version:  version,
-		registry: reg,
-		runner:   testRunner,
-		done:     make(chan struct{}),
+		ctx:              ctx,
+		config:           config,
+		version:          version,
+		registry:         reg,
+		runner:           testRunner,
+		done:             make(chan struct{}),
+		shutdownCallback: shutdownCallback,
 	}, nil
 }
 
@@ -84,7 +88,12 @@ func (n *nat) Start(ctx context.Context) error {
 	n.done = make(chan struct{})
 	n.running.Store(true)
 
-	n.config.Log.Info("Starting op-acceptor", "interval", n.config.RunInterval)
+	if n.config.RunOnce {
+		n.config.Log.Info("Starting op-acceptor in run-once mode")
+	} else {
+		n.config.Log.Info("Starting op-acceptor in continuous mode", "interval", n.config.RunInterval)
+	}
+
 	n.config.Log.Debug("NAT config paths",
 		"config.TestDir", n.config.TestDir,
 		"config.ValidatorConfig", n.config.ValidatorConfig)
@@ -93,6 +102,18 @@ func (n *nat) Start(ctx context.Context) error {
 	err := n.runTests()
 	if err != nil {
 		return err
+	}
+
+	// If in run-once mode, trigger shutdown and return
+	if n.config.RunOnce {
+		n.config.Log.Info("Tests completed, exiting (run-once mode)")
+
+		// Use a goroutine to avoid blocking in Start()
+		go func() {
+			n.shutdownCallback(nil)
+		}()
+
+		return nil
 	}
 
 	// Start a goroutine for periodic test execution

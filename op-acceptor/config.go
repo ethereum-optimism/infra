@@ -18,6 +18,7 @@ type Config struct {
 	TargetGate      string
 	GoBinary        string
 	RunInterval     time.Duration // Interval between test runs
+	RunOnce         bool          // Indicates if the service should exit after one test run
 
 	Log log.Logger
 }
@@ -48,12 +49,16 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		return nil, fmt.Errorf("failed to get absolute path for validator config: %w", err)
 	}
 
+	runInterval := ctx.Duration(flags.RunInterval.Name)
+	runOnce := runInterval == 0
+
 	return &Config{
 		TestDir:         absTestDir,
 		ValidatorConfig: absValidatorConfig,
 		TargetGate:      gate,
 		GoBinary:        ctx.String(flags.GoBinary.Name),
-		RunInterval:     ctx.Duration(flags.RunInterval.Name),
+		RunInterval:     runInterval,
+		RunOnce:         runOnce,
 		Log:             log,
 	}, nil
 }
