@@ -16,6 +16,12 @@ import (
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 )
 
+const (
+	ExitCodeSuccess        = 0
+	ExitCodeTestFailure    = 1
+	ExitCodeRuntimeFailure = 2
+)
+
 var (
 	Version   = "v0.1.0"
 	GitCommit = ""
@@ -40,7 +46,14 @@ func main() {
 	ctx := ctxinterrupt.WithSignalWaiterMain(context.Background())
 	err := app.RunContext(ctx, os.Args)
 	if err != nil {
-		log.Crit("Application failed", "message", err)
+		// Handle different error types to determine exit codes
+		if _, ok := err.(*nat.TestFailedError); ok {
+			log.Error("Tests failed, exiting with code 1", "message", err)
+			os.Exit(ExitCodeTestFailure)
+		} else {
+			log.Crit("Application failed, exiting with code 2", "message", err)
+			os.Exit(ExitCodeRuntimeFailure)
+		}
 	}
 }
 
