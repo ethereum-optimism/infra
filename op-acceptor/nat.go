@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 )
 
@@ -91,6 +92,7 @@ func (n *nat) Start(ctx context.Context) error {
 		// Run tests
 		result, err := n.executor.RunTests()
 		if err != nil {
+			n.config.Log.Error("Error executing tests", "error", err)
 			return err
 		}
 		n.result = result
@@ -107,22 +109,39 @@ func (n *nat) Start(ctx context.Context) error {
 	})
 
 	// Start the scheduler
-	if err := n.scheduler.Start(ctx); err != nil {
-		return err
-	}
+	// In run-once mode, this will execute the tests directly and return any errors
+	err := n.scheduler.Start(ctx)
 
-	// If in run-once mode, trigger shutdown
+	// If in run-once mode, handle the results for proper exit code
 	if n.config.RunOnce {
 		n.config.Log.Info("Tests completed, exiting (run-once mode)")
 
 		// Use a goroutine to avoid blocking in Start()
 		go func() {
-			n.shutdownCallback(nil)
+			var shutdownErr error
+
+			// If we got a runtime error from the scheduler, pass it directly
+			if err != nil {
+				n.config.Log.Error("Runtime error during test execution", "error", err)
+				shutdownErr = err
+			} else if n.result != nil {
+				// Check the test results if available
+				if n.result.Status == types.TestStatusFail {
+					// Tests failed - return TestFailedError (exit code 1)
+					shutdownErr = NewTestFailedError("Tests failed")
+				}
+				// If tests passed or were skipped, return nil (exit code 0)
+			} else {
+				// No result indicates a runtime error - return regular error (exit code 2)
+				shutdownErr = errors.New("runtime error: no test results available")
+			}
+
+			n.shutdownCallback(shutdownErr)
 		}()
 	}
 
 	n.config.Log.Debug("op-acceptor started successfully")
-	return nil
+	return err
 }
 
 // Stop stops the op-acceptor service.

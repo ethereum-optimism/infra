@@ -57,6 +57,7 @@ func (s *DefaultTestScheduler) Start(ctx context.Context) error {
 
 	if s.runOnce {
 		s.logger.Info("Starting scheduler in run-once mode")
+		// In run-once mode, we call the callback once and propagate any errors
 		return s.callback()
 	}
 
@@ -65,7 +66,9 @@ func (s *DefaultTestScheduler) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := s.callback()
 	if err != nil {
-		return err
+		s.logger.Error("Error running tests on startup", "error", err)
+		// In continuous mode, we log the error but continue running
+		// We don't return the error to avoid stopping the scheduler
 	}
 
 	// Start a goroutine for periodic test execution

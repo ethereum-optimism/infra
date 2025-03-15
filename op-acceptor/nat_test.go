@@ -2,17 +2,19 @@ package nat
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/runner"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ethereum-optimism/infra/op-acceptor/runner"
-	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	testlog "github.com/ethereum-optimism/optimism/op-service/testlog"
 )
 
 // trackedMockRunner is a mock runner that counts executions and provides synchronization
@@ -88,7 +90,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	mockRunner := newTrackedMockRunner()
 
 	// Create a basic logger
-	logger := log.New()
+	logger := testlog.Logger(t, log.LvlDebug)
 
 	// Create test executor with mock runner
 	executor := &DefaultTestExecutor{
@@ -348,4 +350,170 @@ func TestNAT_RunOnceMode(t *testing.T) {
 		"Expected exactly one test execution")
 	assert.True(t, shutdownCalled,
 		"Expected shutdown to be called in run-once mode")
+}
+
+func TestRunOnceExitCodes(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupResult    func() *runner.RunnerResult
+		setupExecError error
+		expectedError  error
+	}{
+		{
+			name: "all tests pass",
+			setupResult: func() *runner.RunnerResult {
+				return &runner.RunnerResult{
+					Status: types.TestStatusPass,
+				}
+			},
+			expectedError: nil, // expect exit code 0
+		},
+		{
+			name: "some tests fail",
+			setupResult: func() *runner.RunnerResult {
+				return &runner.RunnerResult{
+					Status: types.TestStatusFail,
+				}
+			},
+			expectedError: &TestFailedError{}, // expect exit code 1
+		},
+		{
+			name:           "runtime error in test execution",
+			setupExecError: errors.New("execution error"),
+			expectedError:  errors.New(""), // expect exit code 2, matching any error
+		},
+		{
+			name: "all tests skipped",
+			setupResult: func() *runner.RunnerResult {
+				return &runner.RunnerResult{
+					Status: types.TestStatusSkip,
+				}
+			},
+			expectedError: nil, // expect exit code 0
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock executor
+			mockExecutor := &MockTestExecutor{
+				result: nil,
+				err:    nil,
+			}
+
+			// Set up the result or error based on the test case
+			if tt.setupResult != nil {
+				mockExecutor.result = tt.setupResult()
+			}
+			mockExecutor.err = tt.setupExecError
+
+			// Create a counter to check if shutdown callback was called
+			shutdownCalled := false
+			var shutdownError error
+
+			// Create a mock scheduler that will call the registered callback
+			mockScheduler := &MockTestScheduler{}
+			mockScheduler.startFunc = func(ctx context.Context) error {
+				if mockScheduler.callback != nil {
+					return mockScheduler.callback()
+				}
+				return nil
+			}
+
+			// Create a NAT instance with run-once mode
+			cfg := &Config{
+				RunOnce: true,
+				Log:     testlog.Logger(t, log.LvlInfo),
+			}
+			n := &nat{
+				config:    cfg,
+				executor:  mockExecutor,
+				scheduler: mockScheduler,
+				formatter: &MockResultFormatter{},
+				reporter:  &MockMetricsReporter{},
+				shutdownCallback: func(err error) {
+					shutdownCalled = true
+					shutdownError = err
+				},
+			}
+
+			// Start NAT
+			_ = n.Start(context.Background())
+
+			// Give the goroutine time to execute
+			time.Sleep(100 * time.Millisecond)
+
+			// Check that shutdown was called
+			require.True(t, shutdownCalled, "Shutdown callback should be called")
+
+			// Check error type matches expectation
+			if tt.expectedError == nil {
+				assert.Nil(t, shutdownError)
+			} else {
+				assert.NotNil(t, shutdownError)
+				switch tt.expectedError.(type) {
+				case *TestFailedError:
+					_, ok := shutdownError.(*TestFailedError)
+					assert.True(t, ok, "Expected *TestFailedError but got different error type")
+				default:
+					// For other error types, just check that it's not nil
+					assert.NotNil(t, shutdownError)
+				}
+			}
+		})
+	}
+}
+
+// Mock implementations for testing
+type MockTestExecutor struct {
+	result *runner.RunnerResult
+	err    error
+}
+
+func (m *MockTestExecutor) RunTests() (*runner.RunnerResult, error) {
+	return m.result, m.err
+}
+
+type MockTestScheduler struct {
+	callback  func() error
+	startFunc func(ctx context.Context) error
+	stopped   bool
+}
+
+func (m *MockTestScheduler) RegisterCallback(callback func() error) {
+	m.callback = callback
+}
+
+func (m *MockTestScheduler) Start(ctx context.Context) error {
+	if m.startFunc != nil {
+		return m.startFunc(ctx)
+	}
+	if m.callback != nil {
+		return m.callback()
+	}
+	return nil
+}
+
+func (m *MockTestScheduler) Stop() error {
+	m.stopped = true
+	return nil
+}
+
+func (m *MockTestScheduler) Stopped() bool {
+	return m.stopped
+}
+
+func (m *MockTestScheduler) WaitForShutdown(ctx context.Context) error {
+	return nil
+}
+
+type MockResultFormatter struct{}
+
+func (m *MockResultFormatter) FormatResults(result *runner.RunnerResult) error {
+	return nil
+}
+
+type MockMetricsReporter struct{}
+
+func (m *MockMetricsReporter) ReportResults(runID string, result *runner.RunnerResult) {
 }
