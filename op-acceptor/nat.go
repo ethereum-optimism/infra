@@ -22,6 +22,13 @@ import (
 // nat implements the cliapp.Lifecycle interface.
 var _ cliapp.Lifecycle = &nat{}
 
+// Exit codes
+const (
+	ExitCodeSuccess     = 0 // Tests passed or skipped
+	ExitCodeTestFailure = 1 // At least one test failed
+	ExitCodeSystemError = 2 // An error occurred in the application
+)
+
 // nat is a Network Acceptance Tester that runs tests.
 type nat struct {
 	ctx      context.Context
@@ -36,6 +43,61 @@ type nat struct {
 	wg      sync.WaitGroup
 
 	shutdownCallback func(error) // Callback to signal application shutdown
+}
+
+// TestFailureError is a custom error type that includes an exit code
+type TestFailureError struct {
+	msg      string
+	exitCode int
+	status   types.TestStatus
+	cause    error // Underlying error that caused the failure
+}
+
+// Error implements the error interface
+func (e *TestFailureError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s: %v", e.msg, e.cause)
+	}
+	return e.msg
+}
+
+// ExitCode returns the exit code to use
+func (e *TestFailureError) ExitCode() int {
+	return e.exitCode
+}
+
+// Status returns the test status
+func (e *TestFailureError) Status() types.TestStatus {
+	return e.status
+}
+
+// Unwrap implements the errors.Unwrap interface for error chains
+func (e *TestFailureError) Unwrap() error {
+	return e.cause
+}
+
+// NewTestFailureError creates a new test failure error from a test status
+func NewTestFailureError(status types.TestStatus) *TestFailureError {
+	exitCode := ExitCodeSuccess
+	if status == types.TestStatusFail {
+		exitCode = ExitCodeTestFailure
+	}
+
+	return &TestFailureError{
+		msg:      fmt.Sprintf("tests completed with status: %s", status),
+		exitCode: exitCode,
+		status:   status,
+	}
+}
+
+// NewRunnerError creates an error for when the test runner fails
+func NewRunnerError(err error) *TestFailureError {
+	return &TestFailureError{
+		msg:      "test runner error",
+		exitCode: ExitCodeSystemError,
+		status:   types.TestStatusFail,
+		cause:    err,
+	}
 }
 
 func New(ctx context.Context, config *Config, version string, shutdownCallback func(error)) (*nat, error) {
@@ -100,7 +162,11 @@ func (n *nat) Start(ctx context.Context) error {
 
 	// Run tests immediately on startup
 	err := n.runTests()
-	if err != nil {
+
+	// If there was a runner error, return it immediately
+	var runnerErr *TestFailureError
+	if err != nil && errors.As(err, &runnerErr) && runnerErr.cause != nil {
+		// This is a runner error (not a test failure)
 		return err
 	}
 
@@ -110,10 +176,20 @@ func (n *nat) Start(ctx context.Context) error {
 
 		// Use a goroutine to avoid blocking in Start()
 		go func() {
-			n.shutdownCallback(nil)
+			// For test failures, pass the error to the shutdown callback
+			n.shutdownCallback(err)
 		}()
 
+		// Always return nil from Start in run-once mode when it's a test failure
+		// as we're handling it via the shutdown callback
 		return nil
+	}
+
+	// In continuous mode, log errors but continue running
+	if err != nil {
+		n.config.Log.Error("Initial test run failed", "error", err)
+		// We don't return the error here as we want to continue
+		// running tests periodically in continuous mode
 	}
 
 	// Start a goroutine for periodic test execution
@@ -159,8 +235,10 @@ func (n *nat) runTests() error {
 	result, err := n.runner.RunAllTests()
 	if err != nil {
 		n.config.Log.Error("Error running tests", "error", err)
-		return err
+		// Create a proper runner error and propagate it
+		return NewRunnerError(err)
 	}
+
 	n.result = result
 
 	n.printResultsTable(result.RunID)
@@ -168,7 +246,14 @@ func (n *nat) runTests() error {
 	if n.result.Status == types.TestStatusFail {
 		printGandalf()
 	}
+
 	n.config.Log.Info("Test run completed", "run_id", result.RunID, "status", n.result.Status)
+
+	// If tests failed, return an appropriate error
+	if n.result.Status == types.TestStatusFail {
+		return NewTestFailureError(n.result.Status)
+	}
+
 	return nil
 }
 
@@ -443,4 +528,44 @@ func (n *nat) WaitForShutdown(ctx context.Context) error {
 		n.config.Log.Warn("Timed out waiting for goroutines to terminate", "error", ctx.Err())
 		return ctx.Err()
 	}
+}
+
+// GetExitCode returns the appropriate exit code based on test results
+func (n *nat) GetExitCode() int {
+	if n.result == nil {
+		// No result means we had an error running tests
+		return ExitCodeSystemError
+	}
+
+	if n.result.Status == types.TestStatusFail {
+		// Tests failed
+		return ExitCodeTestFailure
+	}
+
+	// Tests passed or were skipped
+	return ExitCodeSuccess
+}
+
+// GetExitCode extracts the exit code from an error
+func GetExitCode(err error) int {
+	if err == nil {
+		return ExitCodeSuccess
+	}
+
+	// Try to extract the exit code using errors.As for type safety
+	var testErr *TestFailureError
+	if errors.As(err, &testErr) {
+		return testErr.ExitCode()
+	}
+
+	// Check for other error types implementing ExitCode() int
+	type ExitCoder interface {
+		ExitCode() int
+	}
+	if coder, ok := err.(ExitCoder); ok {
+		return coder.ExitCode()
+	}
+
+	// Default to system error for standard errors
+	return ExitCodeSystemError
 }

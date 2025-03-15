@@ -39,11 +39,27 @@ func main() {
 	// Start CLI
 	ctx := ctxinterrupt.WithSignalWaiterMain(context.Background())
 	err := app.RunContext(ctx, os.Args)
+
+	// Handle application exit
+	exitCode := 0
 	if err != nil {
 		log.Crit("Application failed", "message", err)
+		// Check if the error provides an exit code
+		if coder, ok := err.(interface{ ExitCode() int }); ok {
+			exitCode = coder.ExitCode()
+		} else {
+			exitCode = 2 // Error in the application
+		}
+	}
+
+	// Only exit with non-zero code if there's an error
+	if exitCode != 0 {
+		log.Info("Exiting with status code", "code", exitCode)
+		os.Exit(exitCode)
 	}
 }
 
+// run initializes and starts the NAT service
 func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, error) {
 	logCfg := oplog.ReadCLIConfig(ctx)
 	log := oplog.NewLogger(oplog.AppOut(ctx), logCfg)
@@ -64,7 +80,12 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 
 	cfg.Log.Debug("Config", "config", cfg)
 
-	natService, err := nat.New(ctx.Context, cfg, Version, closeApp)
+	// Create a custom shutdown callback that preserves the error
+	shutdownCallback := func(err error) {
+		closeApp(err) // Pass the error directly to closeApp
+	}
+
+	natService, err := nat.New(ctx.Context, cfg, Version, shutdownCallback)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create nat: %w", err)
 	}

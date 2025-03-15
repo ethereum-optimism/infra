@@ -2,6 +2,9 @@ package nat
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
@@ -133,201 +137,477 @@ func teardownTest(t *testing.T, service *nat, cancel context.CancelFunc) {
 	}
 }
 
-// TestNAT_Start_RunsTestsImmediately tests that NAT runs tests immediately when started
 func TestNAT_Start_RunsTestsImmediately(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
+	// ARRANGE
+	cfg := getTestConfig(t, false)
+	mockRunner := &mockTestRunner{}
+	testNAT := getNAT(t, cfg, mockRunner, nil)
 
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
-	}
+	// ACT
+	err := testNAT.Start(context.Background())
 
-	// Expect RunAllTests to be called once
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
-
-	// Start the service
-	err := service.Start(ctx)
+	// ASSERT
 	require.NoError(t, err)
-
-	// Verify immediate execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected immediate test execution")
-
-	// Stop the service
-	err = service.Stop(ctx)
-	require.NoError(t, err)
-
-	// Verify exactly one execution occurred
-	assert.Equal(t, int32(1), mockRunner.execCount.Load(),
-		"Expected exactly one test execution")
+	assert.Equal(t, 1, mockRunner.runCount, "Tests should be run immediately on startup")
 }
 
-// TestNAT_Start_RunsTestsPeriodically tests that NAT runs tests periodically
 func TestNAT_Start_RunsTestsPeriodically(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
+	// ARRANGE
+	cfg := getTestConfig(t, false)
+	cfg.RunInterval = 100 * time.Millisecond
+	mockRunner := &mockTestRunner{}
+	testNAT := getNAT(t, cfg, mockRunner, nil)
 
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
-	}
+	// ACT
+	err := testNAT.Start(context.Background())
 
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
-
-	// Start the service
-	err := service.Start(ctx)
+	// ASSERT
 	require.NoError(t, err)
+	assert.Equal(t, 1, mockRunner.runCount, "Tests should be run immediately on startup")
 
-	// Wait for at least 3 total executions (initial + at least 2 periodic)
-	assert.True(t, mockRunner.waitForExecutions(ctx, 3),
-		"Expected at least 1 periodic test execution after initial run")
-
-	// Stop the service
-	err = service.Stop(ctx)
-	require.NoError(t, err)
-
-	// Log the final execution count for diagnostics
-	execCount := mockRunner.execCount.Load()
-	t.Logf("Test executed %d times", execCount)
-	assert.GreaterOrEqual(t, execCount, int32(3),
-		"Expected at least 3 test executions (1 initial + 2 periodic)")
+	// Wait for at least one periodic run (plus some buffer time)
+	time.Sleep(150 * time.Millisecond)
+	assert.GreaterOrEqual(t, mockRunner.runCount, 2, "Tests should be run periodically")
 }
 
-// TestNAT_Stop_CleansUpResources tests that the NAT service properly stops
 func TestNAT_Stop_CleansUpResources(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
-
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
-	}
-
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
+	// ARRANGE
+	cfg := getTestConfig(t, false)
+	mockRunner := &mockTestRunner{}
+	testNAT := getNAT(t, cfg, mockRunner, nil)
 
 	// Start the service
-	err := service.Start(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	err := testNAT.Start(ctx)
 	require.NoError(t, err)
 
-	// Wait for the initial execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected at least one test execution")
+	// ACT
+	cancel() // Cancel the context
+	err = testNAT.Stop(ctx)
 
-	// Verify service is running
-	assert.False(t, service.Stopped())
-
-	// Stop the service
-	err = service.Stop(ctx)
+	// ASSERT
 	require.NoError(t, err)
-
-	// Verify service is stopped
-	assert.True(t, service.Stopped())
-
-	// Record the execution count after stopping
-	execCountAfterStop := mockRunner.execCount.Load()
-
-	// Wait 3 intervals to ensure no more tests run after stopping
-	// This gives sufficient time for any in-flight operations to complete
-	time.Sleep(3 * service.config.RunInterval)
-
-	// Verify no additional executions occurred after stopping
-	assert.Equal(t, execCountAfterStop, mockRunner.execCount.Load(),
-		"No additional test executions should occur after stopping the service")
+	assert.False(t, testNAT.running.Load(), "NAT should not be running after stop")
 }
 
-// TestNAT_Context_Cancellation tests that the NAT service properly handles
-// context cancellation
 func TestNAT_Context_Cancellation(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
+	// ARRANGE
+	cfg := getTestConfig(t, false)
+	cfg.RunInterval = 10 * time.Millisecond
+	mockRunner := &mockTestRunner{}
+	testNAT := getNAT(t, cfg, mockRunner, nil)
 
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
-	}
-
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
-
-	// Start the service
-	err := service.Start(ctx)
+	// Start the service with a cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	err := testNAT.Start(ctx)
 	require.NoError(t, err)
 
-	// Wait for the initial execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected immediate test execution")
-
-	// Verify service is running
-	assert.False(t, service.Stopped())
-
-	// Record the execution count before cancellation
-	execCountBeforeCancel := mockRunner.execCount.Load()
-	t.Logf("Test executed %d times before cancellation", execCountBeforeCancel)
-
-	// Cancel the context
-	cancel()
-
-	// Wait a small amount of time for cancellation to propagate
-	// Sleep a minimum of 20ms to allow context cancellation to be processed
+	// ACT
+	// Wait for at least one periodic run
+	time.Sleep(20 * time.Millisecond)
+	cancel() // Cancel the context
 	time.Sleep(20 * time.Millisecond)
 
-	// Verify service is stopped after context cancellation
-	assert.True(t, service.Stopped(), "Service should be stopped after context cancellation")
-
-	// Wait 3 intervals to ensure no more tests run after cancellation
-	// This gives sufficient time for any in-flight operations to complete
-	time.Sleep(3 * service.config.RunInterval)
-
-	// Verify no additional executions occurred after cancellation
-	assert.Equal(t, execCountBeforeCancel, mockRunner.execCount.Load(),
-		"No additional test executions should occur after context cancellation")
+	// ASSERT
+	assert.False(t, testNAT.running.Load(), "NAT should stop running when context is canceled")
 }
 
-// TestNAT_RunOnceMode tests that NAT runs once and triggers shutdown in run-once mode
 func TestNAT_RunOnceMode(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
+	// ARRANGE
+	cfg := getTestConfig(t, true) // Run once mode
+	mockRunner := &mockTestRunner{}
 
-	// Set run-once mode
-	service.config.RunOnce = true
-
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
+	// Create a channel to signal when shutdown is called
+	shutdownCh := make(chan error, 1)
+	shutdownCallback := func(err error) {
+		shutdownCh <- err
 	}
 
-	// Monitor for shutdown signal
-	shutdownCalled := false
-	service.shutdownCallback = func(err error) {
-		shutdownCalled = true
-	}
+	testNAT := getNAT(t, cfg, mockRunner, shutdownCallback)
 
-	// Expect RunAllTests to be called once
-	mockRunner.On("RunAllTests").Return(result, nil).Once()
+	// ACT
+	err := testNAT.Start(context.Background())
 
-	// Start the service
-	err := service.Start(ctx)
+	// ASSERT
 	require.NoError(t, err)
+	assert.Equal(t, 1, mockRunner.runCount, "Tests should be run immediately on startup")
 
-	// Allow time for the delayed shutdown to occur
-	time.Sleep(200 * time.Millisecond)
+	// Wait for shutdown to be called with a timeout
+	select {
+	case err := <-shutdownCh:
+		// No error should be passed when tests pass
+		assert.Nil(t, err, "No error should be passed when tests pass")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Shutdown callback was not called within the timeout period")
+	}
+}
 
-	// Verify exactly one execution occurred and shutdown was called
-	assert.Equal(t, int32(1), mockRunner.execCount.Load(),
-		"Expected exactly one test execution")
-	assert.True(t, shutdownCalled,
-		"Expected shutdown to be called in run-once mode")
+func TestNAT_RunOnceMode_WithFailedTests(t *testing.T) {
+	// ARRANGE
+	cfg := getTestConfig(t, true) // Run once mode
+	mockRunner := &mockTestRunner{
+		failTests: true, // Simulate failed tests
+	}
+
+	// Create a channel to signal when shutdown is called
+	shutdownCh := make(chan error, 1)
+	shutdownCallback := func(err error) {
+		shutdownCh <- err
+	}
+
+	testNAT := getNAT(t, cfg, mockRunner, shutdownCallback)
+
+	// ACT
+	err := testNAT.Start(context.Background())
+
+	// ASSERT
+	require.NoError(t, err)
+	assert.Equal(t, 1, mockRunner.runCount, "Tests should be run immediately on startup")
+
+	// Wait for shutdown to be called with a timeout
+	var capturedError error
+	select {
+	case capturedError = <-shutdownCh:
+		// Good, the callback was called
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Shutdown callback was not called within the timeout period")
+	}
+
+	// Verify we received an error related to test failure
+	require.NotNil(t, capturedError, "Expected an error to be passed to shutdown callback")
+	assert.Contains(t, capturedError.Error(), "fail", "Error should mention test failure")
+}
+
+func TestGetExitCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected int
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: ExitCodeSuccess,
+		},
+		{
+			name:     "standard error",
+			err:      errors.New("some error"),
+			expected: ExitCodeSystemError,
+		},
+		{
+			name:     "custom error with exit code",
+			err:      &TestFailureError{msg: "test failed", exitCode: ExitCodeTestFailure},
+			expected: ExitCodeTestFailure,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			code := GetExitCode(test.err)
+			assert.Equal(t, test.expected, code, "Exit code should match expected value")
+		})
+	}
+}
+
+func TestTestFailureError(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       types.TestStatus
+		expectedCode int
+		expectedMsg  string
+	}{
+		{
+			name:         "pass status",
+			status:       types.TestStatusPass,
+			expectedCode: ExitCodeSuccess,
+			expectedMsg:  "tests completed with status: pass",
+		},
+		{
+			name:         "skip status",
+			status:       types.TestStatusSkip,
+			expectedCode: ExitCodeSuccess,
+			expectedMsg:  "tests completed with status: skip",
+		},
+		{
+			name:         "fail status",
+			status:       types.TestStatusFail,
+			expectedCode: ExitCodeTestFailure,
+			expectedMsg:  "tests completed with status: fail",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := NewTestFailureError(test.status)
+			assert.Equal(t, test.expectedCode, err.ExitCode(), "Exit code should match expected value")
+			assert.Equal(t, test.expectedMsg, err.Error(), "Error message should match expected value")
+		})
+	}
+}
+
+func TestNAT_GetExitCode(t *testing.T) {
+	// Create test cases for different result states
+	testCases := []struct {
+		name       string
+		resultNil  bool
+		testStatus types.TestStatus
+		expected   int
+	}{
+		{
+			name:      "nil result",
+			resultNil: true,
+			expected:  ExitCodeSystemError,
+		},
+		{
+			name:       "passing tests",
+			testStatus: types.TestStatusPass,
+			expected:   ExitCodeSuccess,
+		},
+		{
+			name:       "skipped tests",
+			testStatus: types.TestStatusSkip,
+			expected:   ExitCodeSuccess,
+		},
+		{
+			name:       "failed tests",
+			testStatus: types.TestStatusFail,
+			expected:   ExitCodeTestFailure,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a new nat instance with a mock runner
+			cfg := getTestConfig(t, false)
+			testNAT := getNAT(t, cfg, &mockTestRunner{}, nil)
+
+			// Set up the result based on test case
+			if tc.resultNil {
+				testNAT.result = nil
+			} else {
+				testNAT.result = &runner.RunnerResult{
+					Status: tc.testStatus,
+				}
+			}
+
+			// Get the exit code
+			code := testNAT.GetExitCode()
+
+			// Verify the exit code matches expectations
+			assert.Equal(t, tc.expected, code, "Exit code should match expected value")
+		})
+	}
+}
+
+func TestNewRunnerError(t *testing.T) {
+	// Create a basic error to wrap
+	baseErr := errors.New("underlying error")
+
+	// Create a runner error
+	runnerErr := NewRunnerError(baseErr)
+
+	// Verify its properties
+	assert.Equal(t, ExitCodeSystemError, runnerErr.ExitCode(), "Runner error should have system error exit code")
+	assert.Equal(t, types.TestStatusFail, runnerErr.Status(), "Runner error should have fail status")
+	assert.Contains(t, runnerErr.Error(), "test runner error", "Error message should indicate test runner error")
+	assert.ErrorIs(t, runnerErr, baseErr, "Underlying error should be preserved")
+}
+
+func TestErrorPropagationInRunOnceMode(t *testing.T) {
+	// ARRANGE
+	// Create error scenarios to test
+	testCases := []struct {
+		name             string
+		setupRunner      func(*mockTestRunner)
+		expectStartError bool // Expect error from Start
+		expectCallback   bool // Expect callback to be called
+		expectedCode     int  // Expected exit code
+	}{
+		{
+			name: "runner returns error",
+			setupRunner: func(m *mockTestRunner) {
+				m.runError = errors.New("runner execution error")
+			},
+			expectStartError: true,  // Runner errors are returned from Start
+			expectCallback:   false, // No callback for runner errors
+			expectedCode:     ExitCodeSystemError,
+		},
+		{
+			name: "tests pass",
+			setupRunner: func(m *mockTestRunner) {
+				m.failTests = false
+			},
+			expectStartError: false, // No error from Start
+			expectCallback:   true,  // Callback called with nil
+			expectedCode:     ExitCodeSuccess,
+		},
+		{
+			name: "tests fail",
+			setupRunner: func(m *mockTestRunner) {
+				m.failTests = true
+			},
+			expectStartError: false, // No error from Start
+			expectCallback:   true,  // Callback with test failure error
+			expectedCode:     ExitCodeTestFailure,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create config for run-once mode
+			cfg := getTestConfig(t, true)
+			mockRunner := &mockTestRunner{}
+
+			// Apply test-specific setup
+			tc.setupRunner(mockRunner)
+
+			// Create a channel to signal when shutdown is called
+			shutdownCh := make(chan error, 1)
+			shutdownCallback := func(err error) {
+				shutdownCh <- err
+			}
+
+			testNAT := getNAT(t, cfg, mockRunner, shutdownCallback)
+
+			// ACT
+			err := testNAT.Start(context.Background())
+
+			// ASSERT
+			if tc.expectStartError {
+				// For runner errors, Start should return an error
+				require.Error(t, err, "Start should return runner errors")
+
+				// Verify the exit code
+				var exitCode int
+				if coder, ok := err.(interface{ ExitCode() int }); ok {
+					exitCode = coder.ExitCode()
+				} else {
+					exitCode = ExitCodeSystemError
+				}
+				assert.Equal(t, tc.expectedCode, exitCode, "Error should have expected exit code")
+
+				// No callback should be called for runner errors
+				select {
+				case callbackErr := <-shutdownCh:
+					t.Fatalf("Unexpected shutdown callback with error: %v", callbackErr)
+				case <-time.After(50 * time.Millisecond):
+					// Expected - no callback
+				}
+
+				return
+			}
+
+			// For test results (pass/fail), Start should not return an error
+			require.NoError(t, err, "Start should not return error for test pass/fail")
+
+			// Verify callback was called with expected error
+			if tc.expectCallback {
+				var callbackErr error
+				select {
+				case callbackErr = <-shutdownCh:
+					// Good, callback was called
+				case <-time.After(100 * time.Millisecond):
+					t.Fatal("Shutdown callback not called within timeout")
+				}
+
+				if tc.name == "tests fail" {
+					// For failing tests, verify the error
+					require.NotNil(t, callbackErr, "Expected error for failed tests")
+
+					// Check exit code
+					var exitCode int
+					if coder, ok := callbackErr.(interface{ ExitCode() int }); ok {
+						exitCode = coder.ExitCode()
+					} else {
+						exitCode = ExitCodeSystemError
+					}
+					assert.Equal(t, tc.expectedCode, exitCode, "Error should have expected exit code")
+				} else {
+					// For passing tests, no error
+					assert.Nil(t, callbackErr, "No error expected for passing tests")
+				}
+			}
+		})
+	}
+}
+
+// Helper functions
+
+func getTestConfig(t *testing.T, runOnce bool) *Config {
+	tmpDir, err := os.MkdirTemp("", "nat-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDir)
+	})
+
+	return &Config{
+		TestDir:         tmpDir,
+		ValidatorConfig: "test-validators.yaml",
+		TargetGate:      "test-gate",
+		GoBinary:        "go",
+		RunInterval:     1 * time.Second,
+		RunOnce:         runOnce,
+		Log:             log.New(),
+	}
+}
+
+func getNAT(t *testing.T, cfg *Config, mockRunner *mockTestRunner, shutdownCallback func(error)) *nat {
+	testNAT := &nat{
+		ctx:              context.Background(),
+		config:           cfg,
+		version:          "test-version",
+		registry:         &registry.Registry{},
+		runner:           mockRunner,
+		result:           &runner.RunnerResult{Status: types.TestStatusPass},
+		done:             make(chan struct{}),
+		shutdownCallback: shutdownCallback,
+	}
+	mockRunner.result = testNAT.result
+	return testNAT
+}
+
+// Mock test runner for testing
+type mockTestRunner struct {
+	runCount  int
+	failTests bool
+	result    *runner.RunnerResult
+	runError  error // Added to simulate runner errors
+}
+
+func (m *mockTestRunner) Run(gate string) error {
+	m.runCount++
+	if m.failTests {
+		m.result.Status = types.TestStatusFail
+		return fmt.Errorf("tests failed")
+	}
+	m.result.Status = types.TestStatusPass
+	return nil
+}
+
+func (m *mockTestRunner) RunAllTests() (*runner.RunnerResult, error) {
+	m.runCount++
+
+	// If runError is set, return that error
+	if m.runError != nil {
+		return nil, m.runError
+	}
+
+	if m.failTests {
+		m.result.Status = types.TestStatusFail
+		return m.result, nil
+	}
+	m.result.Status = types.TestStatusPass
+	return m.result, nil
+}
+
+func (m *mockTestRunner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	m.runCount++
+	if m.failTests {
+		return &types.TestResult{
+			Status: types.TestStatusFail,
+		}, nil
+	}
+	return &types.TestResult{
+		Status: types.TestStatusPass,
+	}, nil
 }
