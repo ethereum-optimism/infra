@@ -11,6 +11,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
@@ -101,19 +102,29 @@ func (n *nat) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := n.runTests()
 	if err != nil {
-		return err
+		// For other errors, return an ExitCoder with exit code 1
+		n.config.Log.Error("Error running tests", "error", err)
+		return cli.Exit(fmt.Sprintf("Error running tests: %v", err), 2)
 	}
 
 	// If in run-once mode, trigger shutdown and return
 	if n.config.RunOnce {
 		n.config.Log.Info("Tests completed, exiting (run-once mode)")
 
-		// Use a goroutine to avoid blocking in Start()
+		// Check if any tests failed and return appropriate exit code
+		if n.result != nil && n.result.Status == types.TestStatusFail {
+			n.config.Log.Warn("Run-once test run completed with failures, returning exit code 1")
+			// return an error with test summary
+			return fmt.Errorf("Run-once test run completed with failures: %v", n.result.String())
+		}
+
+		n.config.Log.Info("Test run complete with success, returning exit code 0")
+
+		// Only need to call this when we're in run-once mode and all tests passed, otherwise the returned error will trigger shutdown
 		go func() {
 			n.shutdownCallback(nil)
 		}()
-
-		return nil
+		return nil // Success (exit code 0)
 	}
 
 	// Start a goroutine for periodic test execution
