@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
@@ -111,17 +111,22 @@ func (n *nat) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := n.runTests()
 	if err != nil {
-		if strings.Contains(err.Error(), "test failures:") {
-			n.config.Log.Error("Tests failed", "error", err)
-			os.Exit(exitcodes.TestFailure) // Test failures exit with code 1
-		}
-		n.config.Log.Error("Runtime error occurred", "error", err)
-		os.Exit(exitcodes.RuntimeErr) // All other failures exit with code 2
+		// For runtime errors (like panics or configuration issues), return exit code 2
+		n.config.Log.Error("Runtime error running tests", "error", err)
+		return cli.Exit(err.Error(), 2)
 	}
 
 	// If in run-once mode, trigger shutdown and return
 	if n.config.RunOnce {
 		n.config.Log.Info("Tests completed, exiting (run-once mode)")
+
+		// Check if any tests failed and return appropriate exit code
+		if n.result != nil && n.result.Status == types.TestStatusFail {
+			n.config.Log.Warn("Run-once test run completed with failures, returning exit code 1")
+			// Return exit code 1 for test failures (assertions failed)
+			return NewTestFailureError(n.result.String())
+		}
+
 		// Only need to call this when we're in run-once mode and all tests passed
 		go func() {
 			n.shutdownCallback(nil)
@@ -170,23 +175,18 @@ func (n *nat) Start(ctx context.Context) error {
 func (n *nat) runTests() error {
 	n.config.Log.Info("Running all tests...")
 	result, err := n.runner.RunAllTests()
-
-	// Handle runtime errors (result will be nil or incomplete)
 	if err != nil {
-		n.config.Log.Error("Error running tests", "error", err)
-		return fmt.Errorf("runtime error: %w", err)
+		// This is a runtime error (not a test failure)
+		n.config.Log.Error("Runtime error running tests", "error", err)
+		return NewRuntimeError(err)
 	}
-
 	n.result = result
+
 	n.printResultsTable(result.RunID)
 	fmt.Println(n.result.String())
-
-	// Check for test failures
 	if n.result.Status == types.TestStatusFail {
 		printGandalf()
-		return fmt.Errorf("test failures: test run completed with failures")
 	}
-
 	n.config.Log.Info("Test run completed", "run_id", result.RunID, "status", n.result.Status)
 	return nil
 }
