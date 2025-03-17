@@ -927,3 +927,132 @@ gates:
 	assert.Equal(t, 6, result.Stats.Total, "stats should include all tests (2 packages + 4 subtests)")
 	assert.Equal(t, 6, result.Stats.Passed, "all tests should be passing")
 }
+
+// TestRunTest_PanicRecovery verifies that the RunTest method properly handles and recovers from panics
+func TestRunTest_PanicRecovery(t *testing.T) {
+	// Create a test runner with a test file that will panic when executed
+	testContent := []byte(`
+package feature_test
+
+import "testing"
+
+func TestPanic(t *testing.T) {
+	// This test will deliberately panic
+	panic("deliberate test panic")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: test-gate
+    description: "Test gate"
+    suites:
+      test-suite:
+        description: "Test suite"
+        tests:
+          - name: TestPanic
+            package: "./feature"
+`)
+	r := setupTestRunner(t, testContent, configContent)
+
+	// Run a test that will panic
+	metadata := types.ValidatorMetadata{
+		ID:       "panic-test",
+		Gate:     "test-gate",
+		FuncName: "TestPanic",
+		Package:  "./feature",
+	}
+
+	// The panic should be caught and converted to a test failure
+	result, err := r.RunTest(metadata)
+
+	// The RunTest method actually returns the result but not an error for panics
+	// because the Go test command captures the panic and returns a failed test result
+	require.NotNil(t, result, "Result should not be nil despite panic")
+	assert.Nil(t, err, "RunTest should not return an error for a test panic")
+
+	// Instead, the test should be marked as failed
+	assert.Equal(t, types.TestStatusFail, result.Status, "Test status should be fail")
+	assert.NotNil(t, result.Error, "Result should have an error")
+
+	// The error should indicate a test failure
+	assert.Contains(t, result.Error.Error(), "exit status", "Error should indicate test failure")
+
+	// Verify the metadata was preserved
+	assert.Equal(t, metadata.ID, result.Metadata.ID)
+	assert.Equal(t, metadata.Gate, result.Metadata.Gate)
+	assert.Equal(t, metadata.FuncName, result.Metadata.FuncName)
+	assert.Equal(t, metadata.Package, result.Metadata.Package)
+}
+
+// TestRunAllTests_PanicHandling verifies that the RunAllTests method properly handles tests that panic
+func TestRunAllTests_PanicHandling(t *testing.T) {
+	// Create a test runner with a mix of normal and panicking tests
+	testContent := []byte(`
+package feature_test
+
+import "testing"
+
+func TestNormal(t *testing.T) {
+	t.Log("This test runs normally")
+}
+
+func TestPanic(t *testing.T) {
+	// This test will deliberately panic
+	panic("deliberate panic in RunAllTests")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: test-gate
+    description: "Test gate"
+    suites:
+      test-suite:
+        description: "Test suite"
+        tests:
+          - name: TestNormal
+            package: "./feature"
+          - name: TestPanic
+            package: "./feature"
+`)
+	r := setupTestRunner(t, testContent, configContent)
+
+	// Run all tests - the runner should handle the panic and continue
+	result, err := r.RunAllTests()
+
+	// There should be no error at the top level because the runner handles test panics
+	require.NoError(t, err, "RunAllTests should not return an error even with panicking tests")
+	require.NotNil(t, result, "Result should not be nil")
+
+	// The overall run status should be fail
+	assert.Equal(t, types.TestStatusFail, result.Status, "Run status should be fail when tests panic")
+
+	// Verify gate and suite structure
+	require.Contains(t, result.Gates, "test-gate", "Result should contain test-gate")
+	gate := result.Gates["test-gate"]
+	require.Contains(t, gate.Suites, "test-suite", "Gate should contain test-suite")
+	suite := gate.Suites["test-suite"]
+
+	// Verify test results - there should be a normal test and a failing test (the one that panicked)
+	require.Equal(t, 2, len(suite.Tests), "Suite should contain 2 tests")
+
+	// Find the normal and panicking tests
+	var normalTest, panicTest *types.TestResult
+	for _, test := range suite.Tests {
+		if test.Metadata.FuncName == "TestNormal" {
+			normalTest = test
+		} else if test.Metadata.FuncName == "TestPanic" {
+			panicTest = test
+		}
+	}
+
+	// Verify normal test passed
+	require.NotNil(t, normalTest, "Normal test should be in results")
+	assert.Equal(t, types.TestStatusPass, normalTest.Status, "Normal test should pass")
+
+	// Verify panic test failed
+	require.NotNil(t, panicTest, "Panic test should be in results")
+	assert.Equal(t, types.TestStatusFail, panicTest.Status, "Panic test should fail")
+	assert.NotNil(t, panicTest.Error, "Panic test should have an error")
+}

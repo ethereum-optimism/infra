@@ -30,6 +30,24 @@ func main() {
 	app.Description = "op-acceptor tests networks"
 	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Action = cliapp.LifecycleCmd(run)
+	app.ExitErrHandler = func(c *cli.Context, err error) {
+		if exitErr, ok := err.(cli.ExitCoder); ok {
+			// Use the exit code from the ExitCoder
+			cli.HandleExitCoder(exitErr)
+		} else if err != nil {
+			// Check for typed runtime errors
+			if nat.IsRuntimeError(err) {
+				// For runtime errors, use exit code 2
+				cli.HandleExitCoder(cli.Exit(err.Error(), 2))
+			} else if nat.IsTestFailureError(err) {
+				// For test failures, use exit code 1
+				cli.HandleExitCoder(cli.Exit(err.Error(), 1))
+			} else {
+				// For other unspecified errors, default to exit code 1
+				cli.HandleExitCoder(cli.Exit(err.Error(), 1))
+			}
+		}
+	}
 
 	// Start server
 	svc := service.New()
@@ -59,14 +77,16 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 		ctx.String(flags.Gate.Name),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create config: %w", err)
+		// Wrap in RuntimeError to signal this should exit with code 2
+		return nil, nat.NewRuntimeError(fmt.Errorf("failed to create config: %w", err))
 	}
 
 	cfg.Log.Debug("Config", "config", cfg)
 
 	natService, err := nat.New(ctx.Context, cfg, Version, closeApp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create nat: %w", err)
+		// Wrap in RuntimeError to signal this should exit with code 2
+		return nil, nat.NewRuntimeError(fmt.Errorf("failed to create nat: %w", err))
 	}
 
 	return natService, nil

@@ -298,11 +298,36 @@ func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
 
 // RunTest implements the TestRunner interface
 func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	// Use defer and recover to catch panics and convert them to errors
+	var result *types.TestResult
+	var err error
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			errMsg := fmt.Sprintf("runtime error: %v", rec)
+			r.log.Error("Panic in RunTest", "error", errMsg, "test", metadata.FuncName)
+
+			// If result hasn't been initialized yet, create one
+			if result == nil {
+				result = &types.TestResult{
+					Metadata: metadata,
+					Status:   types.TestStatusFail,
+					Error:    fmt.Errorf("%s", errMsg),
+				}
+			} else {
+				// Otherwise just set the error and status
+				result.Status = types.TestStatusFail
+				result.Error = fmt.Errorf("%s", errMsg)
+			}
+
+			// Set error so it's returned properly
+			err = fmt.Errorf("%s", errMsg)
+		}
+	}()
+
 	start := time.Now()
 	r.log.Info("Running test", "validator", metadata.ID)
 
-	var result *types.TestResult
-	var err error
 	if metadata.RunAll {
 		result, err = r.runAllTestsInPackage(metadata)
 	} else {
