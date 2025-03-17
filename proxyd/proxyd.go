@@ -288,7 +288,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 	var resolvedAuth map[string]string
 	if config.Authentication != nil {
-		log.Info("Authentication config contents",
+		log.Info("Startfunction Authentication config contents",
 			"raw_config", config.Authentication,
 			"auth_url_value", config.Authentication["auth_url"],
 			"secret_value", config.Authentication["secret"])
@@ -297,13 +297,13 @@ func Start(config *Config) (*Server, func(), error) {
 
 		// First, check and process the auth_url if present
 		if authURL, ok := config.Authentication["auth_url"]; ok {
-			log.Info("Found auth_url in config", "auth_url", authURL)
+			log.Info("Startfunction Found auth_url in config", "auth_url", authURL)
 			resolvedURL, err := ReadFromEnvOrConfig(authURL)
 			if err != nil {
 				return nil, nil, err
 			}
 			resolvedAuth["auth_url"] = resolvedURL
-			log.Info("Configured external auth service",
+			log.Info("Startfunction Configured external auth service",
 				"original_url", authURL,
 				"resolved_url", resolvedURL)
 		}
@@ -311,6 +311,7 @@ func Start(config *Config) (*Server, func(), error) {
 		for key, alias := range config.Authentication {
 			// Skip auth_url as we've already processed it
 			if key == "auth_url" {
+				log.Info("Startfunction Skipping auth_url", "key", key)
 				continue
 			}
 
@@ -319,7 +320,7 @@ func Start(config *Config) (*Server, func(), error) {
 				return nil, nil, err
 			}
 			resolvedAuth[resolvedKey] = alias
-			log.Info("Configured traditional auth", "key", resolvedKey, "alias", alias)
+			log.Info("Startfunction Configured traditional auth", "key", resolvedKey, "alias", alias)
 		}
 	}
 
