@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -72,6 +73,7 @@ type runner struct {
 	runID      string
 	timeout    time.Duration // Test timeout
 	goBinary   string        // Path to the Go binary
+	allowSkips bool          // Whether to allow skipping tests when preconditions are not met
 }
 
 type Config struct {
@@ -81,6 +83,7 @@ type Config struct {
 	Log        log.Logger
 	Timeout    time.Duration // Test timeout
 	GoBinary   string        // path to the Go binary
+	AllowSkips bool          // Whether to allow skipping tests when preconditions are not met
 }
 
 // NewTestRunner creates a new test runner instance
@@ -95,7 +98,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.Log = log.New()
 		cfg.Log.Error("No logger provided, using default")
 	}
-	cfg.Log.Info("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir)
+	cfg.Log.Info("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir, "allowSkips", cfg.AllowSkips)
 
 	var validators []types.ValidatorMetadata
 	if len(cfg.TargetGate) > 0 {
@@ -122,6 +125,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		log:        cfg.Log,
 		timeout:    cfg.Timeout,
 		goBinary:   cfg.GoBinary,
+		allowSkips: cfg.AllowSkips,
 	}, nil
 }
 
@@ -336,11 +340,12 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 
 	if result != nil {
 		result.Duration = time.Since(start)
+
+		// TODO: handle network
+		// https://github.com/ethereum-optimism/infra/issues/193
+		metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), result.Status)
 	}
 
-	// TODO: handle network
-	// https://github.com/ethereum-optimism/infra/issues/193
-	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), result.Status)
 	return result, err
 }
 
@@ -476,6 +481,14 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	cmd := exec.CommandContext(ctx, r.goBinary, args...)
 	cmd.Dir = r.workDir
 
+	// Set environment variables for the test
+	env := os.Environ()
+	if !r.allowSkips {
+		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
+		env = append(env, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
+	}
+	cmd.Env = env
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -485,7 +498,8 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		"package", metadata.Package,
 		"test", metadata.FuncName,
 		"command", cmd.String(),
-		"timeout", r.timeout)
+		"timeout", r.timeout,
+		"allowSkips", r.allowSkips)
 
 	result := &types.TestResult{
 		Metadata: metadata,
