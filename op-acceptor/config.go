@@ -19,6 +19,7 @@ type Config struct {
 	GoBinary        string
 	RunInterval     time.Duration // Interval between test runs
 	RunOnce         bool          // Indicates if the service should exit after one test run
+	AllowSkips      bool          // Allow tests to be skipped instead of failing when preconditions are not met
 
 	Log log.Logger
 }
@@ -59,6 +60,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		GoBinary:        ctx.String(flags.GoBinary.Name),
 		RunInterval:     runInterval,
 		RunOnce:         runOnce,
+		AllowSkips:      ctx.Bool(flags.AllowSkips.Name),
 		Log:             log,
 	}, nil
 }

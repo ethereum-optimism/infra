@@ -49,7 +49,8 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		"testDir", config.TestDir,
 		"validatorConfig", config.ValidatorConfig,
 		"runInterval", config.RunInterval,
-		"runOnce", config.RunOnce)
+		"runOnce", config.RunOnce,
+		"allowSkips", config.AllowSkips)
 
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
@@ -66,6 +67,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Log:        config.Log,
 		TargetGate: config.TargetGate,
 		GoBinary:   config.GoBinary,
+		AllowSkips: config.AllowSkips,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)

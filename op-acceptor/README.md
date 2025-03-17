@@ -86,7 +86,7 @@ Run op-acceptor:
 ```bash
 DEVNET_ENV_URL=devnets/alpaca-devnet.json # path to the devnet manifest
 go run cmd/main.go \
-  --gate betanet \                  # The gate to run
+  --gate interop \                  # The gate to run
   --testdir ../../optimism/ \       # Path to the directory containing your tests
   --validators validators.yaml \    # Path to the validator definitions
 ```
@@ -96,10 +96,19 @@ By default, op-acceptor will run tests once and then exit, which is ideal for CI
 If you want to run tests periodically (for continuous monitoring), specify a run interval:
 ```bash
 go run cmd/main.go \
-  --gate betanet \
+  --gate interop \
   --testdir ../../optimism/ \
   --validators validators.yaml \
-  --run-interval=1h                 # Run tests every hour
+  --run-interval 1h                # Run tests every hour
+```
+
+By default, op-acceptor sets the `DEVNET_EXPECT_PRECONDITIONS_MET` environment variable. This instructs [devnet-sdk](https://github.com/ethereum-optimism/optimism/tree/develop/devnet-sdk) to make tests fail if preconditions are not met, rather than skip. If you wish to bypass this and instead allow tests to skip when preconditions are not met, use the `--allow-skips` flag:
+```bash
+go run cmd/main.go \
+  --gate interop \
+  --testdir ../../optimism/ \
+  --validators validators.yaml \
+  --allow-skips                    # Allow tests to skip when preconditions aren't met
 ```
 
 Want to monitor your validation runs? Start our local monitoring stack:
