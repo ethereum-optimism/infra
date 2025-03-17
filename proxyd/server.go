@@ -625,7 +625,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
 
-	log.Info("received request",
+	log.Info("populateContext received request",
 		"path", r.URL.Path,
 		"auth_key", authorization,
 		"auth_url_configured", s.authURL != "",
@@ -686,7 +686,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
-	log.Info("performing auth callback",
+	log.Info("performAuthCallback performing auth callback",
 		"api_key", apiKey)
 
 	if apiKey == "aayushi-key" {
@@ -886,11 +886,16 @@ func instrumentedHdlr(h http.Handler) http.HandlerFunc {
 }
 
 func GetAuthCtx(ctx context.Context) string {
-	authUser, ok := ctx.Value(ContextKeyAuth).(string)
-	if !ok {
+	if ctx == nil {
+		log.Info("GetAuthCtx called with nil context")
 		return "none"
 	}
-
+	authUser, ok := ctx.Value(ContextKeyAuth).(string)
+	if !ok {
+		log.Info("GetAuthCtx No auth value found in context")
+		return "none"
+	}
+	log.Info("GetAuthCtx Auth value found in context", "auth", authUser)
 	return authUser
 }
 
