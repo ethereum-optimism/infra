@@ -47,6 +47,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RUN_INTERVAL"),
 		Usage:   "Interval between test runs (e.g. '1h', '30m'). Set to 0 or omit for run-once mode.",
 	}
+	AllowSkips = &cli.BoolFlag{
+		Name:    "allow-skips",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "ALLOW_SKIPS"),
+		Usage:   "Allow tests to be skipped instead of failing when preconditions are not met.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -58,6 +64,7 @@ var requiredFlags = []cli.Flag{
 var optionalFlags = []cli.Flag{
 	GoBinary,
 	RunInterval,
+	AllowSkips,
 }
 var Flags []cli.Flag
 

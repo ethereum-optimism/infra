@@ -83,6 +83,7 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 
 	cfg.Log.Debug("Config", "config", cfg)
 
+	// Create the NAT service
 	natService, err := nat.New(ctx.Context, cfg, Version, closeApp)
 	if err != nil {
 		// Wrap in RuntimeError to signal this should exit with code 2
