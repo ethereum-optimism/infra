@@ -625,7 +625,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
 
-	log.Debug("received request",
+	log.Info("received request",
 		"path", r.URL.Path,
 		"auth_key", authorization,
 		"auth_url_configured", s.authURL != "",
@@ -646,7 +646,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	if s.authURL != "" {
-		log.Debug("using external auth service",
+		log.Info("using external auth service",
 			"auth_url", s.authURL,
 			"auth_key", authorization)
 
@@ -659,12 +659,12 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
-		log.Debug("external auth succeeded",
+		log.Info("external auth succeeded",
 			"auth_key", authorization,
 			"alias", alias)
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else if len(s.authenticatedPaths) > 0 {
-		log.Debug("using traditional auth",
+		log.Info("using traditional auth",
 			"auth_key", authorization,
 			"valid_keys", len(s.authenticatedPaths))
 
@@ -677,7 +677,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			w.WriteHeader(401)
 			return nil
 		}
-		log.Debug("traditional auth succeeded",
+		log.Info("traditional auth succeeded",
 			"auth_key", authorization,
 			"alias", s.authenticatedPaths[authorization])
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
@@ -686,25 +686,16 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
-	log.Debug("performing auth callback",
+	log.Info("performing auth callback",
 		"api_key", apiKey)
 
-	// Stub authentication for testing
-	validKeys := []string{
-		"aayushi-key",
-		"v1KtFv89SKPFJhKcTlMWybsPAsfIVX3j",
+	if apiKey == "aayushi-key" {
+		log.Info("auth callback succeeded",
+			"api_key", apiKey)
+		return apiKey, nil
 	}
 
-	// Check if apiKey matches any valid key
-	for _, validKey := range validKeys {
-		if apiKey == validKey {
-			log.Debug("auth callback succeeded",
-				"api_key", apiKey)
-			return apiKey, nil
-		}
-	}
-
-	log.Debug("auth callback failed",
+	log.Info("auth callback failed",
 		"api_key", apiKey,
 		"reason", "key not in valid keys list")
 	return "", fmt.Errorf("unauthorized")
