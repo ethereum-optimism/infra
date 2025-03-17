@@ -11,6 +11,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
@@ -34,9 +35,11 @@ type nat struct {
 	running atomic.Bool
 	done    chan struct{}
 	wg      sync.WaitGroup
+
+	shutdownCallback func(error) // Callback to signal application shutdown
 }
 
-func New(ctx context.Context, config *Config, version string) (*nat, error) {
+func New(ctx context.Context, config *Config, version string, shutdownCallback func(error)) (*nat, error) {
 	if config == nil {
 		return nil, errors.New("config is required")
 	}
@@ -44,7 +47,8 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	config.Log.Debug("Creating NAT with config",
 		"testDir", config.TestDir,
 		"validatorConfig", config.ValidatorConfig,
-		"runInterval", config.RunInterval)
+		"runInterval", config.RunInterval,
+		"runOnce", config.RunOnce)
 
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
@@ -68,12 +72,13 @@ func New(ctx context.Context, config *Config, version string) (*nat, error) {
 	config.Log.Info("nat.New: created registry and test runner")
 
 	return &nat{
-		ctx:      ctx,
-		config:   config,
-		version:  version,
-		registry: reg,
-		runner:   testRunner,
-		done:     make(chan struct{}),
+		ctx:              ctx,
+		config:           config,
+		version:          version,
+		registry:         reg,
+		runner:           testRunner,
+		done:             make(chan struct{}),
+		shutdownCallback: shutdownCallback,
 	}, nil
 }
 
@@ -84,7 +89,12 @@ func (n *nat) Start(ctx context.Context) error {
 	n.done = make(chan struct{})
 	n.running.Store(true)
 
-	n.config.Log.Info("Starting op-acceptor", "interval", n.config.RunInterval)
+	if n.config.RunOnce {
+		n.config.Log.Info("Starting op-acceptor in run-once mode")
+	} else {
+		n.config.Log.Info("Starting op-acceptor in continuous mode", "interval", n.config.RunInterval)
+	}
+
 	n.config.Log.Debug("NAT config paths",
 		"config.TestDir", n.config.TestDir,
 		"config.ValidatorConfig", n.config.ValidatorConfig)
@@ -92,7 +102,29 @@ func (n *nat) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := n.runTests()
 	if err != nil {
-		return err
+		// For other errors, return an ExitCoder with exit code 1
+		n.config.Log.Error("Error running tests", "error", err)
+		return cli.Exit(fmt.Sprintf("Error running tests: %v", err), 2)
+	}
+
+	// If in run-once mode, trigger shutdown and return
+	if n.config.RunOnce {
+		n.config.Log.Info("Tests completed, exiting (run-once mode)")
+
+		// Check if any tests failed and return appropriate exit code
+		if n.result != nil && n.result.Status == types.TestStatusFail {
+			n.config.Log.Warn("Run-once test run completed with failures, returning exit code 1")
+			// return an error with test summary
+			return fmt.Errorf("Run-once test run completed with failures: %v", n.result.String())
+		}
+
+		n.config.Log.Info("Test run complete with success, returning exit code 0")
+
+		// Only need to call this when we're in run-once mode and all tests passed, otherwise the returned error will trigger shutdown
+		go func() {
+			n.shutdownCallback(nil)
+		}()
+		return nil // Success (exit code 0)
 	}
 
 	// Start a goroutine for periodic test execution
@@ -194,13 +226,16 @@ func (n *nat) printResultsTable(runID string) {
 	// Set column configurations for better readability
 	t.SetColumnConfigs([]table.ColumnConfig{
 		{Name: "Type", AutoMerge: true},
-		{Name: "ID", WidthMax: 50},
+		{Name: "ID", WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
 		{Name: "Duration", Align: text.AlignRight},
 		{Name: "Tests", Align: text.AlignRight},
 		{Name: "Passed", Align: text.AlignRight},
 		{Name: "Failed", Align: text.AlignRight},
 		{Name: "Skipped", Align: text.AlignRight},
 	})
+
+	// Add flag to show individual tests for packages
+	showIndividualTests := true
 
 	// Print gates and their results
 	for _, gate := range n.result.Gates {
@@ -238,9 +273,14 @@ func (n *nat) printResultsTable(runID string) {
 				if i == len(suite.Tests)-1 {
 					prefix = "│   └──"
 				}
+
+				// Get a display name for the test
+				displayName := types.GetTestDisplayName(testName, test.Metadata)
+
+				// Display the test result
 				t.AppendRow(table.Row{
 					"Test",
-					fmt.Sprintf("%s %s", prefix, testName),
+					fmt.Sprintf("%s %s", prefix, displayName),
 					formatDuration(test.Duration),
 					"1", // Count actual test
 					boolToInt(test.Status == types.TestStatusPass),
@@ -249,6 +289,31 @@ func (n *nat) printResultsTable(runID string) {
 					getResultString(test.Status),
 					test.Error,
 				})
+
+				// Display individual sub-tests if present (for package tests)
+				if len(test.SubTests) > 0 && showIndividualTests {
+					j := 0
+					for subTestName, subTest := range test.SubTests {
+						subPrefix := "│   │   ├──"
+						if j == len(test.SubTests)-1 {
+							subPrefix = "│   │   └──"
+						}
+
+						t.AppendRow(table.Row{
+							"",
+							fmt.Sprintf("%s %s", subPrefix, subTestName),
+							formatDuration(subTest.Duration),
+							"1", // Count actual test
+							boolToInt(subTest.Status == types.TestStatusPass),
+							boolToInt(subTest.Status == types.TestStatusFail),
+							boolToInt(subTest.Status == types.TestStatusSkip),
+							getResultString(subTest.Status),
+							subTest.Error,
+						})
+						j++
+					}
+				}
+
 				i++
 			}
 		}
@@ -260,9 +325,14 @@ func (n *nat) printResultsTable(runID string) {
 			if i == len(gate.Tests)-1 && len(gate.Suites) == 0 {
 				prefix = "└──"
 			}
+
+			// Get a display name for the test
+			displayName := types.GetTestDisplayName(testName, test.Metadata)
+
+			// Display the test result
 			t.AppendRow(table.Row{
 				"Test",
-				fmt.Sprintf("%s %s", prefix, testName),
+				fmt.Sprintf("%s %s", prefix, displayName),
 				formatDuration(test.Duration),
 				"1", // Count actual test
 				boolToInt(test.Status == types.TestStatusPass),
@@ -271,6 +341,31 @@ func (n *nat) printResultsTable(runID string) {
 				getResultString(test.Status),
 				test.Error,
 			})
+
+			// Display individual sub-tests if present (for package tests)
+			if len(test.SubTests) > 0 && showIndividualTests {
+				j := 0
+				for subTestName, subTest := range test.SubTests {
+					subPrefix := "    ├──"
+					if j == len(test.SubTests)-1 {
+						subPrefix = "    └──"
+					}
+
+					t.AppendRow(table.Row{
+						"",
+						fmt.Sprintf("%s %s", subPrefix, subTestName),
+						formatDuration(subTest.Duration),
+						"1", // Count actual test
+						boolToInt(subTest.Status == types.TestStatusPass),
+						boolToInt(subTest.Status == types.TestStatusFail),
+						boolToInt(subTest.Status == types.TestStatusSkip),
+						getResultString(subTest.Status),
+						subTest.Error,
+					})
+					j++
+				}
+			}
+
 			i++
 		}
 

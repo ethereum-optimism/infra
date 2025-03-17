@@ -241,13 +241,9 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 
 	// Run all tests in the suite
 	for _, validator := range suiteTests {
-		testResult, err := r.RunTest(validator)
-		if err != nil {
-			return fmt.Errorf("running test %s: %w", validator.ID, err)
+		if err := r.processTestAndAddToResults(validator, gateResult, suiteResult, result); err != nil {
+			return err
 		}
-
-		suiteResult.Tests[validator.FuncName] = testResult
-		result.updateStats(gateResult, suiteResult, testResult)
 	}
 
 	suiteResult.Duration = time.Since(suiteStart)
@@ -257,45 +253,47 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 	return nil
 }
 
-// determineSuiteStatus determines the overall status of a suite based on its tests
-func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
-	if len(suite.Tests) == 0 {
-		return types.TestStatusSkip
-	}
-
-	allSkipped := true
-	anyFailed := false
-
-	for _, test := range suite.Tests {
-		if test.Status != types.TestStatusSkip {
-			allSkipped = false
-		}
-		if test.Status == types.TestStatusFail {
-			anyFailed = true
-		}
-	}
-
-	if allSkipped {
-		return types.TestStatusSkip
-	}
-	if anyFailed {
-		return types.TestStatusFail
-	}
-	return types.TestStatusPass
-}
-
 // processDirectTests handles the execution of direct gate tests
 func (r *runner) processDirectTests(directTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
 	for _, validator := range directTests {
-		testResult, err := r.RunTest(validator)
-		if err != nil {
-			return fmt.Errorf("running test %s: %w", validator.ID, err)
+		if err := r.processTestAndAddToResults(validator, gateResult, nil, result); err != nil {
+			return err
 		}
-
-		gateResult.Tests[validator.FuncName] = testResult
-		result.updateStats(gateResult, nil, testResult)
 	}
 	return nil
+}
+
+// processTestAndAddToResults runs a single test and adds its results to the appropriate result containers
+func (r *runner) processTestAndAddToResults(validator types.ValidatorMetadata, gateResult *GateResult, suiteResult *SuiteResult, result *RunnerResult) error {
+	testResult, err := r.RunTest(validator)
+	if err != nil {
+		return fmt.Errorf("running test %s: %w", validator.ID, err)
+	}
+
+	// Get the appropriate key for the test
+	testKey := r.getTestKey(validator)
+
+	// Add to suite if provided, otherwise to gate directly
+	if suiteResult != nil {
+		suiteResult.Tests[testKey] = testResult
+	} else {
+		gateResult.Tests[testKey] = testResult
+	}
+
+	// Update stats in all relevant result containers
+	result.updateStats(gateResult, suiteResult, testResult)
+
+	return nil
+}
+
+// getTestKey returns the appropriate key to use for a test in result maps
+func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
+	if validator.RunAll {
+		// For package tests that use RunAll, use the package as the key
+		return validator.Package
+	}
+	// For normal tests, use the function name
+	return validator.FuncName
 }
 
 // RunTest implements the TestRunner interface
@@ -325,59 +323,107 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	testNames, err := r.listTestsInPackage(metadata.Package)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing tests in package %s: %w", metadata.Package, err)
 	}
-	r.log.Info("runAllTestsInPackage() found tests", "package", metadata.Package, "count", len(testNames))
+
+	r.log.Info("Found tests in package",
+		"package", metadata.Package,
+		"count", len(testNames),
+		"tests", strings.Join(testNames, ", "))
+
 	return r.runTestList(metadata, testNames)
 }
 
 // listTestsInPackage returns all test names in a package
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Shorter timeout for listing
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	listCmd := exec.CommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
 	listCmd.Dir = r.workDir
+
 	var listOut, listOutErr bytes.Buffer
 	listCmd.Stdout = &listOut
 	listCmd.Stderr = &listOutErr
+
+	r.log.Debug("Listing tests in package",
+		"package", pkg,
+		"command", listCmd.String())
 
 	if err := listCmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("listing tests timed out after 30s")
 		}
-		return nil, fmt.Errorf("listing tests in package %s: %w\n%s", pkg, err, listOutErr.String())
+		return nil, fmt.Errorf("command error: %w\nstderr: %s", err, listOutErr.String())
 	}
 
+	return parseTestListOutput(listOut.Bytes()), nil
+}
+
+// parseTestListOutput extracts valid test names from go test -list output
+func parseTestListOutput(output []byte) []string {
 	var testNames []string
-	for _, line := range bytes.Split(listOut.Bytes(), []byte("\n")) {
+
+	for _, line := range bytes.Split(output, []byte("\n")) {
 		testName := string(bytes.TrimSpace(line))
 		if isValidTestName(testName) {
 			testNames = append(testNames, testName)
 		}
 	}
-	return testNames, nil
+
+	return testNames
 }
 
 // isValidTestName returns true if the name represents a valid test
 func isValidTestName(name string) bool {
-	return name != "" && name != "ok" && !strings.HasPrefix(name, "?")
+	// Reject empty or specific strings like "ok" and strings with question marks
+	if name == "" || name == "ok" || strings.HasPrefix(name, "?") {
+		return false
+	}
+
+	// Filter out lines that start with "ok" and have the package name and timing info
+	// Example: "ok github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis 0.335s"
+	if strings.HasPrefix(name, "ok ") && strings.Contains(name, ".") && strings.HasSuffix(name, "s") {
+		return false
+	}
+
+	return true
 }
 
 // runTestList runs a list of tests and aggregates their results
 func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
+	if len(testNames) == 0 {
+		r.log.Warn("No tests found to run in package", "package", metadata.Package)
+		return &types.TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusSkip,
+			Duration: 0,
+			SubTests: make(map[string]*types.TestResult),
+		}, nil
+	}
+
 	var result types.TestStatus = types.TestStatusPass
 	var testErrors []error
+	var totalDuration time.Duration
+	testResults := make(map[string]*types.TestResult)
 
+	// Run each test in the list
 	for _, testName := range testNames {
+		// Create a new metadata with the specific test name
 		testMetadata := metadata
 		testMetadata.FuncName = testName
 
+		// Run the individual test
 		testResult, err := r.runSingleTest(testMetadata)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("running test %s: %w", testName, err)
 		}
 
+		// Store the individual test result
+		testResults[testName] = testResult
+		totalDuration += testResult.Duration
+
+		// Update overall status based on individual test result
 		if testResult.Status == types.TestStatusFail {
 			result = types.TestStatusFail
 			if testResult.Error != nil {
@@ -386,10 +432,13 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		}
 	}
 
+	// Create the aggregate result
 	return &types.TestResult{
 		Metadata: metadata,
 		Status:   result,
 		Error:    errors.Join(testErrors...),
+		Duration: totalDuration,
+		SubTests: testResults,
 	}, nil
 }
 
@@ -409,73 +458,79 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	r.log.Debug("Running test command",
 		"dir", cmd.Dir,
 		"package", metadata.Package,
+		"test", metadata.FuncName,
 		"command", cmd.String(),
-		"timeout", r.timeout,
-		"goBinary", r.goBinary)
+		"timeout", r.timeout)
 
-	result := types.TestResult{
+	result := &types.TestResult{
 		Metadata: metadata,
-		Status:   types.TestStatusPass,
+		Status:   types.TestStatusPass, // Default to pass unless determined otherwise
 	}
 
 	err := cmd.Run()
 
-	// Check for timeout
-	if ctx.Err() == context.DeadlineExceeded {
+	// Handle different error cases
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		// Test timed out
 		result.Status = types.TestStatusFail
 		result.Error = fmt.Errorf("test timed out after %v", r.timeout)
-		return &result, nil
-	}
 
-	// Check if the command failed to run
-	if err != nil {
-		r.log.Debug("runSingleTest - test did not complete successfully", "name", metadata.FuncName, "error", err)
+	case err != nil:
+		// Command failed but may just indicate test failure (not a Go execution error)
+		r.log.Debug("Test failed or had error",
+			"test", metadata.FuncName,
+			"package", metadata.Package,
+			"error", err)
+
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.Status = types.TestStatusFail
 			result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), stderr.String())
-			return &result, nil
+		} else {
+			// Actual system error running the test command
+			return nil, fmt.Errorf("failed to execute test %s: %w", metadata.FuncName, err)
 		}
-		return &result, fmt.Errorf("running test %s: %w", metadata.FuncName, err)
+
+	default:
+		// Command succeeded - check output for SKIP marker
+		output := stdout.String()
+		if strings.Contains(output, "--- SKIP:") {
+			result.Status = types.TestStatusSkip
+		}
+
+		r.log.Debug("Test completed",
+			"test", metadata.FuncName,
+			"package", metadata.Package,
+			"status", result.Status,
+			"output_bytes", len(output))
 	}
 
-	r.log.Debug("runSingleTest",
-		"gate", metadata.Gate,
-		"suite", metadata.Suite,
-		"pkg", metadata.Package,
-		"testName", metadata.FuncName,
-		"stdout", stdout.String(),
-		"stderr", stderr.String(),
-	)
-
-	// Check for skipped tests in output
-	if strings.Contains(stdout.String(), "--- SKIP:") {
-		result.Status = types.TestStatusSkip
-	}
-
-	return &result, nil
+	return result, nil
 }
 
 // buildTestArgs constructs the command line arguments for running a test
 func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
-	var args []string = []string{"test"}
+	args := []string{"test"}
 
-	// Run all tests in a package, or a particular test in a package
+	// Determine test target
 	if metadata.Package != "" {
 		args = append(args, metadata.Package)
 	} else {
+		// If no package specified, run in all packages
 		args = append(args, "./...")
 	}
 
-	// Run a specific test in a package
-	if !metadata.RunAll {
+	// Add specific test filter if not running all tests in package
+	if !metadata.RunAll && metadata.FuncName != "" {
 		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
 	}
 
-	// Disable caching
+	// Always disable caching
 	args = append(args, "-count", "1")
 
-	// Enable verbose output
+	// Always use verbose output
 	args = append(args, "-v")
+
 	return args
 }
 
@@ -552,10 +607,30 @@ func (r *RunnerResult) String() string {
 
 		// Print direct gate tests
 		for testName, test := range gate.Tests {
+			// Get a display name for the test
+			displayName := types.GetTestDisplayName(testName, test.Metadata)
+
 			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [status=%s]\n",
-				testName, formatDuration(test.Duration), test.Status))
+				displayName, formatDuration(test.Duration), test.Status))
 			if test.Error != nil {
 				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error.Error()))
+			}
+
+			// Print subtests if present
+			if len(test.SubTests) > 0 {
+				i := 0
+				for subTestName, subTest := range test.SubTests {
+					prefix := "│       ├──"
+					if i == len(test.SubTests)-1 {
+						prefix = "│       └──"
+					}
+					b.WriteString(fmt.Sprintf("│       %s Test: %s (%s) [status=%s]\n",
+						prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+					if subTest.Error != nil {
+						b.WriteString(fmt.Sprintf("│       │       └── Error: %s\n", subTest.Error.Error()))
+					}
+					i++
+				}
 			}
 		}
 
@@ -568,10 +643,30 @@ func (r *RunnerResult) String() string {
 
 			// Print suite tests
 			for testName, test := range suite.Tests {
+				// Get a display name for the test
+				displayName := types.GetTestDisplayName(testName, test.Metadata)
+
 				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [status=%s]\n",
-					testName, formatDuration(test.Duration), test.Status))
+					displayName, formatDuration(test.Duration), test.Status))
 				if test.Error != nil {
 					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error.Error()))
+				}
+
+				// Print subtests if present
+				if len(test.SubTests) > 0 {
+					i := 0
+					for subTestName, subTest := range test.SubTests {
+						prefix := "│       ├──"
+						if i == len(test.SubTests)-1 {
+							prefix = "│       └──"
+						}
+						b.WriteString(fmt.Sprintf("    │       %s Test: %s (%s) [status=%s]\n",
+							prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+						if subTest.Error != nil {
+							b.WriteString(fmt.Sprintf("    │       │       └── Error: %s\n", subTest.Error.Error()))
+						}
+						i++
+					}
 				}
 			}
 		}
@@ -618,6 +713,49 @@ func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *t
 		r.Stats.Skipped++
 	}
 	r.Duration += test.Duration
+
+	// Update stats for SubTests if they exist
+	if len(test.SubTests) > 0 {
+		for _, subTest := range test.SubTests {
+			// Update the global stats with this sub-test
+			r.Stats.Total++
+			switch subTest.Status {
+			case types.TestStatusPass:
+				r.Stats.Passed++
+			case types.TestStatusFail:
+				r.Stats.Failed++
+			case types.TestStatusSkip:
+				r.Stats.Skipped++
+			}
+			r.Duration += subTest.Duration
+
+			// Update gate stats
+			gate.Stats.Total++
+			switch subTest.Status {
+			case types.TestStatusPass:
+				gate.Stats.Passed++
+			case types.TestStatusFail:
+				gate.Stats.Failed++
+			case types.TestStatusSkip:
+				gate.Stats.Skipped++
+			}
+			gate.Duration += subTest.Duration
+
+			// Update suite stats
+			if suite != nil {
+				suite.Stats.Total++
+				switch subTest.Status {
+				case types.TestStatusPass:
+					suite.Stats.Passed++
+				case types.TestStatusFail:
+					suite.Stats.Failed++
+				case types.TestStatusSkip:
+					suite.Stats.Skipped++
+				}
+				suite.Duration += subTest.Duration
+			}
+		}
+	}
 }
 
 // determineGateStatus determines the overall status of a gate based on its tests and suites
@@ -649,13 +787,7 @@ func determineGateStatus(gate *GateResult) types.TestStatus {
 		}
 	}
 
-	if allSkipped {
-		return types.TestStatusSkip
-	}
-	if anyFailed {
-		return types.TestStatusFail
-	}
-	return types.TestStatusPass
+	return determineStatusFromFlags(allSkipped, anyFailed)
 }
 
 // determineRunnerStatus determines the overall status of the test run
@@ -676,6 +808,11 @@ func determineRunnerStatus(result *RunnerResult) types.TestStatus {
 		}
 	}
 
+	return determineStatusFromFlags(allSkipped, anyFailed)
+}
+
+// determineStatusFromFlags is a helper that returns a status based on common flag logic
+func determineStatusFromFlags(allSkipped, anyFailed bool) types.TestStatus {
 	if allSkipped {
 		return types.TestStatusSkip
 	}
@@ -691,4 +828,25 @@ func (r *runner) formatErrors(errors []string) string {
 		return ""
 	}
 	return fmt.Sprintf("Failed tests:\n%s", strings.Join(errors, "\n"))
+}
+
+// determineSuiteStatus determines the overall status of a suite based on its tests
+func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
+	if len(suite.Tests) == 0 {
+		return types.TestStatusSkip
+	}
+
+	allSkipped := true
+	anyFailed := false
+
+	for _, test := range suite.Tests {
+		if test.Status != types.TestStatusSkip {
+			allSkipped = false
+		}
+		if test.Status == types.TestStatusFail {
+			anyFailed = true
+		}
+	}
+
+	return determineStatusFromFlags(allSkipped, anyFailed)
 }
