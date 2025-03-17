@@ -13,6 +13,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
@@ -85,6 +86,14 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 // Start runs the acceptance tests periodically at the configured interval.
 // Start implements the cliapp.Lifecycle interface.
 func (n *nat) Start(ctx context.Context) error {
+	// Set up panic recovery to ensure we exit with code 2 for runtime errors
+	defer func() {
+		if r := recover(); r != nil {
+			n.config.Log.Error("Runtime error occurred", "error", r)
+			os.Exit(exitcodes.RuntimeErr)
+		}
+	}()
+
 	n.ctx = ctx
 	n.done = make(chan struct{})
 	n.running.Store(true)
@@ -102,9 +111,9 @@ func (n *nat) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := n.runTests()
 	if err != nil {
-		// For other errors, return an ExitCoder with exit code 1
-		n.config.Log.Error("Error running tests", "error", err)
-		return cli.Exit(fmt.Sprintf("Error running tests: %v", err), 2)
+		// For runtime errors (like panics or configuration issues), return exit code 2
+		n.config.Log.Error("Runtime error running tests", "error", err)
+		return cli.Exit(err.Error(), 2)
 	}
 
 	// If in run-once mode, trigger shutdown and return
@@ -114,13 +123,11 @@ func (n *nat) Start(ctx context.Context) error {
 		// Check if any tests failed and return appropriate exit code
 		if n.result != nil && n.result.Status == types.TestStatusFail {
 			n.config.Log.Warn("Run-once test run completed with failures, returning exit code 1")
-			// return an error with test summary
-			return fmt.Errorf("Run-once test run completed with failures: %v", n.result.String())
+			// Return exit code 1 for test failures (assertions failed)
+			return NewTestFailureError(n.result.String())
 		}
 
-		n.config.Log.Info("Test run complete with success, returning exit code 0")
-
-		// Only need to call this when we're in run-once mode and all tests passed, otherwise the returned error will trigger shutdown
+		// Only need to call this when we're in run-once mode and all tests passed
 		go func() {
 			n.shutdownCallback(nil)
 		}()
@@ -169,8 +176,9 @@ func (n *nat) runTests() error {
 	n.config.Log.Info("Running all tests...")
 	result, err := n.runner.RunAllTests()
 	if err != nil {
-		n.config.Log.Error("Error running tests", "error", err)
-		return err
+		// This is a runtime error (not a test failure)
+		n.config.Log.Error("Runtime error running tests", "error", err)
+		return NewRuntimeError(err)
 	}
 	n.result = result
 
