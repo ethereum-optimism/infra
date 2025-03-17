@@ -288,19 +288,24 @@ func Start(config *Config) (*Server, func(), error) {
 
 	var resolvedAuth map[string]string
 	if config.Authentication != nil {
-		log.Info("Startfunction Processing authentication config")
+		log.Info("Authentication config contents",
+			"raw_config", config.Authentication,
+			"auth_url_value", config.Authentication["auth_url"],
+			"secret_value", config.Authentication["secret"])
+
 		resolvedAuth = make(map[string]string)
 
 		// First, check and process the auth_url if present
 		if authURL, ok := config.Authentication["auth_url"]; ok {
-			log.Info("Startfunction Found auth_url config", "url", authURL)
+			log.Info("Found auth_url in config", "auth_url", authURL)
 			resolvedURL, err := ReadFromEnvOrConfig(authURL)
 			if err != nil {
 				return nil, nil, err
 			}
-			// Store the auth_url with a special key that we'll check for later
 			resolvedAuth["auth_url"] = resolvedURL
-			log.Info("Startfunction Configured external auth service", "url", resolvedURL)
+			log.Info("Configured external auth service",
+				"original_url", authURL,
+				"resolved_url", resolvedURL)
 		}
 		// Then process any remaining keys as traditional auth keys
 		for key, alias := range config.Authentication {
@@ -314,7 +319,7 @@ func Start(config *Config) (*Server, func(), error) {
 				return nil, nil, err
 			}
 			resolvedAuth[resolvedKey] = alias
-			log.Info("Startfunction Configured traditional auth", "key", resolvedKey, "alias", alias)
+			log.Info("Configured traditional auth", "key", resolvedKey, "alias", alias)
 		}
 	}
 
@@ -356,6 +361,10 @@ func Start(config *Config) (*Server, func(), error) {
 
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
+
+	log.Info("Creating server",
+		"resolvedAuth", resolvedAuth,
+		"has_auth_url", resolvedAuth["auth_url"] != "")
 
 	srv, err := NewServer(
 		backendGroups,

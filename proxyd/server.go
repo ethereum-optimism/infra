@@ -107,6 +107,10 @@ func NewServer(
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
+	log.Info("NewServer called",
+		"authenticatedPaths", authenticatedPaths,
+		"has_auth_url", authenticatedPaths["auth_url"] != "")
+
 	if cache == nil {
 		cache = &NoopRPCCache{}
 	}
@@ -618,6 +622,10 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
+	log.Info("populateContext authenticatedPaths",
+		"paths", s.authenticatedPaths,
+		"has_auth_url", s.authenticatedPaths["auth_url"] != "")
+
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
