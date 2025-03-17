@@ -287,29 +287,34 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	var resolvedAuth map[string]string
-
 	if config.Authentication != nil {
+		log.Info("Startfunction Processing authentication config")
 		resolvedAuth = make(map[string]string)
 
-		// First check for auth_url
-		if urlVal, ok := config.Authentication["auth_url"]; ok {
-			resolvedURL, err := ReadFromEnvOrConfig(urlVal)
+		// First, check and process the auth_url if present
+		if authURL, ok := config.Authentication["auth_url"]; ok {
+			log.Info("Startfunction Found auth_url config", "url", authURL)
+			resolvedURL, err := ReadFromEnvOrConfig(authURL)
 			if err != nil {
 				return nil, nil, err
 			}
+			// Store the auth_url with a special key that we'll check for later
 			resolvedAuth["auth_url"] = resolvedURL
-			log.Info("Start proxyd with configured external auth service", "url", resolvedURL)
-		} else {
-			// If no auth_url, process secrets as before
-			for secret, alias := range config.Authentication {
-				if secret != "auth_url" { // Skip auth_url key
-					resolvedSecret, err := ReadFromEnvOrConfig(secret)
-					if err != nil {
-						return nil, nil, err
-					}
-					resolvedAuth[resolvedSecret] = alias
-				}
+			log.Info("Startfunction Configured external auth service", "url", resolvedURL)
+		}
+		// Then process any remaining keys as traditional auth keys
+		for key, alias := range config.Authentication {
+			// Skip auth_url as we've already processed it
+			if key == "auth_url" {
+				continue
 			}
+
+			resolvedKey, err := ReadFromEnvOrConfig(key)
+			if err != nil {
+				return nil, nil, err
+			}
+			resolvedAuth[resolvedKey] = alias
+			log.Info("Startfunction Configured traditional auth", "key", resolvedKey, "alias", alias)
 		}
 	}
 
