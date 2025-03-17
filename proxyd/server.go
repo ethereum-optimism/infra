@@ -624,6 +624,13 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
+
+	log.Debug("received request",
+		"path", r.URL.Path,
+		"auth_key", authorization,
+		"auth_url_configured", s.authURL != "",
+		"authenticated_paths_configured", len(s.authenticatedPaths) > 0)
+
 	if xff == "" {
 		ipPort := strings.Split(r.RemoteAddr, ":")
 		if len(ipPort) == 2 {
@@ -639,29 +646,49 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	if s.authURL != "" {
+		log.Debug("using external auth service",
+			"auth_url", s.authURL,
+			"auth_key", authorization)
+
 		// Use external authentication service
 		alias, err := s.performAuthCallback(r, authorization)
 		if err != nil {
-			log.Error("auth callback failed", "err", err)
+			log.Error("auth callback failed",
+				"err", err,
+				"auth_key", authorization)
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
+		log.Debug("external auth succeeded",
+			"auth_key", authorization,
+			"alias", alias)
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else if len(s.authenticatedPaths) > 0 {
+		log.Debug("using traditional auth",
+			"auth_key", authorization,
+			"valid_keys", len(s.authenticatedPaths))
+
 		// Fallback to traditional auth
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			log.Info("blocked unauthorized request", "authorization", authorization)
+			log.Info("blocked unauthorized request",
+				"auth_key", authorization,
+				"valid_keys_count", len(s.authenticatedPaths))
 			httpResponseCodesTotal.WithLabelValues("401").Inc()
 			w.WriteHeader(401)
 			return nil
 		}
-
+		log.Debug("traditional auth succeeded",
+			"auth_key", authorization,
+			"alias", s.authenticatedPaths[authorization])
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
+	log.Debug("performing auth callback",
+		"api_key", apiKey)
+
 	// Stub authentication for testing
 	validKeys := []string{
 		"aayushi-key",
@@ -671,11 +698,15 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, er
 	// Check if apiKey matches any valid key
 	for _, validKey := range validKeys {
 		if apiKey == validKey {
+			log.Debug("auth callback succeeded",
+				"api_key", apiKey)
 			return apiKey, nil
 		}
 	}
 
-	// Return unauthorized for any other key
+	log.Debug("auth callback failed",
+		"api_key", apiKey,
+		"reason", "key not in valid keys list")
 	return "", fmt.Errorf("unauthorized")
 
 	/* Original HTTP request logic commented out for now
@@ -706,6 +737,7 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, er
 
 	return apiKey, nil
 	*/
+
 }
 
 func randStr(l int) string {
