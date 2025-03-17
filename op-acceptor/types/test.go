@@ -9,9 +9,10 @@ import (
 type TestStatus string
 
 const (
-	TestStatusPass TestStatus = "pass"
-	TestStatusFail TestStatus = "fail"
-	TestStatusSkip TestStatus = "skip"
+	TestStatusPass  TestStatus = "pass"
+	TestStatusFail  TestStatus = "fail"
+	TestStatusSkip  TestStatus = "skip"
+	TestStatusError TestStatus = "error"
 )
 
 // TestResult captures the outcome of a single test run
