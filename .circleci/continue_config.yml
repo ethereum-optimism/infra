@@ -363,7 +363,7 @@ jobs:
           name: run tests
           command: |
             gotestsum --format=standard-verbose --junitfile=/tmp/test-results/<<parameters.module>>.xml \
-            -- -coverpkg=github.com/ethereum-optimism/infrastructure-services/... -coverprofile=coverage.out ./...
+            -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
           working_directory: <<parameters.module>>
       - run:
           name: upload coverage
