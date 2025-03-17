@@ -289,15 +289,9 @@ func Start(config *Config) (*Server, func(), error) {
 
 		// First, check and process the auth_url if present
 		if authURL, ok := config.Authentication["auth_url"]; ok {
-			log.Info("Startfunction Found auth_url in config", "auth_url", authURL)
-			resolvedURL, err := ReadFromEnvOrConfig(authURL)
-			if err != nil {
-				return nil, nil, err
-			}
-			resolvedAuth["auth_url"] = resolvedURL
+			resolvedAuth["auth_url"] = authURL
 			log.Info("Startfunction Configured external auth service",
-				"original_url", authURL,
-				"resolved_url", resolvedURL)
+				"auth_url", authURL)
 		}
 		// Then process any remaining keys as traditional auth keys
 		for key, alias := range config.Authentication {
