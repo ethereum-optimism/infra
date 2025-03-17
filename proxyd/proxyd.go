@@ -286,26 +286,30 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var authenticatedPaths map[string]string
-	var authURL string
+	var resolvedAuth map[string]string
 
 	if config.Authentication != nil {
-		// Check if auth_url is specified in the authentication map
-		if urlVal, ok := config.Authentication["auth_url"]; ok {
-			authURL = urlVal
-		}
+		resolvedAuth = make(map[string]string)
 
-		// Check for traditional secret-based auth
-		if secret, ok := config.Authentication["secret"]; ok {
-			if authURL != "" {
-				return nil, nil, errors.New("cannot specify both auth_url and secrets")
-			}
-			authenticatedPaths = make(map[string]string)
-			resolvedSecret, err := ReadFromEnvOrConfig(secret)
+		// First check for auth_url
+		if urlVal, ok := config.Authentication["auth_url"]; ok {
+			resolvedURL, err := ReadFromEnvOrConfig(urlVal)
 			if err != nil {
 				return nil, nil, err
 			}
-			authenticatedPaths[resolvedSecret] = "default"
+			resolvedAuth["auth_url"] = resolvedURL
+			log.Info("Start proxyd with configured external auth service", "url", resolvedURL)
+		} else {
+			// If no auth_url, process secrets as before
+			for secret, alias := range config.Authentication {
+				if secret != "auth_url" { // Skip auth_url key
+					resolvedSecret, err := ReadFromEnvOrConfig(secret)
+					if err != nil {
+						return nil, nil, err
+					}
+					resolvedAuth[resolvedSecret] = alias
+				}
+			}
 		}
 	}
 
@@ -354,7 +358,7 @@ func Start(config *Config) (*Server, func(), error) {
 		NewStringSetFromStrings(config.WSMethodWhitelist),
 		config.RPCMethodMappings,
 		config.Server.MaxBodySizeBytes,
-		authenticatedPaths,
+		resolvedAuth,
 		secondsToDuration(config.Server.TimeoutSeconds),
 		config.Server.MaxUpstreamBatchSize,
 		config.Server.EnableXServedByHeader,
@@ -365,7 +369,6 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
-		authURL,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

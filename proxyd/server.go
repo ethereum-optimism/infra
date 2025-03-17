@@ -83,7 +83,6 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
-	authURL                string
 }
 
 type limiterFunc func(method string) bool
@@ -107,7 +106,6 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
-	authURL string,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -200,7 +198,6 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
-		authURL:                authURL,
 	}, nil
 }
 
@@ -628,7 +625,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	log.Info("populateContext received request",
 		"path", r.URL.Path,
 		"auth_key", authorization,
-		"auth_url_configured", s.authURL != "",
+		"auth_url_configured", s.authenticatedPaths["auth_url"] != "",
 		"authenticated_paths_configured", len(s.authenticatedPaths) > 0)
 
 	if xff == "" {
@@ -645,15 +642,15 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
 	}
 
-	if s.authURL != "" {
-		log.Info("using external auth service",
-			"auth_url", s.authURL,
+	if s.authenticatedPaths["auth_url"] != "" {
+		log.Info("populateContext using external auth service",
+			"auth_url", s.authenticatedPaths["auth_url"],
 			"auth_key", authorization)
 
 		// Use external authentication service
 		alias, err := s.performAuthCallback(r, authorization)
 		if err != nil {
-			log.Error("auth callback failed",
+			log.Error("populateContext auth callback failed",
 				"err", err,
 				"auth_key", authorization)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -690,12 +687,12 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, er
 		"api_key", apiKey)
 
 	if apiKey == "aayushi-key" {
-		log.Info("auth callback succeeded",
+		log.Info("performAuthCallback auth callback succeeded",
 			"api_key", apiKey)
 		return apiKey, nil
 	}
 
-	log.Info("auth callback failed",
+	log.Info("performAuthCallback auth callback failed",
 		"api_key", apiKey,
 		"reason", "key not in valid keys list")
 	return "", fmt.Errorf("unauthorized")
