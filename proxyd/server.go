@@ -672,19 +672,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		log.Info("populateContext using traditional auth",
 			"auth_key", authorization,
 			"valid_keys", len(s.authenticatedPaths))
-
-		// Fallback to traditional auth
-		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			log.Info("populateContext blocked unauthorized request",
-				"auth_key", authorization,
-				"valid_keys_count", len(s.authenticatedPaths))
-			httpResponseCodesTotal.WithLabelValues("401").Inc()
-			w.WriteHeader(401)
-			return nil
-		}
-		log.Info("populateContext traditional auth succeeded",
-			"auth_key", authorization,
-			"alias", s.authenticatedPaths[authorization])
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck

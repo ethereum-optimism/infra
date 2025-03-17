@@ -33,14 +33,6 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, errors.New("must define at least one RPC method mapping")
 	}
 
-	if config.Authentication != nil {
-		if secret, ok := config.Authentication["secret"]; ok {
-			if secret == "none" {
-				return nil, nil, errors.New("cannot use none as an auth key")
-			}
-		}
-	}
-
 	// redis primary client
 	var redisClient redis.UniversalClient
 	if config.Redis.URL != "" {
