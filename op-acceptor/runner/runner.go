@@ -338,13 +338,16 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 		result, err = r.runSingleTest(metadata)
 	}
 
+	var status types.TestStatus
 	if result != nil {
 		result.Duration = time.Since(start)
-
-		// TODO: handle network
-		// https://github.com/ethereum-optimism/infra/issues/193
-		metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), result.Status)
+		status = result.Status
+	} else {
+		status = types.TestStatusError
 	}
+	// TODO: handle network
+	// https://github.com/ethereum-optimism/infra/issues/193
+	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), status)
 
 	return result, err
 }
