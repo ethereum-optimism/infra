@@ -1,9 +1,16 @@
 package nat
 
-import "fmt"
+import (
+	"fmt"
+	"testing"
+)
 
 // printGandalf gatekeeps naughty network deployments
 func printGandalf() {
+	if testing.Testing() {
+		// skip when running tests
+		return
+	}
 	ysnp := `▗▖  ▗▖▗▄▖ ▗▖ ▗▖     ▗▄▄▖▗▖ ▗▖ ▗▄▖ ▗▖   ▗▖       ▗▖  ▗▖ ▗▄▖▗▄▄▄▖    ▗▄▄▖  ▗▄▖  ▗▄▄▖ ▗▄▄▖
  ▝▚▞▘▐▌ ▐▌▐▌ ▐▌    ▐▌   ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌       ▐▛▚▖▐▌▐▌ ▐▌ █      ▐▌ ▐▌▐▌ ▐▌▐▌   ▐▌   
   ▐▌ ▐▌ ▐▌▐▌ ▐▌     ▝▀▚▖▐▛▀▜▌▐▛▀▜▌▐▌   ▐▌       ▐▌ ▝▜▌▐▌ ▐▌ █      ▐▛▀▘ ▐▛▀▜▌ ▝▀▚▖ ▝▀▚▖
