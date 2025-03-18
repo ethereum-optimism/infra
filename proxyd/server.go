@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -658,7 +659,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			"auth_key", authorization)
 
 		// Use external authentication service
-		alias, err := s.performAuthCallback(r, authorization)
+		alias, err := s.performAuthCallback(r, authorization, authURL)
 		if err != nil {
 			log.Error("Auth callback failed",
 				"err", err,
@@ -678,50 +679,83 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
 }
 
-func (s *Server) performAuthCallback(r *http.Request, apiKey string) (string, error) {
-	log.Info("performAuthCallback performing auth callback",
-		"api_key", apiKey)
-
-	if apiKey == "aayushi-key" {
-		log.Info("performAuthCallback auth callback succeeded",
-			"api_key", apiKey)
-		return apiKey, nil
-	}
-
-	log.Info("performAuthCallback auth callback failed",
+func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
+	log.Info("performAuthCallback starting",
 		"api_key", apiKey,
-		"reason", "key not in valid keys list")
-	return "", fmt.Errorf("unauthorized")
+		"auth_url", authURL,
+		"request_path", r.URL.Path)
 
-	/* Original HTTP request logic commented out for now
-	if s.authURL == "" {
-		return "", fmt.Errorf("no auth URL configured")
+	// Create auth callback request body
+	authReq := &AuthCallbackRequest{
+		Headers:    r.Header,
+		Path:       r.URL.Path,
+		Body:       "", // We'll read the body below
+		RemoteAddr: r.RemoteAddr,
 	}
 
-	// Create auth request with API key in path
-	authURL := fmt.Sprintf("%s/%s", s.authURL, apiKey)
-	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, r.Body)
+	// Read and restore the request body since it's a stream
+	if r.Body != nil {
+		log.Info("performAuthCallback reading request body")
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Error("performAuthCallback failed to read body", "err", err)
+			return "", fmt.Errorf("failed to read request body: %w", err)
+		}
+		// Restore the body for later use
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		authReq.Body = string(bodyBytes)
+		log.Info("performAuthCallback read body successfully",
+			"body_length", len(bodyBytes))
+	}
+
+	// Marshal the auth request to JSON
+	authReqBody, err := json.Marshal(authReq)
 	if err != nil {
-		return "", err
+		log.Error("performAuthCallback failed to marshal request", "err", err)
+		return "", fmt.Errorf("failed to marshal auth request: %w", err)
+	}
+	log.Info("performAuthCallback marshaled request body",
+		"body_length", len(authReqBody))
+
+	// Create the auth callback request
+	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(authReqBody))
+	if err != nil {
+		log.Error("performAuthCallback failed to create request", "err", err)
+		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	// Forward headers
+	// Set headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", apiKey)
+	log.Info("performAuthCallback created request with headers",
+		"content_type", req.Header.Get("Content-Type"),
+		"auth_key", apiKey)
 
+	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
+	log.Info("performAuthCallback sending request to auth service")
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Error("performAuthCallback request failed", "err", err)
 		return "", fmt.Errorf("auth callback failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Check response status
+	log.Info("performAuthCallback received response",
+		"status_code", resp.StatusCode)
+
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("auth callback failed with status: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		log.Info("performAuthCallback request rejected",
+			"status_code", resp.StatusCode,
+			"response_body", string(body))
+		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
+	log.Info("performAuthCallback succeeded",
+		"api_key", apiKey)
 	return apiKey, nil
-	*/
-
 }
 
 func randStr(l int) string {
