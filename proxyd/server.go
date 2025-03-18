@@ -681,7 +681,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
 	log.Info("performAuthCallback starting",
-		"api_key", apiKey,
 		"auth_url", authURL,
 		"request_path", r.URL.Path)
 
@@ -714,8 +713,6 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		log.Error("performAuthCallback failed to marshal request", "err", err)
 		return "", fmt.Errorf("failed to marshal auth request: %w", err)
 	}
-	log.Info("performAuthCallback marshaled request body",
-		"body_length", len(authReqBody))
 
 	// Create the auth callback request
 	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(authReqBody))
@@ -724,12 +721,15 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	// Set headers
+	// Set headers with Bearer token format
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", apiKey)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	log.Info("performAuthCallback created request with headers",
 		"content_type", req.Header.Get("Content-Type"),
-		"auth_key", apiKey)
+		"auth_key", apiKey,
+		"request_body", authReq.Body,
+		"auth_header", req.Header.Get("Authorization"),
+	)
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -739,10 +739,14 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		log.Error("performAuthCallback request failed", "err", err)
 		return "", fmt.Errorf("auth callback failed: %w", err)
 	}
+	if resp == nil {
+		log.Error("performAuthCallback received nil response")
+		return "", fmt.Errorf("auth callback failed: nil response")
+	}
 	defer resp.Body.Close()
 
 	// Check response status
-	log.Info("performAuthCallback received response",
+	log.Info("performAuthCallback received response", "resp", resp,
 		"status_code", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
@@ -753,8 +757,7 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Info("performAuthCallback succeeded",
-		"api_key", apiKey)
+	log.Info("performAuthCallback succeeded")
 	return apiKey, nil
 }
 
