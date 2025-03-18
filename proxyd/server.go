@@ -622,9 +622,12 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
-	log.Info("populateContext authenticatedPaths",
-		"paths", s.authenticatedPaths,
-		"has_auth_url", s.authenticatedPaths["auth_url"] != "")
+	log.Info("populateContext detailed inspection",
+		"s ", s,
+		"auth_paths_nil", s.authenticatedPaths == nil,
+		"auth_paths_len", len(s.authenticatedPaths),
+		"all_keys", getMapKeys(s.authenticatedPaths),
+		"auth_url_exists", s.authenticatedPaths != nil && s.authenticatedPaths["auth_url"] != "")
 
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
@@ -959,4 +962,16 @@ func createBatchRequest(elems []batchElem) []*RPCReq {
 		batch[i] = elems[i].Req
 	}
 	return batch
+}
+
+// Helper function to get map keys
+func getMapKeys(m map[string]string) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
