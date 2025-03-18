@@ -278,14 +278,13 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var resolvedAuth map[string]string
+	var resolvedAuth map[string]string = make(map[string]string) // Initialize map first
+
 	if config.Authentication != nil {
 		log.Info("Startfunction Authentication config contents",
 			"raw_config", config.Authentication,
 			"auth_url_value", config.Authentication["auth_url"],
 			"secret_value", config.Authentication["secret"])
-
-		resolvedAuth = make(map[string]string)
 
 		// First, check and process the auth_url if present
 		if authURL, ok := config.Authentication["auth_url"]; ok {
@@ -349,9 +348,9 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
-	log.Info("Creating server",
-		"resolvedAuth", resolvedAuth,
-		"has_auth_url", resolvedAuth["auth_url"] != "")
+	log.Info("StartFunction Creating server with auth paths",
+		"resolvedAuth_nil", resolvedAuth == nil,
+		"config_auth_nil", config.Authentication == nil)
 
 	srv, err := NewServer(
 		backendGroups,

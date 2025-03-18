@@ -108,8 +108,7 @@ func NewServer(
 	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
 	log.Info("NewServer called",
-		"authenticatedPaths", authenticatedPaths,
-		"has_auth_url", authenticatedPaths["auth_url"] != "")
+		"authenticatedPaths", authenticatedPaths)
 
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -622,21 +621,19 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
+	s.srvMu.Lock()
+	defer s.srvMu.Unlock()
+
+	vars := mux.Vars(r)
+	authorization := vars["authorization"]
+	xff := r.Header.Get(s.rateLimitHeader)
+
 	log.Info("populateContext detailed inspection",
 		"s ", s,
 		"auth_paths_nil", s.authenticatedPaths == nil,
 		"auth_paths_len", len(s.authenticatedPaths),
 		"all_keys", getMapKeys(s.authenticatedPaths),
 		"auth_url_exists", s.authenticatedPaths != nil && s.authenticatedPaths["auth_url"] != "")
-
-	vars := mux.Vars(r)
-	authorization := vars["authorization"]
-	xff := r.Header.Get(s.rateLimitHeader)
-
-	log.Info("populateContext received request",
-		"path", r.URL.Path,
-		"auth_key", authorization,
-		"auth_url_configured", s.authenticatedPaths["auth_url"] != "")
 
 	if xff == "" {
 		ipPort := strings.Split(r.RemoteAddr, ":")
@@ -654,7 +651,8 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	// Check if we have an external auth URL configured
 	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
-	if hasExternalAuth && authURL != "" {
+	log.Info("populateContext hasExternalAuth", "hasExternalAuth", hasExternalAuth, "authURL", authURL)
+	if hasExternalAuth && authURL != "" { // nolint:staticcheck
 		log.Info("populateContext Using external auth service",
 			"auth_url", authURL,
 			"auth_key", authorization)
