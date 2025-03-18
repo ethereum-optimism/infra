@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -49,6 +50,13 @@ const (
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
+
+type AuthCallbackRequest struct {
+	Headers    map[string][]string `json:"headers"`
+	Path       string              `json:"path"`
+	Body       string              `json:"body"`
+	RemoteAddr string              `json:"remote_addr"`
+}
 
 type Server struct {
 	BackendGroups          map[string]*BackendGroup
@@ -100,6 +108,9 @@ func NewServer(
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
+	log.Info("NewServer called",
+		"authenticatedPaths", authenticatedPaths)
+
 	if cache == nil {
 		cache = &NoopRPCCache{}
 	}
@@ -611,9 +622,20 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
+	s.srvMu.Lock()
+	defer s.srvMu.Unlock()
+
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
+
+	log.Info("populateContext detailed inspection",
+		"s ", s,
+		"auth_paths_nil", s.authenticatedPaths == nil,
+		"auth_paths_len", len(s.authenticatedPaths),
+		"all_keys", getMapKeys(s.authenticatedPaths),
+		"auth_url_exists", s.authenticatedPaths != nil && s.authenticatedPaths["auth_url"] != "")
+
 	if xff == "" {
 		ipPort := strings.Split(r.RemoteAddr, ":")
 		if len(ipPort) == 2 {
@@ -628,22 +650,115 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyOpTxProxyAuth, opTxProxyAuth) // nolint:staticcheck
 	}
 
-	if len(s.authenticatedPaths) > 0 {
-		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			log.Info("blocked unauthorized request", "authorization", authorization)
-			httpResponseCodesTotal.WithLabelValues("401").Inc()
-			w.WriteHeader(401)
+	// Check if we have an external auth URL configured
+	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
+	log.Info("populateContext hasExternalAuth", "hasExternalAuth", hasExternalAuth, "authURL", authURL)
+	if hasExternalAuth && authURL != "" { // nolint:staticcheck
+		log.Info("populateContext Using external auth service",
+			"auth_url", authURL,
+			"auth_key", authorization)
+
+		// Use external authentication service
+		alias, err := s.performAuthCallback(r, authorization, authURL)
+		if err != nil {
+			log.Error("Auth callback failed",
+				"err", err,
+				"auth_key", authorization)
+			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
 
+		log.Info("populateContext External auth succeeded", "auth_key", authorization, "alias", alias)
+		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
+	} else {
+		log.Info("populateContext using traditional auth",
+			"auth_key", authorization,
+			"valid_keys", len(s.authenticatedPaths))
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
+	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
+}
 
-	return context.WithValue(
-		ctx,
-		ContextKeyReqID, // nolint:staticcheck
-		randStr(10),
+func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
+	log.Info("performAuthCallback starting",
+		"auth_url", authURL,
+		"request_path", r.URL.Path)
+
+	// Create auth callback request body
+	authReq := &AuthCallbackRequest{
+		Headers:    r.Header,
+		Path:       r.URL.Path,
+		Body:       "", // We'll read the body below
+		RemoteAddr: r.RemoteAddr,
+	}
+
+	// Read and restore the request body since it's a stream
+	if r.Body != nil {
+		log.Info("performAuthCallback reading request body")
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Error("performAuthCallback failed to read body", "err", err)
+			return "", fmt.Errorf("failed to read request body: %w", err)
+		}
+		// Restore the body for later use
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		authReq.Body = string(bodyBytes)
+		log.Info("performAuthCallback read body successfully",
+			"body_length", len(bodyBytes))
+	}
+
+	// Marshal the auth request to JSON
+	authReqBody, err := json.Marshal(authReq)
+	if err != nil {
+		log.Error("performAuthCallback failed to marshal request", "err", err)
+		return "", fmt.Errorf("failed to marshal auth request: %w", err)
+	}
+
+	// Create the auth callback request
+	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(authReqBody))
+	if err != nil {
+		log.Error("performAuthCallback failed to create request", "err", err)
+		return "", fmt.Errorf("failed to create auth request: %w", err)
+	}
+
+	// Set headers with Bearer token format
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+	log.Info("performAuthCallback created request with headers",
+		"content_type", req.Header.Get("Content-Type"),
+		"auth_key", apiKey,
+		"request_body", authReq.Body,
+		"auth_header", req.Header.Get("Authorization"),
 	)
+
+	// Make the request
+	client := &http.Client{Timeout: 5 * time.Second}
+	log.Info("performAuthCallback sending request to auth service")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Error("performAuthCallback request failed", "err", err)
+		return "", fmt.Errorf("auth callback failed: %w", err)
+	}
+	if resp == nil {
+		log.Error("performAuthCallback received nil response")
+		return "", fmt.Errorf("auth callback failed: nil response")
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	log.Info("performAuthCallback received response", "resp", resp,
+		"status_code", resp.StatusCode)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Info("performAuthCallback request rejected",
+			"status_code", resp.StatusCode,
+			"response_body", string(body))
+		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Info("performAuthCallback succeeded")
+	return apiKey, nil
 }
 
 func randStr(l int) string {
@@ -801,11 +916,16 @@ func instrumentedHdlr(h http.Handler) http.HandlerFunc {
 }
 
 func GetAuthCtx(ctx context.Context) string {
-	authUser, ok := ctx.Value(ContextKeyAuth).(string)
-	if !ok {
+	if ctx == nil {
+		log.Info("GetAuthCtx called with nil context")
 		return "none"
 	}
-
+	authUser, ok := ctx.Value(ContextKeyAuth).(string)
+	if !ok {
+		log.Info("GetAuthCtx No auth value found in context")
+		return "none"
+	}
+	log.Info("GetAuthCtx Auth value found in context", "auth", authUser)
 	return authUser
 }
 
@@ -877,4 +997,16 @@ func createBatchRequest(elems []batchElem) []*RPCReq {
 		batch[i] = elems[i].Req
 	}
 	return batch
+}
+
+// Helper function to get map keys
+func getMapKeys(m map[string]string) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

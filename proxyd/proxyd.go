@@ -33,12 +33,6 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, errors.New("must define at least one RPC method mapping")
 	}
 
-	for authKey := range config.Authentication {
-		if authKey == "none" {
-			return nil, nil, errors.New("cannot use none as an auth key")
-		}
-	}
-
 	// redis primary client
 	var redisClient redis.UniversalClient
 	if config.Redis.URL != "" {
@@ -193,7 +187,6 @@ func Start(config *Config) (*Server, func(), error) {
 			opts = append(opts, WithStrippedTrailingXFF())
 		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
-		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
@@ -285,16 +278,34 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var resolvedAuth map[string]string
+	var resolvedAuth map[string]string = make(map[string]string) // Initialize map first
 
 	if config.Authentication != nil {
-		resolvedAuth = make(map[string]string)
-		for secret, alias := range config.Authentication {
-			resolvedSecret, err := ReadFromEnvOrConfig(secret)
+		log.Info("Startfunction Authentication config contents",
+			"raw_config", config.Authentication,
+			"auth_url_value", config.Authentication["auth_url"],
+			"secret_value", config.Authentication["secret"])
+
+		// First, check and process the auth_url if present
+		if authURL, ok := config.Authentication["auth_url"]; ok {
+			resolvedAuth["auth_url"] = authURL
+			log.Info("Startfunction Configured external auth service",
+				"auth_url", authURL)
+		}
+		// Then process any remaining keys as traditional auth keys
+		for key, alias := range config.Authentication {
+			// Skip auth_url as we've already processed it
+			if key == "auth_url" {
+				log.Info("Startfunction Skipping auth_url", "key", key)
+				continue
+			}
+
+			resolvedKey, err := ReadFromEnvOrConfig(key)
 			if err != nil {
 				return nil, nil, err
 			}
-			resolvedAuth[resolvedSecret] = alias
+			resolvedAuth[resolvedKey] = alias
+			log.Info("Startfunction Configured traditional auth", "key", resolvedKey, "alias", alias)
 		}
 	}
 
@@ -336,6 +347,10 @@ func Start(config *Config) (*Server, func(), error) {
 
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
+
+	log.Info("StartFunction Creating server with auth paths",
+		"resolvedAuth_nil", resolvedAuth == nil,
+		"config_auth_nil", config.Authentication == nil)
 
 	srv, err := NewServer(
 		backendGroups,
