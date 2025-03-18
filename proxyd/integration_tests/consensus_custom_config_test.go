@@ -159,6 +159,15 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 
 	}
 
+	initSetupAndAssetions := func() {
+		reset()
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+	}
+
 	override := func(node string, method string, block string, response string) {
 		if _, ok := nodes[node]; !ok {
 			t.Fatalf("node %s does not exist in the nodes map", node)
@@ -196,8 +205,8 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	}
 
 	t.Run("allow backend if tags are messed if below tolerance - safe dropped", func(t *testing.T) {
-		reset()
-		update()
+		initSetupAndAssetions()
+
 		overrideBlock("node1", "safe", "0xe0") // 1 blocks behind is ok
 		update()
 
@@ -212,8 +221,7 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	})
 
 	t.Run("ban backend if tags are messed above tolerance - safe dropped", func(t *testing.T) {
-		reset()
-		update()
+		initSetupAndAssetions()
 		overrideBlock("node1", "safe", "0xdf") // 2 blocks behind is not ok
 		update()
 
@@ -228,8 +236,7 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	})
 
 	t.Run("allow backend if tags are messed if below tolerance - finalized dropped", func(t *testing.T) {
-		reset()
-		update()
+		initSetupAndAssetions()
 		overrideBlock("node1", "finalized", "0xbf") // finalized 2 blocks behind is ok
 		update()
 
@@ -244,8 +251,7 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	})
 
 	t.Run("ban backend if tags are messed - finalized dropped", func(t *testing.T) {
-		reset()
-		update()
+		initSetupAndAssetions()
 		overrideBlock("node1", "finalized", "0xbe") // finalized 3 blocks behind is not ok
 		update()
 
