@@ -422,8 +422,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 }
 
 // checkExpectedBlockTags for unexpected conditions on block tags
-// - finalized block number should never decrease
-// - safe block number should never decrease
+// - finalized block number should never decrease by more than finalizedBlockDriftThreshold
+// - safe block number should never decrease by more than safeBlockDriftThreshold
 // - finalized block should be <= safe block <= latest block
 func (cp *ConsensusPoller) checkExpectedBlockTags(
 	safeBlockDriftThreshold uint64,
