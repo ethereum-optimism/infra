@@ -155,9 +155,11 @@ type Backend struct {
 	skipPeerCountCheck bool
 	forcedCandidate    bool
 
-	maxDegradedLatencyThreshold time.Duration
-	maxLatencyThreshold         time.Duration
-	maxErrorRateThreshold       float64
+	safeBlockDriftThreshold      uint64
+	finalizedBlockDriftThreshold uint64
+	maxDegradedLatencyThreshold  time.Duration
+	maxLatencyThreshold          time.Duration
+	maxErrorRateThreshold        float64
 
 	latencySlidingWindow            *sw.AvgSlidingWindow
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
@@ -241,6 +243,18 @@ func WithProxydIP(ip string) BackendOpt {
 func WithSkipIsSyncingCheck(skipIsSyncingCheck bool) BackendOpt {
 	return func(b *Backend) {
 		b.skipIsSyncingCheck = skipIsSyncingCheck
+	}
+}
+
+func WithSafeBlockDriftThreshold(safeBlockDriftThreshold uint64) BackendOpt {
+	return func(b *Backend) {
+		b.safeBlockDriftThreshold = safeBlockDriftThreshold
+	}
+}
+
+func WithFinalizedBlockDriftThreshold(finalizedBlockDriftThreshold uint64) BackendOpt {
+	return func(b *Backend) {
+		b.finalizedBlockDriftThreshold = finalizedBlockDriftThreshold
 	}
 }
 

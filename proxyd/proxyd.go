@@ -194,6 +194,8 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
 		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
+		opts = append(opts, WithSafeBlockDriftThreshold(cfg.SafeBlockDriftThreshold))
+		opts = append(opts, WithFinalizedBlockDriftThreshold(cfg.FinalizedBlockDriftThreshold))
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
