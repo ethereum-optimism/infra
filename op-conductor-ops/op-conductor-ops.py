@@ -13,7 +13,7 @@ from utils import make_rpc_payload, print_boolean, print_warn, print_error
 
 
 app = typer.Typer(
-    help="CLI for managing OP Conductor sequencers. WARNING: This tool can cause a network outage if used improperly. Please consult #pod-devinfra before using."
+    help="CLI for managing OP Conductor sequencers. WARNING: This tool can cause a network outage if used improperly."
 )
 
 console = Console()
@@ -446,6 +446,107 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
         raise typer.Exit(code=1)
 
     typer.echo(f"Successfully forced {sequencer_id} to become active")
+
+
+def wait_for_condition(description, condition_func, timeout_seconds=300, retry_seconds=10, update_func=None):
+    """Wait for a condition to be met, with timeout.
+
+    Args:
+        description: Description of what we're waiting for (used in messages)
+        condition_func: Function that returns True when condition is met
+        timeout_seconds: Maximum time to wait in seconds (default: 5 minutes)
+        retry_seconds: Time between retries in seconds (default: 10 seconds)
+        update_func: Optional function to call before checking condition
+
+    Returns:
+        True if condition was met, raises typer.Exit if timeout occurs
+    """
+    start_time = time.time()
+    while not condition_func():
+        if time.time() - start_time > timeout_seconds:
+            print_error(f"Timed out waiting for {description} after {timeout_seconds//60} minutes.")
+            raise typer.Exit(code=1)
+        typer.echo(f"Waiting {retry_seconds} seconds for {description}...")
+        time.sleep(retry_seconds)
+        if update_func:
+            update_func()
+    return True
+
+
+@app.command()
+def bootstrap_cluster(
+  network: str,
+  sequencer_start_timeout: Annotated[int, typer.Option(
+    "--sequencer-start-timeout",
+    help="Timeout for sequencer start in seconds. Default is 300 seconds.",
+    default=300,
+    envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
+  )] = 300,
+  sequencer_healthy_timeout: Annotated[int, typer.Option(
+    "--sequencer-healthy-timeout",
+    help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
+    default=300,
+    envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
+  )] = 300,
+):
+    """Bootstraps a new cluster.
+
+    This is for bootstrapping a new sequencer cluster starting from genesis, or for disaster recovery on a failed cluster.
+    It will not work if the cluster is already healthy or conductor is active.
+    """
+    network_obj = get_network(network)
+
+    wait_for_condition(
+        "all sequencers to start",
+        lambda: network_obj.update_successful,
+        update_func=network_obj.update,
+        timeout_seconds=sequencer_start_timeout,
+        retry_seconds=10,
+    )
+
+    typer.echo("All sequencers are running. Bootstrapping cluster...")
+
+    # abort if all sequencer are already healthy
+    if network_obj.is_healthy():
+      typer.echo("All sequencers are already healthy. Skipping bootstrap.")
+      raise typer.Exit(code=0)
+
+    leader = network_obj.find_conductor_leader()
+    if leader is None:
+        print_error(f"Could not find current leader in network {network}")
+        raise typer.Exit(code=1)
+
+    if leader.conductor_active:
+      print_error("Current leader is active. Please pause conductor first.")
+      raise typer.Exit(code=1)
+
+    for sequencer in network_obj.sequencers:
+      if sequencer.sequencer_id != leader.sequencer_id and sequencer.sequencer_active:
+        print_error(f"Sequencer {sequencer.sequencer_id} is active even though its not the leader. Please stop it first.")
+        raise typer.Exit(code=1)
+
+    if not leader.sequencer_active:
+        typer.echo(f"Current leader {leader.sequencer_id} is not sequencing. Forcing it to start...")
+        force_active_sequencer(network, leader.sequencer_id, force=True)
+
+    wait_for_condition(
+        "all sequencers to be healthy",
+        lambda: network_obj.is_healthy(),
+        update_func=network_obj.update,
+        timeout_seconds=sequencer_healthy_timeout,
+        retry_seconds=10,
+    )
+
+    typer.echo("All sequencers are healthy. Updating cluster membership...")
+
+    update_cluster_membership(network)
+
+    typer.echo("Cluster membership updated. Resuming conductors.")
+
+    resume(network)
+
+    typer.echo("Conductors resumed. Bootstrap complete.")
+
 
 if __name__ == "__main__":
     app()
