@@ -400,6 +400,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	// sanity check for latest, safe and finalized block tags
 	expectedBlockTags := cp.checkExpectedBlockTags(
+		be.safeBlockDriftThreshold,
+		be.finalizedBlockDriftThreshold,
 		latestBlockNumber,
 		bs.safeBlockNumber, safeBlockNumber,
 		bs.finalizedBlockNumber, finalizedBlockNumber)
@@ -420,15 +422,27 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 }
 
 // checkExpectedBlockTags for unexpected conditions on block tags
-// - finalized block number should never decrease
-// - safe block number should never decrease
+// - finalized block number should never decrease by more than finalizedBlockDriftThreshold
+// - safe block number should never decrease by more than safeBlockDriftThreshold
 // - finalized block should be <= safe block <= latest block
 func (cp *ConsensusPoller) checkExpectedBlockTags(
+	safeBlockDriftThreshold uint64,
+	finalizedBlockDriftThreshold uint64,
 	currentLatest hexutil.Uint64,
 	oldSafe hexutil.Uint64, currentSafe hexutil.Uint64,
 	oldFinalized hexutil.Uint64, currentFinalized hexutil.Uint64) bool {
-	return currentFinalized >= oldFinalized &&
-		currentSafe >= oldSafe &&
+
+	minSafeBlockAllowance := oldSafe
+	minFinalizedBlockAllowance := oldFinalized
+	if minSafeBlockAllowance > hexutil.Uint64(safeBlockDriftThreshold) {
+		minSafeBlockAllowance -= hexutil.Uint64(safeBlockDriftThreshold)
+	}
+	if minFinalizedBlockAllowance > hexutil.Uint64(finalizedBlockDriftThreshold) {
+		minFinalizedBlockAllowance -= hexutil.Uint64(finalizedBlockDriftThreshold)
+	}
+
+	return currentFinalized >= minFinalizedBlockAllowance &&
+		currentSafe >= minSafeBlockAllowance &&
 		currentFinalized <= currentSafe &&
 		currentSafe <= currentLatest
 }

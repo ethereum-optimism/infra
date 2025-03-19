@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	ms "github.com/ethereum-optimism/infra/proxyd/tools/mockserver/handler"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -127,5 +128,167 @@ func TestConsensusSkipSyncTest(t *testing.T) {
 		require.Contains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.Equal(t, 2, len(consensusGroup))
+	})
+}
+
+func TestConsensusBlockDriftThreshold(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_block_drift_threshold")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	ctx := context.Background()
+
+	// poll for updated consensus
+	update := func() {
+		for _, be := range bg.Backends {
+			bg.Consensus.UpdateBackend(ctx, be)
+		}
+		bg.Consensus.UpdateBackendGroupConsensus(ctx)
+	}
+
+	// convenient methods to manipulate state and mock responses
+	reset := func() {
+		for _, node := range nodes {
+			node.handler.ResetOverrides()
+			node.mockBackend.Reset()
+			node.backend.ClearSlidingWindows()
+		}
+		bg.Consensus.ClearListeners()
+		bg.Consensus.Reset()
+
+	}
+
+	initSetupAndAssetions := func() {
+		reset()
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+	}
+
+	override := func(node string, method string, block string, response string) {
+		if _, ok := nodes[node]; !ok {
+			t.Fatalf("node %s does not exist in the nodes map", node)
+		}
+		nodes[node].handler.AddOverride(&ms.MethodTemplate{
+			Method:   method,
+			Block:    block,
+			Response: response,
+		})
+	}
+
+	overrideBlock := func(node string, blockRequest string, blockResponse string) {
+		override(node,
+			"eth_getBlockByNumber",
+			blockRequest,
+			buildResponse(map[string]string{
+				"number": blockResponse,
+				"hash":   "hash_" + blockResponse,
+			}))
+	}
+
+	overridePeerCount := func(node string, count int) {
+		override(node, "net_peerCount", "", buildResponse(hexutil.Uint64(count).String()))
+	}
+
+	// force ban node2 and make sure node1 is the only one in consensus
+	useOnlyNode1 := func() {
+		overridePeerCount("node2", 0)
+		update()
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.Equal(t, 1, len(consensusGroup))
+		require.Contains(t, consensusGroup, nodes["node1"].backend)
+		nodes["node1"].mockBackend.Reset()
+	}
+
+	t.Run("allow backend if tags are messed if below tolerance - safe dropped", func(t *testing.T) {
+		initSetupAndAssetions()
+
+		overrideBlock("node1", "safe", "0xe0") // 1 blocks behind is ok
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe0", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.Contains(t, consensusGroup, nodes["node1"].backend)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 2, len(consensusGroup))
+	})
+
+	t.Run("ban backend if tags are messed above tolerance - safe dropped", func(t *testing.T) {
+		initSetupAndAssetions()
+		overrideBlock("node1", "safe", "0xdf") // 2 blocks behind is not ok
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 1, len(consensusGroup))
+	})
+
+	t.Run("allow backend if tags are messed if below tolerance - finalized dropped", func(t *testing.T) {
+		initSetupAndAssetions()
+		overrideBlock("node1", "finalized", "0xbf") // finalized 2 blocks behind is ok
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xbf", bg.Consensus.GetFinalizedBlockNumber().String())
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.Contains(t, consensusGroup, nodes["node1"].backend)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 2, len(consensusGroup))
+	})
+
+	t.Run("ban backend if tags are messed - finalized dropped", func(t *testing.T) {
+		initSetupAndAssetions()
+		overrideBlock("node1", "finalized", "0xbe") // finalized 3 blocks behind is not ok
+		update()
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 1, len(consensusGroup))
+	})
+
+	t.Run("recover after safe and finalized dropped", func(t *testing.T) {
+		reset()
+		useOnlyNode1()
+		overrideBlock("node1", "latest", "0xd1")
+		overrideBlock("node1", "safe", "0xb1")
+		overrideBlock("node1", "finalized", "0x91")
+		update()
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 0, len(consensusGroup))
+
+		// unban and see if it recovers
+		bg.Consensus.Unban(nodes["node1"].backend)
+		update()
+
+		consensusGroup = bg.Consensus.GetConsensusGroup()
+		require.Contains(t, consensusGroup, nodes["node1"].backend)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 1, len(consensusGroup))
+
+		require.Equal(t, "0xd1", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xb1", bg.Consensus.GetSafeBlockNumber().String())
+		require.Equal(t, "0x91", bg.Consensus.GetFinalizedBlockNumber().String())
 	})
 }
