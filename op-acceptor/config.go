@@ -12,16 +12,16 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+// Config holds the configuration for the Network Acceptance Tester.
 type Config struct {
+	Log             log.Logger
 	TestDir         string
 	ValidatorConfig string
-	TargetGate      string
+	RunInterval     time.Duration
+	RunOnce         bool
 	GoBinary        string
-	RunInterval     time.Duration // Interval between test runs
-	RunOnce         bool          // Indicates if the service should exit after one test run
-	AllowSkips      bool          // Allow tests to be skipped instead of failing when preconditions are not met
-
-	Log log.Logger
+	TargetGate      string
+	AllowSkips      bool
 }
 
 // NewConfig creates a new Config instance

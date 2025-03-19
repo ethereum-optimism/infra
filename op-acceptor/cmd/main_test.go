@@ -156,6 +156,23 @@ func createMockGoMod(t *testing.T, testDir string) {
 	cmd := exec.Command("go", "mod", "init", "test")
 	cmd.Dir = testDir
 	require.NoError(t, cmd.Run(), "Failed to initialize module")
+
+	// Add a go.mod file that includes appropriate module settings
+	goModContent := `module test
+
+go 1.22
+
+`
+	writeFile(t, filepath.Join(testDir, "go.mod"), goModContent)
+
+	// Create a go.work file to allow the test to use modules outside the main module
+	goWorkContent := `go 1.22
+
+use (
+	.
+)
+`
+	writeFile(t, filepath.Join(testDir, "go.work"), goWorkContent)
 }
 
 // createMockTest creates a test file that either passes or fails
@@ -170,9 +187,13 @@ func createMockTest(t *testing.T, testDir, packageName, filename string, passing
 	// Use a template approach for test content
 	testTemplate := `package %s
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func %s(t *testing.T) {
+	fmt.Println("Running test in %s package")
 	%s
 }
 `
@@ -186,7 +207,7 @@ func %s(t *testing.T) {
 		testBody = `t.Fatal("This test intentionally fails")`
 	}
 
-	testContent := fmt.Sprintf(testTemplate, packageName, testName, testBody)
+	testContent := fmt.Sprintf(testTemplate, packageName, testName, packageName, testBody)
 
 	t.Logf("Writing test file to %s", testPath)
 	writeFile(t, testPath, testContent)
@@ -203,9 +224,10 @@ func writeFile(t *testing.T, path, content string) {
 // createValidatorConfig creates a validator configuration file
 // useInvalidPath can be set to true to create a config with an invalid path
 func createValidatorConfig(t *testing.T, testDir, packageName, testName, gateID string, useInvalidPath bool) string {
-	packageDir := filepath.Join(testDir, packageName)
-	if useInvalidPath {
-		packageDir = packageName // Use the raw name to create an invalid path
+	packagePath := packageName
+	if !useInvalidPath {
+		// Use relative path from test directory for better module support
+		packagePath = "./" + packageName
 	}
 
 	validatorPath := filepath.Join(testDir, "test-validators.yaml")
@@ -220,7 +242,7 @@ gates:
         tests:
           - name: %s
             package: %s
-`, gateID, testName, packageDir)
+`, gateID, testName, packagePath)
 
 	writeFile(t, validatorPath, validatorConfig)
 	return validatorPath
@@ -239,6 +261,12 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string) int {
 		"--gate="+gate,
 		"--testdir="+testdir,
 		"--validators="+validators)
+
+	// Set environment variables to help with Go modules
+	execCmd.Env = append(os.Environ(),
+		"GO111MODULE=on",
+		"GOWORK=off", // Disable Go workspace mode to avoid conflicts
+	)
 
 	// Capture output for debugging
 	var stdout, stderr bytes.Buffer
@@ -298,14 +326,16 @@ func createMockPanicTest(t *testing.T, testDir, packageName, filename string) st
 	testContent := fmt.Sprintf(`package %s
 
 import (
+	"fmt"
 	"testing"
 )
 
 func TestExplicitPanic(t *testing.T) {
 	// This test will deliberately panic
+	fmt.Println("Running test in %s package - about to panic")
 	panic("This is a deliberate panic to test error handling")
 }
-`, packageName)
+`, packageName, packageName)
 
 	t.Logf("Writing panic test file to %s", testPath)
 	writeFile(t, testPath, testContent)

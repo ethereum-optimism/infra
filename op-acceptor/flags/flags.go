@@ -49,9 +49,9 @@ var (
 	}
 	AllowSkips = &cli.BoolFlag{
 		Name:    "allow-skips",
+		Usage:   "Allow tests to be skipped when preconditions aren't met",
 		Value:   false,
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "ALLOW_SKIPS"),
-		Usage:   "Allow tests to be skipped instead of failing when preconditions are not met.",
 	}
 )
 

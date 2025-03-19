@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -242,6 +243,7 @@ func (n *nat) printResultsTable(runID string) {
 		{Name: "Passed", Align: text.AlignRight},
 		{Name: "Failed", Align: text.AlignRight},
 		{Name: "Skipped", Align: text.AlignRight},
+		{Name: "Error", WidthMax: 80, WidthMaxEnforcer: text.WrapSoft},
 	})
 
 	// Add flag to show individual tests for packages
@@ -287,6 +289,9 @@ func (n *nat) printResultsTable(runID string) {
 				// Get a display name for the test
 				displayName := types.GetTestDisplayName(testName, test.Metadata)
 
+				// Extract key error information
+				errorMsg := extractKeyErrorMessage(test.Error)
+
 				// Display the test result
 				t.AppendRow(table.Row{
 					"Test",
@@ -297,7 +302,7 @@ func (n *nat) printResultsTable(runID string) {
 					boolToInt(test.Status == types.TestStatusFail),
 					boolToInt(test.Status == types.TestStatusSkip),
 					getResultString(test.Status),
-					test.Error,
+					errorMsg,
 				})
 
 				// Display individual sub-tests if present (for package tests)
@@ -309,6 +314,9 @@ func (n *nat) printResultsTable(runID string) {
 							subPrefix = "│   │   └──"
 						}
 
+						// Extract key error information for subtest
+						subErrorMsg := extractKeyErrorMessage(subTest.Error)
+
 						t.AppendRow(table.Row{
 							"",
 							fmt.Sprintf("%s %s", subPrefix, subTestName),
@@ -318,7 +326,7 @@ func (n *nat) printResultsTable(runID string) {
 							boolToInt(subTest.Status == types.TestStatusFail),
 							boolToInt(subTest.Status == types.TestStatusSkip),
 							getResultString(subTest.Status),
-							subTest.Error,
+							subErrorMsg,
 						})
 						j++
 					}
@@ -339,6 +347,9 @@ func (n *nat) printResultsTable(runID string) {
 			// Get a display name for the test
 			displayName := types.GetTestDisplayName(testName, test.Metadata)
 
+			// Extract key error information
+			errorMsg := extractKeyErrorMessage(test.Error)
+
 			// Display the test result
 			t.AppendRow(table.Row{
 				"Test",
@@ -349,7 +360,7 @@ func (n *nat) printResultsTable(runID string) {
 				boolToInt(test.Status == types.TestStatusFail),
 				boolToInt(test.Status == types.TestStatusSkip),
 				getResultString(test.Status),
-				test.Error,
+				errorMsg,
 			})
 
 			// Display individual sub-tests if present (for package tests)
@@ -361,6 +372,9 @@ func (n *nat) printResultsTable(runID string) {
 						subPrefix = "    └──"
 					}
 
+					// Extract key error information for subtest
+					subErrorMsg := extractKeyErrorMessage(subTest.Error)
+
 					t.AppendRow(table.Row{
 						"",
 						fmt.Sprintf("%s %s", subPrefix, subTestName),
@@ -370,7 +384,7 @@ func (n *nat) printResultsTable(runID string) {
 						boolToInt(subTest.Status == types.TestStatusFail),
 						boolToInt(subTest.Status == types.TestStatusSkip),
 						getResultString(subTest.Status),
-						subTest.Error,
+						subErrorMsg,
 					})
 					j++
 				}
@@ -416,6 +430,113 @@ func (n *nat) printResultsTable(runID string) {
 		n.result.Stats.Failed,
 		n.result.Duration,
 	)
+}
+
+// extractKeyErrorMessage extracts the most pertinent part of the error message for display
+func extractKeyErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	errStr := err.Error()
+
+	// Look for precondition messages which are typically important
+	if idx := strings.Index(errStr, "precondition not met:"); idx != -1 {
+		// Extract the line with the precondition message
+		start := idx
+		end := len(errStr)
+		if newLine := strings.Index(errStr[start:], "\n"); newLine != -1 {
+			end = start + newLine
+		}
+		return errStr[start:end]
+	}
+
+	// Look for assertion failures
+	if idx := strings.Index(errStr, "assertion failed:"); idx != -1 {
+		start := idx
+		end := len(errStr)
+		if newLine := strings.Index(errStr[start:], "\n"); newLine != -1 {
+			end = start + newLine
+		}
+		return errStr[start:end]
+	}
+
+	// Look for panics
+	if idx := strings.Index(errStr, "panic:"); idx != -1 {
+		start := idx
+		end := len(errStr)
+		if newLine := strings.Index(errStr[start:], "\n"); newLine != -1 {
+			end = start + newLine
+		}
+		return errStr[start:end]
+	}
+
+	// For exit status errors, try to find a more meaningful message in the error text
+	if strings.Contains(errStr, "exit status") {
+		// Look for common Go test error patterns
+		errorPatterns := []string{
+			"expected",
+			"Expected",
+			"got:",
+			"want:",
+			"Error:",
+			"Fatal:",
+			"Failed:",
+		}
+
+		for _, pattern := range errorPatterns {
+			if idx := strings.Index(errStr, pattern); idx != -1 {
+				// Extract context around the match
+				start := idx
+				// Find the start of the line
+				for start > 0 && errStr[start-1] != '\n' {
+					start--
+				}
+
+				// Skip over filename:line: prefix to get cleaner error messages
+				colonCount := 0
+				fileLineEnd := start
+				for i := start; i < len(errStr) && colonCount < 2; i++ {
+					if errStr[i] == ':' {
+						colonCount++
+						if colonCount == 2 {
+							fileLineEnd = i + 1
+						}
+					}
+				}
+
+				end := len(errStr)
+				if newLine := strings.Index(errStr[idx:], "\n"); newLine != -1 {
+					end = idx + newLine
+				}
+
+				// Include the source file info for expected/want/got patterns
+				if pattern == "expected" || pattern == "Expected" || pattern == "got:" || pattern == "want:" {
+					return errStr[start:end]
+				}
+
+				// Skip the file:line: prefix for other patterns
+				if colonCount == 2 && fileLineEnd < end && fileLineEnd > start {
+					// Skip leading space after the second colon
+					if fileLineEnd < len(errStr) && errStr[fileLineEnd] == ' ' {
+						fileLineEnd++
+					}
+					return errStr[fileLineEnd:end]
+				}
+
+				return errStr[start:end]
+			}
+		}
+	}
+
+	// If we can't find a specific pattern, limit to the first line or 80 chars
+	if idx := strings.Index(errStr, "\n"); idx != -1 {
+		return errStr[:idx]
+	} else if len(errStr) > 80 {
+		return errStr[:70] + "..."
+	}
+
+	return errStr
 }
 
 // Helper function to convert bool to int

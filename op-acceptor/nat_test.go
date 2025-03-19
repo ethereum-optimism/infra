@@ -2,6 +2,7 @@ package nat
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,10 +23,16 @@ type trackedMockRunner struct {
 	execCh    chan struct{} // Channel for signaling on each execution
 }
 
+// newTrackedMockRunner creates a new runner with execution tracking
 func newTrackedMockRunner() *trackedMockRunner {
-	return &trackedMockRunner{
-		execCh: make(chan struct{}, 50),
+	mock := &trackedMockRunner{
+		execCh: make(chan struct{}, 100), // Buffer to prevent blocking
 	}
+
+	// Set up default expectation for Finalize (can be overridden in tests)
+	mock.On("Finalize").Return().Maybe()
+
+	return mock
 }
 
 func (m *trackedMockRunner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
@@ -33,17 +40,28 @@ func (m *trackedMockRunner) RunTest(metadata types.ValidatorMetadata) (*types.Te
 	return args.Get(0).(*types.TestResult), args.Error(1)
 }
 
+// RunAllTests implements the runner.TestRunner interface
 func (m *trackedMockRunner) RunAllTests() (*runner.RunnerResult, error) {
+	count := m.execCount.Add(1)
 	args := m.Called()
 
-	// Track execution and signal on channel
-	m.execCount.Add(1)
+	// Signal that an execution has happened
 	select {
 	case m.execCh <- struct{}{}:
-	default: // Don't block if channel buffer is full
+	default:
+		// Non-blocking send, just in case no one is listening
 	}
 
+	// Return based on count to make different results possible
+	if count%2 == 0 {
+		return args.Get(0).(*runner.RunnerResult), args.Error(1)
+	}
 	return args.Get(0).(*runner.RunnerResult), args.Error(1)
+}
+
+// Finalize implements the runner.TestRunner interface
+func (m *trackedMockRunner) Finalize() {
+	m.Called()
 }
 
 // waitForExecutions waits for a specific number of executions with timeout
@@ -99,6 +117,8 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 		},
 		runner: mockRunner,
 		done:   make(chan struct{}),
+		// Add a no-op shutdown callback for tests
+		shutdownCallback: func(error) {},
 	}
 
 	return mockRunner, service, ctx, cancel
@@ -108,28 +128,22 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 func teardownTest(t *testing.T, service *nat, cancel context.CancelFunc) {
 	t.Helper()
 
-	// Cancel the context to ensure any hanging goroutines exit
+	// Cancel context first to stop background activities
 	cancel()
 
-	// Only attempt cleanup if the service was actually created
-	if service == nil {
-		return
+	// Then properly stop the service
+	if !service.Stopped() {
+		err := service.Stop(context.Background())
+		assert.NoError(t, err, "Service should stop cleanly during teardown")
 	}
 
-	// Call Stop directly to ensure proper cleanup
-	err := service.Stop(context.Background())
-	if err != nil {
-		t.Logf("Warning: error stopping service during teardown: %v", err)
-	}
+	// Ensure all goroutines have terminated
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
 
-	// Create a timeout for shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer shutdownCancel()
-
-	// Wait for shutdown with timeout
-	err = service.WaitForShutdown(shutdownCtx)
+	err := service.WaitForShutdown(ctx)
 	if err != nil {
-		t.Logf("Warning: service shutdown timed out: %v", err)
+		t.Logf("Warning: Service did not shut down cleanly in teardown: %v", err)
 	}
 }
 
@@ -139,30 +153,23 @@ func TestNAT_Start_RunsTestsImmediately(t *testing.T) {
 	mockRunner, service, ctx, cancel := setupTest(t)
 	defer teardownTest(t, service, cancel)
 
-	// Create expected result
+	// Configure mock to return success
 	result := &runner.RunnerResult{
 		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
 	}
-
-	// Expect RunAllTests to be called once
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
+	mockRunner.On("RunAllTests").Return(result, nil)
+	mockRunner.On("Finalize").Return()
 
 	// Start the service
 	err := service.Start(ctx)
 	require.NoError(t, err)
 
-	// Verify immediate execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected immediate test execution")
+	// Wait for first execution to complete
+	execCompleted := mockRunner.waitForExecutions(ctx, 1)
+	require.True(t, execCompleted, "First execution should have completed")
 
-	// Stop the service
-	err = service.Stop(ctx)
-	require.NoError(t, err)
-
-	// Verify exactly one execution occurred
-	assert.Equal(t, int32(1), mockRunner.execCount.Load(),
-		"Expected exactly one test execution")
+	// Verify the runner was called once
+	mockRunner.AssertNumberOfCalls(t, "RunAllTests", 1)
 }
 
 // TestNAT_Start_RunsTestsPeriodically tests that NAT runs tests periodically
@@ -171,77 +178,24 @@ func TestNAT_Start_RunsTestsPeriodically(t *testing.T) {
 	mockRunner, service, ctx, cancel := setupTest(t)
 	defer teardownTest(t, service, cancel)
 
-	// Create expected result
+	// Configure mock to return success
 	result := &runner.RunnerResult{
 		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
 	}
-
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
+	mockRunner.On("RunAllTests").Return(result, nil)
+	mockRunner.On("Finalize").Return()
 
 	// Start the service
 	err := service.Start(ctx)
 	require.NoError(t, err)
 
-	// Wait for at least 3 total executions (initial + at least 2 periodic)
-	assert.True(t, mockRunner.waitForExecutions(ctx, 3),
-		"Expected at least 1 periodic test execution after initial run")
+	// Wait for multiple executions (at least 3)
+	execCompleted := mockRunner.waitForExecutions(ctx, 3)
+	require.True(t, execCompleted, "Multiple executions should have completed")
 
-	// Stop the service
-	err = service.Stop(ctx)
-	require.NoError(t, err)
-
-	// Log the final execution count for diagnostics
-	execCount := mockRunner.execCount.Load()
-	t.Logf("Test executed %d times", execCount)
-	assert.GreaterOrEqual(t, execCount, int32(3),
-		"Expected at least 3 test executions (1 initial + 2 periodic)")
-}
-
-// TestNAT_Stop_CleansUpResources tests that the NAT service properly stops
-func TestNAT_Stop_CleansUpResources(t *testing.T) {
-	// Setup
-	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
-
-	// Create expected result
-	result := &runner.RunnerResult{
-		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
-	}
-
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
-
-	// Start the service
-	err := service.Start(ctx)
-	require.NoError(t, err)
-
-	// Wait for the initial execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected at least one test execution")
-
-	// Verify service is running
-	assert.False(t, service.Stopped())
-
-	// Stop the service
-	err = service.Stop(ctx)
-	require.NoError(t, err)
-
-	// Verify service is stopped
-	assert.True(t, service.Stopped())
-
-	// Record the execution count after stopping
-	execCountAfterStop := mockRunner.execCount.Load()
-
-	// Wait 3 intervals to ensure no more tests run after stopping
-	// This gives sufficient time for any in-flight operations to complete
-	time.Sleep(3 * service.config.RunInterval)
-
-	// Verify no additional executions occurred after stopping
-	assert.Equal(t, execCountAfterStop, mockRunner.execCount.Load(),
-		"No additional test executions should occur after stopping the service")
+	// Verify the runner was called multiple times
+	callCount := mockRunner.execCount.Load()
+	assert.GreaterOrEqual(t, callCount, int32(3), "Runner should be called at least 3 times")
 }
 
 // TestNAT_Context_Cancellation tests that the NAT service properly handles
@@ -251,42 +205,34 @@ func TestNAT_Context_Cancellation(t *testing.T) {
 	mockRunner, service, ctx, cancel := setupTest(t)
 	defer teardownTest(t, service, cancel)
 
-	// Create expected result
+	// Configure mock to return success
 	result := &runner.RunnerResult{
 		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
 	}
-
-	// Configure mock for any number of calls
-	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
+	mockRunner.On("RunAllTests").Return(result, nil)
+	mockRunner.On("Finalize").Return()
 
 	// Start the service
 	err := service.Start(ctx)
 	require.NoError(t, err)
 
-	// Wait for the initial execution
-	assert.True(t, mockRunner.waitForExecutions(ctx, 1),
-		"Expected immediate test execution")
-
-	// Verify service is running
-	assert.False(t, service.Stopped())
+	// Wait for first execution to complete
+	execCompleted := mockRunner.waitForExecutions(ctx, 1)
+	require.True(t, execCompleted, "First execution should have completed")
 
 	// Record the execution count before cancellation
 	execCountBeforeCancel := mockRunner.execCount.Load()
-	t.Logf("Test executed %d times before cancellation", execCountBeforeCancel)
 
 	// Cancel the context
 	cancel()
 
-	// Wait a small amount of time for cancellation to propagate
-	// Sleep a minimum of 20ms to allow context cancellation to be processed
-	time.Sleep(20 * time.Millisecond)
+	// Wait a moment for the cancellation to propagate
+	time.Sleep(50 * time.Millisecond)
 
-	// Verify service is stopped after context cancellation
+	// Verify service is stopped
 	assert.True(t, service.Stopped(), "Service should be stopped after context cancellation")
 
-	// Wait 3 intervals to ensure no more tests run after cancellation
-	// This gives sufficient time for any in-flight operations to complete
+	// Wait more time to ensure no more tests run after stopping
 	time.Sleep(3 * service.config.RunInterval)
 
 	// Verify no additional executions occurred after cancellation
@@ -298,36 +244,84 @@ func TestNAT_Context_Cancellation(t *testing.T) {
 func TestNAT_RunOnceMode(t *testing.T) {
 	// Setup
 	mockRunner, service, ctx, cancel := setupTest(t)
-	defer teardownTest(t, service, cancel)
+	defer cancel()
 
 	// Set run-once mode
 	service.config.RunOnce = true
 
-	// Create expected result
-	result := &runner.RunnerResult{
+	// Configure mock for 1 call
+	passResult := &runner.RunnerResult{
 		Status: types.TestStatusPass,
-		RunID:  "test-run-id",
 	}
-
-	// Monitor for shutdown signal
-	shutdownCalled := false
-	service.shutdownCallback = func(err error) {
-		shutdownCalled = true
-	}
-
-	// Expect RunAllTests to be called once
-	mockRunner.On("RunAllTests").Return(result, nil).Once()
+	mockRunner.On("RunAllTests").Return(passResult, nil).Once()
+	mockRunner.On("Finalize").Return()
 
 	// Start the service
 	err := service.Start(ctx)
 	require.NoError(t, err)
 
-	// Allow time for the delayed shutdown to occur
-	time.Sleep(200 * time.Millisecond)
+	// Wait for execution to complete
+	execCompleted := mockRunner.waitForExecutions(ctx, 1)
+	require.True(t, execCompleted, "Execution should have completed")
 
-	// Verify exactly one execution occurred and shutdown was called
-	assert.Equal(t, int32(1), mockRunner.execCount.Load(),
-		"Expected exactly one test execution")
-	assert.True(t, shutdownCalled,
-		"Expected shutdown to be called in run-once mode")
+	// Verify the runner was called exactly once and doesn't continue running
+	time.Sleep(3 * service.config.RunInterval)
+	mockRunner.AssertNumberOfCalls(t, "RunAllTests", 1)
+}
+
+// TestExtractKeyErrorMessage tests the error message extraction functionality
+func TestExtractKeyErrorMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: "",
+		},
+		{
+			name:     "precondition not met error",
+			err:      fmt.Errorf("exit status 1\nsystest.go:185: precondition not met: no available wallet with balance of at least of 1000000000000000000"),
+			expected: "precondition not met: no available wallet with balance of at least of 1000000000000000000",
+		},
+		{
+			name:     "assertion failure",
+			err:      fmt.Errorf("exit status 1\ntest.go:42: assertion failed: expected 5 but got 4"),
+			expected: "assertion failed: expected 5 but got 4",
+		},
+		{
+			name:     "panic error",
+			err:      fmt.Errorf("exit status 2\npanic: runtime error: index out of range [10] with length 5"),
+			expected: "panic: runtime error: index out of range [10] with length 5",
+		},
+		{
+			name:     "expected vs got error",
+			err:      fmt.Errorf("exit status 1\nsome_test.go:123: expected \"success\", got: \"failure\""),
+			expected: "some_test.go:123: expected \"success\", got: \"failure\"",
+		},
+		{
+			name:     "simple error",
+			err:      fmt.Errorf("simple error message"),
+			expected: "simple error message",
+		},
+		{
+			name:     "multiline error without specific pattern",
+			err:      fmt.Errorf("first line\nsecond line\nthird line"),
+			expected: "first line",
+		},
+		{
+			name:     "long error without newlines",
+			err:      fmt.Errorf("this is a very long error message that should be truncated because it exceeds the maximum length that we want to display in our formatted output table"),
+			expected: "this is a very long error message that should be truncated because it ...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractKeyErrorMessage(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

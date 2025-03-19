@@ -551,21 +551,28 @@ func TestRunPackageTests(t *testing.T) {
 	testContent := []byte(`
 package feature_test
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestPackageOne(t *testing.T) {
+	fmt.Println("=== Running TestPackageOne")
 	t.Log("Test package one running")
 }
 
 func TestPackageTwo(t *testing.T) {
+	fmt.Println("=== Running TestPackageTwo")
 	t.Log("Test package two running")
 }
 
 func TestPackageThree(t *testing.T) {
+	fmt.Println("=== Running TestPackageThree")
 	t.Log("Test package three running")
 }
 
 func TestPackageFour(t *testing.T) {
+	fmt.Println("=== Running TestPackageFour")
 	t.Log("Test package four running")
 }
 `)
@@ -608,6 +615,14 @@ gates:
 		break
 	}
 	require.NotNil(t, packageTest, "package test should exist")
+
+	// Debug packageTest
+	t.Logf("Package test: %+v", packageTest)
+	if packageTest.SubTests != nil {
+		t.Logf("SubTests: %+v", packageTest.SubTests)
+	} else {
+		t.Log("SubTests is nil")
+	}
 
 	// Verify the package test has subtests
 	assert.NotEmpty(t, packageTest.SubTests, "package test should have subtests")
@@ -1163,5 +1178,124 @@ gates:
 					"DEVNET_EXPECT_PRECONDITIONS_MET should be set to 'true' when allowSkips=false")
 			}
 		})
+	}
+}
+
+// TestExtractDetailedError tests the extraction of detailed error messages from test output
+func TestExtractDetailedError(t *testing.T) {
+	tests := []struct {
+		name     string
+		stdout   string
+		stderr   string
+		expected string
+	}{
+		{
+			name:     "empty output",
+			stdout:   "",
+			stderr:   "",
+			expected: "",
+		},
+		{
+			name:     "precondition not met in stdout",
+			stdout:   "=== RUN   TestFees\nsystest.go:185: precondition not met: no available wallet with balance of at least of 1000000000000000000\n--- FAIL: TestFees (0.00s)",
+			stderr:   "",
+			expected: "systest.go:185: precondition not met: no available wallet with balance of at least of 1000000000000000000",
+		},
+		{
+			name:     "precondition not met in stderr",
+			stdout:   "=== RUN   TestFees\n--- FAIL: TestFees (0.00s)",
+			stderr:   "systest.go:185: precondition not met: no available wallet with balance of at least of 1000000000000000000",
+			expected: "systest.go:185: precondition not met: no available wallet with balance of at least of 1000000000000000000",
+		},
+		{
+			name:     "assertion failed in stdout",
+			stdout:   "=== RUN   TestAssert\ntest_file.go:42: assertion failed: expected true, got false\n--- FAIL: TestAssert (0.00s)",
+			stderr:   "",
+			expected: "test_file.go:42: assertion failed: expected true, got false",
+		},
+		{
+			name:     "unexpected error in stdout",
+			stdout:   "=== RUN   TestUnexpected\ntest_file.go:42: unexpected error: connection refused\n--- FAIL: TestUnexpected (0.00s)",
+			stderr:   "",
+			expected: "test_file.go:42: unexpected error: connection refused",
+		},
+		{
+			name:     "expected vs got in stdout",
+			stdout:   "=== RUN   TestCompare\ntest_file.go:42: expected \"hello\", got \"world\"\n--- FAIL: TestCompare (0.00s)",
+			stderr:   "",
+			expected: "test_file.go:42: expected \"hello\", got \"world\"",
+		},
+		{
+			name:     "want vs got in stdout",
+			stdout:   "=== RUN   TestCompare\ntest_file.go:42: want 5, got 4\n--- FAIL: TestCompare (0.00s)",
+			stderr:   "",
+			expected: "test_file.go:42: want 5, got 4",
+		},
+		{
+			name:     "generic Error in stdout",
+			stdout:   "=== RUN   TestError\ntest_file.go:42: Error: something went wrong\n--- FAIL: TestError (0.00s)",
+			stderr:   "",
+			expected: "test_file.go:42: Error: something went wrong",
+		},
+		{
+			name:     "panic in stdout",
+			stdout:   "=== RUN   TestPanic\npanic: index out of range [5] with length 3\n--- FAIL: TestPanic (0.00s)",
+			stderr:   "",
+			expected: "panic: index out of range [5] with length 3",
+		},
+		{
+			name:     "fail output with no specific pattern",
+			stdout:   "=== RUN   TestFail\n--- FAIL: TestFail (0.00s)\nSome additional context\nMore context",
+			stderr:   "",
+			expected: "--- FAIL: TestFail (0.00s)",
+		},
+		{
+			name:     "error in stderr but not stdout",
+			stdout:   "=== RUN   TestStderr\n--- FAIL: TestStderr (0.00s)",
+			stderr:   "Error occurred: file not found",
+			expected: "Error occurred: file not found",
+		},
+		{
+			name:     "complex output with multiple errors",
+			stdout:   "=== RUN   TestComplex\n--- FAIL: TestComplex (0.15s)\ntest_a.go:12: This is not the main error\ntest_b.go:34: precondition not met: required setup failed\ntest_c.go:56: This is an additional error",
+			stderr:   "Some stderr output\nMore stderr details",
+			expected: "test_b.go:34: precondition not met: required setup failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractDetailedError(tt.stdout, tt.stderr)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Add this test function at the end of the file
+func TestParseTestOutput(t *testing.T) {
+	// Simulated Go test output with multiple tests
+	testOutput := `=== RUN   TestPackageOne
+=== RUN   TestPackageTwo
+=== RUN   TestPackageThree
+=== RUN   TestPackageFour
+--- PASS: TestPackageOne (0.00s)
+--- PASS: TestPackageTwo (0.00s)
+--- PASS: TestPackageThree (0.00s)
+--- PASS: TestPackageFour (0.00s)
+PASS
+ok  	github.com/ethereum-optimism/infra/op-acceptor/feature	0.001s
+`
+
+	// Parse the output
+	results := parseTestOutput(testOutput, "")
+
+	// Verify the results
+	assert.Len(t, results, 4, "should find 4 tests")
+
+	// Check each expected test
+	testNames := []string{"TestPackageOne", "TestPackageTwo", "TestPackageThree", "TestPackageFour"}
+	for _, name := range testNames {
+		assert.Contains(t, results, name, "should have parsed "+name)
+		assert.Equal(t, types.TestStatusPass, results[name].Status, name+" should be marked as passed")
 	}
 }

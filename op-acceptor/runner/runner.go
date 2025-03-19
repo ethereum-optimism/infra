@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
-
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -74,8 +72,10 @@ type runner struct {
 	timeout    time.Duration // Test timeout
 	goBinary   string        // Path to the Go binary
 	allowSkips bool          // Whether to allow skipping tests when preconditions are not met
+	result     *RunnerResult
 }
 
+// Config provides the configuration for the test runner
 type Config struct {
 	Registry   *registry.Registry
 	TargetGate string
@@ -118,15 +118,21 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.GoBinary = "go" // Default to "go" if not specified
 	}
 
-	return &runner{
+	// Generate unique run ID
+	runID := uuid.New().String()
+
+	r := &runner{
 		registry:   cfg.Registry,
 		validators: validators,
+		runID:      runID,
 		workDir:    cfg.WorkDir,
 		log:        cfg.Log,
 		timeout:    cfg.Timeout,
 		goBinary:   cfg.GoBinary,
 		allowSkips: cfg.AllowSkips,
-	}, nil
+	}
+
+	return r, nil
 }
 
 // RunAllTests implements the TestRunner interface
@@ -135,6 +141,7 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 	defer func() {
 		r.runID = ""
 	}()
+
 	start := time.Now()
 	r.log.Debug("Running all tests", "run_id", r.runID)
 
@@ -151,6 +158,7 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
 	result.RunID = r.runID
+	r.result = result // Store result for use in defer function
 	return result, nil
 }
 
@@ -423,56 +431,71 @@ func isValidTestName(name string) bool {
 	return true
 }
 
-// runTestList runs a list of tests and aggregates their results
+// runTestList runs multiple tests in the same package
 func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
-	if len(testNames) == 0 {
-		r.log.Warn("No tests found to run in package", "package", metadata.Package)
-		return &types.TestResult{
-			Metadata: metadata,
-			Status:   types.TestStatusSkip,
-			Duration: 0,
-			SubTests: make(map[string]*types.TestResult),
-		}, nil
+	baseMetadata := metadata
+	baseMetadata.RunAll = false
+
+	var allErrors []string
+	anySkipped := false
+
+	// Log to structured logger
+	r.log.Info("Running tests in package", "package", metadata.Package, "testCount", len(testNames))
+
+	// Create a combined result for all tests in the package
+	result := &types.TestResult{
+		Metadata: metadata,
+		Status:   types.TestStatusPass,               // Default to pass, will be updated below
+		SubTests: make(map[string]*types.TestResult), // Initialize SubTests map
 	}
 
-	var result types.TestStatus = types.TestStatusPass
-	var testErrors []error
-	var totalDuration time.Duration
-	testResults := make(map[string]*types.TestResult)
-
-	// Run each test in the list
 	for _, testName := range testNames {
-		// Create a new metadata with the specific test name
-		testMetadata := metadata
+		testMetadata := baseMetadata
 		testMetadata.FuncName = testName
 
-		// Run the individual test
 		testResult, err := r.runSingleTest(testMetadata)
 		if err != nil {
-			return nil, fmt.Errorf("running test %s: %w", testName, err)
+			allErrors = append(allErrors, fmt.Sprintf("Test %s error: %v", testName, err))
+			continue
 		}
 
-		// Store the individual test result
-		testResults[testName] = testResult
-		totalDuration += testResult.Duration
+		// Store this test as a subtest
+		result.SubTests[testName] = testResult
 
-		// Update overall status based on individual test result
-		if testResult.Status == types.TestStatusFail {
-			result = types.TestStatusFail
+		// Check test status
+		switch testResult.Status {
+		case types.TestStatusFail:
 			if testResult.Error != nil {
-				testErrors = append(testErrors, fmt.Errorf("%s: %w", testName, testResult.Error))
+				allErrors = append(allErrors, fmt.Sprintf("Test %s failed: %v", testName, testResult.Error))
+			} else {
+				allErrors = append(allErrors, fmt.Sprintf("Test %s failed with no error message", testName))
 			}
+		case types.TestStatusSkip:
+			anySkipped = true
 		}
 	}
 
-	// Create the aggregate result
-	return &types.TestResult{
-		Metadata: metadata,
-		Status:   result,
-		Error:    errors.Join(testErrors...),
-		Duration: totalDuration,
-		SubTests: testResults,
-	}, nil
+	// Determine overall status
+	if len(allErrors) > 0 {
+		result.Status = types.TestStatusFail
+	} else if anySkipped {
+		result.Status = types.TestStatusSkip
+	} else {
+		result.Status = types.TestStatusPass
+	}
+
+	// Format all errors into a single error message
+	if len(allErrors) > 0 {
+		result.Error = fmt.Errorf("%s", r.formatErrors(allErrors))
+	}
+
+	// Log to structured logger
+	r.log.Info("Package tests completed",
+		"package", metadata.Package,
+		"status", result.Status,
+		"error", result.Error)
+
+	return result, nil
 }
 
 // runSingleTest runs a specific test
@@ -480,22 +503,95 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
 	defer cancel()
 
+	// Setup and prepare for test run
+	result, cmd, testID, buffers := r.prepareTest(ctx, metadata)
+	var stdout, stderr = buffers.stdout, buffers.stderr
+
+	// Execute the test
+	testStartTime := time.Now()
+	r.logTestHeader(testID, metadata.Package, cmd.String(), testStartTime)
+
+	err := cmd.Run()
+
+	testEndTime := time.Now()
+	stdoutStr, stderrStr := stdout.String(), stderr.String()
+	duration := testEndTime.Sub(testStartTime)
+
+	// Log outputs
+	r.logTestOutput(stdoutStr, stderrStr)
+
+	// Process results
+	result, resultErr := r.processTestResult(result, ctx, err, stdoutStr, stderrStr)
+
+	// For tests that run all tests in a package, extract the individual test results
+	if metadata.RunAll && result != nil {
+		// Parse the test output to extract all test names and statuses
+		subtests := parseTestOutput(stdoutStr, stderrStr)
+
+		r.log.Debug(
+			"Parsed test output for subtests",
+			"metadata", metadata,
+			"subtestCount", len(subtests),
+			"subtestNames", getKeys(subtests),
+			"stdout", stdoutStr,
+		)
+
+		// Make sure we have a result before setting SubTests
+		if result.SubTests == nil {
+			result.SubTests = make(map[string]*types.TestResult)
+		}
+
+		// Add the subtests to the result
+		for testName, subTest := range subtests {
+			result.SubTests[testName] = subTest
+		}
+	}
+
+	// Log result status
+	r.logTestResult(testID, metadata.Package, result.Status, resultErr, duration, err)
+
+	return result, resultErr
+}
+
+// getKeys returns the keys of a map as a slice of strings
+func getKeys(m map[string]*types.TestResult) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Buffers holds stdout and stderr buffers
+type testBuffers struct {
+	stdout, stderr *bytes.Buffer
+}
+
+// prepareTest prepares the test command and initializes the result
+func (r *runner) prepareTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, *exec.Cmd, string, testBuffers) {
 	args := r.buildTestArgs(metadata)
 	cmd := exec.CommandContext(ctx, r.goBinary, args...)
 	cmd.Dir = r.workDir
 
-	// Set environment variables for the test
+	// Set environment variables
 	env := os.Environ()
 	if !r.allowSkips {
-		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 		env = append(env, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
 	}
 	cmd.Env = env
 
+	// Setup output capture
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Get test ID
+	testID := metadata.FuncName
+	if testID == "" {
+		testID = "All tests in " + metadata.Package
+	}
+
+	// Log command
 	r.log.Debug("Running test command",
 		"dir", cmd.Dir,
 		"package", metadata.Package,
@@ -504,50 +600,192 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		"timeout", r.timeout,
 		"allowSkips", r.allowSkips)
 
+	// Initialize result
 	result := &types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass, // Default to pass unless determined otherwise
 	}
 
-	err := cmd.Run()
+	return result, cmd, testID, testBuffers{&stdout, &stderr}
+}
 
-	// Handle different error cases
+// logTestHeader logs the test header information
+func (r *runner) logTestHeader(testID, packageName, command string, startTime time.Time) {
+	// Log test header with structured logger
+	r.log.Debug("Starting test",
+		"test", testID,
+		"package", packageName,
+		"command", command,
+		"startTime", startTime)
+}
+
+// logTestOutput logs the stdout and stderr output
+func (r *runner) logTestOutput(stdout, stderr string) {
+	// Log detailed outputs at trace level
+	if stdout != "" {
+		r.log.Debug("Test stdout", "output", stdout)
+	}
+	if stderr != "" {
+		r.log.Debug("Test stderr", "output", stderr)
+	}
+}
+
+// processTestResult processes the result of a test execution
+func (r *runner) processTestResult(result *types.TestResult, ctx context.Context, err error, stdout, stderr string) (*types.TestResult, error) {
+	// Determine test status first based on context and error conditions
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		// Test timed out
 		result.Status = types.TestStatusFail
 		result.Error = fmt.Errorf("test timed out after %v", r.timeout)
+		r.log.Warn("Test timed out", "timeout", r.timeout)
 
 	case err != nil:
-		// Command failed but may just indicate test failure (not a Go execution error)
-		r.log.Debug("Test failed or had error",
-			"test", metadata.FuncName,
-			"package", metadata.Package,
-			"error", err)
-
+		// Command failed but may indicate test failure (not a Go execution error)
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.Status = types.TestStatusFail
-			result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), stderr.String())
+
+			// Look for more specific errors in stdout/stderr
+			detailedError := extractDetailedError(stdout, stderr)
+			if detailedError != "" {
+				result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), detailedError)
+			} else {
+				result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), stderr)
+			}
+			r.log.Debug("Test failed with exit error", "error", exitErr.Error(), "details", detailedError)
 		} else {
 			// Actual system error running the test command
-			return nil, fmt.Errorf("failed to execute test %s: %w", metadata.FuncName, err)
+			r.log.Error("System error running test", "error", err)
+			return nil, fmt.Errorf("failed to execute test %s: %w", result.Metadata.FuncName, err)
 		}
 
 	default:
 		// Command succeeded - check output for SKIP marker
-		output := stdout.String()
-		if strings.Contains(output, "--- SKIP:") {
+		if strings.Contains(stdout, "--- SKIP:") {
 			result.Status = types.TestStatusSkip
-		}
 
-		r.log.Debug("Test completed",
-			"test", metadata.FuncName,
-			"package", metadata.Package,
-			"status", result.Status,
-			"output_bytes", len(output))
+			// Extract skip reason if available
+			var skipReason string
+			if idx := strings.Index(stdout, "--- SKIP:"); idx != -1 {
+				skipLine := stdout[idx:]
+				if endIdx := strings.Index(skipLine, "\n"); endIdx != -1 {
+					skipReason = skipLine[:endIdx]
+				}
+			}
+			r.log.Debug("Test skipped", "reason", skipReason)
+		} else {
+			r.log.Debug("Test passed")
+		}
 	}
 
 	return result, nil
+}
+
+// extractDetailedError extracts meaningful error information from test output
+func extractDetailedError(stdout, stderr string) string {
+	// Common test error patterns to search for, in order of importance
+	patterns := []string{
+		"precondition not met:", // Environment conditions not met
+		"assertion failed:",     // Test assertion that failed
+		"unexpected error:",     // Unexpected error during test
+		"expected ",             // Expectation that was not met
+		"want ",                 // Common pattern in go tests
+		"got ",                  // Common pattern in go tests
+		"Error:",                // General error message
+		"Fatal:",                // Fatal error
+		"panic:",                // Panic in test
+	}
+
+	// Helper to check both stdout and stderr
+	checkOutput := func(pattern, output string) (string, bool) {
+		if idx := strings.Index(output, pattern); idx != -1 {
+			// Find start of line
+			start := idx
+			for start > 0 && output[start-1] != '\n' {
+				start--
+			}
+
+			// Find end of line
+			var end int
+			if endIdx := strings.Index(output[idx:], "\n"); endIdx != -1 {
+				end = idx + endIdx
+			} else {
+				end = len(output)
+			}
+
+			// Return the full line containing the pattern
+			return output[start:end], true
+		}
+		return "", false
+	}
+
+	// Check patterns in order of priority
+	for _, pattern := range patterns {
+		// Check stderr first (usually more informative for errors)
+		if msg, found := checkOutput(pattern, stderr); found {
+			return msg
+		}
+
+		// Then check stdout
+		if msg, found := checkOutput(pattern, stdout); found {
+			return msg
+		}
+	}
+
+	// If we couldn't find specific patterns but have stderr error content, use that
+	if len(stderr) > 0 && !strings.Contains(stderr, "warning: ") {
+		if idx := strings.Index(stderr, "Error"); idx != -1 {
+			// Find start of line
+			start := idx
+			for start > 0 && stderr[start-1] != '\n' {
+				start--
+			}
+
+			// Find end of line
+			if endIdx := strings.Index(stderr[start:], "\n"); endIdx != -1 {
+				return stderr[start : start+endIdx]
+			}
+			return stderr[start:]
+		}
+
+		// Just return the first line of stderr if we can't find a better error
+		if idx := strings.Index(stderr, "\n"); idx != -1 {
+			return stderr[:idx]
+		}
+		return stderr
+	}
+
+	// If we couldn't find specific patterns, look for failed test output in Go test format
+	if idx := strings.Index(stdout, "--- FAIL:"); idx != -1 {
+		var end int
+		if newline := strings.Index(stdout[idx:], "\n"); newline != -1 {
+			end = idx + newline
+		} else {
+			end = len(stdout)
+		}
+		return stdout[idx:end]
+	}
+
+	return ""
+}
+
+// logTestResult logs the test result information
+func (r *runner) logTestResult(testID, packageName string, status types.TestStatus, resultErr error, duration time.Duration, cmdErr error) {
+	// Log test completion with structured logger
+	r.log.Info("Test completed",
+		"test", testID,
+		"package", packageName,
+		"status", status,
+		"duration", duration,
+		"error", resultErr)
+
+	// Log additional debug information for errors
+	if cmdErr != nil {
+		r.log.Debug("Test execution details",
+			"test", testID,
+			"package", packageName,
+			"error", cmdErr)
+	}
 }
 
 // buildTestArgs constructs the command line arguments for running a test
@@ -891,4 +1129,86 @@ func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
 	}
 
 	return determineStatusFromFlags(allSkipped, anyFailed)
+}
+
+// parseTestOutput parses the output of a Go test run to extract test results
+func parseTestOutput(stdout, _ string) map[string]*types.TestResult {
+	subtests := make(map[string]*types.TestResult)
+	lines := strings.Split(stdout, "\n")
+
+	// First scan for all RUN lines to identify tests
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Look for test start line (=== RUN TestName)
+		if strings.HasPrefix(trimmed, "=== RUN ") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 3 {
+				testName := parts[2]
+				// Only consider top-level tests, not subtests with slashes
+				if !strings.Contains(testName, "/") && isValidTestName(testName) {
+					// Initialize test result if not exists
+					if _, exists := subtests[testName]; !exists {
+						subtests[testName] = &types.TestResult{
+							Status: types.TestStatusPass, // Default to pass unless we find otherwise
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Then scan for PASS/FAIL/SKIP status lines to update the status
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Look for test result lines (--- PASS/FAIL/SKIP: TestName)
+		if strings.HasPrefix(trimmed, "--- PASS: ") {
+			processResultLine(trimmed, types.TestStatusPass, subtests)
+		} else if strings.HasPrefix(trimmed, "--- FAIL: ") {
+			processResultLine(trimmed, types.TestStatusFail, subtests)
+		} else if strings.HasPrefix(trimmed, "--- SKIP: ") {
+			processResultLine(trimmed, types.TestStatusSkip, subtests)
+		}
+	}
+
+	return subtests
+}
+
+// processResultLine extracts test name and status from a result line
+func processResultLine(line string, status types.TestStatus, subtests map[string]*types.TestResult) {
+	parts := strings.SplitN(line, ": ", 2)
+	if len(parts) < 2 {
+		return
+	}
+
+	// Extract test name and duration
+	remainder := parts[1]
+	durIdx := strings.LastIndex(remainder, " (")
+	if durIdx == -1 {
+		return
+	}
+
+	testName := strings.TrimSpace(remainder[:durIdx])
+
+	// Handle subtests (e.g., TestName/SubTest) by extracting the main test name
+	mainTest := testName
+	if idx := strings.Index(testName, "/"); idx != -1 {
+		mainTest = testName[:idx]
+	}
+
+	// Only process and include valid test names
+	if isValidTestName(mainTest) {
+		// Create test result if it doesn't exist yet
+		if _, exists := subtests[mainTest]; !exists {
+			subtests[mainTest] = &types.TestResult{
+				Status: status,
+			}
+		} else {
+			// If the test exists, update its status - FAIL trumps all, SKIP trumps PASS
+			if status == types.TestStatusFail || (status == types.TestStatusSkip && subtests[mainTest].Status == types.TestStatusPass) {
+				subtests[mainTest].Status = status
+			}
+		}
+	}
 }
