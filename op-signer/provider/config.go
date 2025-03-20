@@ -43,7 +43,7 @@ func ReadConfig(path string) (ProviderConfig, error) {
 		return config, err
 	}
 
-	// Default to GCP if Provider is empty to avoid breaking changes
+	// Default to GCP if Provider is empty
 	if config.ProviderType == "" {
 		config.ProviderType = KeyProviderGCP
 	}
