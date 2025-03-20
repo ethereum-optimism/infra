@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -475,6 +476,16 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 	}, nil
 }
 
+// TestEvent represents a single event from the go test JSON output
+type TestEvent struct {
+	Time    time.Time // Time the event occurred
+	Action  string    // The action taken (run, pause, cont, pass, fail, skip, output)
+	Package string    // The package being tested
+	Test    string    // The test function name (may be empty for package events)
+	Output  string    // Output text (may be empty)
+	Elapsed float64   // Elapsed time in seconds for the specific action
+}
+
 // runSingleTest runs a specific test
 func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
@@ -504,50 +515,177 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		"timeout", r.timeout,
 		"allowSkips", r.allowSkips)
 
+	// Run the command
+	err := cmd.Run()
+
+	// Check for timeout first
+	if ctx.Err() == context.DeadlineExceeded {
+		return &types.TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusFail,
+			Error:    fmt.Errorf("test timed out after %v", r.timeout),
+		}, nil
+	}
+
+	// Parse the JSON output
+	parsedResult := r.parseTestOutput(stdout.Bytes(), metadata)
+
+	// If we couldn't parse the output for some reason, create a minimal failing result
+	if parsedResult == nil {
+		parsedResult = &types.TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusFail,
+			Error:    fmt.Errorf("failed to parse test output"),
+		}
+	}
+
+	// Add any stderr output to the error
+	if err != nil && stderr.Len() > 0 {
+		if parsedResult.Error != nil {
+			parsedResult.Error = fmt.Errorf("%w\nstderr: %s", parsedResult.Error, stderr.String())
+		} else {
+			parsedResult.Error = fmt.Errorf("stderr: %s", stderr.String())
+		}
+	}
+
+	return parsedResult, nil
+}
+
+// parseTestOutput parses the JSON test output and extracts test result information
+func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata) *types.TestResult {
+	if len(output) == 0 {
+		r.log.Debug("Empty test output", "test", metadata.FuncName, "package", metadata.Package)
+		return &types.TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusFail,
+			Error:    fmt.Errorf("empty test output"),
+			SubTests: make(map[string]*types.TestResult),
+		}
+	}
+
 	result := &types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass, // Default to pass unless determined otherwise
+		SubTests: make(map[string]*types.TestResult),
 	}
 
-	err := cmd.Run()
+	var testStart time.Time
+	var testEnd time.Time
+	var errorMsg strings.Builder
+	var subTestStatuses = make(map[string]types.TestStatus)
+	var hasSkip bool          // Track if any "skip" action was detected
+	var hasAnyValidEvent bool // Track if we processed any valid JSON events
 
-	// Handle different error cases
-	switch {
-	case ctx.Err() == context.DeadlineExceeded:
-		// Test timed out
-		result.Status = types.TestStatusFail
-		result.Error = fmt.Errorf("test timed out after %v", r.timeout)
+	// Parse each line as a separate JSON object
+	lines := bytes.Split(output, []byte("\n"))
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
 
-	case err != nil:
-		// Command failed but may just indicate test failure (not a Go execution error)
-		r.log.Debug("Test failed or had error",
-			"test", metadata.FuncName,
-			"package", metadata.Package,
-			"error", err)
+		var event TestEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			// If we can't parse a line, log and continue
+			r.log.Debug("Failed to parse test JSON output line", "error", err, "line", string(line))
+			continue
+		}
 
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.Status = types.TestStatusFail
-			result.Error = fmt.Errorf("%s\n%s", exitErr.Error(), stderr.String())
+		hasAnyValidEvent = true
+
+		// Main test handling
+		if event.Test == "" || event.Test == metadata.FuncName {
+			// Package-level or main test events
+			switch event.Action {
+			case "start":
+				testStart = event.Time
+			case "pass":
+				testEnd = event.Time
+				result.Status = types.TestStatusPass
+			case "fail":
+				testEnd = event.Time
+				result.Status = types.TestStatusFail
+			case "skip":
+				testEnd = event.Time
+				result.Status = types.TestStatusSkip
+				hasSkip = true
+			case "output":
+				// Collect error output for the main test
+				if event.Output != "" {
+					errorMsg.WriteString(event.Output)
+				}
+			}
 		} else {
-			// Actual system error running the test command
-			return nil, fmt.Errorf("failed to execute test %s: %w", metadata.FuncName, err)
-		}
+			// Sub-test events
+			subTest, exists := result.SubTests[event.Test]
+			if !exists {
+				subTest = &types.TestResult{
+					Metadata: types.ValidatorMetadata{
+						FuncName: event.Test,
+						Package:  metadata.Package,
+					},
+					Status: types.TestStatusPass, // Default to pass
+				}
+				result.SubTests[event.Test] = subTest
+			}
 
-	default:
-		// Command succeeded - check output for SKIP marker
-		output := stdout.String()
-		if strings.Contains(output, "--- SKIP:") {
-			result.Status = types.TestStatusSkip
+			switch event.Action {
+			case "pass":
+				subTest.Status = types.TestStatusPass
+				subTestStatuses[event.Test] = types.TestStatusPass
+			case "fail":
+				subTest.Status = types.TestStatusFail
+				subTestStatuses[event.Test] = types.TestStatusFail
+				// A failing subtest means the main test fails too
+				result.Status = types.TestStatusFail
+			case "skip":
+				subTest.Status = types.TestStatusSkip
+				subTestStatuses[event.Test] = types.TestStatusSkip
+				hasSkip = true
+			case "output":
+				// Collect error output for the subtest
+				if event.Output != "" && subTest.Error == nil {
+					subTest.Error = fmt.Errorf("%s", event.Output)
+				} else if event.Output != "" {
+					subTest.Error = fmt.Errorf("%s\n%s", subTest.Error.Error(), event.Output)
+				}
+			}
 		}
-
-		r.log.Debug("Test completed",
-			"test", metadata.FuncName,
-			"package", metadata.Package,
-			"status", result.Status,
-			"output_bytes", len(output))
 	}
 
-	return result, nil
+	// If we didn't process any valid events, mark as a failure
+	if !hasAnyValidEvent {
+		result.Status = types.TestStatusFail
+		result.Error = fmt.Errorf("no valid JSON output from test")
+		return result
+	}
+
+	// Set the test duration
+	if !testStart.IsZero() && !testEnd.IsZero() {
+		result.Duration = testEnd.Sub(testStart)
+	} else if !testStart.IsZero() {
+		// If we have a start but no end, use time since start
+		result.Duration = time.Since(testStart)
+	}
+
+	// Set the error message if any
+	if errorMsg.Len() > 0 {
+		result.Error = fmt.Errorf("%s", errorMsg.String())
+	}
+
+	// Final check for skipped tests
+	if hasSkip && result.Status != types.TestStatusFail && len(result.SubTests) == 0 {
+		result.Status = types.TestStatusSkip
+	}
+
+	r.log.Debug("Parsed test output",
+		"test", metadata.FuncName,
+		"package", metadata.Package,
+		"status", result.Status,
+		"subtests", len(result.SubTests),
+		"hasAnyValidEvent", hasAnyValidEvent,
+		"hasError", result.Error != nil)
+
+	return result
 }
 
 // buildTestArgs constructs the command line arguments for running a test
@@ -572,6 +710,9 @@ func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
 
 	// Always use verbose output
 	args = append(args, "-v")
+
+	// Always use JSON output for more reliable parsing
+	args = append(args, "-json")
 
 	return args
 }
