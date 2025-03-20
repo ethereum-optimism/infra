@@ -7,19 +7,28 @@ TLS_DIR=$SCRIPT_DIR/tls
 
 version=$(openssl version)
 
-if [[ "$version" != "LibreSSL"* ]] && [[ "$version" != "OpenSSL 1.1"* ]]; then
+if [[ "$version" == "LibreSSL"* ]]; then
   echo "openssl version: $version"
-  echo "script only works with LibreSSL (darwin) or OpenSSL 1.1*"
+  echo "script only works with LibreSSL (darwin)"
   exit 1
 fi
 
-echo "Generating mTLS credentials for local development..."
-echo ""
+minimumVersion="1.1"
+currentVersion="$(echo "$version" | awk '{print $2}')"
+
+if [[ "$(printf '%s\n' "$minimumVersion" "$currentVersion" | sort -V | head -n1)" != "$minimumVersion" ]]; then
+  echo "openssl version: $currentVersion"
+  echo "minimum required version: $minimumVersion"
+  echo "please upgrade OpenSSL to >= $minimumVersion"
+  exit 1
+fi
+
+echo -e "Generating mTLS credentials for local development...\n"
 
 mkdir -p "$TLS_DIR"
 
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
-  echo 'Generating CA'
+  echo "Generating CA"
   openssl req -newkey rsa:2048 \
     -new -nodes -x509 \
     -days 365 \
@@ -29,17 +38,18 @@ if [ ! -f "$TLS_DIR/ca.crt" ]; then
     -subj "/O=OP Labs/CN=root"
 fi
 
-echo 'Generating TLS certificate request'
+hostname="localhost"
+altName="subjectAltName=DNS:$hostname"
+
+echo "Generating TLS certificate request"
 openssl genrsa -out "$TLS_DIR/tls.key" 2048
 openssl req -new -key "$TLS_DIR/tls.key" \
-  -days 1 \
   -sha256 \
   -out "$TLS_DIR/tls.csr" \
-  -keyout "$TLS_DIR/tls.key" \
-  -subj "/O=OP Labs/CN=localhost" \
+  -subj "/O=OP Labs/CN=$hostname" \
   -extensions san \
-  -config <(echo '[req]'; echo 'distinguished_name=req'; \
-            echo '[san]'; echo 'subjectAltName=DNS:localhost')
+  -config <(echo "[req]"; echo "distinguished_name=req"; \
+            echo "[san]"; echo "$altName")
 
 openssl x509 -req -in "$TLS_DIR/tls.csr" \
   -sha256 \
@@ -48,4 +58,4 @@ openssl x509 -req -in "$TLS_DIR/tls.csr" \
   -CAcreateserial \
   -out "$TLS_DIR/tls.crt" \
   -days 3 \
-  -extfile <(echo 'subjectAltName=DNS:localhost')
+  -extfile <(echo "$altName")
