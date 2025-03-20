@@ -440,6 +440,7 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 	var testErrors []error
 	var totalDuration time.Duration
 	testResults := make(map[string]*types.TestResult)
+	var failedTestsStdout strings.Builder
 
 	// Run each test in the list
 	for _, testName := range testNames {
@@ -463,7 +464,21 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 			if testResult.Error != nil {
 				testErrors = append(testErrors, fmt.Errorf("%s: %w", testName, testResult.Error))
 			}
+
+			// Collect stdout from failing tests
+			if testResult.Stdout != "" {
+				failedTestsStdout.WriteString(fmt.Sprintf("\n--- Test: %s ---\n", testName))
+				failedTestsStdout.WriteString(testResult.Stdout)
+			}
 		}
+	}
+
+	// If any tests failed, log the collected stdout
+	failedStdout := failedTestsStdout.String()
+	if result == types.TestStatusFail && failedStdout != "" {
+		r.log.Debug("Package test failed",
+			"package", metadata.Package,
+			"stdout_from_failed_tests", failedStdout)
 	}
 
 	// Create the aggregate result
@@ -473,6 +488,7 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		Error:    errors.Join(testErrors...),
 		Duration: totalDuration,
 		SubTests: testResults,
+		Stdout:   failedStdout,
 	}, nil
 }
 
@@ -539,6 +555,11 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		}
 	}
 
+	// Capture stdout in the test result when failing
+	if (parsedResult.Status == types.TestStatusFail || parsedResult.Status == types.TestStatusSkip) && stdout.Len() > 0 {
+		parsedResult.Stdout = stdout.String()
+	}
+
 	// Add any stderr output to the error
 	if err != nil && stderr.Len() > 0 {
 		if parsedResult.Error != nil {
@@ -555,12 +576,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata) *types.TestResult {
 	if len(output) == 0 {
 		r.log.Debug("Empty test output", "test", metadata.FuncName, "package", metadata.Package)
-		return &types.TestResult{
-			Metadata: metadata,
-			Status:   types.TestStatusFail,
-			Error:    fmt.Errorf("empty test output"),
-			SubTests: make(map[string]*types.TestResult),
-		}
+		return newFailedTestResult(metadata, fmt.Errorf("empty test output"))
 	}
 
 	result := &types.TestResult{
@@ -569,103 +585,40 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 		SubTests: make(map[string]*types.TestResult),
 	}
 
-	var testStart time.Time
-	var testEnd time.Time
+	var testStart, testEnd time.Time
 	var errorMsg strings.Builder
-	var subTestStatuses = make(map[string]types.TestStatus)
-	var hasSkip bool          // Track if any "skip" action was detected
-	var hasAnyValidEvent bool // Track if we processed any valid JSON events
+	var hasSkip bool
+	var hasAnyValidEvent bool
 
-	// Parse each line as a separate JSON object
+	subTestStatuses := make(map[string]types.TestStatus)
 	lines := bytes.Split(output, []byte("\n"))
+
 	for _, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
 
-		var event TestEvent
-		if err := json.Unmarshal(line, &event); err != nil {
-			// If we can't parse a line, log and continue
+		event, err := parseTestEvent(line)
+		if err != nil {
 			r.log.Debug("Failed to parse test JSON output line", "error", err, "line", string(line))
 			continue
 		}
 
 		hasAnyValidEvent = true
 
-		// Main test handling
-		if event.Test == "" || event.Test == metadata.FuncName {
-			// Package-level or main test events
-			switch event.Action {
-			case "start":
-				testStart = event.Time
-			case "pass":
-				testEnd = event.Time
-				result.Status = types.TestStatusPass
-			case "fail":
-				testEnd = event.Time
-				result.Status = types.TestStatusFail
-			case "skip":
-				testEnd = event.Time
-				result.Status = types.TestStatusSkip
-				hasSkip = true
-			case "output":
-				// Collect error output for the main test
-				if event.Output != "" {
-					errorMsg.WriteString(event.Output)
-				}
-			}
+		if isMainTestEvent(event, metadata.FuncName) {
+			processMainTestEvent(event, result, &testStart, &testEnd, &errorMsg, &hasSkip)
 		} else {
-			// Sub-test events
-			subTest, exists := result.SubTests[event.Test]
-			if !exists {
-				subTest = &types.TestResult{
-					Metadata: types.ValidatorMetadata{
-						FuncName: event.Test,
-						Package:  metadata.Package,
-					},
-					Status: types.TestStatusPass, // Default to pass
-				}
-				result.SubTests[event.Test] = subTest
-			}
-
-			switch event.Action {
-			case "pass":
-				subTest.Status = types.TestStatusPass
-				subTestStatuses[event.Test] = types.TestStatusPass
-			case "fail":
-				subTest.Status = types.TestStatusFail
-				subTestStatuses[event.Test] = types.TestStatusFail
-				// A failing subtest means the main test fails too
-				result.Status = types.TestStatusFail
-			case "skip":
-				subTest.Status = types.TestStatusSkip
-				subTestStatuses[event.Test] = types.TestStatusSkip
-				hasSkip = true
-			case "output":
-				// Collect error output for the subtest
-				if event.Output != "" && subTest.Error == nil {
-					subTest.Error = fmt.Errorf("%s", event.Output)
-				} else if event.Output != "" {
-					subTest.Error = fmt.Errorf("%s\n%s", subTest.Error.Error(), event.Output)
-				}
-			}
+			processSubTestEvent(event, result, subTestStatuses, &hasSkip)
 		}
 	}
 
-	// If we didn't process any valid events, mark as a failure
 	if !hasAnyValidEvent {
-		result.Status = types.TestStatusFail
-		result.Error = fmt.Errorf("no valid JSON output from test")
-		return result
+		return newFailedTestResult(metadata, fmt.Errorf("no valid JSON output from test"))
 	}
 
 	// Set the test duration
-	if !testStart.IsZero() && !testEnd.IsZero() {
-		result.Duration = testEnd.Sub(testStart)
-	} else if !testStart.IsZero() {
-		// If we have a start but no end, use time since start
-		result.Duration = time.Since(testStart)
-	}
+	result.Duration = calculateTestDuration(testStart, testEnd)
 
 	// Set the error message if any
 	if errorMsg.Len() > 0 {
@@ -686,6 +639,108 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 		"hasError", result.Error != nil)
 
 	return result
+}
+
+// parseTestEvent parses a single line of test output into a TestEvent
+func parseTestEvent(line []byte) (TestEvent, error) {
+	var event TestEvent
+	err := json.Unmarshal(line, &event)
+	return event, err
+}
+
+// isMainTestEvent checks if the event belongs to the main test or package
+func isMainTestEvent(event TestEvent, mainTestName string) bool {
+	return event.Test == "" || event.Test == mainTestName
+}
+
+// processMainTestEvent handles events for the main test
+func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time,
+	errorMsg *strings.Builder, hasSkip *bool) {
+	switch event.Action {
+	case "start":
+		*testStart = event.Time
+	case "pass":
+		*testEnd = event.Time
+		result.Status = types.TestStatusPass
+	case "fail":
+		*testEnd = event.Time
+		result.Status = types.TestStatusFail
+	case "skip":
+		*testEnd = event.Time
+		result.Status = types.TestStatusSkip
+		*hasSkip = true
+	case "output":
+		if event.Output != "" {
+			errorMsg.WriteString(event.Output)
+		}
+	}
+}
+
+// processSubTestEvent handles events for subtests
+func processSubTestEvent(event TestEvent, result *types.TestResult,
+	subTestStatuses map[string]types.TestStatus, hasSkip *bool) {
+	subTest, exists := result.SubTests[event.Test]
+	if !exists {
+		subTest = &types.TestResult{
+			Metadata: types.ValidatorMetadata{
+				FuncName: event.Test,
+				Package:  result.Metadata.Package,
+			},
+			Status: types.TestStatusPass, // Default to pass
+		}
+		result.SubTests[event.Test] = subTest
+	}
+
+	switch event.Action {
+	case "pass":
+		subTest.Status = types.TestStatusPass
+		subTestStatuses[event.Test] = types.TestStatusPass
+	case "fail":
+		subTest.Status = types.TestStatusFail
+		subTestStatuses[event.Test] = types.TestStatusFail
+		// A failing subtest means the main test fails too
+		result.Status = types.TestStatusFail
+	case "skip":
+		subTest.Status = types.TestStatusSkip
+		subTestStatuses[event.Test] = types.TestStatusSkip
+		*hasSkip = true
+	case "output":
+		updateSubTestError(subTest, event.Output)
+	}
+}
+
+// updateSubTestError updates a subtest's error message
+func updateSubTestError(subTest *types.TestResult, output string) {
+	if output == "" {
+		return
+	}
+
+	if subTest.Error == nil {
+		subTest.Error = fmt.Errorf("%s", output)
+	} else {
+		subTest.Error = fmt.Errorf("%s\n%s", subTest.Error.Error(), output)
+	}
+}
+
+// calculateTestDuration calculates the duration of a test
+func calculateTestDuration(start, end time.Time) time.Duration {
+	if !start.IsZero() && !end.IsZero() {
+		return end.Sub(start)
+	} else if !start.IsZero() {
+		// If we have a start but no end, use time since start
+		return time.Since(start)
+	}
+	return 0
+}
+
+// newFailedTestResult creates a new failed test result
+func newFailedTestResult(metadata types.ValidatorMetadata, err error) *types.TestResult {
+	return &types.TestResult{
+		Metadata: metadata,
+		Status:   types.TestStatusFail,
+		Error:    err,
+		SubTests: make(map[string]*types.TestResult),
+	}
 }
 
 // buildTestArgs constructs the command line arguments for running a test

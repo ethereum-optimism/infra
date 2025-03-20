@@ -22,6 +22,7 @@ type TestResult struct {
 	Error    error                  // Changed from string to error
 	Duration time.Duration          // Track test execution time
 	SubTests map[string]*TestResult // Store individual test results when running a package
+	Stdout   string                 // Capture stdout for failing tests
 }
 
 // TestConfig represents a test configuration
