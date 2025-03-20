@@ -1,5 +1,5 @@
 # Path to the SSL/TLS certificate file
-cert_path = "./cacert.pem"
+# cert_path = "./cacert.pem"
 
 # Network configurations
 [networks]
