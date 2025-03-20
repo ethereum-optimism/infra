@@ -37,7 +37,7 @@ func generateTestPrivateKeyPEM(t *testing.T) ([]byte, []byte) {
 		Version    int
 		PrivateKey []byte
 		Parameters asn1.ObjectIdentifier `asn1:"optional,explicit,tag:0"`
-		PublicKey  asn1.BitString       `asn1:"optional,explicit,tag:1"`
+		PublicKey  asn1.BitString        `asn1:"optional,explicit,tag:1"`
 	}{
 		Version:    1,
 		PrivateKey: privateKeyBytes,
@@ -250,4 +250,4 @@ func TestLocalKMSSignatureProvider_KeyNotFound(t *testing.T) {
 
 	_, err = provider.SignDigest(context.Background(), "nonexistent", []byte{1, 2, 3})
 	assert.ErrorContains(t, err, "not found in key map")
-} 
+}

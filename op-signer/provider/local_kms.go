@@ -15,9 +15,9 @@ import (
 
 // LocalKMSSignatureProvider implements SignatureProvider using local private keys
 type LocalKMSSignatureProvider struct {
-	logger     log.Logger
-	config     ProviderConfig
-	keyMap     map[string]*ecdsa.PrivateKey
+	logger log.Logger
+	config ProviderConfig
+	keyMap map[string]*ecdsa.PrivateKey
 }
 
 // NewLocalKMSSignatureProvider creates a new LocalKMSSignatureProvider and loads all configured keys
@@ -67,10 +67,10 @@ func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.Priv
 		//   publicKey [1] BIT STRING OPTIONAL
 		// }
 		var asn1Key struct {
-			Version       int
-			PrivateKey   []byte
-			Parameters   asn1.ObjectIdentifier `asn1:"optional,explicit,tag:0"`
-			PublicKey    asn1.BitString       `asn1:"optional,explicit,tag:1"`
+			Version    int
+			PrivateKey []byte
+			Parameters asn1.ObjectIdentifier `asn1:"optional,explicit,tag:0"`
+			PublicKey  asn1.BitString        `asn1:"optional,explicit,tag:1"`
 		}
 		if _, err := asn1.Unmarshal(block.Bytes, &asn1Key); err != nil {
 			return nil, fmt.Errorf("failed to parse SEC1 key from path '%s': %w", keyPath, err)
@@ -99,7 +99,7 @@ func (l *LocalKMSSignatureProvider) loadKey(keyPath string) error {
 		return fmt.Errorf("failed to load key from path '%s': %w", keyPath, err)
 	}
 	l.keyMap[keyPath] = key
-	l.logger.Info("loaded private key", 
+	l.logger.Info("loaded private key",
 		"keyPath", keyPath,
 		"address", crypto.PubkeyToAddress(key.PublicKey).Hex())
 	return nil
@@ -135,4 +135,4 @@ func (l *LocalKMSSignatureProvider) GetPublicKey(
 	}
 
 	return crypto.FromECDSAPub(&privateKey.PublicKey), nil
-} 
+}

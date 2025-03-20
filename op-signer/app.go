@@ -28,8 +28,8 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum-optimism/optimism/op-service/tls/certman"
 
-	"github.com/ethereum-optimism/infra/op-signer/service"
 	"github.com/ethereum-optimism/infra/op-signer/provider"
+	"github.com/ethereum-optimism/infra/op-signer/service"
 )
 
 type SignerApp struct {

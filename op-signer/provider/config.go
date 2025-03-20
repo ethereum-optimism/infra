@@ -30,7 +30,7 @@ func (c AuthConfig) MaxValueToInt() *big.Int {
 
 type ProviderConfig struct {
 	ProviderType ProviderType `yaml:"provider"`
-	Auth         []AuthConfig          `yaml:"auth"`
+	Auth         []AuthConfig `yaml:"auth"`
 }
 
 func ReadConfig(path string) (ProviderConfig, error) {
