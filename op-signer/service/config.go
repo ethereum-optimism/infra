@@ -15,7 +15,7 @@ import (
 type AuthConfig struct {
 	// ClientName DNS name of the client connecting to op-signer.
 	ClientName string `yaml:"name"`
-	// KeyName key resource name of the Cloud KMS
+	// KeyName key resource name of the KMS
 	KeyName string `yaml:"key"`
 	// ChainID chain id of the op-signer to sign for
 	ChainID uint64 `yaml:"chainID"`

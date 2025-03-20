@@ -1,4 +1,4 @@
-//go:generate mockgen -destination=mock_kms.go -package=provider github.com/ethereum-optimism/infra/op-signer/service/provider CloudKMSClient
+//go:generate mockgen -destination=mock_kms.go -package=provider github.com/ethereum-optimism/infra/op-signer/service/provider GCPKMSClient
 package provider
 
 import (
@@ -32,27 +32,27 @@ type publicKeyInfo struct {
 	PublicKey asn1.BitString
 }
 
-type CloudKMSClient interface {
+type GCPKMSClient interface {
 	GetPublicKey(ctx context.Context, req *kmspb.GetPublicKeyRequest, opts ...gax.CallOption) (*kmspb.PublicKey, error)
 	AsymmetricSign(context context.Context, req *kmspb.AsymmetricSignRequest, opts ...gax.CallOption) (*kmspb.AsymmetricSignResponse, error)
 }
 
-type CloudKMSSignatureProvider struct {
+type GCPKMSSignatureProvider struct {
 	logger log.Logger
-	client CloudKMSClient
+	client GCPKMSClient
 }
 
-func NewCloudKMSSignatureProvider(logger log.Logger) (SignatureProvider, error) {
+func NewGCPKMSSignatureProvider(logger log.Logger) (SignatureProvider, error) {
 	ctx := context.Background()
 	client, err := kms.NewKeyManagementClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize kms client: %w", err)
 	}
-	return &CloudKMSSignatureProvider{logger, client}, nil
+	return &GCPKMSSignatureProvider{logger, client}, nil
 }
 
-func NewCloudKMSSignatureProviderWithClient(logger log.Logger, client CloudKMSClient) SignatureProvider {
-	return &CloudKMSSignatureProvider{logger, client}
+func NewGCPKMSSignatureProviderWithClient(logger log.Logger, client GCPKMSClient) SignatureProvider {
+	return &GCPKMSSignatureProvider{logger, client}
 }
 
 func crc32c(data []byte) uint32 {
@@ -73,9 +73,9 @@ func createSignRequestFromDigest(keyName string, digest []byte) *kmspb.Asymmetri
 	}
 }
 
-// SignDigest signs the digest with a given Cloud KMS keyname and returns a compact recoverable signature.
+// SignDigest signs the digest with a given GCP KMS keyname and returns a compact recoverable signature.
 // If the keyName provided is not a EC_SIGN_SECP256K1_SHA256 key, the result will be an error.
-func (c *CloudKMSSignatureProvider) SignDigest(
+func (c *GCPKMSSignatureProvider) SignDigest(
 	ctx context.Context,
 	keyName string,
 	digest []byte,
@@ -88,16 +88,16 @@ func (c *CloudKMSSignatureProvider) SignDigest(
 	request := createSignRequestFromDigest(keyName, digest)
 	result, err := c.client.AsymmetricSign(ctx, request)
 	if err != nil {
-		return nil, fmt.Errorf("cloud kms sign request failed: %w", err)
+		return nil, fmt.Errorf("GCP KMS sign request failed: %w", err)
 	}
 	if result.Name != request.Name {
-		return nil, errors.New("cloud kms sign request corrupted in transit")
+		return nil, errors.New("GCP KMS sign request corrupted in transit")
 	}
 	if !result.VerifiedDigestCrc32C {
-		return nil, errors.New("cloud kms sign request corrupted in transit")
+		return nil, errors.New("GCP KMS sign request corrupted in transit")
 	}
 	if int64(crc32c(result.Signature)) != result.SignatureCrc32C.Value {
-		return nil, errors.New("cloud kms sign response corrupted in transit")
+		return nil, errors.New("GCP KMS sign response corrupted in transit")
 	}
 
 	c.logger.Debug(fmt.Sprintf("der signature: %s", hexutil.Encode(result.Signature)))
@@ -112,7 +112,7 @@ func convertToCompactRecoverableSignature(derSignature, digest, publicKey []byte
 		return nil, fmt.Errorf("failed to convert to compact signature: %w", err)
 	}
 
-	// NOTE: so far I haven't seen CloudKMS produce a malleable signature
+	// NOTE: so far I haven't seen GCP KMS produce a malleable signature
 	// but if it does happen, this can be handled as a retryable error by the client
 	if err := compactSignatureMalleabilityCheck(signature); err != nil {
 		// should never happen
@@ -202,7 +202,7 @@ func compactSignatureMalleabilityCheck(sig []byte) error {
 }
 
 // GetPublicKey returns a decoded secp256k1 public key.
-func (c *CloudKMSSignatureProvider) GetPublicKey(
+func (c *GCPKMSSignatureProvider) GetPublicKey(
 	ctx context.Context,
 	keyName string,
 ) ([]byte, error) {
@@ -212,12 +212,12 @@ func (c *CloudKMSSignatureProvider) GetPublicKey(
 
 	result, err := c.client.GetPublicKey(ctx, &request)
 	if err != nil {
-		return nil, fmt.Errorf("kms get public key request failed: %w", err)
+		return nil, fmt.Errorf("GCP KMS get public key request failed: %w", err)
 	}
 
 	key := []byte(result.Pem)
 	if int64(crc32c(key)) != result.PemCrc32C.Value {
-		return nil, errors.New("cloud kms public key response corrupted in transit")
+		return nil, errors.New("GCP KMS public key response corrupted in transit")
 	}
 
 	return decodePublicKeyPEM(key)

@@ -13,10 +13,10 @@ source .env.example # (or copy to .envrc if using direnv)
 ./bin/signer
 ```
 
-## Configuring Cloud KMS
-Modify the `config.yaml` file to connect op-signer with your cloud KMS.
+## Configuring KMS
+Modify the `config.yaml` file to connect op-signer with your KMS.
 - `name`: DNS name of the client connecting to op-signer. Must match the DNS name in the TLS certificate.
-- `key`: key resource name of the Cloud KMS.
+- `key`: key resource name of the KMS.
 
 You can add a list of `name`/`key` to use different keys for each client connecting with op-signer.
 

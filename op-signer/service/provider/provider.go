@@ -13,7 +13,7 @@ type SignatureProvider interface {
 	GetPublicKey(ctx context.Context, keyName string) ([]byte, error)
 }
 
-// ProviderType represents the cloud provider for the key management service
+// ProviderType represents the provider for the key management service
 type ProviderType string
 
 const (
@@ -35,7 +35,7 @@ func (k ProviderType) IsValid() bool {
 func NewSignatureProvider(logger log.Logger, providerType ProviderType) (SignatureProvider, error) {
 	switch providerType {
 	case KeyProviderGCP:
-		return NewCloudKMSSignatureProvider(logger)
+		return NewGCPKMSSignatureProvider(logger)
 	case KeyProviderAWS:
 		return NewAWSKMSSignatureProvider(logger)
 	default:
