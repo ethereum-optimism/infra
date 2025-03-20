@@ -14,25 +14,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	passing_dir = "passing"
+	failing_dir = "failing"
+	panic_dir   = "panicking"
+)
+
 // TestExitCodeBehavior verifies that op-acceptor returns the correct exit codes in run-once mode:
 // - Exit code 0 when all tests pass
 // - Exit code 1 when any tests fail
 // - Exit code 2 when there's a runtime error
 func TestExitCodeBehavior(t *testing.T) {
-	// Setup paths
-	cwd, err := os.Getwd()
-	require.NoError(t, err, "Failed to get current working directory")
-	projectRoot := filepath.Dir(cwd)
-
-	// Binary path
+	// Find the binary path
+	projectRoot, err := os.Getwd()
+	require.NoError(t, err, "Failed to get current directory")
+	projectRoot = filepath.Dir(projectRoot) // Go up one directory to project root
 	opAcceptorBin := filepath.Join(projectRoot, "bin", "op-acceptor")
+
+	// Make sure the binary exists
 	ensureBinaryExists(t, projectRoot, opAcceptorBin)
 
 	// Define test cases
 	testCases := []struct {
 		name           string
-		setupFunc      func(t *testing.T, testDir string) (gateID string, validatorPath string, inputTestDir string)
-		expectedStatus int
+		setupFunc      func(t *testing.T, testDir string) (string, string, string) // Returns gate, validators, testdir
+		expectedStatus int                                                         // Expected exit code
 	}{
 		{
 			name: "Passing tests should exit with code 0",
@@ -42,8 +48,7 @@ func TestExitCodeBehavior(t *testing.T) {
 				gateID := "test-gate-passes"
 
 				// Create a simple passing test
-				createMockGoMod(t, testDir)
-				createMockTest(t, testDir, packageName, "passing_test.go", true)
+				createMockTest(t, testDir, true)
 				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
 
 				return gateID, validatorPath, testDir
@@ -58,8 +63,7 @@ func TestExitCodeBehavior(t *testing.T) {
 				gateID := "test-gate-fails"
 
 				// Create a simple failing test
-				createMockGoMod(t, testDir)
-				createMockTest(t, testDir, packageName, "failing_test.go", false)
+				createMockTest(t, testDir, false)
 				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
 
 				return gateID, validatorPath, testDir
@@ -92,8 +96,7 @@ func TestExitCodeBehavior(t *testing.T) {
 				gateID := "test-gate-panic"
 
 				// Create a test that deliberately panics
-				createMockGoMod(t, testDir)
-				createMockPanicTest(t, testDir, packageName, "panic_test.go")
+				createMockPanicTest(t, testDir)
 				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
 
 				return gateID, validatorPath, testDir
@@ -151,46 +154,58 @@ func ensureBinaryExists(t *testing.T, projectRoot, binaryPath string) {
 	require.FileExists(t, binaryPath, "op-acceptor binary not found")
 }
 
-func createMockGoMod(t *testing.T, testDir string) {
-	// Initialize the module with go mod init
-	cmd := exec.Command("go", "mod", "init", "test")
-	cmd.Dir = testDir
-	require.NoError(t, cmd.Run(), "Failed to initialize module")
-}
-
 // createMockTest creates a test file that either passes or fails
-func createMockTest(t *testing.T, testDir, packageName, filename string, passing bool) string {
-	// Create package directory
-	packageDir := filepath.Join(testDir, packageName)
-	require.NoError(t, os.MkdirAll(packageDir, 0755))
+func createMockTest(t *testing.T, testDir string, passing bool) string {
+	t.Helper()
 
-	// Create test file
-	testPath := filepath.Join(packageDir, filename)
-
-	// Use a template approach for test content
-	testTemplate := `package %s
-
-import "testing"
-
-func %s(t *testing.T) {
-	%s
-}
-`
-
-	var testName, testBody string
-	if passing {
-		testName = "TestAlwaysPasses"
-		testBody = "// This test will always pass"
-	} else {
-		testName = "TestAlwaysFails"
-		testBody = `t.Fatal("This test intentionally fails")`
+	// Create the package directory
+	packageDir := filepath.Join(testDir, passing_dir)
+	if !passing {
+		packageDir = filepath.Join(testDir, failing_dir)
 	}
 
-	testContent := fmt.Sprintf(testTemplate, packageName, testName, testBody)
+	err := os.MkdirAll(packageDir, 0755)
+	require.NoError(t, err)
 
-	t.Logf("Writing test file to %s", testPath)
-	writeFile(t, testPath, testContent)
+	// Create a go.mod file to make this a valid module
+	goModPath := filepath.Join(packageDir, "go.mod")
+	goModContent := `module test
 
+go 1.21
+`
+	err = os.WriteFile(goModPath, []byte(goModContent), 0644)
+	require.NoError(t, err)
+
+	// Create the test file
+	testFileName := "passing_test.go"
+	if !passing {
+		testFileName = "failing_test.go"
+	}
+	testFilePath := filepath.Join(packageDir, testFileName)
+
+	// Create a simple test that either passes or fails
+	testContent := `package test
+
+import (
+	"testing"
+)
+
+func TestAlways`
+
+	if passing {
+		testContent += `Passes(t *testing.T) {
+	// This test always passes
+}`
+	} else {
+		testContent += `Fails(t *testing.T) {
+	t.Fail()
+}`
+	}
+
+	err = os.WriteFile(testFilePath, []byte(testContent), 0644)
+	require.NoError(t, err)
+
+	t.Logf("Writing test file to %s", testFilePath)
 	return packageDir
 }
 
@@ -203,9 +218,31 @@ func writeFile(t *testing.T, path, content string) {
 // createValidatorConfig creates a validator configuration file
 // useInvalidPath can be set to true to create a config with an invalid path
 func createValidatorConfig(t *testing.T, testDir, packageName, testName, gateID string, useInvalidPath bool) string {
-	packageDir := filepath.Join(testDir, packageName)
+	var packagePath string
 	if useInvalidPath {
-		packageDir = packageName // Use the raw name to create an invalid path
+		packagePath = packageName // Use the raw name to create an invalid path
+	} else {
+		// Use a relative path from the test directory to the package directory
+		// This avoids the "cannot import absolute path" error
+		packagePath = "./tests/" + packageName
+
+		// Ensure tests directory exists
+		testsDir := filepath.Join(testDir, "tests")
+		require.NoError(t, os.MkdirAll(testsDir, 0755))
+
+		// Make sure the tests directory is a valid Go module
+		goModPath := filepath.Join(testsDir, "go.mod")
+		goModContent := `module tests
+
+go 1.21
+`
+		err := os.WriteFile(goModPath, []byte(goModContent), 0644)
+		require.NoError(t, err)
+
+		// Move the package directory under tests/
+		oldDir := filepath.Join(testDir, packageName)
+		newDir := filepath.Join(testsDir, packageName)
+		require.NoError(t, os.Rename(oldDir, newDir))
 	}
 
 	validatorPath := filepath.Join(testDir, "test-validators.yaml")
@@ -220,7 +257,7 @@ gates:
         tests:
           - name: %s
             package: %s
-`, gateID, testName, packageDir)
+`, gateID, testName, packagePath)
 
 	writeFile(t, validatorPath, validatorConfig)
 	return validatorPath
@@ -239,6 +276,13 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string) int {
 		"--gate="+gate,
 		"--testdir="+testdir,
 		"--validators="+validators)
+
+	// Set environment variables for the test
+	// This forces Go to run tests in the current directory, regardless of module settings
+	execCmd.Env = append(os.Environ(),
+		"GO111MODULE=off",
+		"GOPATH=/tmp/go",              // Use a temporary GOPATH to avoid conflicts
+		"GOROOT="+os.Getenv("GOROOT")) // Preserve the GOROOT
 
 	// Capture output for debugging
 	var stdout, stderr bytes.Buffer
@@ -286,29 +330,39 @@ func fileExists(path string) bool {
 }
 
 // createMockPanicTest creates a test file that deliberately panics
-func createMockPanicTest(t *testing.T, testDir, packageName, filename string) string {
-	// Create package directory
-	packageDir := filepath.Join(testDir, packageName)
-	require.NoError(t, os.MkdirAll(packageDir, 0755))
+func createMockPanicTest(t *testing.T, testDir string) string {
+	t.Helper()
 
-	// Create test file
-	testPath := filepath.Join(packageDir, filename)
+	// Create the package directory
+	packageDir := filepath.Join(testDir, panic_dir)
+	err := os.MkdirAll(packageDir, 0755)
+	require.NoError(t, err)
 
-	// Test content with explicit panic
-	testContent := fmt.Sprintf(`package %s
+	// Create a go.mod file to make this a valid module
+	goModPath := filepath.Join(packageDir, "go.mod")
+	goModContent := `module test
+
+go 1.21
+`
+	err = os.WriteFile(goModPath, []byte(goModContent), 0644)
+	require.NoError(t, err)
+
+	// Create the test file that will panic
+	testFilePath := filepath.Join(packageDir, "panic_test.go")
+	testContent := `package test
 
 import (
 	"testing"
 )
 
 func TestExplicitPanic(t *testing.T) {
-	// This test will deliberately panic
-	panic("This is a deliberate panic to test error handling")
+	panic("This test explicitly panics")
 }
-`, packageName)
+`
 
-	t.Logf("Writing panic test file to %s", testPath)
-	writeFile(t, testPath, testContent)
+	err = os.WriteFile(testFilePath, []byte(testContent), 0644)
+	require.NoError(t, err)
 
+	t.Logf("Writing test file to %s", testFilePath)
 	return packageDir
 }
