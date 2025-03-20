@@ -15,7 +15,7 @@ import (
 type AuthConfig struct {
 	// ClientName DNS name of the client connecting to op-signer.
 	ClientName string `yaml:"name"`
-	// KeyName key resource name of the KMS
+	// KeyName key locator for the KMS (resource name in cloud provider, or path to private key file for local provider)
 	KeyName string `yaml:"key"`
 	// ChainID chain id of the op-signer to sign for
 	ChainID uint64 `yaml:"chainID"`
@@ -50,7 +50,7 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 	}
 
 	if !config.ProviderType.IsValid() {
-		return config, fmt.Errorf("invalid provider '%s' in config. Must be 'AWS' or 'GCP'", config.ProviderType)
+		return config, fmt.Errorf("invalid provider '%s' in config. Must be 'AWS', 'GCP', or 'LOCAL'", config.ProviderType)
 	}
 
 	for _, authConfig := range config.Auth {
