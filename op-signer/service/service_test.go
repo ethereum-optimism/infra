@@ -71,7 +71,7 @@ func createBlobTx() *types.Transaction {
 }
 
 var config = provider.ProviderConfig{
-	Auth: []AuthConfig{
+	Auth: []provider.AuthConfig{
 		{ClientName: "client.oplabs.co", KeyName: "keyName"},
 		{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName"},
 		{ClientName: "authorized-to.oplabs.co", KeyName: "keyName", ToAddresses: []string{"0x000000000000000000000000000000000000Aaaa"}},
@@ -189,7 +189,7 @@ func TestSignBlockPayload(t *testing.T) {
 	sender := crypto.PubkeyToAddress(priv.PublicKey)
 
 	var blockPayloadConfig = provider.ProviderConfig{
-		Auth: []AuthConfig{
+		Auth: []provider.AuthConfig{
 			{ClientName: "client.oplabs.co", KeyName: "keyName", ChainID: 1, FromAddress: sender},
 			{ClientName: "invalid-chainId-client.oplabs.co", KeyName: "keyName", ChainID: 2, FromAddress: sender},
 			{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName", ChainID: 1, FromAddress: sender},
