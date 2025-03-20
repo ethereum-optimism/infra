@@ -51,122 +51,38 @@ func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.Priv
 		return nil, fmt.Errorf("failed to decode PEM block from key path '%s'", keyPath)
 	}
 
-	// Log detailed key information
-	l.logger.Debug("parsing private key", 
-		"keyPath", keyPath,
-		"blockType", block.Type,
-		"blockHeaders", block.Headers,
-		"blockBytesLen", len(block.Bytes),
-		"keyDataPrefix", fmt.Sprintf("%x", block.Bytes[:min(32, len(block.Bytes))]))
+	if block.Type != "EC PRIVATE KEY" {
+		return nil, fmt.Errorf("invalid PEM block type '%s' in key path '%s' (expected 'EC PRIVATE KEY')", block.Type, keyPath)
+	}
 
-	// Support both SEC1 ("EC PRIVATE KEY") and PKCS8 ("PRIVATE KEY") formats
-	var key *ecdsa.PrivateKey
-	if block.Type == "EC PRIVATE KEY" {
-		// Try to parse as SEC1 format
-		l.logger.Debug("attempting to parse SEC1 key",
-			"keyPath", keyPath,
-			"keyDataLength", len(block.Bytes),
-			"keyDataHex", fmt.Sprintf("%x", block.Bytes))
-
-		// Try to decode the ASN.1 structure
+	// Parse SEC1 format
+	key, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		// Try to extract raw private key from ASN.1 structure
+		// SEC1 ASN.1 structure for EC private keys:
+		// ECPrivateKey ::= SEQUENCE {
+		//   version INTEGER { ecPrivkeyVer1(1) },
+		//   privateKey OCTET STRING,
+		//   parameters [0] ECParameters {{ NamedCurve }} OPTIONAL,
+		//   publicKey [1] BIT STRING OPTIONAL
+		// }
 		var asn1Key struct {
 			Version       int
-			PrivateKey    []byte
-			NamedCurveOID asn1.ObjectIdentifier
-			PublicKey     asn1.BitString
+			PrivateKey   []byte
+			Parameters   asn1.ObjectIdentifier `asn1:"optional,explicit,tag:0"`
+			PublicKey    asn1.BitString       `asn1:"optional,explicit,tag:1"`
 		}
-		rest, err := asn1.Unmarshal(block.Bytes, &asn1Key)
+		if _, err := asn1.Unmarshal(block.Bytes, &asn1Key); err != nil {
+			return nil, fmt.Errorf("failed to parse SEC1 key from path '%s': %w", keyPath, err)
+		}
+		if len(asn1Key.PrivateKey) != 32 {
+			return nil, fmt.Errorf("invalid private key length from path '%s': got %d bytes, expected 32", keyPath, len(asn1Key.PrivateKey))
+		}
+		key, err = crypto.ToECDSA(asn1Key.PrivateKey)
 		if err != nil {
-			l.logger.Debug("failed to decode ASN.1 structure",
-				"keyPath", keyPath,
-				"error", err.Error(),
-				"errorType", fmt.Sprintf("%T", err))
-		} else {
-			l.logger.Debug("decoded ASN.1 structure",
-				"keyPath", keyPath,
-				"version", asn1Key.Version,
-				"namedCurveOID", asn1Key.NamedCurveOID,
-				"privateKeyLen", len(asn1Key.PrivateKey),
-				"publicKeyLen", asn1Key.PublicKey.BitLength,
-				"restLen", len(rest))
+			return nil, fmt.Errorf("failed to convert private key from path '%s': %w", keyPath, err)
 		}
-
-		// Try to parse the key using x509.ParseECPrivateKey
-		key, err = x509.ParseECPrivateKey(block.Bytes)
-		if err != nil {
-			l.logger.Debug("failed to parse EC private key as SEC1",
-				"keyPath", keyPath,
-				"error", err.Error(),
-				"errorType", fmt.Sprintf("%T", err),
-				"keyDataHex", fmt.Sprintf("%x", block.Bytes))
-
-			// Try to extract the private key bytes from the ASN.1 structure
-			if len(asn1Key.PrivateKey) == 32 {
-				l.logger.Debug("extracting private key bytes from ASN.1 structure",
-					"keyPath", keyPath,
-					"privateKeyLen", len(asn1Key.PrivateKey),
-					"privateKeyHex", fmt.Sprintf("%x", asn1Key.PrivateKey))
-				key, err = crypto.ToECDSA(asn1Key.PrivateKey)
-				if err != nil {
-					l.logger.Debug("failed to parse extracted private key bytes",
-						"keyPath", keyPath,
-						"error", err.Error(),
-						"errorType", fmt.Sprintf("%T", err))
-				}
-			} else {
-				l.logger.Debug("private key length is not 32 bytes",
-					"keyPath", keyPath,
-					"privateKeyLen", len(asn1Key.PrivateKey))
-			}
-		}
-	} else if block.Type == "PRIVATE KEY" {
-		// Try to parse as PKCS8 format
-		l.logger.Debug("attempting to parse PKCS8 key",
-			"keyPath", keyPath,
-			"keyDataLength", len(block.Bytes))
-
-		privKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err != nil {
-			l.logger.Debug("failed to parse private key as PKCS8",
-				"keyPath", keyPath,
-				"error", err.Error(),
-				"errorType", fmt.Sprintf("%T", err),
-				"keyDataPrefix", fmt.Sprintf("%x", block.Bytes[:min(32, len(block.Bytes))]))
-
-			// Try to parse the raw bytes as a secp256k1 key
-			rawKey, err := crypto.ToECDSA(block.Bytes)
-			if err != nil {
-				l.logger.Debug("failed to parse raw key bytes",
-					"keyPath", keyPath,
-					"error", err.Error(),
-					"errorType", fmt.Sprintf("%T", err))
-			} else {
-				key = rawKey
-			}
-		} else {
-			var ok bool
-			key, ok = privKey.(*ecdsa.PrivateKey)
-			if !ok {
-				l.logger.Debug("parsed key is not an EC key",
-					"keyPath", keyPath,
-					"keyType", fmt.Sprintf("%T", privKey))
-				return nil, fmt.Errorf("key from path '%s' is not an EC key", keyPath)
-			}
-		}
-	} else {
-		return nil, fmt.Errorf("invalid PEM block type '%s' in key path '%s' (expected 'EC PRIVATE KEY' or 'PRIVATE KEY')", block.Type, keyPath)
 	}
-
-	if key == nil {
-		return nil, fmt.Errorf("failed to parse private key from path '%s'", keyPath)
-	}
-
-	// Log curve information for debugging
-	l.logger.Debug("parsed EC key", 
-		"keyPath", keyPath,
-		"curve", key.Curve.Params().Name,
-		"curveParams", fmt.Sprintf("%+v", key.Curve.Params()),
-		"publicKey", fmt.Sprintf("%x", crypto.FromECDSAPub(&key.PublicKey)))
 
 	// Verify it's using secp256k1 curve
 	if key.Curve != crypto.S256() {
@@ -174,14 +90,6 @@ func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.Priv
 	}
 
 	return key, nil
-}
-
-// min returns the minimum of a and b
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // loadKey loads a private key from a file path and stores it in the key map
@@ -203,21 +111,15 @@ func (l *LocalKMSSignatureProvider) SignDigest(
 	keyName string,
 	digest []byte,
 ) ([]byte, error) {
-	// Get the private key from the map
 	privateKey, ok := l.keyMap[keyName]
 	if !ok {
 		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
 	}
 
-	// Sign the digest
 	signature, err := crypto.Sign(digest, privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign digest")
 	}
-
-	l.logger.Debug("local signature generated", 
-		"signature", fmt.Sprintf("%x", signature),
-		"keyAddress", crypto.PubkeyToAddress(privateKey.PublicKey).Hex())
 
 	return signature, nil
 }
@@ -227,7 +129,6 @@ func (l *LocalKMSSignatureProvider) GetPublicKey(
 	ctx context.Context,
 	keyName string,
 ) ([]byte, error) {
-	// Get the private key from the map
 	privateKey, ok := l.keyMap[keyName]
 	if !ok {
 		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
