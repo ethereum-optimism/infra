@@ -15,7 +15,7 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
 # Copy only the dependency files initially to leverage Docker caching
-COPY pyproject.toml poetry.lock* ./
+COPY /op-conductor-ops/pyproject.toml /op-conductor-ops/poetry.lock* ./
 
 # Configure Poetry to not use virtualenvs inside the container
 RUN poetry config virtualenvs.create false
@@ -24,7 +24,7 @@ RUN poetry config virtualenvs.create false
 RUN poetry install --no-interaction --no-ansi
 
 # Copy the rest of the application
-COPY . .
+COPY /op-conductor-ops/ .
 
 # Set permissions for the executable
 RUN chmod +x op-conductor-ops
