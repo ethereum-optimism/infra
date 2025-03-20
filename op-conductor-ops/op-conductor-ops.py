@@ -479,13 +479,11 @@ def bootstrap_cluster(
   sequencer_start_timeout: Annotated[int, typer.Option(
     "--sequencer-start-timeout",
     help="Timeout for sequencer start in seconds. Default is 300 seconds.",
-    default=300,
     envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
   )] = 300,
   sequencer_healthy_timeout: Annotated[int, typer.Option(
     "--sequencer-healthy-timeout",
     help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
-    default=300,
     envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
   )] = 300,
 ):
