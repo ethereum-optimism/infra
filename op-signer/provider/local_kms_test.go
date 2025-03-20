@@ -32,7 +32,7 @@ func generateTestPrivateKeyPEM(t *testing.T) ([]byte, []byte) {
 	privateKeyBytes := crypto.FromECDSA(privateKey)
 	publicKeyBytes := crypto.FromECDSAPub(&privateKey.PublicKey)
 
-	// Create ASN.1 structure
+	// Create ASN.1 structure for SEC1 EC private key
 	asn1Bytes, err := asn1.Marshal(struct {
 		Version    int
 		PrivateKey []byte
@@ -41,7 +41,7 @@ func generateTestPrivateKeyPEM(t *testing.T) ([]byte, []byte) {
 	}{
 		Version:    1,
 		PrivateKey: privateKeyBytes,
-		Parameters: asn1.ObjectIdentifier{1, 3, 132, 0, 10}, // secp256k1 OID
+		Parameters: oidNamedCurveSECP256K1,
 		PublicKey:  asn1.BitString{Bytes: publicKeyBytes, BitLength: len(publicKeyBytes) * 8},
 	})
 	require.NoError(t, err)
