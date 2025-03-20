@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/infra/op-signer/service"
 )
 
 type SignatureProvider interface {
@@ -33,14 +34,14 @@ func (k ProviderType) IsValid() bool {
 }
 
 // NewSignatureProvider creates a new SignatureProvider based on the provider type
-func NewSignatureProvider(logger log.Logger, providerType ProviderType) (SignatureProvider, error) {
+func NewSignatureProvider(logger log.Logger, providerType ProviderType, config service.SignerServiceConfig) (SignatureProvider, error) {
 	switch providerType {
 	case KeyProviderGCP:
 		return NewGCPKMSSignatureProvider(logger)
 	case KeyProviderAWS:
 		return NewAWSKMSSignatureProvider(logger)
 	case KeyProviderLocal:
-		return NewLocalKMSSignatureProvider(logger)
+		return NewLocalKMSSignatureProvider(logger, config)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}

@@ -9,20 +9,34 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ethereum-optimism/infra/op-signer/service"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 // LocalKMSSignatureProvider implements SignatureProvider using local private keys
 type LocalKMSSignatureProvider struct {
-	logger log.Logger
+	logger     log.Logger
+	config     service.SignerServiceConfig
+	keyMap     map[string]*ecdsa.PrivateKey
 }
 
-// NewLocalKMSSignatureProvider creates a new LocalKMSSignatureProvider
-func NewLocalKMSSignatureProvider(logger log.Logger) (SignatureProvider, error) {
-	return &LocalKMSSignatureProvider{
+// NewLocalKMSSignatureProvider creates a new LocalKMSSignatureProvider and loads all configured keys
+func NewLocalKMSSignatureProvider(logger log.Logger, config service.SignerServiceConfig) (SignatureProvider, error) {
+	provider := &LocalKMSSignatureProvider{
 		logger: logger,
-	}, nil
+		config: config,
+		keyMap: make(map[string]*ecdsa.PrivateKey),
+	}
+
+	// Load all keys during construction
+	for _, auth := range config.Auth {
+		if err := provider.loadKey(auth.KeyName); err != nil {
+			return nil, fmt.Errorf("failed to load key from path '%s': %w", auth.KeyName, err)
+		}
+	}
+
+	return provider, nil
 }
 
 // parsePrivateKey parses a private key from a PEM-formatted file
@@ -171,16 +185,29 @@ func min(a, b int) int {
 	return b
 }
 
+// loadKey loads a private key from a file path and stores it in the key map
+func (l *LocalKMSSignatureProvider) loadKey(keyPath string) error {
+	key, err := l.parsePrivateKey(keyPath)
+	if err != nil {
+		return fmt.Errorf("failed to load key from path '%s': %w", keyPath, err)
+	}
+	l.keyMap[keyPath] = key
+	l.logger.Info("loaded private key", 
+		"keyPath", keyPath,
+		"address", crypto.PubkeyToAddress(key.PublicKey).Hex())
+	return nil
+}
+
 // SignDigest signs the digest using the local private key and returns a compact recoverable signature
 func (l *LocalKMSSignatureProvider) SignDigest(
 	ctx context.Context,
 	keyName string,
 	digest []byte,
 ) ([]byte, error) {
-	// Parse the private key for this request
-	privateKey, err := l.parsePrivateKey(keyName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	// Get the private key from the map
+	privateKey, ok := l.keyMap[keyName]
+	if !ok {
+		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
 	}
 
 	// Sign the digest
@@ -201,10 +228,10 @@ func (l *LocalKMSSignatureProvider) GetPublicKey(
 	ctx context.Context,
 	keyName string,
 ) ([]byte, error) {
-	// Parse the private key for this request
-	privateKey, err := l.parsePrivateKey(keyName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	// Get the private key from the map
+	privateKey, ok := l.keyMap[keyName]
+	if !ok {
+		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
 	}
 
 	return crypto.FromECDSAPub(&privateKey.PublicKey), nil

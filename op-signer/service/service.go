@@ -37,7 +37,7 @@ type OpsignerSerivce struct {
 }
 
 func NewSignerService(logger log.Logger, config SignerServiceConfig) (*SignerService, error) {
-	provider, err := provider.NewSignatureProvider(logger, config.ProviderType)
+	provider, err := provider.NewSignatureProvider(logger, config.ProviderType, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signature provider: %w", err)
 	}

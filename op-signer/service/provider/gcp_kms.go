@@ -46,7 +46,7 @@ func NewGCPKMSSignatureProvider(logger log.Logger) (SignatureProvider, error) {
 	ctx := context.Background()
 	client, err := kms.NewKeyManagementClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize kms client: %w", err)
+		return nil, fmt.Errorf("failed to initialize GCP KMS client: %w", err)
 	}
 	return &GCPKMSSignatureProvider{logger, client}, nil
 }
@@ -135,7 +135,7 @@ func convertToCompactRecoverableSignature(derSignature, digest, publicKey []byte
 	return signature, nil
 }
 
-// convertToCompactSignature compacts a DER signature output from kms (>70 bytes) into 64 bytes
+// convertToCompactSignature compacts a DER signature output from KMS (>70 bytes) into 64 bytes
 func convertToCompactSignature(derSignature []byte) ([]byte, error) {
 	var parsedSig struct{ R, S *big.Int }
 	if _, err := asn1.Unmarshal(derSignature, &parsedSig); err != nil {
