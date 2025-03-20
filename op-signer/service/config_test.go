@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ethereum-optimism/infra/op-signer/service/provider"
+	"github.com/ethereum-optimism/infra/op-signer/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

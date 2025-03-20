@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ethereum-optimism/infra/op-signer/service"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -17,12 +16,12 @@ import (
 // LocalKMSSignatureProvider implements SignatureProvider using local private keys
 type LocalKMSSignatureProvider struct {
 	logger     log.Logger
-	config     service.SignerServiceConfig
+	config     ProviderConfig
 	keyMap     map[string]*ecdsa.PrivateKey
 }
 
 // NewLocalKMSSignatureProvider creates a new LocalKMSSignatureProvider and loads all configured keys
-func NewLocalKMSSignatureProvider(logger log.Logger, config service.SignerServiceConfig) (SignatureProvider, error) {
+func NewLocalKMSSignatureProvider(logger log.Logger, config ProviderConfig) (SignatureProvider, error) {
 	provider := &LocalKMSSignatureProvider{
 		logger: logger,
 		config: config,

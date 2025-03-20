@@ -1,4 +1,4 @@
-//go:generate mockgen -destination=mock_provider.go -package=provider github.com/ethereum-optimism/infra/op-signer/service/provider SignatureProvider
+//go:generate mockgen -destination=mock_provider.go -package=provider github.com/ethereum-optimism/infra/op-signer/provider SignatureProvider
 package provider
 
 import (
@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum-optimism/infra/op-signer/service"
 )
 
 type SignatureProvider interface {
@@ -34,7 +33,7 @@ func (k ProviderType) IsValid() bool {
 }
 
 // NewSignatureProvider creates a new SignatureProvider based on the provider type
-func NewSignatureProvider(logger log.Logger, providerType ProviderType, config service.SignerServiceConfig) (SignatureProvider, error) {
+func NewSignatureProvider(logger log.Logger, providerType ProviderType, config ProviderConfig) (SignatureProvider, error) {
 	switch providerType {
 	case KeyProviderGCP:
 		return NewGCPKMSSignatureProvider(logger)

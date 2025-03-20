@@ -20,7 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"github.com/ethereum-optimism/infra/op-signer/service/provider"
+	"github.com/ethereum-optimism/infra/op-signer/provider"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	clientSigner "github.com/ethereum-optimism/optimism/op-service/signer"
 )
@@ -70,7 +70,7 @@ func createBlobTx() *types.Transaction {
 	return tx
 }
 
-var config = SignerServiceConfig{
+var config = provider.ProviderConfig{
 	Auth: []AuthConfig{
 		{ClientName: "client.oplabs.co", KeyName: "keyName"},
 		{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName"},
@@ -188,7 +188,7 @@ func TestSignBlockPayload(t *testing.T) {
 
 	sender := crypto.PubkeyToAddress(priv.PublicKey)
 
-	var blockPayloadConfig = SignerServiceConfig{
+	var blockPayloadConfig = provider.ProviderConfig{
 		Auth: []AuthConfig{
 			{ClientName: "client.oplabs.co", KeyName: "keyName", ChainID: 1, FromAddress: sender},
 			{ClientName: "invalid-chainId-client.oplabs.co", KeyName: "keyName", ChainID: 2, FromAddress: sender},

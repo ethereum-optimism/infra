@@ -1,4 +1,4 @@
-package service
+package provider
 
 import (
 	"errors"
@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"os"
 
-	"github.com/ethereum-optimism/infra/op-signer/service/provider"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"gopkg.in/yaml.v3"
@@ -29,13 +28,13 @@ func (c AuthConfig) MaxValueToInt() *big.Int {
 	return hexutil.MustDecodeBig(c.MaxValue)
 }
 
-type SignerServiceConfig struct {
-	ProviderType provider.ProviderType `yaml:"provider"`
+type ProviderConfig struct {
+	ProviderType ProviderType `yaml:"provider"`
 	Auth         []AuthConfig          `yaml:"auth"`
 }
 
-func ReadConfig(path string) (SignerServiceConfig, error) {
-	config := SignerServiceConfig{}
+func ReadConfig(path string) (ProviderConfig, error) {
+	config := ProviderConfig{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return config, err
@@ -46,7 +45,7 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 
 	// Default to GCP if Provider is empty to avoid breaking changes
 	if config.ProviderType == "" {
-		config.ProviderType = provider.KeyProviderGCP
+		config.ProviderType = KeyProviderGCP
 	}
 
 	if !config.ProviderType.IsValid() {
@@ -68,7 +67,7 @@ func ReadConfig(path string) (SignerServiceConfig, error) {
 	return config, err
 }
 
-func (s SignerServiceConfig) GetAuthConfigForClient(clientName string, fromAddress *common.Address) (*AuthConfig, error) {
+func (s ProviderConfig) GetAuthConfigForClient(clientName string, fromAddress *common.Address) (*AuthConfig, error) {
 	if clientName == "" {
 		return nil, errors.New("client name is empty")
 	}

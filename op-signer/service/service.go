@@ -13,7 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ethereum-optimism/infra/op-signer/service/provider"
+	"github.com/ethereum-optimism/infra/op-signer/provider"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 	"github.com/ethereum-optimism/optimism/op-service/signer"
@@ -26,17 +26,17 @@ type SignerService struct {
 
 type EthService struct {
 	logger   log.Logger
-	config   SignerServiceConfig
+	config   provider.ProviderConfig
 	provider provider.SignatureProvider
 }
 
 type OpsignerService struct {
 	logger   log.Logger
-	config   SignerServiceConfig
+	config   provider.ProviderConfig
 	provider provider.SignatureProvider
 }
 
-func NewSignerService(logger log.Logger, config SignerServiceConfig) (*SignerService, error) {
+func NewSignerService(logger log.Logger, config provider.ProviderConfig) (*SignerService, error) {
 	provider, err := provider.NewSignatureProvider(logger, config.ProviderType, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signature provider: %w", err)
@@ -46,7 +46,7 @@ func NewSignerService(logger log.Logger, config SignerServiceConfig) (*SignerSer
 
 func NewSignerServiceWithProvider(
 	logger log.Logger,
-	config SignerServiceConfig,
+	config provider.ProviderConfig,
 	provider provider.SignatureProvider,
 ) *SignerService {
 	ethService := EthService{logger, config, provider}

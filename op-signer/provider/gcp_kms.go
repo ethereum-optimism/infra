@@ -1,4 +1,4 @@
-//go:generate mockgen -destination=mock_kms.go -package=provider github.com/ethereum-optimism/infra/op-signer/service/provider GCPKMSClient
+//go:generate mockgen -destination=mock_kms.go -package=provider github.com/ethereum-optimism/infra/op-signer/provider GCPKMSClient
 package provider
 
 import (
