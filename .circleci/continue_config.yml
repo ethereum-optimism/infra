@@ -452,7 +452,7 @@ workflows:
           docker_file: op-conductor-ops/Dockerfile
           docker_name: op-conductor-ops
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: op-conductor-ops
+          docker_context: .
   op-signer:
     when:
       or: [<< pipeline.parameters.run-build-op-signer >>, << pipeline.parameters.run-all >>]
