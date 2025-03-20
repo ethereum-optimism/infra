@@ -27,6 +27,8 @@ echo -e "Generating mTLS credentials for local development...\n"
 
 mkdir -p "$TLS_DIR"
 
+org="OP Labs"
+
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
   echo "Generating CA"
   openssl req -newkey rsa:2048 \
@@ -35,7 +37,7 @@ if [ ! -f "$TLS_DIR/ca.crt" ]; then
     -sha256 \
     -out "$TLS_DIR/ca.crt" \
     -keyout "$TLS_DIR/ca.key" \
-    -subj "/O=OP Labs/CN=root"
+    -subj "/O=$org/CN=root"
 fi
 
 hostname="localhost"
@@ -46,7 +48,7 @@ openssl genrsa -out "$TLS_DIR/tls.key" 2048
 openssl req -new -key "$TLS_DIR/tls.key" \
   -sha256 \
   -out "$TLS_DIR/tls.csr" \
-  -subj "/O=OP Labs/CN=$hostname" \
+  -subj "/O=$org/CN=$hostname" \
   -extensions san \
   -config <(echo "[req]"; echo "distinguished_name=req"; \
             echo "[san]"; echo "$altName")
@@ -59,3 +61,7 @@ openssl x509 -req -in "$TLS_DIR/tls.csr" \
   -out "$TLS_DIR/tls.crt" \
   -days 3 \
   -extfile <(echo "$altName")
+
+echo "Generating EC private key for the local KMS provider"
+openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
+  -out "$TLS_DIR/ec_private.pem"
