@@ -1,6 +1,0 @@
-[book]
-title = "Proxyd" # used to generate the index page
-description = "About proxyd" # used to generate the index page
-
-[output.html]
-build-dir = "infra-proxyd" # defines which subdirectory the book will be deployed to
