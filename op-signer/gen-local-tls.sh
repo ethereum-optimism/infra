@@ -7,6 +7,9 @@ TLS_DIR=$SCRIPT_DIR/tls
 
 OPENSSL_IMAGE="alpine/openssl:3.3.3"
 
+USER_UID=$(id -u)
+USER_GID=$(id -g)
+
 echo "Generating mTLS credentials for local development..."
 echo ""
 
@@ -14,7 +17,10 @@ mkdir -p "$TLS_DIR"
 
 # Helper function to run openssl commands in docker
 docker_openssl() {
-    docker run --rm -v "$TLS_DIR:/export" "$OPENSSL_IMAGE" "$@"
+    docker run --rm \
+        -v "$TLS_DIR:/export" \
+        -u "$USER_UID:$USER_GID" \
+        "$OPENSSL_IMAGE" "$@"
 }
 
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
