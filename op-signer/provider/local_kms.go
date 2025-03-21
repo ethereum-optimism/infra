@@ -40,6 +40,7 @@ func NewLocalKMSSignatureProvider(logger log.Logger, config ProviderConfig) (Sig
 
 // parsePrivateKey parses a private key from a PEM-formatted file
 func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.PrivateKey, error) {
+	l.logger.Debug("parsing private key", "keyPath", keyPath)
 	// Read the private key file
 	keyBytes, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -55,9 +56,12 @@ func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.Priv
 		return nil, fmt.Errorf("invalid PEM block type '%s' in key path '%s' (expected 'EC PRIVATE KEY')", block.Type, keyPath)
 	}
 
+	l.logger.Debug("decoded PEM block", "keyPath", keyPath, "type", block.Type)
+
 	// Parse SEC1 format
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
+		l.logger.Debug("failed to parse as SEC1 key, attempting ASN.1 parsing", "keyPath", keyPath, "error", err)
 		// Try to extract raw private key from ASN.1 structure
 		// SEC1 ASN.1 structure for EC private keys:
 		// ECPrivateKey ::= SEQUENCE {
@@ -89,11 +93,13 @@ func (l *LocalKMSSignatureProvider) parsePrivateKey(keyPath string) (*ecdsa.Priv
 		return nil, fmt.Errorf("key from path '%s' must use secp256k1 curve (got %s)", keyPath, key.Curve.Params().Name)
 	}
 
+	l.logger.Debug("successfully parsed private key", "keyPath", keyPath, "curve", key.Curve.Params().Name)
 	return key, nil
 }
 
 // loadKey loads a private key from a file path and stores it in the key map
 func (l *LocalKMSSignatureProvider) loadKey(keyPath string) error {
+	l.logger.Debug("loading key from path", "keyPath", keyPath)
 	key, err := l.parsePrivateKey(keyPath)
 	if err != nil {
 		return fmt.Errorf("failed to load key from path '%s': %w", keyPath, err)
@@ -111,6 +117,7 @@ func (l *LocalKMSSignatureProvider) SignDigest(
 	keyName string,
 	digest []byte,
 ) ([]byte, error) {
+	l.logger.Debug("signing digest", "keyName", keyName, "digestLength", len(digest))
 	privateKey, ok := l.keyMap[keyName]
 	if !ok {
 		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
@@ -121,6 +128,7 @@ func (l *LocalKMSSignatureProvider) SignDigest(
 		return nil, fmt.Errorf("failed to sign digest")
 	}
 
+	l.logger.Debug("successfully signed digest", "keyName", keyName, "signatureLength", len(signature))
 	return signature, nil
 }
 
@@ -129,10 +137,13 @@ func (l *LocalKMSSignatureProvider) GetPublicKey(
 	ctx context.Context,
 	keyName string,
 ) ([]byte, error) {
+	l.logger.Debug("retrieving public key", "keyName", keyName)
 	privateKey, ok := l.keyMap[keyName]
 	if !ok {
 		return nil, fmt.Errorf("key '%s' not found in key map", keyName)
 	}
 
-	return crypto.FromECDSAPub(&privateKey.PublicKey), nil
+	pubKey := crypto.FromECDSAPub(&privateKey.PublicKey)
+	l.logger.Debug("retrieved public key", "keyName", keyName, "pubKeyLength", len(pubKey))
+	return pubKey, nil
 }
