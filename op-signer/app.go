@@ -157,7 +157,10 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to read service config: %w", err)
 	}
-	s.signer = service.NewSignerService(s.log, serviceCfg)
+	s.signer, err = service.NewSignerService(s.log, serviceCfg)
+	if err != nil {
+		return fmt.Errorf("failed to create signer service: %w", err)
+	}
 	s.signer.RegisterAPIs(s.rpc)
 
 	if err := s.rpc.Start(); err != nil {

@@ -36,8 +36,12 @@ type OpsignerSerivce struct {
 	provider provider.SignatureProvider
 }
 
-func NewSignerService(logger log.Logger, config SignerServiceConfig) *SignerService {
-	return NewSignerServiceWithProvider(logger, config, provider.NewCloudKMSSignatureProvider(logger))
+func NewSignerService(logger log.Logger, config SignerServiceConfig) (*SignerService, error) {
+	provider, err := provider.NewSignatureProvider(logger, config.ProviderType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signature provider: %w", err)
+	}
+	return NewSignerServiceWithProvider(logger, config, provider), nil
 }
 
 func NewSignerServiceWithProvider(
