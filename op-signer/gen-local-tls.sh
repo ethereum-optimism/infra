@@ -11,7 +11,6 @@ USER_UID=$(id -u)
 USER_GID=$(id -g)
 
 echo "Generating mTLS credentials for local development..."
-echo ""
 
 mkdir -p "$TLS_DIR"
 
