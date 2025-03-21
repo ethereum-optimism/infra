@@ -5,47 +5,54 @@ set -euo pipefail
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TLS_DIR=$SCRIPT_DIR/tls
 
-version=$(openssl version)
-
-if [[ "$version" != "LibreSSL"* ]] && [[ "$version" != "OpenSSL 1.1"* ]]; then
-  echo "openssl version: $version"
-  echo "script only works with LibreSSL (darwin) or OpenSSL 1.1*"
-  exit 1
-fi
+OPENSSL_IMAGE="alpine/openssl:3.3.3"
 
 echo "Generating mTLS credentials for local development..."
 echo ""
 
 mkdir -p "$TLS_DIR"
 
+# Helper function to run openssl commands in docker
+docker_openssl() {
+    docker run --rm -v "$TLS_DIR:/export" "$OPENSSL_IMAGE" "$@"
+}
+
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
-  echo 'Generating CA'
-  openssl req -newkey rsa:2048 \
-    -new -nodes -x509 \
-    -days 365 \
-    -sha256 \
-    -out "$TLS_DIR/ca.crt" \
-    -keyout "$TLS_DIR/ca.key" \
-    -subj "/O=OP Labs/CN=root"
+    echo 'Generating CA'
+    docker_openssl req -newkey rsa:2048 \
+        -new -nodes -x509 \
+        -days 365 \
+        -sha256 \
+        -out /export/ca.crt \
+        -keyout /export/ca.key \
+        -subj "/O=OP Labs/CN=root"
 fi
 
 echo 'Generating TLS certificate request'
-openssl genrsa -out "$TLS_DIR/tls.key" 2048
-openssl req -new -key "$TLS_DIR/tls.key" \
-  -days 1 \
-  -sha256 \
-  -out "$TLS_DIR/tls.csr" \
-  -keyout "$TLS_DIR/tls.key" \
-  -subj "/O=OP Labs/CN=localhost" \
-  -extensions san \
-  -config <(echo '[req]'; echo 'distinguished_name=req'; \
-            echo '[san]'; echo 'subjectAltName=DNS:localhost')
+docker_openssl genrsa -out /export/tls.key 2048
 
-openssl x509 -req -in "$TLS_DIR/tls.csr" \
-  -sha256 \
-  -CA "$TLS_DIR/ca.crt" \
-  -CAkey "$TLS_DIR/ca.key" \
-  -CAcreateserial \
-  -out "$TLS_DIR/tls.crt" \
-  -days 3 \
-  -extfile <(echo 'subjectAltName=DNS:localhost')
+# Create a config file for the CSR
+cat > $TLS_DIR/openssl.cnf << EOF
+[req]
+distinguished_name=req
+[san]
+subjectAltName=DNS:localhost
+EOF
+
+docker_openssl req -new -key /export/tls.key \
+    -out /export/tls.csr \
+    -subj "/O=OP Labs/CN=localhost" \
+    -extensions san \
+    -config /export/openssl.cnf
+
+# Create the certificate
+docker_openssl x509 -req -in /export/tls.csr \
+    -sha256 \
+    -CA /export/ca.crt \
+    -CAkey /export/ca.key \
+    -CAcreateserial \
+    -out /export/tls.crt \
+    -days 3 \
+    -extfile /export/openssl.cnf
+
+echo "TLS certificates generated successfully in $TLS_DIR"
