@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum-optimism/optimism/op-service/tls/certman"
 
+	"github.com/ethereum-optimism/infra/op-signer/provider"
 	"github.com/ethereum-optimism/infra/op-signer/service"
 )
 
@@ -153,11 +154,11 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 		},
 	)
 
-	serviceCfg, err := service.ReadConfig(cfg.ServiceConfigPath)
+	providerCfg, err := provider.ReadConfig(cfg.ServiceConfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to read service config: %w", err)
+		return fmt.Errorf("failed to read provider config: %w", err)
 	}
-	s.signer, err = service.NewSignerService(s.log, serviceCfg)
+	s.signer, err = service.NewSignerService(s.log, providerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create signer service: %w", err)
 	}
