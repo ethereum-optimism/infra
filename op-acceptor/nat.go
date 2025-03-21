@@ -45,13 +45,6 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, errors.New("config is required")
 	}
 
-	config.Log.Debug("Creating NAT with config",
-		"testDir", config.TestDir,
-		"validatorConfig", config.ValidatorConfig,
-		"runInterval", config.RunInterval,
-		"runOnce", config.RunOnce,
-		"allowSkips", config.AllowSkips)
-
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
 		ValidatorConfigFile: config.ValidatorConfig,
@@ -72,7 +65,16 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
 	}
-	config.Log.Info("nat.New: created registry and test runner")
+
+	config.Log.Debug("Created NAT with config",
+		"testDir", config.TestDir,
+		"validatorConfig", config.ValidatorConfig,
+		"targetGate", config.TargetGate,
+		"runInterval", config.RunInterval,
+		"runOnce", config.RunOnce,
+		"allowSkips", config.AllowSkips,
+		"goBinary", config.GoBinary,
+	)
 
 	return &nat{
 		ctx:              ctx,
@@ -124,9 +126,8 @@ func (n *nat) Start(ctx context.Context) error {
 
 		// Check if any tests failed and return appropriate exit code
 		if n.result != nil && n.result.Status == types.TestStatusFail {
-			n.config.Log.Warn("Run-once test run completed with failures, returning exit code 1")
-			// Return exit code 1 for test failures (assertions failed)
-			return NewTestFailureError(n.result.String())
+			n.config.Log.Warn("Run-once test run completed with failures")
+			return NewTestFailureError("Run-once test run completed with failures")
 		}
 
 		// Only need to call this when we're in run-once mode and all tests passed
@@ -260,6 +261,7 @@ func (n *nat) printResultsTable(runID string) {
 			gate.Stats.Skipped,
 			getResultString(gate.Status),
 			"",
+			"", // No stdout for gates
 		})
 
 		// Print suites in this gate
@@ -274,6 +276,7 @@ func (n *nat) printResultsTable(runID string) {
 				suite.Stats.Skipped,
 				getResultString(suite.Status),
 				"",
+				"", // No stdout for suites
 			})
 
 			// Print tests in this suite
@@ -297,7 +300,7 @@ func (n *nat) printResultsTable(runID string) {
 					boolToInt(test.Status == types.TestStatusFail),
 					boolToInt(test.Status == types.TestStatusSkip),
 					getResultString(test.Status),
-					test.Error,
+					getErrorMessage(test.Status, test.Error),
 				})
 
 				// Display individual sub-tests if present (for package tests)
@@ -318,7 +321,7 @@ func (n *nat) printResultsTable(runID string) {
 							boolToInt(subTest.Status == types.TestStatusFail),
 							boolToInt(subTest.Status == types.TestStatusSkip),
 							getResultString(subTest.Status),
-							subTest.Error,
+							getErrorMessage(subTest.Status, subTest.Error),
 						})
 						j++
 					}
@@ -349,7 +352,7 @@ func (n *nat) printResultsTable(runID string) {
 				boolToInt(test.Status == types.TestStatusFail),
 				boolToInt(test.Status == types.TestStatusSkip),
 				getResultString(test.Status),
-				test.Error,
+				getErrorMessage(test.Status, test.Error),
 			})
 
 			// Display individual sub-tests if present (for package tests)
@@ -370,12 +373,11 @@ func (n *nat) printResultsTable(runID string) {
 						boolToInt(subTest.Status == types.TestStatusFail),
 						boolToInt(subTest.Status == types.TestStatusSkip),
 						getResultString(subTest.Status),
-						subTest.Error,
+						getErrorMessage(subTest.Status, subTest.Error),
 					})
 					j++
 				}
 			}
-
 			i++
 		}
 
@@ -441,6 +443,14 @@ func getResultString(status types.TestStatus) string {
 // Helper function to format duration to seconds with 1 decimal place
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+// getErrorMessage returns the error message if test failed, empty string otherwise
+func getErrorMessage(status types.TestStatus, err error) string {
+	if status == types.TestStatusFail && err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // WaitForShutdown blocks until all goroutines have terminated.
