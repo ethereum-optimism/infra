@@ -1,4 +1,4 @@
-//go:generate mockgen -destination=mock_provider.go -package=provider github.com/ethereum-optimism/infra/op-signer/service/provider SignatureProvider
+//go:generate mockgen -destination=mock_provider.go -package=provider github.com/ethereum-optimism/infra/op-signer/provider SignatureProvider
 package provider
 
 import (
@@ -13,18 +13,19 @@ type SignatureProvider interface {
 	GetPublicKey(ctx context.Context, keyName string) ([]byte, error)
 }
 
-// ProviderType represents the cloud provider for the key management service
+// ProviderType represents the provider for the key management service
 type ProviderType string
 
 const (
-	KeyProviderAWS ProviderType = "AWS"
-	KeyProviderGCP ProviderType = "GCP"
+	KeyProviderAWS   ProviderType = "AWS"
+	KeyProviderGCP   ProviderType = "GCP"
+	KeyProviderLocal ProviderType = "LOCAL"
 )
 
 // IsValid checks if the KeyProvider value is valid
 func (k ProviderType) IsValid() bool {
 	switch k {
-	case KeyProviderAWS, KeyProviderGCP:
+	case KeyProviderAWS, KeyProviderGCP, KeyProviderLocal:
 		return true
 	default:
 		return false
@@ -32,12 +33,14 @@ func (k ProviderType) IsValid() bool {
 }
 
 // NewSignatureProvider creates a new SignatureProvider based on the provider type
-func NewSignatureProvider(logger log.Logger, providerType ProviderType) (SignatureProvider, error) {
+func NewSignatureProvider(logger log.Logger, providerType ProviderType, config ProviderConfig) (SignatureProvider, error) {
 	switch providerType {
 	case KeyProviderGCP:
-		return NewCloudKMSSignatureProvider(logger)
+		return NewGCPKMSSignatureProvider(logger)
 	case KeyProviderAWS:
 		return NewAWSKMSSignatureProvider(logger)
+	case KeyProviderLocal:
+		return NewLocalKMSSignatureProvider(logger, config)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}

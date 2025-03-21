@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	CloudKMSPemPublicKey = `-----BEGIN PUBLIC KEY-----
+	GCPKMSPemPublicKey = `-----BEGIN PUBLIC KEY-----
 MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEQpdToIk9lwjBdl0VcqXl7AwqhB9NwRf+
 IHRNqIUNa8vAH/5l5MGXO/qVT5D/4sOTfpd29BQAkDVOgTAneA2Vrg==
 -----END PUBLIC KEY-----`
@@ -44,17 +44,17 @@ func csprngEntropy(n int) []byte {
 	return buf
 }
 
-func TestCloudKMS_SignDigest(t *testing.T) {
+func TestGCPKMS_SignDigest(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := NewMockCloudKMSClient(ctrl)
-	provider := NewCloudKMSSignatureProviderWithClient(log.Root(), mockClient)
+	mockClient := NewMockGCPKMSClient(ctrl)
+	provider := NewGCPKMSSignatureProviderWithClient(log.Root(), mockClient)
 
 	keyName := "keyName"
 	digest, _ := hexutil.Decode("0x8dabbae6d856bb7ab93bc35b74c1303975a3f70f942d033e8591a9f8c897ae42")
 	derSignature, _ := hexutil.Decode("0x30450221008680faa49fd6653d273fb34393a47efac44b8f4a4de62bbe11a65ee53739e9bb0220350897677c32d67dc1e520d7458c5cca4a7fe49a3e9d74bdef1ec96836148661")
-	pemPublicKey := []byte(CloudKMSPemPublicKey)
+	pemPublicKey := []byte(GCPKMSPemPublicKey)
 
 	var tests = []struct {
 		testName                 string
@@ -112,15 +112,15 @@ func TestCloudKMS_SignDigest(t *testing.T) {
 	}
 }
 
-func TestCloudKMS_GetPublicKey(t *testing.T) {
+func TestGCPKMS_GetPublicKey(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := NewMockCloudKMSClient(ctrl)
-	provider := NewCloudKMSSignatureProviderWithClient(log.Root(), mockClient)
+	mockClient := NewMockGCPKMSClient(ctrl)
+	provider := NewGCPKMSSignatureProviderWithClient(log.Root(), mockClient)
 
 	keyName := "keyName"
-	pemPublicKey := []byte(CloudKMSPemPublicKey)
+	pemPublicKey := []byte(GCPKMSPemPublicKey)
 	wantPublicKey, _ := hexutil.Decode("0x04429753a0893d9708c1765d1572a5e5ec0c2a841f4dc117fe20744da8850d6bcbc01ffe65e4c1973bfa954f90ffe2c3937e9776f4140090354e813027780d95ae")
 
 	var tests = []struct {
