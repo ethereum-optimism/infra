@@ -401,7 +401,7 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 			"max_attempts", b.maxRetries+1,
 			"method", metricLabelMethod,
 		)
-		res, err := b.doForward(ctx, reqs, isBatch)
+		res, err := b.doForward(ctx, reqs, isBatch, false)
 		switch err {
 		case nil: // do nothing
 		case ErrBackendResponseTooLarge:
@@ -475,6 +475,10 @@ func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet
 
 // ForwardRPC makes a call directly to a backend and populate the response into `res`
 func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method string, params ...any) error {
+	return b.forwardRPC(ctx, false, res, id, method, params...)
+}
+
+func (b *Backend) forwardRPC(ctx context.Context, isNonConsensusPoll bool, res *RPCRes, id string, method string, params ...any) error {
 	jsonParams, err := json.Marshal(params)
 	if err != nil {
 		return err
@@ -487,7 +491,7 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 		ID:      []byte(id),
 	}
 
-	slicedRes, err := b.doForward(ctx, []*RPCReq{&rpcReq}, false)
+	slicedRes, err := b.doForward(ctx, []*RPCReq{&rpcReq}, false, isNonConsensusPoll)
 	if err != nil {
 		return err
 	}
@@ -503,9 +507,19 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 	return nil
 }
 
-func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, error) {
+func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch, isNonConsensusPoll bool) ([]*RPCRes, error) {
 	// we are concerned about network error rates, so we record 1 request independently of how many are in the batch
-	b.networkRequestsSlidingWindow.Incr()
+	// (we don't count non-consensus polling towards error rates)
+	if !isNonConsensusPoll {
+		b.networkRequestsSlidingWindow.Incr()
+	}
+
+	incrementError := func() {
+		if !isNonConsensusPoll {
+			b.intermittentErrorsSlidingWindow.Incr()
+		}
+		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+	}
 
 	translatedReqs := make(map[string]*RPCReq, len(rpcReqs))
 	// translate consensus_getReceipts to receipts target
@@ -573,8 +587,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", b.rpcURL, bytes.NewReader(body))
 	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		incrementError()
 		return nil, wrapErr(err, "error creating backend request")
 	}
 
@@ -604,8 +617,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		incrementError()
 		return nil, wrapErr(err, "error in backend request")
 	}
 
@@ -623,8 +635,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	// Alchemy returns a 400 on bad JSONs, so handle that case
 	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		incrementError()
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
@@ -634,8 +645,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, ErrBackendResponseTooLarge
 	}
 	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		incrementError()
 		return nil, wrapErr(err, "error reading response body")
 	}
 
@@ -650,21 +660,17 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		}
 	} else {
 		if err := json.Unmarshal(resB, &rpcRes); err != nil {
+			incrementError()
 			// Infura may return a single JSON-RPC response if, for example, the batch contains a request for an unsupported method
 			if responseIsNotBatched(resB) {
-				b.intermittentErrorsSlidingWindow.Incr()
-				RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 				return nil, ErrBackendUnexpectedJSONRPC
 			}
-			b.intermittentErrorsSlidingWindow.Incr()
-			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 			return nil, ErrBackendBadResponse
 		}
 	}
 
 	if len(rpcReqs) != len(rpcRes) {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		incrementError()
 		return nil, ErrBackendUnexpectedJSONRPC
 	}
 
@@ -753,7 +759,10 @@ type BackendGroup struct {
 	Backends               []*Backend
 	WeightedRouting        bool
 	Consensus              *ConsensusPoller
+	Nonconsensus           *NonconsensusPoller
 	FallbackBackends       map[string]bool
+	MaxBlockRange          uint64
+	RateLimitRange         bool
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
 }
@@ -781,6 +790,36 @@ func (bg *BackendGroup) Primaries() []*Backend {
 		}
 	}
 	return primaries
+}
+
+func (bg *BackendGroup) GetLatestBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetLatestBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetLatestBlockNumber()
+	}
+	return 0, false
+}
+
+func (bg *BackendGroup) GetSafeBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetSafeBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetSafeBlockNumber()
+	}
+	return 0, false
+}
+
+func (bg *BackendGroup) GetFinalizedBlockNumber() (uint64, bool) {
+	if bg.Consensus != nil {
+		return uint64(bg.Consensus.GetFinalizedBlockNumber()), true
+	}
+	if bg.Nonconsensus != nil {
+		return bg.Nonconsensus.GetFinalizedBlockNumber()
+	}
+	return 0, false
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
@@ -1082,6 +1121,9 @@ func (bg *BackendGroup) loadBalancedConsensusGroup() []*Backend {
 func (bg *BackendGroup) Shutdown() {
 	if bg.Consensus != nil {
 		bg.Consensus.Shutdown()
+	}
+	if bg.Nonconsensus != nil {
+		bg.Nonconsensus.Shutdown()
 	}
 }
 
