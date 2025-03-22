@@ -21,6 +21,7 @@ class Sequencer:
         self.sequencer_active = None
         self.unsafe_l2_hash = None
         self.unsafe_l2_number = None
+        self.update_successful = False
 
     def _get_sequencer_active(self):
         resp = requests.post(
@@ -103,3 +104,6 @@ class Sequencer:
                     result = future.result()
                 except Exception as e:
                     typer.echo(f"{func.__name__} raised an exception: {e}")
+                    self.update_successful = False
+                else:
+                    self.update_successful = True

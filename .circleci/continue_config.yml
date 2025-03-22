@@ -7,6 +7,9 @@ parameters:
   run-build-op-conductor-mon:
     type: boolean
     default: false
+  run-build-op-conductor-ops:
+    type: boolean
+    default: false
   run-build-op-signer:
     type: boolean
     default: false
@@ -94,6 +97,7 @@ jobs:
           command: |
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-conductor-ops: << pipeline.parameters.run-build-op-conductor-ops >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
             echo "run-build-op-txproxy: << pipeline.parameters.run-build-op-txproxy >>"
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
@@ -121,6 +125,12 @@ jobs:
               echo "op-conductor-mon tag regex match: true"
             else
               echo "op-conductor-mon tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-conductor-ops/v.* ]]; then
+              echo "op-conductor-ops tag regex match: true"
+            else
+              echo "op-conductor-ops tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-signer/v.* ]]; then
@@ -433,6 +443,16 @@ workflows:
           docker_name: op-conductor-mon
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  op-conductor-ops:
+    when:
+      or: [<< pipeline.parameters.run-build-op-conductor-ops >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - docker-build:
+          name: op-conductor-ops-docker-build
+          docker_file: op-conductor-ops/Dockerfile
+          docker_name: op-conductor-ops
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
   op-signer:
     when:
       or: [<< pipeline.parameters.run-build-op-signer >>, << pipeline.parameters.run-all >>]
@@ -579,6 +599,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
@@ -603,6 +624,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
@@ -625,6 +647,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor

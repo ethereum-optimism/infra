@@ -22,6 +22,8 @@ docker_openssl() {
         "$OPENSSL_IMAGE" "$@"
 }
 
+org_name="OP-Signer Local Org"
+
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
     echo 'Generating CA'
     docker_openssl req -newkey rsa:2048 \
@@ -33,7 +35,7 @@ if [ ! -f "$TLS_DIR/ca.crt" ]; then
         -subj "/O=OP Labs/CN=root"
 fi
 
-echo 'Generating TLS certificate request'
+echo "Generating TLS certificate request"
 docker_openssl genrsa -out /export/tls.key 2048
 
 # Create a config file for the CSR
@@ -43,6 +45,8 @@ distinguished_name=req
 [san]
 subjectAltName=DNS:localhost
 EOF
+
+hostname="localhost"
 
 docker_openssl req -new -key /export/tls.key \
     -out /export/tls.csr \
@@ -60,4 +64,7 @@ docker_openssl x509 -req -in /export/tls.csr \
     -days 3 \
     -extfile /export/openssl.cnf
 
-echo "TLS certificates generated successfully in $TLS_DIR"
+# Create a EC private key for the local KMS provider
+echo "Generating EC private key for the local KMS provider"
+docker_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
+  -out "$TLS_DIR/ec_private.pem"
