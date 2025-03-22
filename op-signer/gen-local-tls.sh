@@ -10,6 +10,9 @@ OPENSSL_IMAGE="alpine/openssl:3.3.3"
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 
+CERT_ORG_NAME="OP-Signer Local Org"
+CERT_HOSTNAME="localhost"
+
 echo "Generating mTLS credentials for local development..."
 
 mkdir -p "$TLS_DIR"
@@ -22,8 +25,6 @@ docker_openssl() {
         "$OPENSSL_IMAGE" "$@"
 }
 
-org_name="OP-Signer Local Org"
-
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
     echo 'Generating CA'
     docker_openssl req -newkey rsa:2048 \
@@ -32,7 +33,7 @@ if [ ! -f "$TLS_DIR/ca.crt" ]; then
         -sha256 \
         -out /export/ca.crt \
         -keyout /export/ca.key \
-        -subj "/O=OP Labs/CN=root"
+        -subj "/O=$CERT_ORG_NAME/CN=root"
 fi
 
 echo "Generating TLS certificate request"
@@ -50,7 +51,7 @@ hostname="localhost"
 
 docker_openssl req -new -key /export/tls.key \
     -out /export/tls.csr \
-    -subj "/O=OP Labs/CN=localhost" \
+    -subj "/O=$CERT_ORG_NAME/CN=$CERT_HOSTNAME" \
     -extensions san \
     -config /export/openssl.cnf
 
