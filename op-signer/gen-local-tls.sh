@@ -67,4 +67,4 @@ docker_openssl x509 -req -in /export/tls.csr \
 # Create a EC private key for the local KMS provider
 echo "Generating EC private key for the local KMS provider"
 docker_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
-  -out "$TLS_DIR/ec_private.pem"
+  -out "/export/ec_private.pem"
