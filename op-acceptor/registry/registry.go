@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -21,6 +22,7 @@ type Registry struct {
 type Config struct {
 	Log                 log.Logger
 	ValidatorConfigFile string
+	DefaultTimeout      time.Duration
 }
 
 // NewRegistry creates a new registry instance
@@ -200,6 +202,14 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 	var tests []types.ValidatorMetadata
 
 	for _, cfg := range configs {
+
+		var timeout time.Duration
+		if cfg.Timeout != nil {
+			timeout = *cfg.Timeout
+		} else {
+			timeout = r.config.DefaultTimeout
+		}
+
 		// If only package is specified (no name), treat it as "run all"
 		if cfg.Name == "" {
 			tests = append(tests, types.ValidatorMetadata{
@@ -209,6 +219,7 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 				Package: cfg.Package,
 				RunAll:  true,
 				Type:    types.ValidatorTypeTest,
+				Timeout: timeout,
 			})
 			continue
 		}
@@ -221,6 +232,7 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 			FuncName: cfg.Name,
 			Package:  cfg.Package,
 			Type:     types.ValidatorTypeTest,
+			Timeout:  timeout,
 		})
 	}
 

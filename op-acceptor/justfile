@@ -38,3 +38,6 @@ start-monitoring:
 # Stop prometheus and grafana
 stop-monitoring:
     docker compose -f 'docker-compose.yml' down
+
+lint:
+    golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint --timeout 5m -e "errors.As" -e "errors.Is" ./...

@@ -48,6 +48,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
 		ValidatorConfigFile: config.ValidatorConfig,
+		DefaultTimeout:      config.DefaultTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry: %w", err)

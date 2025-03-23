@@ -2,6 +2,7 @@ package flags
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -53,6 +54,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "ALLOW_SKIPS"),
 		Usage:   "Allow tests to be skipped instead of failing when preconditions are not met.",
 	}
+	DefaultTimeout = &cli.DurationFlag{
+		Name:    "default-timeout",
+		Value:   5 * time.Minute,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "DEFAULT_TIMEOUT"),
+		Usage:   "Default timeout of an individual test (e.g. '30s', '5m', etc.). This setting is superseded by test or suite level timeout configuration. Set to '0' to disable any default timeout. Defaults to '5m'.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -65,6 +72,7 @@ var optionalFlags = []cli.Flag{
 	GoBinary,
 	RunInterval,
 	AllowSkips,
+	DefaultTimeout,
 }
 var Flags []cli.Flag
 
