@@ -680,56 +680,33 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
-	log.Info("performAuthCallback starting",
-		"auth_url", authURL,
-		"request_path", r.URL.Path)
+	log.Info("performAuthCallback starting", "auth_url", authURL)
 
-	// Create auth callback request body
-	authReq := &AuthCallbackRequest{
-		Headers:    r.Header,
-		Path:       r.URL.Path,
-		Body:       "", // We'll read the body below
-		RemoteAddr: r.RemoteAddr,
-	}
-
-	// Read and restore the request body since it's a stream
-	if r.Body != nil {
-		log.Info("performAuthCallback reading request body")
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			log.Error("performAuthCallback failed to read body", "err", err)
-			return "", fmt.Errorf("failed to read request body: %w", err)
-		}
-		// Restore the body for later use
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		authReq.Body = string(bodyBytes)
-		log.Info("performAuthCallback read body successfully",
-			"body_length", len(bodyBytes))
+	// Create auth request body with the API key
+	authReqBody := map[string]string{
+		"id": apiKey,
 	}
 
 	// Marshal the auth request to JSON
-	authReqBody, err := json.Marshal(authReq)
+	jsonBody, err := json.Marshal(authReqBody)
 	if err != nil {
 		log.Error("performAuthCallback failed to marshal request", "err", err)
 		return "", fmt.Errorf("failed to marshal auth request: %w", err)
 	}
 
 	// Create the auth callback request
-	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(authReqBody))
+	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
 		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	// Set headers with Bearer token format
+	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	log.Info("performAuthCallback created request with headers",
 		"content_type", req.Header.Get("Content-Type"),
 		"auth_key", apiKey,
-		"request_body", authReq.Body,
-		"auth_header", req.Header.Get("Authorization"),
-	)
+		"request_body", string(jsonBody))
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -755,6 +732,20 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 			"status_code", resp.StatusCode,
 			"response_body", string(body))
 		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to check authenticated status
+	var authResponse struct {
+		Authenticated bool `json:"authenticated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&authResponse); err != nil {
+		log.Error("performAuthCallback failed to decode response", "err", err)
+		return "", fmt.Errorf("failed to decode auth response: %w", err)
+	}
+
+	if !authResponse.Authenticated {
+		log.Info("performAuthCallback authentication failed")
+		return "", fmt.Errorf("authentication failed")
 	}
 
 	log.Info("performAuthCallback succeeded")
