@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1171,9 +1172,23 @@ gates:
 func TestParseTestOutput(t *testing.T) {
 	r := setupDefaultTestRunner(t)
 
+	// Helper function to convert TestEvent slices to JSON
+	eventToJSON := func(events []TestEvent) string {
+		var lines []string
+		for _, event := range events {
+			data, err := json.Marshal(event)
+			require.NoError(t, err)
+			lines = append(lines, string(data))
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	// Time values for test events
+	baseTime := time.Date(2023, 5, 1, 12, 0, 0, 0, time.UTC)
+
 	tests := []struct {
 		name         string
-		jsonOutput   string
+		events       []TestEvent
 		metadata     types.ValidatorMetadata
 		wantStatus   types.TestStatus
 		wantError    bool
@@ -1181,8 +1196,21 @@ func TestParseTestOutput(t *testing.T) {
 	}{
 		{
 			name: "passing test",
-			jsonOutput: `{"Time":"2023-05-01T12:00:00Z","Action":"start","Package":"pkg/foo","Test":"TestFoo"}
-{"Time":"2023-05-01T12:00:01Z","Action":"pass","Package":"pkg/foo","Test":"TestFoo","Elapsed":1.0}`,
+			events: []TestEvent{
+				{
+					Time:    baseTime,
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+				},
+				{
+					Time:    baseTime.Add(1 * time.Second),
+					Action:  ActionPass,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+					Elapsed: 1.0,
+				},
+			},
 			metadata: types.ValidatorMetadata{
 				FuncName: "TestFoo",
 				Package:  "pkg/foo",
@@ -1193,9 +1221,28 @@ func TestParseTestOutput(t *testing.T) {
 		},
 		{
 			name: "failing test with output",
-			jsonOutput: `{"Time":"2023-05-01T12:00:00Z","Action":"start","Package":"pkg/foo","Test":"TestFoo"}
-{"Time":"2023-05-01T12:00:00.1Z","Action":"output","Package":"pkg/foo","Test":"TestFoo","Output":"Some error occurred\n"}
-{"Time":"2023-05-01T12:00:01Z","Action":"fail","Package":"pkg/foo","Test":"TestFoo","Elapsed":1.0}`,
+			events: []TestEvent{
+				{
+					Time:    baseTime,
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+				},
+				{
+					Time:    baseTime.Add(100 * time.Millisecond),
+					Action:  ActionOutput,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+					Output:  "Some error occurred\n",
+				},
+				{
+					Time:    baseTime.Add(1 * time.Second),
+					Action:  ActionFail,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+					Elapsed: 1.0,
+				},
+			},
 			metadata: types.ValidatorMetadata{
 				FuncName: "TestFoo",
 				Package:  "pkg/foo",
@@ -1206,8 +1253,21 @@ func TestParseTestOutput(t *testing.T) {
 		},
 		{
 			name: "skipped test",
-			jsonOutput: `{"Time":"2023-05-01T12:00:00Z","Action":"start","Package":"pkg/foo","Test":"TestFoo"}
-{"Time":"2023-05-01T12:00:00.1Z","Action":"skip","Package":"pkg/foo","Test":"TestFoo","Elapsed":0.1}`,
+			events: []TestEvent{
+				{
+					Time:    baseTime,
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+				},
+				{
+					Time:    baseTime.Add(100 * time.Millisecond),
+					Action:  ActionSkip,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+					Elapsed: 0.1,
+				},
+			},
 			metadata: types.ValidatorMetadata{
 				FuncName: "TestFoo",
 				Package:  "pkg/foo",
@@ -1218,12 +1278,47 @@ func TestParseTestOutput(t *testing.T) {
 		},
 		{
 			name: "test with subtests",
-			jsonOutput: `{"Time":"2023-05-01T12:00:00Z","Action":"start","Package":"pkg/foo","Test":"TestFoo"}
-{"Time":"2023-05-01T12:00:00.1Z","Action":"start","Package":"pkg/foo","Test":"TestFoo/SubTest1"}
-{"Time":"2023-05-01T12:00:00.2Z","Action":"pass","Package":"pkg/foo","Test":"TestFoo/SubTest1","Elapsed":0.1}
-{"Time":"2023-05-01T12:00:00.3Z","Action":"start","Package":"pkg/foo","Test":"TestFoo/SubTest2"}
-{"Time":"2023-05-01T12:00:00.4Z","Action":"fail","Package":"pkg/foo","Test":"TestFoo/SubTest2","Elapsed":0.1}
-{"Time":"2023-05-01T12:00:01Z","Action":"fail","Package":"pkg/foo","Test":"TestFoo","Elapsed":1.0}`,
+			events: []TestEvent{
+				{
+					Time:    baseTime,
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+				},
+				{
+					Time:    baseTime.Add(100 * time.Millisecond),
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo/SubTest1",
+				},
+				{
+					Time:    baseTime.Add(200 * time.Millisecond),
+					Action:  ActionPass,
+					Package: "pkg/foo",
+					Test:    "TestFoo/SubTest1",
+					Elapsed: 0.1,
+				},
+				{
+					Time:    baseTime.Add(300 * time.Millisecond),
+					Action:  ActionStart,
+					Package: "pkg/foo",
+					Test:    "TestFoo/SubTest2",
+				},
+				{
+					Time:    baseTime.Add(400 * time.Millisecond),
+					Action:  ActionFail,
+					Package: "pkg/foo",
+					Test:    "TestFoo/SubTest2",
+					Elapsed: 0.1,
+				},
+				{
+					Time:    baseTime.Add(1 * time.Second),
+					Action:  ActionFail,
+					Package: "pkg/foo",
+					Test:    "TestFoo",
+					Elapsed: 1.0,
+				},
+			},
 			metadata: types.ValidatorMetadata{
 				FuncName: "TestFoo",
 				Package:  "pkg/foo",
@@ -1236,7 +1331,10 @@ func TestParseTestOutput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.parseTestOutput([]byte(tt.jsonOutput), tt.metadata)
+			// Convert events to JSON string
+			jsonOutput := eventToJSON(tt.events)
+
+			result := r.parseTestOutput([]byte(jsonOutput), tt.metadata)
 
 			assert.NotNil(t, result, "result should not be nil")
 			assert.Equal(t, tt.wantStatus, result.Status, "unexpected status")

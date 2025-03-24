@@ -19,6 +19,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Go test2json (TestEvent)action constants for JSON test output
+// See https://cs.opensource.google/go/go/+/master:src/cmd/test2json/main.go;l=34-60
+const (
+	ActionStart  = "start"
+	ActionPass   = "pass"
+	ActionFail   = "fail"
+	ActionSkip   = "skip"
+	ActionOutput = "output"
+)
+
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
 	ID          string
@@ -657,19 +667,19 @@ func isMainTestEvent(event TestEvent, mainTestName string) bool {
 func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time,
 	errorMsg *strings.Builder, hasSkip *bool) {
 	switch event.Action {
-	case "start":
+	case ActionStart:
 		*testStart = event.Time
-	case "pass":
+	case ActionPass:
 		*testEnd = event.Time
 		result.Status = types.TestStatusPass
-	case "fail":
+	case ActionFail:
 		*testEnd = event.Time
 		result.Status = types.TestStatusFail
-	case "skip":
+	case ActionSkip:
 		*testEnd = event.Time
 		result.Status = types.TestStatusSkip
 		*hasSkip = true
-	case "output":
+	case ActionOutput:
 		if event.Output != "" {
 			errorMsg.WriteString(event.Output)
 		}
@@ -692,19 +702,19 @@ func processSubTestEvent(event TestEvent, result *types.TestResult,
 	}
 
 	switch event.Action {
-	case "pass":
+	case ActionPass:
 		subTest.Status = types.TestStatusPass
 		subTestStatuses[event.Test] = types.TestStatusPass
-	case "fail":
+	case ActionFail:
 		subTest.Status = types.TestStatusFail
 		subTestStatuses[event.Test] = types.TestStatusFail
 		// A failing subtest means the main test fails too
 		result.Status = types.TestStatusFail
-	case "skip":
+	case ActionSkip:
 		subTest.Status = types.TestStatusSkip
 		subTestStatuses[event.Test] = types.TestStatusSkip
 		*hasSkip = true
-	case "output":
+	case ActionOutput:
 		updateSubTestError(subTest, event.Output)
 	}
 }
