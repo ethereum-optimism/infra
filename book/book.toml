@@ -4,3 +4,6 @@ description = "About infrastructure"
 
 [output.html]
 build-dir = "infra"
+site-url = "/infra/"
+git-repository-url = "https://github.com/ethereum-optimism/infra/tree/main/op-deployer/book"
+edit-url-template = "https://github.com/ethereum-optimism/infra/tree/main/op-deployer/book/{path}"
