@@ -19,6 +19,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Go test2json (TestEvent)action constants for JSON test output
+// See https://cs.opensource.google/go/go/+/master:src/cmd/test2json/main.go;l=34-60
+const (
+	ActionStart  = "start"
+	ActionPass   = "pass"
+	ActionFail   = "fail"
+	ActionSkip   = "skip"
+	ActionOutput = "output"
+)
+
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
 	ID          string
@@ -591,6 +601,7 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 	var hasAnyValidEvent bool
 
 	subTestStatuses := make(map[string]types.TestStatus)
+	subTestStartTimes := make(map[string]time.Time) // Map to track start times for subtests
 	lines := bytes.Split(output, []byte("\n"))
 
 	for _, line := range lines {
@@ -609,7 +620,7 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 		if isMainTestEvent(event, metadata.FuncName) {
 			processMainTestEvent(event, result, &testStart, &testEnd, &errorMsg, &hasSkip)
 		} else {
-			processSubTestEvent(event, result, subTestStatuses, &hasSkip)
+			processSubTestEvent(event, result, subTestStatuses, subTestStartTimes, &hasSkip)
 		}
 	}
 
@@ -657,19 +668,19 @@ func isMainTestEvent(event TestEvent, mainTestName string) bool {
 func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time,
 	errorMsg *strings.Builder, hasSkip *bool) {
 	switch event.Action {
-	case "start":
+	case ActionStart:
 		*testStart = event.Time
-	case "pass":
+	case ActionPass:
 		*testEnd = event.Time
 		result.Status = types.TestStatusPass
-	case "fail":
+	case ActionFail:
 		*testEnd = event.Time
 		result.Status = types.TestStatusFail
-	case "skip":
+	case ActionSkip:
 		*testEnd = event.Time
 		result.Status = types.TestStatusSkip
 		*hasSkip = true
-	case "output":
+	case ActionOutput:
 		if event.Output != "" {
 			errorMsg.WriteString(event.Output)
 		}
@@ -678,7 +689,9 @@ func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, 
 
 // processSubTestEvent handles events for subtests
 func processSubTestEvent(event TestEvent, result *types.TestResult,
-	subTestStatuses map[string]types.TestStatus, hasSkip *bool) {
+	subTestStatuses map[string]types.TestStatus,
+	subTestStartTimes map[string]time.Time,
+	hasSkip *bool) {
 	subTest, exists := result.SubTests[event.Test]
 	if !exists {
 		subTest = &types.TestResult{
@@ -692,20 +705,40 @@ func processSubTestEvent(event TestEvent, result *types.TestResult,
 	}
 
 	switch event.Action {
-	case "pass":
+	case ActionStart:
+		// Record the start time for the subtest
+		subTestStartTimes[event.Test] = event.Time
+	case ActionPass:
 		subTest.Status = types.TestStatusPass
 		subTestStatuses[event.Test] = types.TestStatusPass
-	case "fail":
+		// Calculate duration based on start time or elapsed
+		calculateSubTestDuration(subTest, event, subTestStartTimes)
+	case ActionFail:
 		subTest.Status = types.TestStatusFail
 		subTestStatuses[event.Test] = types.TestStatusFail
 		// A failing subtest means the main test fails too
 		result.Status = types.TestStatusFail
-	case "skip":
+		// Calculate duration based on start time or elapsed
+		calculateSubTestDuration(subTest, event, subTestStartTimes)
+	case ActionSkip:
 		subTest.Status = types.TestStatusSkip
 		subTestStatuses[event.Test] = types.TestStatusSkip
 		*hasSkip = true
-	case "output":
+		// Calculate duration based on start time or elapsed
+		calculateSubTestDuration(subTest, event, subTestStartTimes)
+	case ActionOutput:
 		updateSubTestError(subTest, event.Output)
+	}
+}
+
+// calculateSubTestDuration sets the duration for a subtest based on tracked start time or elapsed field
+func calculateSubTestDuration(subTest *types.TestResult, event TestEvent, subTestStartTimes map[string]time.Time) {
+	startTime, hasStartTime := subTestStartTimes[event.Test]
+	if hasStartTime {
+		subTest.Duration = event.Time.Sub(startTime)
+	} else if event.Elapsed > 0 {
+		// Fallback to elapsed if provided
+		subTest.Duration = time.Duration(event.Elapsed * float64(time.Second))
 	}
 }
 
