@@ -2,66 +2,74 @@
 
 set -euo pipefail
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-TLS_DIR=$SCRIPT_DIR/tls
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+TLS_DIR="$SCRIPT_DIR/tls"
+EXPORT_DIR="/export"
 
-version=$(openssl version)
+OPENSSL_IMAGE="alpine/openssl:3.3.3"
 
-if [[ "$version" == "LibreSSL"* ]]; then
-  echo "openssl version: $version"
-  echo "script only works with LibreSSL (darwin)"
-  exit 1
-fi
+USER_UID=$(id -u)
+USER_GID=$(id -g)
 
-minimumVersion="1.1"
-currentVersion="$(echo "$version" | awk '{print $2}')"
+CERT_ORG_NAME="OP-Signer Local Org"
+CLIENT_HOSTNAME="localhost"
 
-if [[ "$(printf '%s\n' "$minimumVersion" "$currentVersion" | sort -V | head -n1)" != "$minimumVersion" ]]; then
-  echo "openssl version: $currentVersion"
-  echo "minimum required version: $minimumVersion"
-  echo "please upgrade OpenSSL to >= $minimumVersion"
-  exit 1
-fi
-
-echo -e "Generating mTLS credentials for local development...\n"
+echo "Generating mTLS credentials for local development......."
 
 mkdir -p "$TLS_DIR"
 
-org="OP Labs"
+# Helper function to run openssl commands in docker
+docker_openssl() {
+    docker run --rm \
+        -v "$TLS_DIR:$EXPORT_DIR" \
+        -u "$USER_UID:$USER_GID" \
+        "$OPENSSL_IMAGE" "$@"
+}
 
+MOD_LENGTH=2048
+
+# Avoid regenerating the CA so it doesn't need to be trusted again
 if [ ! -f "$TLS_DIR/ca.crt" ]; then
-  echo "Generating CA"
-  openssl req -newkey rsa:2048 \
-    -new -nodes -x509 \
-    -days 365 \
-    -sha256 \
-    -out "$TLS_DIR/ca.crt" \
-    -keyout "$TLS_DIR/ca.key" \
-    -subj "/O=$org/CN=root"
+    echo "Generating CA...."
+    docker_openssl req -newkey "rsa:$MOD_LENGTH" \
+        -new -nodes -x509 \
+        -days 365 \
+        -sha256 \
+        -out "$EXPORT_DIR/ca.crt" \
+        -keyout "$EXPORT_DIR/ca.key" \
+        -subj "/O=$CERT_ORG_NAME/CN=root"
 fi
 
-hostname="localhost"
-altName="subjectAltName=DNS:$hostname"
+echo "Generating client key...."
+docker_openssl genrsa -out "$EXPORT_DIR/tls.key" "$MOD_LENGTH"
 
-echo "Generating TLS certificate request"
-openssl genrsa -out "$TLS_DIR/tls.key" 2048
-openssl req -new -key "$TLS_DIR/tls.key" \
-  -sha256 \
-  -out "$TLS_DIR/tls.csr" \
-  -subj "/O=$org/CN=$hostname" \
-  -extensions san \
-  -config <(echo "[req]"; echo "distinguished_name=req"; \
-            echo "[san]"; echo "$altName")
+# Create a config file for the CSR
+cat > "$TLS_DIR/openssl.cnf" << EOF
+[req]
+distinguished_name=req
+[san]
+subjectAltName=DNS:$CLIENT_HOSTNAME
+EOF
 
-openssl x509 -req -in "$TLS_DIR/tls.csr" \
-  -sha256 \
-  -CA "$TLS_DIR/ca.crt" \
-  -CAkey "$TLS_DIR/ca.key" \
-  -CAcreateserial \
-  -out "$TLS_DIR/tls.crt" \
-  -days 3 \
-  -extfile <(echo "$altName")
+echo "Generating client certificate signing request...."
+docker_openssl req -new -key "$EXPORT_DIR/tls.key" \
+    -sha256 \
+    -out "$EXPORT_DIR/tls.csr" \
+    -subj "/O=$CERT_ORG_NAME/CN=$CLIENT_HOSTNAME" \
+    -extensions san \
+    -config "$EXPORT_DIR/openssl.cnf"
 
-echo "Generating EC private key for the local KMS provider"
-openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
-  -out "$TLS_DIR/ec_private.pem"
+echo "Generating client certificate...."
+docker_openssl x509 -req -in "$EXPORT_DIR/tls.csr" \
+    -sha256 \
+    -CA "$EXPORT_DIR/ca.crt" \
+    -CAkey "$EXPORT_DIR/ca.key" \
+    -CAcreateserial \
+    -out "$EXPORT_DIR/tls.crt" \
+    -days 3 \
+    -extensions san \
+    -extfile "$EXPORT_DIR/openssl.cnf"
+
+echo "Generating EC private key for the local KMS provider...."
+docker_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
+  -out "$EXPORT_DIR/ec_private.pem"

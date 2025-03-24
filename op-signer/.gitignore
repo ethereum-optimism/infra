@@ -1,2 +1,5 @@
 bin/
 tls/
+
+# Local envrc file
+.envrc.local
