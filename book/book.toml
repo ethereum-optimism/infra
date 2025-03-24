@@ -1,6 +1,6 @@
 [book]
-title = "Infrastructure" # used to generate the index page
-description = "About infrastructure" # used to generate the index page
+title = "Infrastructure"
+description = "About infrastructure"
 
 [output.html]
-build-dir = "infra" # defines which subdirectory the book will be deployed to
+build-dir = "infra"
