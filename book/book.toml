@@ -1,9 +1,12 @@
 [book]
 title = "Infrastructure"
 description = "About infrastructure"
+language = "en"
+multilingual = false
+src = "src"
 
 [output.html]
 build-dir = "infra"
 site-url = "/infra/"
-git-repository-url = "https://github.com/ethereum-optimism/infra/tree/main/op-deployer/book"
+git-repository-url = "https://github.com/ethereum-optimism/infra"
 edit-url-template = "https://github.com/ethereum-optimism/infra/tree/main/op-deployer/book/{path}"
