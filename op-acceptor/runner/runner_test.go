@@ -1187,12 +1187,13 @@ func TestParseTestOutput(t *testing.T) {
 	baseTime := time.Date(2023, 5, 1, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name         string
-		events       []TestEvent
-		metadata     types.ValidatorMetadata
-		wantStatus   types.TestStatus
-		wantError    bool
-		wantSubTests int
+		name            string
+		events          []TestEvent
+		metadata        types.ValidatorMetadata
+		wantStatus      types.TestStatus
+		wantError       bool
+		wantSubTests    int
+		wantSubTestDurs map[string]time.Duration // Added field for expected subtest durations
 	}{
 		{
 			name: "passing test",
@@ -1326,6 +1327,10 @@ func TestParseTestOutput(t *testing.T) {
 			wantStatus:   types.TestStatusFail,
 			wantError:    false,
 			wantSubTests: 2,
+			wantSubTestDurs: map[string]time.Duration{
+				"TestFoo/SubTest1": 100 * time.Millisecond, // 200ms - 100ms
+				"TestFoo/SubTest2": 100 * time.Millisecond, // 400ms - 300ms
+			},
 		},
 	}
 
@@ -1345,6 +1350,104 @@ func TestParseTestOutput(t *testing.T) {
 			if tt.wantStatus != types.TestStatusSkip {
 				assert.Greater(t, result.Duration, time.Duration(0), "duration should be greater than 0")
 			}
+
+			// Verify subtest durations if specified
+			if tt.wantSubTestDurs != nil {
+				for subTestName, expectedDuration := range tt.wantSubTestDurs {
+					subTest, exists := result.SubTests[subTestName]
+					assert.True(t, exists, "expected subtest %s to exist", subTestName)
+					if exists {
+						assert.Equal(t, expectedDuration, subTest.Duration,
+							"unexpected duration for subtest %s", subTestName)
+					}
+				}
+			}
 		})
 	}
+}
+
+// TestSubTestDurationCalculation verifies that durations for subtests are correctly calculated
+// using either start/end times or the Elapsed field as fallback
+func TestSubTestDurationCalculation(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	// Helper function to convert TestEvent slices to JSON
+	eventToJSON := func(events []TestEvent) string {
+		var lines []string
+		for _, event := range events {
+			data, err := json.Marshal(event)
+			require.NoError(t, err)
+			lines = append(lines, string(data))
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	// Time values for test events
+	baseTime := time.Date(2023, 5, 1, 12, 0, 0, 0, time.UTC)
+	expectedDuration1 := 200 * time.Millisecond // SubTest1: 300ms - 100ms = 200ms
+	expectedDuration2 := 500 * time.Millisecond // Elapsed value of 0.5s converted to Duration
+
+	// Test scenario where both subtests have ActionStart, but one uses time diff and one uses Elapsed
+	events := []TestEvent{
+		// Main test start
+		{
+			Time:    baseTime,
+			Action:  ActionStart,
+			Package: "pkg/foo",
+			Test:    "TestFoo",
+		},
+		// SubTest1 with start and pass events (should calculate duration from timestamps)
+		{
+			Time:    baseTime.Add(100 * time.Millisecond),
+			Action:  ActionStart,
+			Package: "pkg/foo",
+			Test:    "TestFoo/SubTest1",
+		},
+		{
+			Time:    baseTime.Add(300 * time.Millisecond),
+			Action:  ActionPass,
+			Package: "pkg/foo",
+			Test:    "TestFoo/SubTest1",
+			Elapsed: 0.3, // This should be ignored in favor of the actual time diff
+		},
+		// SubTest2 with only pass event (should use Elapsed)
+		{
+			Time:    baseTime.Add(400 * time.Millisecond),
+			Action:  ActionPass,
+			Package: "pkg/foo",
+			Test:    "TestFoo/SubTest2",
+			Elapsed: 0.5, // This should be used since there's no start event
+		},
+		// Main test end
+		{
+			Time:    baseTime.Add(1 * time.Second),
+			Action:  ActionPass,
+			Package: "pkg/foo",
+			Test:    "TestFoo",
+			Elapsed: 1.0,
+		},
+	}
+
+	metadata := types.ValidatorMetadata{
+		FuncName: "TestFoo",
+		Package:  "pkg/foo",
+	}
+
+	jsonOutput := eventToJSON(events)
+	result := r.parseTestOutput([]byte(jsonOutput), metadata)
+
+	// Verify subtests were created
+	require.Equal(t, 2, len(result.SubTests), "Expected 2 subtests")
+
+	// Verify SubTest1 duration (calculated from start/end times)
+	subTest1, exists := result.SubTests["TestFoo/SubTest1"]
+	require.True(t, exists, "SubTest1 should exist")
+	assert.Equal(t, expectedDuration1, subTest1.Duration,
+		"SubTest1 duration should be calculated from start/end times")
+
+	// Verify SubTest2 duration (calculated from Elapsed)
+	subTest2, exists := result.SubTests["TestFoo/SubTest2"]
+	require.True(t, exists, "SubTest2 should exist")
+	assert.Equal(t, expectedDuration2, subTest2.Duration,
+		"SubTest2 duration should be calculated from Elapsed field")
 }
