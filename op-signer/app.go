@@ -112,29 +112,35 @@ func (s *SignerApp) initMetrics(cfg *Config) error {
 }
 
 func (s *SignerApp) initRPC(cfg *Config) error {
-	caCert, err := os.ReadFile(cfg.TLSConfig.TLSCaCert)
-	if err != nil {
-		return fmt.Errorf("failed to read tls ca cert: %s", string(caCert))
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	var httpOptions = []httputil.Option{}
 
-	cm, err := certman.New(s.log, cfg.TLSConfig.TLSCert, cfg.TLSConfig.TLSKey)
-	if err != nil {
-		return fmt.Errorf("failed to read tls cert or key: %w", err)
-	}
-	if err := cm.Watch(); err != nil {
-		return fmt.Errorf("failed to start certman watcher: %w", err)
-	}
+	if cfg.TLSConfig.Enabled {
+		caCert, err := os.ReadFile(cfg.TLSConfig.TLSCaCert)
+		if err != nil {
+			return fmt.Errorf("failed to read tls ca cert: %s", string(caCert))
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
 
-	tlsConfig := &tls.Config{
-		GetCertificate: cm.GetCertificate,
-		ClientCAs:      caCertPool,
-		ClientAuth:     tls.VerifyClientCertIfGiven, // necessary for k8s healthz probes, but we check the cert in service/auth.go
-	}
-	serverTlsConfig := &httputil.ServerTLSConfig{
-		Config:    tlsConfig,
-		CLIConfig: &cfg.TLSConfig,
+		cm, err := certman.New(s.log, cfg.TLSConfig.TLSCert, cfg.TLSConfig.TLSKey)
+		if err != nil {
+			return fmt.Errorf("failed to read tls cert or key: %w", err)
+		}
+		if err := cm.Watch(); err != nil {
+			return fmt.Errorf("failed to start certman watcher: %w", err)
+		}
+
+		tlsConfig := &tls.Config{
+			GetCertificate: cm.GetCertificate,
+			ClientCAs:      caCertPool,
+			ClientAuth:     tls.VerifyClientCertIfGiven, // necessary for k8s healthz probes, but we check the cert in service/auth.go
+		}
+		serverTlsConfig := &httputil.ServerTLSConfig{
+			Config:    tlsConfig,
+			CLIConfig: &cfg.TLSConfig,
+		}
+
+		httpOptions = append(httpOptions, httputil.WithServerTLS(serverTlsConfig))
 	}
 
 	rpcCfg := cfg.RPCConfig
@@ -148,9 +154,7 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 				oprpc.WithHTTPRecorder(opmetrics.NewPromHTTPRecorder(s.registry, "signer")),
 				oprpc.WithLogger(s.log),
 			},
-			HttpOptions: []httputil.Option{
-				httputil.WithServerTLS(serverTlsConfig),
-			},
+			HttpOptions: httpOptions,
 		},
 	)
 
