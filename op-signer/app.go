@@ -141,6 +141,8 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 		}
 
 		httpOptions = append(httpOptions, httputil.WithServerTLS(serverTlsConfig))
+	} else {
+		s.log.Warn("TLS disabled. This is insecure and only supported for local development. Please enable TLS in production environments!")
 	}
 
 	rpcCfg := cfg.RPCConfig
