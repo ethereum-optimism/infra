@@ -67,7 +67,7 @@ func (s *SignerApp) init(cfg *Config) error {
 		return fmt.Errorf("metrics error: %w", err)
 	}
 	if err := s.initRPC(cfg); err != nil {
-		return fmt.Errorf("metrics error: %w", err)
+		return fmt.Errorf("rpc error: %w", err)
 	}
 	return nil
 }
