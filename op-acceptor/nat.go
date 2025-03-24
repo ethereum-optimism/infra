@@ -447,8 +447,11 @@ func formatDuration(d time.Duration) string {
 
 // getErrorMessage returns the error message if test failed, empty string otherwise
 func getErrorMessage(status types.TestStatus, err error) string {
-	if status == types.TestStatusFail && err != nil {
-		return err.Error()
+	if status == types.TestStatusFail {
+		if err != nil {
+			return err.Error()
+		}
+		return "Test failed without providing an error message" // Default message for fail cases with nil error
 	}
 	return ""
 }
