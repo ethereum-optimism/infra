@@ -1,0 +1,12 @@
+[book]
+authors = ["Optimism Contributors"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Proxyd Book"
+
+[output.html]
+site-url = "/proxyd/"
+git-repository-url = "https://github.com/ethereum-optimism/infra/tree/main/proxyd/book"
+edit-url-template = "https://github.com/ethereum-optimism/infra/tree/main/proxyd/book/{path}"
+
