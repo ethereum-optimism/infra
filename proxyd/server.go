@@ -643,17 +643,20 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	// Check if we have an external auth URL configured
 	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
+	log.Info("populateContext Auth configuration", "hasExternalAuth", hasExternalAuth, "authURL", authURL)
 	if hasExternalAuth && authURL != "" { // nolint:staticcheck
 		// Use external authentication service
+		log.Info("populateContext Using external authentication service", "authURL", authURL)
 		alias, err := s.performAuthCallback(r, authorization, authURL)
 		if err != nil || alias == "" { // Check both error and empty alias
-			log.Error("Auth callback failed",
+			log.Error("populateContext Auth callback failed",
 				"err", err,
 				"auth_key", authorization,
 				"alias", alias)
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
+		log.Info("populateContext Auth callback successful", "alias", alias)
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else {
@@ -663,6 +666,8 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
+	log.Info("Attempting performAuthCallback", "apiKey", apiKey, "authURL", authURL)
+
 	authReqBody := map[string]string{
 		"id": apiKey,
 	}
@@ -675,6 +680,7 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 	}
 
 	// Create the auth callback request
+	log.Info("performAuthCallback Creating request", "authURL", authURL)
 	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
