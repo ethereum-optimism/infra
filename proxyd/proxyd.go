@@ -313,7 +313,8 @@ func Start(config *Config) (*Server, func(), error) {
 			if config.Cache.TTL != 0 {
 				ttl = time.Duration(config.Cache.TTL)
 			}
-			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
+
+			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl, time.Duration(config.Cache.ShortLivedTTL))
 
 			if config.Redis.FallbackToMemory {
 				cache = newFallbackCache(cache, newMemoryCache())
