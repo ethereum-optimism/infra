@@ -108,8 +108,6 @@ func NewServer(
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
 ) (*Server, error) {
-	log.Info("NewServer called",
-		"authenticatedPaths", authenticatedPaths)
 
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -629,13 +627,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
 
-	log.Info("populateContext detailed inspection",
-		"s ", s,
-		"auth_paths_nil", s.authenticatedPaths == nil,
-		"auth_paths_len", len(s.authenticatedPaths),
-		"all_keys", getMapKeys(s.authenticatedPaths),
-		"auth_url_exists", s.authenticatedPaths != nil && s.authenticatedPaths["auth_url"] != "")
-
 	if xff == "" {
 		ipPort := strings.Split(r.RemoteAddr, ":")
 		if len(ipPort) == 2 {
@@ -652,37 +643,26 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	// Check if we have an external auth URL configured
 	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
-	log.Info("populateContext hasExternalAuth", "hasExternalAuth", hasExternalAuth, "authURL", authURL)
 	if hasExternalAuth && authURL != "" { // nolint:staticcheck
-		log.Info("populateContext Using external auth service",
-			"auth_url", authURL,
-			"auth_key", authorization)
-
 		// Use external authentication service
 		alias, err := s.performAuthCallback(r, authorization, authURL)
-		if err != nil {
+		if err != nil || alias == "" { // Check both error and empty alias
 			log.Error("Auth callback failed",
 				"err", err,
-				"auth_key", authorization)
+				"auth_key", authorization,
+				"alias", alias)
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
 
-		log.Info("populateContext External auth succeeded", "auth_key", authorization, "alias", alias)
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else {
-		log.Info("populateContext using traditional auth",
-			"auth_key", authorization,
-			"valid_keys", len(s.authenticatedPaths))
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
-	log.Info("performAuthCallback starting", "auth_url", authURL)
-
-	// Create auth request body with the API key
 	authReqBody := map[string]string{
 		"id": apiKey,
 	}
@@ -703,14 +683,9 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	log.Info("performAuthCallback created request with headers",
-		"content_type", req.Header.Get("Content-Type"),
-		"auth_key", apiKey,
-		"request_body", string(jsonBody))
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
-	log.Info("performAuthCallback sending request to auth service")
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Error("performAuthCallback request failed", "err", err)
@@ -722,33 +697,43 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 	}
 	defer resp.Body.Close()
 
-	// Check response status
-	log.Info("performAuthCallback received response", "resp", resp,
-		"status_code", resp.StatusCode)
-
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		log.Info("performAuthCallback request rejected",
+		log.Error("performAuthCallback non-200 status",
 			"status_code", resp.StatusCode,
 			"response_body", string(body))
 		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Read response body for logging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Error("performAuthCallback failed to read response body", "err", err)
+		return "", fmt.Errorf("failed to read auth response: %w", err)
+	}
+	log.Info("performAuthCallback received response body", "body", string(body))
+
 	// Parse response to check authenticated status
 	var authResponse struct {
 		Authenticated bool `json:"authenticated"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&authResponse); err != nil {
-		log.Error("performAuthCallback failed to decode response", "err", err)
+	if err := json.Unmarshal(body, &authResponse); err != nil {
+		log.Error("performAuthCallback failed to decode response",
+			"err", err,
+			"body", string(body))
 		return "", fmt.Errorf("failed to decode auth response: %w", err)
 	}
 
+	log.Info("performAuthCallback parsed response",
+		"authenticated", authResponse.Authenticated,
+		"auth_response", authResponse)
+
 	if !authResponse.Authenticated {
-		log.Info("performAuthCallback authentication failed")
+		log.Error("performAuthCallback authentication failed",
+			"auth_response", authResponse)
 		return "", fmt.Errorf("authentication failed")
 	}
 
-	log.Info("performAuthCallback succeeded")
 	return apiKey, nil
 }
 
