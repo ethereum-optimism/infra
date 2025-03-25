@@ -20,6 +20,7 @@ type Config struct {
 	RunInterval     time.Duration // Interval between test runs
 	RunOnce         bool          // Indicates if the service should exit after one test run
 	AllowSkips      bool          // Allow tests to be skipped instead of failing when preconditions are not met
+	DefaultTimeout  time.Duration // Default timeout for individual tests, can be overridden by test config
 
 	Log log.Logger
 }
@@ -53,6 +54,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	runInterval := ctx.Duration(flags.RunInterval.Name)
 	runOnce := runInterval == 0
 
+	defaultTimeout := ctx.Duration(flags.DefaultTimeout.Name)
+
 	return &Config{
 		TestDir:         absTestDir,
 		ValidatorConfig: absValidatorConfig,
@@ -62,5 +65,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		RunOnce:         runOnce,
 		AllowSkips:      ctx.Bool(flags.AllowSkips.Name),
 		Log:             log,
+		DefaultTimeout:  defaultTimeout,
 	}, nil
 }
