@@ -178,8 +178,9 @@ func TestBuildTestArgs(t *testing.T) {
 			metadata: types.ValidatorMetadata{
 				FuncName: "TestFoo",
 				Package:  "pkg/foo",
+				Timeout:  10 * time.Second,
 			},
-			want: []string{"test", "pkg/foo", "-run", "^TestFoo$", "-count", "1", "-v", "-json"},
+			want: []string{"test", "pkg/foo", "-run", "^TestFoo$", "-count", "1", "-timeout", "10s", "-v", "-json"},
 		},
 		{
 			name: "run all in package",
@@ -1450,4 +1451,73 @@ func TestSubTestDurationCalculation(t *testing.T) {
 	require.True(t, exists, "SubTest2 should exist")
 	assert.Equal(t, expectedDuration2, subTest2.Duration,
 		"SubTest2 duration should be calculated from Elapsed field")
+}
+
+func TestRunTestTimeout_SingleTest_ExceedsTimeout(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	// Create a simple test file in the work directory
+	testContent := []byte(`
+package main
+
+import "time"
+import "testing"
+
+func TestDirectToGate(t *testing.T) {
+	time.Sleep(2 * time.Second)
+	t.Log("Test running")
+}
+`)
+	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	result, err := r.RunTest(types.ValidatorMetadata{
+		ID:       "test1",
+		Gate:     "test-gate",
+		FuncName: "TestDirectToGate",
+		Package:  ".",
+		Timeout:  1 * time.Second,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, types.TestStatusFail, result.Status)
+	assert.Equal(t, "test1", result.Metadata.ID)
+	assert.Equal(t, "test-gate", result.Metadata.Gate)
+	assert.Equal(t, ".", result.Metadata.Package)
+	assert.False(t, result.Metadata.RunAll)
+	assert.Equal(t, "test timed out after 1s", result.Error.Error())
+}
+
+func TestRunTestTimeout_SingleTest_DoesNotExceedTimeout(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	// Create a simple test file in the work directory
+	testContent := []byte(`
+package main
+
+import "time"
+import "testing"
+
+func TestDirectToGate(t *testing.T) {
+	time.Sleep(1 * time.Second)
+	t.Log("Test running")
+}
+`)
+	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	result, err := r.RunTest(types.ValidatorMetadata{
+		ID:       "test1",
+		Gate:     "test-gate",
+		FuncName: "TestDirectToGate",
+		Package:  ".",
+		Timeout:  2 * time.Second,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, types.TestStatusPass, result.Status)
+	assert.Equal(t, "test1", result.Metadata.ID)
+	assert.Equal(t, "test-gate", result.Metadata.Gate)
+	assert.Equal(t, ".", result.Metadata.Package)
+	assert.False(t, result.Metadata.RunAll)
 }

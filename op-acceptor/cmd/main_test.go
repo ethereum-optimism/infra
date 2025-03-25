@@ -39,6 +39,8 @@ func TestExitCodeBehavior(t *testing.T) {
 		name           string
 		setupFunc      func(t *testing.T, testDir string) (string, string, string) // Returns gate, validators, testdir
 		expectedStatus int                                                         // Expected exit code
+		defaultTimeout time.Duration                                               // Default timeout for the test runner
+		timeout        *time.Duration                                              // Timeout for the test
 	}{
 		{
 			name: "Passing tests should exit with code 0",
@@ -48,12 +50,13 @@ func TestExitCodeBehavior(t *testing.T) {
 				gateID := "test-gate-passes"
 
 				// Create a simple passing test
-				createMockTest(t, testDir, true)
-				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
+				createMockTest(t, testDir, true, 0)
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, nil)
 
 				return gateID, validatorPath, testDir
 			},
 			expectedStatus: exitcodes.Success,
+			defaultTimeout: 5 * time.Second,
 		},
 		{
 			name: "Failing tests should exit with code 1",
@@ -63,12 +66,13 @@ func TestExitCodeBehavior(t *testing.T) {
 				gateID := "test-gate-fails"
 
 				// Create a simple failing test
-				createMockTest(t, testDir, false)
-				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
+				createMockTest(t, testDir, false, 0)
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, nil)
 
 				return gateID, validatorPath, testDir
 			},
 			expectedStatus: exitcodes.TestFailure,
+			defaultTimeout: 5 * time.Second,
 		},
 		// {
 		// 	// TODO: This fails in CI, but not locally.
@@ -97,13 +101,88 @@ func TestExitCodeBehavior(t *testing.T) {
 
 				// Create a test that deliberately panics
 				createMockPanicTest(t, testDir)
-				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false)
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, nil)
 
 				return gateID, validatorPath, testDir
 			},
 			// Go's test framework catches panics and treats them as test failures (exit code 1)
 			// rather than propagating them as runtime errors (exit code 2)
 			expectedStatus: exitcodes.TestFailure,
+			defaultTimeout: 5 * time.Second,
+		},
+		{
+			name: "Test should timeout with default timeout",
+			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
+				packageName := "passing"
+				testName := "TestAlwaysPasses"
+				gateID := "test-gate-passes"
+
+				// Create a simple passing test after timeout
+				createMockTest(t, testDir, true, 5*time.Second)
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, nil)
+
+				return gateID, validatorPath, testDir
+			},
+			// Go's test framework catches panics and treats them as test failures (exit code 1)
+			// rather than propagating them as runtime errors (exit code 2)
+			expectedStatus: exitcodes.TestFailure,
+			defaultTimeout: 2 * time.Second,
+		},
+		{
+			name: "Test should not timeout",
+			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
+				packageName := "passing"
+				testName := "TestAlwaysPasses"
+				gateID := "test-gate-passes"
+
+				// Create a simple passing test after timeout
+				createMockTest(t, testDir, true, 1*time.Second)
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, nil)
+
+				return gateID, validatorPath, testDir
+			},
+			// Go's test framework catches panics and treats them as test failures (exit code 1)
+			// rather than propagating them as runtime errors (exit code 2)
+			expectedStatus: exitcodes.Success,
+			defaultTimeout: 10 * time.Second,
+		},
+		{
+			name: "Test should timeout with test-level timeout",
+			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
+				packageName := "passing"
+				testName := "TestAlwaysPasses"
+				gateID := "test-gate-passes"
+
+				// Create a simple passing test after timeout
+				createMockTest(t, testDir, true, 3*time.Second)
+				duration := 1 * time.Second
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, &duration)
+
+				return gateID, validatorPath, testDir
+			},
+			// Go's test framework catches panics and treats them as test failures (exit code 1)
+			// rather than propagating them as runtime errors (exit code 2)
+			expectedStatus: exitcodes.TestFailure,
+			defaultTimeout: 10 * time.Second,
+		},
+		{
+			name: "Test should not timeout with either test-level or default timeout",
+			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
+				packageName := "passing"
+				testName := "TestAlwaysPasses"
+				gateID := "test-gate-passes"
+
+				// Create a simple passing test after timeout
+				createMockTest(t, testDir, true, 1*time.Second)
+				duration := 3 * time.Second
+				validatorPath := createValidatorConfig(t, testDir, packageName, testName, gateID, false, &duration)
+
+				return gateID, validatorPath, testDir
+			},
+			// Go's test framework catches panics and treats them as test failures (exit code 1)
+			// rather than propagating them as runtime errors (exit code 2)
+			expectedStatus: exitcodes.Success,
+			defaultTimeout: 5 * time.Second,
 		},
 	}
 
@@ -119,7 +198,7 @@ func TestExitCodeBehavior(t *testing.T) {
 			gate, validatorPath, testDir := tc.setupFunc(t, tempDir)
 
 			// Run op-acceptor
-			exitCode := runOpAcceptor(t, opAcceptorBin, testDir, validatorPath, gate)
+			exitCode := runOpAcceptor(t, opAcceptorBin, testDir, validatorPath, gate, tc.defaultTimeout)
 			require.Equal(t, tc.expectedStatus, exitCode, "Unexpected exit code")
 		})
 	}
@@ -155,7 +234,7 @@ func ensureBinaryExists(t *testing.T, projectRoot, binaryPath string) {
 }
 
 // createMockTest creates a test file that either passes or fails
-func createMockTest(t *testing.T, testDir string, passing bool) string {
+func createMockTest(t *testing.T, testDir string, passing bool, sleepDuration time.Duration) string {
 	t.Helper()
 
 	// Create the package directory
@@ -188,18 +267,29 @@ go 1.21
 
 import (
 	"testing"
+	"time"
 )
 
 func TestAlways`
 
 	if passing {
-		testContent += `Passes(t *testing.T) {
+		testContent += fmt.Sprintf(`Passes(t *testing.T) {
 	// This test always passes
-}`
+	d, err := time.ParseDuration("%s")
+	if err != nil {
+		t.Fatalf("Failed to parse duration: %%v", err)
+	}
+	time.Sleep(d)
+}`, sleepDuration.String())
 	} else {
-		testContent += `Fails(t *testing.T) {
+		testContent += fmt.Sprintf(`Fails(t *testing.T) {
+	d, err := time.ParseDuration("%s")
+	if err != nil {
+		t.Fatalf("Failed to parse duration: %%v", err)
+	}
+	time.Sleep(d)
 	t.Fail()
-}`
+}`, sleepDuration.String())
 	}
 
 	err = os.WriteFile(testFilePath, []byte(testContent), 0644)
@@ -217,7 +307,7 @@ func writeFile(t *testing.T, path, content string) {
 
 // createValidatorConfig creates a validator configuration file
 // useInvalidPath can be set to true to create a config with an invalid path
-func createValidatorConfig(t *testing.T, testDir, packageName, testName, gateID string, useInvalidPath bool) string {
+func createValidatorConfig(t *testing.T, testDir, packageName, testName, gateID string, useInvalidPath bool, testTimeout *time.Duration) string {
 	var packagePath string
 	if useInvalidPath {
 		packagePath = packageName // Use the raw name to create an invalid path
@@ -246,7 +336,23 @@ go 1.21
 	}
 
 	validatorPath := filepath.Join(testDir, "test-validators.yaml")
-	validatorConfig := fmt.Sprintf(`# Test validator configuration file for exit code testing
+	var validatorConfig string
+	if testTimeout != nil {
+		validatorConfig = fmt.Sprintf(`# Test validator configuration file for exit code testing
+
+gates:
+  - id: %s
+    description: "Test gate for exit code testing"
+    suites:
+      test-suite:
+        description: "Test suite for exit code testing"
+        tests:
+          - name: %s
+            package: %s
+            timeout: %s
+`, gateID, testName, packagePath, testTimeout.String())
+	} else {
+		validatorConfig = fmt.Sprintf(`# Test validator configuration file for exit code testing
 
 gates:
   - id: %s
@@ -258,13 +364,14 @@ gates:
           - name: %s
             package: %s
 `, gateID, testName, packagePath)
+	}
 
 	writeFile(t, validatorPath, validatorConfig)
 	return validatorPath
 }
 
 // Helper function to run op-acceptor with given parameters and return the exit code
-func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string) int {
+func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defaultTimeout time.Duration) int {
 	t.Logf("Running op-acceptor with testdir=%s, gate=%s, validators=%s", testdir, gate, validators)
 
 	// Create a command with timeout context
@@ -275,7 +382,8 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string) int {
 		"--run-interval=0", // This ensures the process runs once and exits
 		"--gate="+gate,
 		"--testdir="+testdir,
-		"--validators="+validators)
+		"--validators="+validators,
+		"--default-timeout="+defaultTimeout.String())
 
 	// Set environment variables for the test
 	// This forces Go to run tests in the current directory, regardless of module settings

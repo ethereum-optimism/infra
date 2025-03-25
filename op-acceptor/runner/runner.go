@@ -82,9 +82,8 @@ type runner struct {
 	workDir    string // Directory for running tests
 	log        log.Logger
 	runID      string
-	timeout    time.Duration // Test timeout
-	goBinary   string        // Path to the Go binary
-	allowSkips bool          // Whether to allow skipping tests when preconditions are not met
+	goBinary   string // Path to the Go binary
+	allowSkips bool   // Whether to allow skipping tests when preconditions are not met
 }
 
 type Config struct {
@@ -92,9 +91,8 @@ type Config struct {
 	TargetGate string
 	WorkDir    string
 	Log        log.Logger
-	Timeout    time.Duration // Test timeout
-	GoBinary   string        // path to the Go binary
-	AllowSkips bool          // Whether to allow skipping tests when preconditions are not met
+	GoBinary   string // path to the Go binary
+	AllowSkips bool   // Whether to allow skipping tests when preconditions are not met
 }
 
 // NewTestRunner creates a new test runner instance
@@ -121,10 +119,6 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		return nil, fmt.Errorf("no validators found")
 	}
 
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 5 * time.Minute // Default timeout
-	}
-
 	if cfg.GoBinary == "" {
 		cfg.GoBinary = "go" // Default to "go" if not specified
 	}
@@ -134,7 +128,6 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		validators: validators,
 		workDir:    cfg.WorkDir,
 		log:        cfg.Log,
-		timeout:    cfg.Timeout,
 		goBinary:   cfg.GoBinary,
 		allowSkips: cfg.AllowSkips,
 	}, nil
@@ -514,8 +507,15 @@ type TestEvent struct {
 
 // runSingleTest runs a specific test
 func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
-	defer cancel()
+
+	ctx := context.Background()
+	if metadata.Timeout != 0 {
+		var cancel func()
+		// This parent process timeout is redundant, add 200ms to allow child process
+		// to trigger timeout before parent process.
+		ctx, cancel = context.WithTimeout(ctx, metadata.Timeout+200*time.Millisecond)
+		defer cancel()
+	}
 
 	args := r.buildTestArgs(metadata)
 	cmd := exec.CommandContext(ctx, r.goBinary, args...)
@@ -538,7 +538,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		"package", metadata.Package,
 		"test", metadata.FuncName,
 		"command", cmd.String(),
-		"timeout", r.timeout,
+		"timeout", metadata.Timeout,
 		"allowSkips", r.allowSkips)
 
 	// Run the command
@@ -549,7 +549,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		return &types.TestResult{
 			Metadata: metadata,
 			Status:   types.TestStatusFail,
-			Error:    fmt.Errorf("test timed out after %v", r.timeout),
+			Error:    fmt.Errorf("test timed out after %v", metadata.Timeout),
 		}, nil
 	}
 
@@ -795,6 +795,11 @@ func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
 
 	// Always disable caching
 	args = append(args, "-count", "1")
+
+	// Add timeout if it's not 0
+	if metadata.Timeout != 0 {
+		args = append(args, "-timeout", metadata.Timeout.String())
+	}
 
 	// Always use verbose output
 	args = append(args, "-v")

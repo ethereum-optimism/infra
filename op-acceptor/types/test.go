@@ -27,9 +27,10 @@ type TestResult struct {
 
 // TestConfig represents a test configuration
 type TestConfig struct {
-	Name    string `yaml:"name,omitempty"`
-	Package string `yaml:"package"`
-	RunAll  bool   `yaml:"run_all,omitempty"`
+	Name    string         `yaml:"name,omitempty"`
+	Package string         `yaml:"package"`
+	RunAll  bool           `yaml:"run_all,omitempty"`
+	Timeout *time.Duration `yaml:"timeout,omitempty"`
 }
 
 // GetTestDisplayName returns a formatted display name for a test based on its name and metadata
