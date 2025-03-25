@@ -643,20 +643,15 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 
 	// Check if we have an external auth URL configured
 	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
-	log.Info("populateContext Auth configuration", "hasExternalAuth", hasExternalAuth, "authURL", authURL)
 	if hasExternalAuth && authURL != "" { // nolint:staticcheck
 		// Use external authentication service
-		log.Info("populateContext Using external authentication service", "authURL", authURL)
 		alias, err := s.performAuthCallback(r, authorization, authURL)
 		if err != nil || alias == "" { // Check both error and empty alias
 			log.Error("populateContext Auth callback failed",
-				"err", err,
-				"auth_key", authorization,
-				"alias", alias)
+				"err", err)
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
-		log.Info("populateContext Auth callback successful", "alias", alias)
 
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else {
@@ -666,8 +661,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
-	log.Info("Attempting performAuthCallback", "apiKey", apiKey, "authURL", authURL)
-
 	authReqBody := map[string]string{
 		"id": apiKey,
 	}
@@ -680,7 +673,6 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 	}
 
 	// Create the auth callback request
-	log.Info("performAuthCallback Creating request", "authURL", authURL)
 	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
@@ -706,8 +698,7 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		log.Error("performAuthCallback non-200 status",
-			"status_code", resp.StatusCode,
-			"response_body", string(body))
+			"status_code", resp.StatusCode)
 		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -717,7 +708,6 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		log.Error("performAuthCallback failed to read response body", "err", err)
 		return "", fmt.Errorf("failed to read auth response: %w", err)
 	}
-	log.Info("performAuthCallback received response body", "body", string(body))
 
 	// Parse response to check authenticated status
 	var authResponse struct {
@@ -725,18 +715,12 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 	}
 	if err := json.Unmarshal(body, &authResponse); err != nil {
 		log.Error("performAuthCallback failed to decode response",
-			"err", err,
-			"body", string(body))
+			"err", err)
 		return "", fmt.Errorf("failed to decode auth response: %w", err)
 	}
 
-	log.Info("performAuthCallback parsed response",
-		"authenticated", authResponse.Authenticated,
-		"auth_response", authResponse)
-
 	if !authResponse.Authenticated {
-		log.Error("performAuthCallback authentication failed",
-			"auth_response", authResponse)
+		log.Error("performAuthCallback authentication failed")
 		return "", fmt.Errorf("authentication failed")
 	}
 
