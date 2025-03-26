@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -647,7 +648,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
-
+		log.Info("populateContext Auth callback successful", "alias", alias)
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
 	} else {
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
@@ -662,13 +663,25 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 		return "", fmt.Errorf("missing authorization token")
 	}
 
+	// Read the body first
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Error("performAuthCallback failed to read request body", "err", err)
+		return "", fmt.Errorf("failed to read request body: %w", err)
+	}
+	r.Body.Close()
+
+	// Create new body for original request
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
 	// Append the token to the auth URL path
 	authURLWithToken := fmt.Sprintf("%s/%s",
-		strings.TrimRight(authURL, "/"), // Remove any trailing slash
+		strings.TrimRight(authURL, "/"),
 		authorization)
 
-	// Create new request to auth URL with same method, headers and body
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, authURLWithToken, r.Body)
+	// Create new request to auth URL with same method, headers and new body copy
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, authURLWithToken,
+		bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
 		return "", fmt.Errorf("failed to create auth request: %w", err)
