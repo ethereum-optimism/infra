@@ -656,8 +656,19 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 }
 
 func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, error) {
+	// Get the authorization token from the request
+	authorization := mux.Vars(r)["authorization"]
+	if authorization == "" {
+		return "", fmt.Errorf("missing authorization token")
+	}
+
+	// Append the token to the auth URL path
+	authURLWithToken := fmt.Sprintf("%s/%s",
+		strings.TrimRight(authURL, "/"), // Remove any trailing slash
+		authorization)
+
 	// Create new request to auth URL with same method, headers and body
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, authURL, r.Body)
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, authURLWithToken, r.Body)
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
 		return "", fmt.Errorf("failed to create auth request: %w", err)
@@ -668,7 +679,9 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
-	log.Info("performAuthCallback making request", "authURL", authURL, "req URL Path", req.URL.Path)
+	log.Info("performAuthCallback making request",
+		"authURL", authURLWithToken,
+		"token", authorization)
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Error("performAuthCallback request failed", "err", err)
@@ -681,8 +694,7 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 		return "", fmt.Errorf("unauthorized")
 	}
 
-	// Return the authorization value from the request
-	return mux.Vars(r)["authorization"], nil
+	return authorization, nil
 }
 
 func randStr(l int) string {
