@@ -51,6 +51,11 @@ const (
 
 var emptyArrayResponse = json.RawMessage("[]")
 
+var (
+	// Shared HTTP client for auth callbacks with 5 second timeout
+	authHTTPClient = &http.Client{Timeout: 5 * time.Second}
+)
+
 type AuthCallbackRequest struct {
 	Headers    map[string][]string `json:"headers"`
 	Path       string              `json:"path"`
@@ -667,7 +672,7 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 		log.Error("performAuthCallback failed to read request body", "err", err)
 		return "", fmt.Errorf("failed to read request body: %w", err)
 	}
-	r.Body.Close()
+	defer r.Body.Close()
 
 	// Create new body for original request
 	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -686,11 +691,10 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 	}
 
 	// Copy original headers
-	req.Header = r.Header
+	req.Header = r.Header.Clone()
 
-	// Make the request
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	// Use the shared client
+	resp, err := authHTTPClient.Do(req)
 	if err != nil {
 		log.Error("performAuthCallback request failed", "err", err)
 		return "", fmt.Errorf("auth callback failed: %w", err)
