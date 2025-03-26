@@ -668,7 +668,7 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
-	log.Info("performAuthCallback making request", "authURL", authURL, "req", req)
+	log.Info("performAuthCallback making request", "authURL", authURL, "req URL Path", req.URL.Path)
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Error("performAuthCallback request failed", "err", err)
