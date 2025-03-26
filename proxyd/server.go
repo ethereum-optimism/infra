@@ -864,16 +864,10 @@ func instrumentedHdlr(h http.Handler) http.HandlerFunc {
 }
 
 func GetAuthCtx(ctx context.Context) string {
-	if ctx == nil {
-		log.Info("GetAuthCtx called with nil context")
-		return "none"
-	}
 	authUser, ok := ctx.Value(ContextKeyAuth).(string)
 	if !ok {
-		log.Info("GetAuthCtx No auth value found in context")
 		return "none"
 	}
-	log.Info("GetAuthCtx Auth value found in context", "auth", authUser)
 	return authUser
 }
 
