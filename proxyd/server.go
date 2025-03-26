@@ -89,6 +89,7 @@ type Server struct {
 	cache                  RPCCache
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
+	authClient             *http.Client
 }
 
 type limiterFunc func(method string) bool
@@ -205,6 +206,9 @@ func NewServer(
 		limExemptOrigins:       limExemptOrigins,
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
+		authClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
 	}, nil
 }
 
@@ -693,8 +697,8 @@ func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, e
 	// Copy original headers
 	req.Header = r.Header.Clone()
 
-	// Use the shared client
-	resp, err := authHTTPClient.Do(req)
+	// Use the server's auth client
+	resp, err := s.authClient.Do(req)
 	if err != nil {
 		log.Error("performAuthCallback request failed", "err", err)
 		return "", fmt.Errorf("auth callback failed: %w", err)
