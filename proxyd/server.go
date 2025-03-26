@@ -1,7 +1,6 @@
 package proxyd
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -620,9 +619,6 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
-	s.srvMu.Lock()
-	defer s.srvMu.Unlock()
-
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
@@ -645,10 +641,9 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	authURL, hasExternalAuth := s.authenticatedPaths["auth_url"]
 	if hasExternalAuth && authURL != "" { // nolint:staticcheck
 		// Use external authentication service
-		alias, err := s.performAuthCallback(r, authorization, authURL)
+		alias, err := s.performAuthCallback(r, authURL)
 		if err != nil || alias == "" { // Check both error and empty alias
-			log.Error("populateContext Auth callback failed",
-				"err", err)
+			log.Error("populateContext Auth callback failed", "err", err)
 			w.WriteHeader(http.StatusUnauthorized)
 			return nil
 		}
@@ -660,27 +655,16 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	return context.WithValue(ctx, ContextKeyReqID, randStr(10)) // nolint:staticcheck
 }
 
-func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL string) (string, error) {
-	authReqBody := map[string]string{
-		"id": apiKey,
-	}
-
-	// Marshal the auth request to JSON
-	jsonBody, err := json.Marshal(authReqBody)
-	if err != nil {
-		log.Error("performAuthCallback failed to marshal request", "err", err)
-		return "", fmt.Errorf("failed to marshal auth request: %w", err)
-	}
-
-	// Create the auth callback request
-	req, err := http.NewRequestWithContext(r.Context(), "POST", authURL, bytes.NewBuffer(jsonBody))
+func (s *Server) performAuthCallback(r *http.Request, authURL string) (string, error) {
+	// Create new request to auth URL with same method, headers and body
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, authURL, r.Body)
 	if err != nil {
 		log.Error("performAuthCallback failed to create request", "err", err)
 		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
+	// Copy original headers
+	req.Header = r.Header
 
 	// Make the request
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -689,42 +673,15 @@ func (s *Server) performAuthCallback(r *http.Request, apiKey string, authURL str
 		log.Error("performAuthCallback request failed", "err", err)
 		return "", fmt.Errorf("auth callback failed: %w", err)
 	}
-	if resp == nil {
-		log.Error("performAuthCallback received nil response")
-		return "", fmt.Errorf("auth callback failed: nil response")
-	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		log.Error("performAuthCallback non-200 status",
-			"status_code", resp.StatusCode)
-		return "", fmt.Errorf("auth callback failed with status %d: %s", resp.StatusCode, string(body))
+	// Only reject if we get a 401
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "", fmt.Errorf("unauthorized")
 	}
 
-	// Read response body for logging
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Error("performAuthCallback failed to read response body", "err", err)
-		return "", fmt.Errorf("failed to read auth response: %w", err)
-	}
-
-	// Parse response to check authenticated status
-	var authResponse struct {
-		Authenticated bool `json:"authenticated"`
-	}
-	if err := json.Unmarshal(body, &authResponse); err != nil {
-		log.Error("performAuthCallback failed to decode response",
-			"err", err)
-		return "", fmt.Errorf("failed to decode auth response: %w", err)
-	}
-
-	if !authResponse.Authenticated {
-		log.Error("performAuthCallback authentication failed")
-		return "", fmt.Errorf("authentication failed")
-	}
-
-	return apiKey, nil
+	// Return the authorization value from the request
+	return mux.Vars(r)["authorization"], nil
 }
 
 func randStr(l int) string {
