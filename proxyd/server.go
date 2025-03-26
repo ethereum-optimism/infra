@@ -939,15 +939,3 @@ func createBatchRequest(elems []batchElem) []*RPCReq {
 	}
 	return batch
 }
-
-// Helper function to get map keys
-func getMapKeys(m map[string]string) []string {
-	if m == nil {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
