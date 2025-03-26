@@ -13,6 +13,15 @@ USER_GID=$(id -g)
 CERT_ORG_NAME="OP-Signer Local Org"
 MOD_LENGTH=2048
 
+# File paths
+CA_CERT="$TLS_DIR/ca.crt"
+CA_KEY="$TLS_DIR/ca.key"
+CLIENT_TLS_KEY="tls.key"
+CLIENT_TLS_CSR="tls.csr"
+CLIENT_TLS_CERT="tls.crt"
+CLIENT_PRIVATE_KEY="ec_private.pem"
+CLIENT_OPENSSL_CNF="openssl.cnf"
+
 # Check if we should use Docker (default to true if not set)
 USE_DOCKER=${OP_SIGNER_GEN_TLS_DOCKER:-true}
 
@@ -33,19 +42,33 @@ run_openssl() {
     fi
 }
 
-# Function to generate credentials for a single hostname
-generate_host_credentials() {
+generate_ca() {
+    local force="$1"
+    [ "$force" = "true" ] || [ ! -f "$CA_CERT" ] || return 0
+
+    echo -e "\nGenerating CA..."
+    run_openssl req -newkey "rsa:$MOD_LENGTH" \
+        -new -nodes -x509 \
+        -days 365 \
+        -sha256 \
+        -out "$CA_CERT" \
+        -keyout "$CA_KEY" \
+        -subj "/O=$CERT_ORG_NAME/CN=root"
+}
+
+generate_client_tls() {
     local hostname="$1"
-    echo -e "\nGenerating client credentials for $hostname..."
+    echo -e "\nGenerating client TLS credentials for $hostname..."
     
-    # Create a directory for this hostname's credentials
-    mkdir -p "$TLS_DIR/$hostname"
+    # Create a directory for this client's credentials
+    local clientDir="$TLS_DIR/$hostname"
+    mkdir -p "$clientDir"
     
     # Generate client key
     echo "Generating client key..."
-    run_openssl genrsa -out "$TLS_DIR/$hostname/tls.key" "$MOD_LENGTH"
+    run_openssl genrsa -out "$clientDir/$CLIENT_TLS_KEY" "$MOD_LENGTH"
 
-    local confFile="$TLS_DIR/$hostname/openssl.cnf"
+    local confFile="$clientDir/$CLIENT_OPENSSL_CNF"
     
     # Create a config file for the CSR
     cat > "$confFile" << EOF
@@ -56,53 +79,101 @@ subjectAltName=DNS:$hostname
 EOF
     
     echo "Generating client certificate signing request..."
-    run_openssl req -new -key "$TLS_DIR/$hostname/tls.key" \
+    run_openssl req -new -key "$clientDir/$CLIENT_TLS_KEY" \
         -sha256 \
-        -out "$TLS_DIR/$hostname/tls.csr" \
+        -out "$clientDir/$CLIENT_TLS_CSR" \
         -subj "/O=$CERT_ORG_NAME/CN=$hostname" \
         -extensions san \
         -config "$confFile"
     
     echo "Generating client certificate..."
-    run_openssl x509 -req -in "$TLS_DIR/$hostname/tls.csr" \
+    run_openssl x509 -req -in "$clientDir/$CLIENT_TLS_CSR" \
         -sha256 \
-        -CA "$TLS_DIR/ca.crt" \
-        -CAkey "$TLS_DIR/ca.key" \
+        -CA "$CA_CERT" \
+        -CAkey "$CA_KEY" \
         -CAcreateserial \
-        -out "$TLS_DIR/$hostname/tls.crt" \
+        -out "$clientDir/$CLIENT_TLS_CERT" \
         -days 3 \
         -extensions san \
         -extfile "$confFile"
 }
 
-# Get hostnames from command line arguments, fallback to localhost if none provided
-CLIENT_HOSTNAMES=("$@")
-if [ ${#CLIENT_HOSTNAMES[@]} -eq 0 ]; then
-    CLIENT_HOSTNAMES=("localhost")
+generate_client_key() {
+    local hostname="$1"
+    echo -e "\nGenerating private key for $hostname..."
+    local clientDir="$TLS_DIR/$hostname"
+    mkdir -p "$clientDir"
+    run_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
+        -out "$clientDir/$CLIENT_PRIVATE_KEY"
+}
+
+process_clients() {
+    local generator="$1"
+    for hostname in "${CLIENT_HOSTNAMES[@]}"; do
+        "$generator" "$hostname"
+    done
+}
+
+generate_client_credentials() {
+    setup_client_hostnames "$@"
+    process_clients generate_client_tls
+    process_clients generate_client_key
+}
+
+setup_client_hostnames() {
+    CLIENT_HOSTNAMES=("$@")
+    if [ ${#CLIENT_HOSTNAMES[@]} -eq 0 ]; then
+        CLIENT_HOSTNAMES=("localhost")
+    fi
+    echo -e "\nProcessing clients: ${CLIENT_HOSTNAMES[*]}"
+}
+
+# Valid targets for the script
+VALID_TARGETS="ca, client, client_tls, client_key, all"
+
+# Get target and client hostnames from command line arguments
+if [ $# -eq 0 ]; then
+    echo "Error: Target argument is required. Must be one of: $VALID_TARGETS"
+    exit 1
 fi
 
-echo "Generating mTLS credentials for local development..."
-echo "Hostnames: ${CLIENT_HOSTNAMES[*]}"
+TARGET="$1"; shift
+
+echo "----------------------------------------"
+echo "!!!! DO NOT USE IN PRODUCTION !!!!!"
+echo "This script is meant for development/testing ONLY."
+echo -e "\nGenerating credentials..."
+echo "Target: $TARGET"
 echo "Using Docker: $USE_DOCKER"
+echo "----------------------------------------"
 
 mkdir -p "$TLS_DIR"
 
-# Avoid regenerating the CA so it doesn't need to be trusted again
-if [ ! -f "$TLS_DIR/ca.crt" ]; then
-    echo -e "\nGenerating CA..."
-    run_openssl req -newkey "rsa:$MOD_LENGTH" \
-        -new -nodes -x509 \
-        -days 365 \
-        -sha256 \
-        -out "$TLS_DIR/ca.crt" \
-        -keyout "$TLS_DIR/ca.key" \
-        -subj "/O=$CERT_ORG_NAME/CN=root"
-fi
+case "$TARGET" in
+    "ca")
+        generate_ca true
+        ;;
+    "client_tls")
+        setup_client_hostnames "$@"
+        process_clients generate_client_tls
+        ;;
+    "client_key")
+        setup_client_hostnames "$@"
+        process_clients generate_client_key
+        ;;
+    "client")
+        generate_client_credentials "$@"
+        ;;
+    "all")
+        generate_ca false
+        generate_client_credentials "$@"
+        ;;
+    *)
+        echo "Error: Invalid target '$TARGET'. Must be one of: $VALID_TARGETS"
+        exit 1
+        ;;
+esac
 
-for hostname in "${CLIENT_HOSTNAMES[@]}"; do
-    generate_host_credentials "$hostname"
-done
-
-echo -e "\nGenerating private key for the local KMS provider..."
-run_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
-  -out "$TLS_DIR/ec_private.pem"
+echo -e "\n----------------------------------------"
+echo "Credentials generated successfully."
+echo "----------------------------------------"
