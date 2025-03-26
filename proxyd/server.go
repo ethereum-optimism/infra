@@ -51,11 +51,6 @@ const (
 
 var emptyArrayResponse = json.RawMessage("[]")
 
-var (
-	// Shared HTTP client for auth callbacks with 5 second timeout
-	authHTTPClient = &http.Client{Timeout: 5 * time.Second}
-)
-
 type AuthCallbackRequest struct {
 	Headers    map[string][]string `json:"headers"`
 	Path       string              `json:"path"`
