@@ -38,6 +38,21 @@ func NewAuthMiddleware() oprpc.Middleware {
 	}
 }
 
+// NewAnonMiddleware is a middleware that sets the client info to "anon". This is applied when mTLS is disabled to
+// ensure a value is set for the ClientInfo.ClientName, but should only be used for local development. This effectively
+// disables authentication.
+func NewAnonMiddleware() oprpc.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clientInfo := ClientInfo{
+				ClientName: "anon",
+			}
+			ctx := context.WithValue(r.Context(), clientInfoContextKey{}, clientInfo)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 func ClientInfoFromContext(ctx context.Context) ClientInfo {
 	info, _ := ctx.Value(clientInfoContextKey{}).(ClientInfo)
 	return info
