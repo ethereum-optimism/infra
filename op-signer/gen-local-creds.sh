@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 set -euo pipefail
 
@@ -46,7 +46,8 @@ generate_ca() {
     local force="$1"
     [ "$force" = "true" ] || [ ! -f "$CA_CERT" ] || return 0
 
-    echo -e "\nGenerating CA..."
+    echo "Generating CA..."
+    echo
     run_openssl req -newkey "rsa:$MOD_LENGTH" \
         -new -nodes -x509 \
         -days 365 \
@@ -58,7 +59,8 @@ generate_ca() {
 
 generate_client_tls() {
     local hostname="$1"
-    echo -e "\nGenerating client TLS credentials for $hostname..."
+    echo "Generating client TLS credentials for $hostname..."
+    echo
     
     # Create a directory for this client's credentials
     local clientDir="$TLS_DIR/$hostname"
@@ -100,19 +102,14 @@ EOF
 
 generate_client_key() {
     local hostname="$1"
-    echo -e "\nGenerating private key for $hostname..."
+    echo "Generating private key for $hostname..."
+    echo
     local clientDir="$TLS_DIR/$hostname"
     mkdir -p "$clientDir"
     run_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
         -out "$clientDir/$CLIENT_PRIVATE_KEY"
 }
 
-process_clients() {
-    local generator="$1"
-    for hostname in "${CLIENT_HOSTNAMES[@]}"; do
-        "$generator" "$hostname"
-    done
-}
 
 generate_client_credentials() {
     setup_client_hostnames "$@"
@@ -121,11 +118,18 @@ generate_client_credentials() {
 }
 
 setup_client_hostnames() {
-    CLIENT_HOSTNAMES=("$@")
-    if [ ${#CLIENT_HOSTNAMES[@]} -eq 0 ]; then
-        CLIENT_HOSTNAMES=("localhost")
+    CLIENT_HOSTNAMES="$*"
+    if [ -z "$CLIENT_HOSTNAMES" ]; then
+        CLIENT_HOSTNAMES="localhost"
     fi
-    echo -e "\nProcessing clients: ${CLIENT_HOSTNAMES[*]}"
+    printf "\nProcessing clients: %s\n" "$CLIENT_HOSTNAMES"
+}
+
+process_clients() {
+    generator="$1"
+    for hostname in $CLIENT_HOSTNAMES; do
+        "$generator" "$hostname"
+    done
 }
 
 # Valid targets for the script
@@ -142,7 +146,8 @@ TARGET="$1"; shift
 echo "----------------------------------------"
 echo "!!!! DO NOT USE IN PRODUCTION !!!!!"
 echo "This script is meant for development/testing ONLY."
-echo -e "\nGenerating credentials..."
+echo "Generating credentials..."
+echo
 echo "Target: $TARGET"
 echo "Using Docker: $USE_DOCKER"
 echo "----------------------------------------"
@@ -174,6 +179,7 @@ case "$TARGET" in
         ;;
 esac
 
-echo -e "\n----------------------------------------"
+echo "----------------------------------------"
+echo
 echo "Credentials generated successfully."
 echo "----------------------------------------"
