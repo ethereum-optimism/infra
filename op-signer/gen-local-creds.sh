@@ -2,8 +2,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-TLS_DIR="$SCRIPT_DIR/tls"
+if [ -z "$TLS_DIR" ]; then
+    SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+    TLS_DIR="$SCRIPT_DIR/tls"
+fi
 
 OPENSSL_IMAGE="alpine/openssl:3.3.3"
 
@@ -46,8 +48,9 @@ generate_ca() {
     local force="$1"
     [ "$force" = "true" ] || [ ! -f "$CA_CERT" ] || return 0
 
-    echo "Generating CA..."
     echo
+    echo "Generating CA..."
+
     run_openssl req -newkey "rsa:$MOD_LENGTH" \
         -new -nodes -x509 \
         -days 365 \
@@ -59,8 +62,9 @@ generate_ca() {
 
 generate_client_tls() {
     local hostname="$1"
-    echo "Generating client TLS credentials for $hostname..."
     echo
+    echo "Generating client TLS credentials for $hostname..."
+    
     
     # Create a directory for this client's credentials
     local clientDir="$TLS_DIR/$hostname"
@@ -102,8 +106,8 @@ EOF
 
 generate_client_key() {
     local hostname="$1"
-    echo "Generating private key for $hostname..."
     echo
+    echo "Generating private key for $hostname..."
     local clientDir="$TLS_DIR/$hostname"
     mkdir -p "$clientDir"
     run_openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit \
