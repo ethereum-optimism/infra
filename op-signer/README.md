@@ -74,6 +74,6 @@ An mTLS connection is required between `op-signer` and the requesting service.
 
 To test services in your local environment:
 
-1. run `./gen-local-tls.sh`
+1. run `./gen-local-creds.sh [all|ca|client|client_tls|client_key] [clients]`
 2. Check that `/tls` folder has been created with certificates and keys
-2. Set the appropriate flags (`tls.cert`, `tls.key`, `tls.ca`) to the corresponding files under `/tls`
+2. Set the appropriate flags (`tls.cert`, `tls.key`, `tls.ca`) to the corresponding files under `/tls/<client>`
