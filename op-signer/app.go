@@ -147,6 +147,7 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 		authMiddleware = service.NewAuthMiddleware()
 	} else {
 		s.log.Warn("TLS disabled. This disables authentication and is INSECURE! Please enable TLS in production environments!")
+		s.log.Info("Using anonymous authentication. You must explicitly set the 'auth[].name' config field to 'anonymous' to allow unauthenticated anonymous usage.")
 		authMiddleware = service.NewAnonMiddleware()
 	}
 
