@@ -118,16 +118,23 @@ just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 
 ### Create a release
 Releases are created by pushing tags which triggers a CircleCI pipeline.
-Create an annotated tag (with a semantic version) and push it.
+One simply needs to create an annotated tag (with a semantic version) and push it.
+Note that the CircleCI workflow will require manual approval before it will publish the new release.
 
 ```
-VERSION=v0.1.4
+# Determine the latest version
+git tag -l --sort=-v:refname | grep op-acceptor
 
-git tag -a op-acceptor/$VERSION -m "Some useful summary of changes"
+# Set you target version (increase the latest appropriately)
+# and add a useful summary
+VERSION=v0.1.6
+SUMMARY="Some useful summary of changes"
+
+# Tag your release
+git tag -a op-acceptor/$VERSION -m "$SUMMARY"
 git push origin op-acceptor/$VERSION
 ```
 
-To find the latest version use: `git tag --list`
 
 ### Future Development
 We track our public roadmap and issues on [Github](https://github.com/ethereum-optimism/infra/issues). Feel free to:
