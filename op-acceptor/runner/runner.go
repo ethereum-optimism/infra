@@ -507,7 +507,6 @@ type TestEvent struct {
 
 // runSingleTest runs a specific test
 func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
-
 	ctx := context.Background()
 	if metadata.Timeout != 0 {
 		var cancel func()
