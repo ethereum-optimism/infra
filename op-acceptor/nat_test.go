@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
@@ -90,15 +91,21 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	// Create a basic logger
 	logger := log.New()
 
+	// Set up a mock file logger
+	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id")
+	require.NoError(t, err)
+
 	// Create service with the mock
 	service := &nat{
 		ctx: ctx,
 		config: &Config{
 			Log:         logger,
 			RunInterval: 25 * time.Millisecond, // Short interval for testing
+			LogDir:      t.TempDir(),
 		},
-		runner: mockRunner,
-		done:   make(chan struct{}),
+		runner:     mockRunner,
+		fileLogger: mockFileLogger,
+		done:       make(chan struct{}),
 	}
 
 	return mockRunner, service, ctx, cancel

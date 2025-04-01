@@ -60,6 +60,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "DEFAULT_TIMEOUT"),
 		Usage:   "Default timeout of an individual test (e.g. '30s', '5m', etc.). This setting is superseded by test or suite level timeout configuration. Set to '0' to disable any default timeout. Defaults to '5m'.",
 	}
+	LogDir = &cli.StringFlag{
+		Name:    "logdir",
+		Value:   "logs",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "LOGDIR"),
+		Usage:   "Directory to store test logs. Defaults to 'logs' if not specified.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -73,6 +79,7 @@ var optionalFlags = []cli.Flag{
 	RunInterval,
 	AllowSkips,
 	DefaultTimeout,
+	LogDir,
 }
 var Flags []cli.Flag
 

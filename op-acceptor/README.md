@@ -116,6 +116,33 @@ Want to monitor your validation runs? Start our local monitoring stack:
 just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 ```
 
+### Log Management
+
+By default, test output from all tests is saved to log files, while only test results summaries are shown in the terminal. This makes the output much more manageable, especially when running many tests.
+
+Test logs are saved in a timestamped directory under the log directory path. The default log directory is `logs`, but you can specify a custom location:
+
+```bash
+go run cmd/main.go \
+  --gate interop \
+  --testdir ../../optimism/ \
+  --validators validators.yaml \
+  --logdir /path/to/logs          # Custom log directory
+```
+
+Each test run creates a directory with the following structure:
+```
+testrun-<run-id>/
+├── tests/               # All test logs, including passing tests
+├── failed/              # Just the logs for failed tests (hard links)
+└── summary.log          # Overall test run summary
+```
+
+In CI environments, you can easily access all failed test logs with:
+```bash
+cat /path/to/logs/testrun-*/failed/*
+```
+
 ### Create a release
 Releases are created by pushing tags which triggers a CircleCI pipeline.
 One simply needs to create an annotated tag (with a semantic version) and push it.
