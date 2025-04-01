@@ -648,7 +648,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		// Use external authentication service
 		alias, err := s.performAuthCallback(r, authURL)
 		if err != nil || alias == "" { // Check both error and empty alias
-			w.WriteHeader(http.StatusUnauthorized)
+			writeRPCError(ctx, w, nil, &RPCErr{Code: -32001, Message: "unauthorized"})
 			return nil
 		}
 		ctx = context.WithValue(ctx, ContextKeyAuth, alias) // nolint:staticcheck
