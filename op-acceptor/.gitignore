@@ -1,3 +1,4 @@
 bin
+logs
 **/testdata/grafana-data
 **/testdata/prometheus-data

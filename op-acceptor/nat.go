@@ -14,6 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
@@ -26,12 +27,13 @@ var _ cliapp.Lifecycle = &nat{}
 
 // nat is a Network Acceptance Tester that runs tests.
 type nat struct {
-	ctx      context.Context
-	config   *Config
-	version  string
-	registry *registry.Registry
-	runner   runner.TestRunner
-	result   *runner.RunnerResult
+	ctx        context.Context
+	config     *Config
+	version    string
+	registry   *registry.Registry
+	runner     runner.TestRunner
+	result     *runner.RunnerResult
+	fileLogger *logging.FileLogger
 
 	running atomic.Bool
 	done    chan struct{}
@@ -67,6 +69,9 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
 	}
 
+	// FileLogger will be created when we have a valid runID
+	// It's initialized during the first test run
+
 	config.Log.Debug("Created NAT with config",
 		"testDir", config.TestDir,
 		"validatorConfig", config.ValidatorConfig,
@@ -75,6 +80,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		"runOnce", config.RunOnce,
 		"allowSkips", config.AllowSkips,
 		"goBinary", config.GoBinary,
+		"logDir", config.LogDir,
 	)
 
 	return &nat{
@@ -111,7 +117,8 @@ func (n *nat) Start(ctx context.Context) error {
 
 	n.config.Log.Debug("NAT config paths",
 		"config.TestDir", n.config.TestDir,
-		"config.ValidatorConfig", n.config.ValidatorConfig)
+		"config.ValidatorConfig", n.config.ValidatorConfig,
+		"config.LogDir", n.config.LogDir)
 
 	// Run tests immediately on startup
 	err := n.runTests()
@@ -123,7 +130,7 @@ func (n *nat) Start(ctx context.Context) error {
 
 	// If in run-once mode, trigger shutdown and return
 	if n.config.RunOnce {
-		n.config.Log.Info("Tests completed, exiting (run-once mode)")
+		n.config.Log.Debug("Tests completed, exiting (run-once mode)")
 
 		// Check if any tests failed and return appropriate exit code
 		if n.result != nil && n.result.Status == types.TestStatusFail {
@@ -178,6 +185,7 @@ func (n *nat) Start(ctx context.Context) error {
 // runTests runs all tests and processes the results
 func (n *nat) runTests() error {
 	n.config.Log.Info("Running all tests...")
+
 	result, err := n.runner.RunAllTests()
 	if err != nil {
 		// This is a runtime error (not a test failure)
@@ -186,12 +194,85 @@ func (n *nat) runTests() error {
 	}
 	n.result = result
 
+	// Create a file logger with the runID if we don't have one yet
+	if n.fileLogger == nil {
+		fileLogger, err := logging.NewFileLogger(n.config.LogDir, result.RunID)
+		if err != nil {
+			n.config.Log.Error("Error creating file logger", "error", err)
+			return fmt.Errorf("failed to create file logger: %w", err)
+		}
+		n.fileLogger = fileLogger
+	}
+
+	// Save the test results to files
+	err = n.saveTestResults(result)
+	if err != nil {
+		n.config.Log.Error("Error saving test results to files", "error", err)
+		// Continue execution despite file saving errors
+	}
+
+	n.config.Log.Info("Printing results table")
 	n.printResultsTable(result.RunID)
-	fmt.Println(n.result.String())
-	if n.result.Status == types.TestStatusFail {
+
+	// Complete the file logging
+	if err := n.fileLogger.Complete(result.RunID); err != nil {
+		n.config.Log.Error("Error completing file logging", "error", err)
+	}
+
+	// Save the original detailed summary to the all.log file
+	resultSummary := n.result.String()
+
+	// Get the all.log file path
+	allLogsFile, err := n.fileLogger.GetAllLogsFileForRunID(result.RunID)
+	if err != nil {
+		n.config.Log.Error("Error getting all.log file path", "error", err)
+	} else {
+		// Write the complete detailed summary to all.log
+		// We don't need the separate detailed-summary.log file anymore
+		if err := os.WriteFile(allLogsFile, []byte(resultSummary), 0644); err != nil {
+			n.config.Log.Error("Error saving detailed summary to all.log file", "error", err)
+		}
+	}
+
+	if n.result.Status == types.TestStatusFail && result.Stats.Failed > result.Stats.Passed {
 		printGandalf()
 	}
-	n.config.Log.Info("Test run completed", "run_id", result.RunID, "status", n.result.Status)
+
+	// Get log directory for this run
+	logDir, err := n.fileLogger.GetDirectoryForRunID(result.RunID)
+	if err != nil {
+		n.config.Log.Error("Error getting log directory path", "error", err)
+		// Use default base directory as fallback
+		logDir = n.fileLogger.GetBaseDir()
+	}
+
+	n.config.Log.Info("Test run completed",
+		"run_id", result.RunID,
+		"status", n.result.Status,
+		"log_dir", logDir)
+	return nil
+}
+
+// saveTestResults saves the test results to files
+func (n *nat) saveTestResults(result *runner.RunnerResult) error {
+	// Process each gate
+	for _, gate := range result.Gates {
+		// Process direct tests for each gate
+		for _, test := range gate.Tests {
+			if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
+				return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
+			}
+		}
+
+		// Process suite tests for each gate
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
+					return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -232,13 +313,13 @@ func (n *nat) printResultsTable(runID string) {
 
 	// Configure columns
 	t.AppendHeader(table.Row{
-		"Type", "ID", "Duration", "Tests", "Passed", "Failed", "Skipped", "Status", "Error",
+		"Type", "ID", "Duration", "Tests", "Passed", "Failed", "Skipped", "Status",
 	})
 
 	// Set column configurations for better readability
 	t.SetColumnConfigs([]table.ColumnConfig{
 		{Name: "Type", AutoMerge: true},
-		{Name: "ID", WidthMax: 50, WidthMaxEnforcer: text.WrapSoft},
+		{Name: "ID", WidthMax: 200, WidthMaxEnforcer: text.WrapSoft},
 		{Name: "Duration", Align: text.AlignRight},
 		{Name: "Tests", Align: text.AlignRight},
 		{Name: "Passed", Align: text.AlignRight},
@@ -261,7 +342,6 @@ func (n *nat) printResultsTable(runID string) {
 			gate.Stats.Failed,
 			gate.Stats.Skipped,
 			getResultString(gate.Status),
-			"",
 			"", // No stdout for gates
 		})
 
@@ -276,7 +356,6 @@ func (n *nat) printResultsTable(runID string) {
 				suite.Stats.Failed,
 				suite.Stats.Skipped,
 				getResultString(suite.Status),
-				"",
 				"", // No stdout for suites
 			})
 
@@ -301,7 +380,6 @@ func (n *nat) printResultsTable(runID string) {
 					boolToInt(test.Status == types.TestStatusFail),
 					boolToInt(test.Status == types.TestStatusSkip),
 					getResultString(test.Status),
-					getErrorMessage(test.Status, test.Error),
 				})
 
 				// Display individual sub-tests if present (for package tests)
@@ -322,7 +400,6 @@ func (n *nat) printResultsTable(runID string) {
 							boolToInt(subTest.Status == types.TestStatusFail),
 							boolToInt(subTest.Status == types.TestStatusSkip),
 							getResultString(subTest.Status),
-							getErrorMessage(subTest.Status, subTest.Error),
 						})
 						j++
 					}
@@ -353,7 +430,6 @@ func (n *nat) printResultsTable(runID string) {
 				boolToInt(test.Status == types.TestStatusFail),
 				boolToInt(test.Status == types.TestStatusSkip),
 				getResultString(test.Status),
-				getErrorMessage(test.Status, test.Error),
 			})
 
 			// Display individual sub-tests if present (for package tests)
@@ -374,7 +450,6 @@ func (n *nat) printResultsTable(runID string) {
 						boolToInt(subTest.Status == types.TestStatusFail),
 						boolToInt(subTest.Status == types.TestStatusSkip),
 						getResultString(subTest.Status),
-						getErrorMessage(subTest.Status, subTest.Error),
 					})
 					j++
 				}
@@ -404,7 +479,6 @@ func (n *nat) printResultsTable(runID string) {
 		n.result.Stats.Failed,
 		n.result.Stats.Skipped,
 		getResultString(n.result.Status),
-		"",
 	})
 
 	t.Render()
@@ -429,7 +503,7 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// getResultString returns a colored string representing the test result
+// getResultString returns a human-readable string for a test status
 func getResultString(status types.TestStatus) string {
 	switch status {
 	case types.TestStatusPass:
@@ -441,41 +515,28 @@ func getResultString(status types.TestStatus) string {
 	}
 }
 
-// Helper function to format duration to seconds with 1 decimal place
+// formatDuration formats a duration in a readable format
 func formatDuration(d time.Duration) string {
-	return fmt.Sprintf("%.1fs", d.Seconds())
+	return d.Round(time.Second).String()
 }
 
-// getErrorMessage returns the error message if test failed, empty string otherwise
-func getErrorMessage(status types.TestStatus, err error) string {
-	if status == types.TestStatusFail {
-		if err != nil {
-			return err.Error()
-		}
-		return "Test failed without providing an error message" // Default message for fail cases with nil error
-	}
-	return ""
-}
-
-// WaitForShutdown blocks until all goroutines have terminated.
-// This is useful in tests to ensure complete cleanup before moving to the next test.
+// WaitForShutdown waits for all goroutines to finish
 func (n *nat) WaitForShutdown(ctx context.Context) error {
-	n.config.Log.Debug("Waiting for all goroutines to terminate")
+	timeout := time.NewTimer(time.Second * 5)
+	defer timeout.Stop()
 
-	// Create a channel that will be closed when the WaitGroup is done
-	done := make(chan struct{})
+	doneCh := make(chan struct{})
 	go func() {
 		n.wg.Wait()
-		close(done)
+		close(doneCh)
 	}()
 
-	// Wait for either WaitGroup completion or context expiration
 	select {
-	case <-done:
-		n.config.Log.Debug("All goroutines terminated successfully")
+	case <-doneCh:
 		return nil
+	case <-timeout.C:
+		return errors.New("timed out waiting for nat to shutdown")
 	case <-ctx.Done():
-		n.config.Log.Warn("Timed out waiting for goroutines to terminate", "error", ctx.Err())
 		return ctx.Err()
 	}
 }

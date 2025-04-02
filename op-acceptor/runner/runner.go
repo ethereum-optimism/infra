@@ -107,7 +107,6 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.Log = log.New()
 		cfg.Log.Error("No logger provided, using default")
 	}
-	cfg.Log.Info("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir, "allowSkips", cfg.AllowSkips)
 
 	var validators []types.ValidatorMetadata
 	if len(cfg.TargetGate) > 0 {
@@ -122,6 +121,8 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	if cfg.GoBinary == "" {
 		cfg.GoBinary = "go" // Default to "go" if not specified
 	}
+
+	cfg.Log.Debug("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir, "allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary)
 
 	return &runner{
 		registry:   cfg.Registry,
