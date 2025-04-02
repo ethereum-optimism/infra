@@ -104,7 +104,7 @@ EOF
         -extfile "$confFile"
 }
 
-generate_client_key() {
+generate_client_signing_key() {
     local hostname="$1"
     echo
     echo "Generating private key for $hostname..."
@@ -118,7 +118,7 @@ generate_client_key() {
 generate_client_credentials() {
     setup_client_hostnames "$@"
     process_clients generate_client_tls
-    process_clients generate_client_key
+    process_clients generate_client_signing_key
 }
 
 setup_client_hostnames() {
@@ -137,7 +137,7 @@ process_clients() {
 }
 
 # Valid targets for the script
-VALID_TARGETS="ca, client, client_tls, client_key, all"
+VALID_TARGETS="ca, client, client_tls, client_signing_key, all"
 
 # Get target and client hostnames from command line arguments
 if [ $# -eq 0 ]; then
@@ -166,9 +166,9 @@ case "$TARGET" in
         setup_client_hostnames "$@"
         process_clients generate_client_tls
         ;;
-    "client_key")
+    "client_signing_key")
         setup_client_hostnames "$@"
-        process_clients generate_client_key
+        process_clients generate_client_signing_key
         ;;
     "client")
         generate_client_credentials "$@"
