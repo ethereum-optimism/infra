@@ -116,11 +116,12 @@ Want to monitor your validation runs? Start our local monitoring stack:
 just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 ```
 
+
 ### Log Management
 
 By default, test output from all tests is saved to log files, while only test results summaries are shown in the terminal. This makes the output much more manageable, especially when running many tests.
 
-Test logs are saved in a timestamped directory under the log directory path. The default log directory is `logs`, but you can specify a custom location:
+Test logs are saved under the log directory path, in a directory named based on the run ID. The default log directory is `logs`, but you can specify a custom location:
 
 ```bash
 go run cmd/main.go \
@@ -130,13 +131,13 @@ go run cmd/main.go \
   --logdir /path/to/logs          # Custom log directory
 ```
 
-Each test run creates a directory with the following structure:
-```
-testrun-<run-id>/
-├── tests/               # All test logs, including passing tests
-├── failed/              # Just the logs for failed tests (hard links)
-└── summary.log          # Overall test run summary
-```
+For each test run, the following outputs are generated in the logs directory:
+
+1. Individual test log files in `logs/testrun-{run-id}/tests/`
+2. Summary of the test run in `logs/testrun-{run-id}/summary.log`
+3. Combined log of all tests in `logs/testrun-{run-id}/all.log`
+4. Failed test logs in `logs/testrun-{run-id}/failed/`
+5. Raw Go test events in `logs/testrun-{run-id}/raw_go_events.log` (in the format of `go test -json`)
 
 In CI environments, you can easily access all failed test logs with:
 ```bash

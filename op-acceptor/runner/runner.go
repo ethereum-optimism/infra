@@ -12,6 +12,7 @@ import (
 
 	"errors"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -76,14 +77,22 @@ type TestRunner interface {
 	RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error)
 }
 
+// TestRunnerWithFileLogger extends the TestRunner interface with a method
+// to set the file logger after creation
+type TestRunnerWithFileLogger interface {
+	TestRunner
+	SetFileLogger(logger *logging.FileLogger)
+}
+
 type runner struct {
 	registry   *registry.Registry
 	validators []types.ValidatorMetadata
 	workDir    string // Directory for running tests
 	log        log.Logger
 	runID      string
-	goBinary   string // Path to the Go binary
-	allowSkips bool   // Whether to allow skipping tests when preconditions are not met
+	goBinary   string              // Path to the Go binary
+	allowSkips bool                // Whether to allow skipping tests when preconditions are not met
+	fileLogger *logging.FileLogger // Logger for storing test results
 }
 
 type Config struct {
@@ -91,8 +100,9 @@ type Config struct {
 	TargetGate string
 	WorkDir    string
 	Log        log.Logger
-	GoBinary   string // path to the Go binary
-	AllowSkips bool   // Whether to allow skipping tests when preconditions are not met
+	GoBinary   string              // path to the Go binary
+	AllowSkips bool                // Whether to allow skipping tests when preconditions are not met
+	FileLogger *logging.FileLogger // Logger for storing test results
 }
 
 // NewTestRunner creates a new test runner instance
@@ -131,12 +141,19 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		log:        cfg.Log,
 		goBinary:   cfg.GoBinary,
 		allowSkips: cfg.AllowSkips,
+		fileLogger: cfg.FileLogger,
 	}, nil
 }
 
 // RunAllTests implements the TestRunner interface
 func (r *runner) RunAllTests() (*RunnerResult, error) {
-	r.runID = uuid.New().String()
+	// Use fileLogger's runID if available, otherwise generate new
+	if r.fileLogger != nil {
+		r.runID = r.fileLogger.GetRunID()
+	} else {
+		r.runID = uuid.New().String()
+	}
+
 	defer func() {
 		r.runID = ""
 	}()
@@ -543,6 +560,24 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 
 	// Run the command
 	err := cmd.Run()
+
+	// Store the raw JSON output for the RawJSONSink if we have a file logger
+	if r.fileLogger != nil {
+		// Try to get the RawJSONSink from the file logger
+		if sink, ok := r.fileLogger.GetSinkByType("RawJSONSink"); ok {
+			if rawSink, ok := sink.(*logging.RawJSONSink); ok {
+				// Store the raw JSON output using the test's ID as the key
+				rawJSON := stdout.Bytes()
+				rawSink.StoreRawJSON(metadata.ID, rawJSON)
+			} else {
+				r.log.Error("Failed to get RawJSONSink: wrong type", "type", fmt.Sprintf("%T", sink))
+			}
+		} else {
+			r.log.Error("Failed to get RawJSONSink")
+		}
+	} else {
+		r.log.Debug("No file logger available, not storing raw JSON output")
+	}
 
 	// Check for timeout first
 	if ctx.Err() == context.DeadlineExceeded {
@@ -1126,3 +1161,12 @@ func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
 
 	return determineStatusFromFlags(allSkipped, anyFailed)
 }
+
+// SetFileLogger sets the file logger for the runner
+func (r *runner) SetFileLogger(logger *logging.FileLogger) {
+	r.fileLogger = logger
+}
+
+// Make sure the runner type implements both interfaces
+var _ TestRunner = &runner{}
+var _ TestRunnerWithFileLogger = &runner{}

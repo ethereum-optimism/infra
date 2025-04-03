@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+	"github.com/google/uuid"
 )
 
 // nat implements the cliapp.Lifecycle interface.
@@ -186,6 +187,30 @@ func (n *nat) Start(ctx context.Context) error {
 func (n *nat) runTests() error {
 	n.config.Log.Info("Running all tests...")
 
+	// Generate a runID for this test run
+	runID := uuid.New().String()
+	n.config.Log.Info("Generated new runID for test run", "runID", runID)
+
+	// Create a new file logger with the runID
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID)
+	if err != nil {
+		n.config.Log.Error("Error creating file logger", "error", err)
+		return fmt.Errorf("failed to create file logger: %w", err)
+	}
+
+	// Save the new logger
+	n.fileLogger = fileLogger
+
+	// Update the runner with the new file logger
+	if n.runner != nil {
+		if fileLoggerRunner, ok := n.runner.(runner.TestRunnerWithFileLogger); ok {
+			fileLoggerRunner.SetFileLogger(n.fileLogger)
+		} else {
+			n.config.Log.Error("Runner does not implement TestRunnerWithFileLogger interface")
+		}
+	}
+
+	// Run the tests with our new logger
 	result, err := n.runner.RunAllTests()
 	if err != nil {
 		// This is a runtime error (not a test failure)
@@ -194,14 +219,10 @@ func (n *nat) runTests() error {
 	}
 	n.result = result
 
-	// Create a file logger with the runID if we don't have one yet
-	if n.fileLogger == nil {
-		fileLogger, err := logging.NewFileLogger(n.config.LogDir, result.RunID)
-		if err != nil {
-			n.config.Log.Error("Error creating file logger", "error", err)
-			return fmt.Errorf("failed to create file logger: %w", err)
-		}
-		n.fileLogger = fileLogger
+	// We should have the same runID from the test run result
+	if result.RunID != runID {
+		n.config.Log.Warn("RunID from result doesn't match expected runID",
+			"expected", runID, "actual", result.RunID)
 	}
 
 	// Save the test results to files
@@ -232,6 +253,14 @@ func (n *nat) runTests() error {
 		if err := os.WriteFile(allLogsFile, []byte(resultSummary), 0644); err != nil {
 			n.config.Log.Error("Error saving detailed summary to all.log file", "error", err)
 		}
+	}
+
+	// Get the raw_go_events.log file path
+	rawEventsFile, err := n.fileLogger.GetRawEventsFileForRunID(result.RunID)
+	if err != nil {
+		n.config.Log.Error("Error getting raw_go_events.log file path", "error", err)
+	} else {
+		n.config.Log.Info("Raw Go test events saved", "file", rawEventsFile)
 	}
 
 	if n.result.Status == types.TestStatusFail && result.Stats.Failed > result.Stats.Passed {
