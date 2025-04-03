@@ -162,6 +162,7 @@ git tag -a op-acceptor/$VERSION -m "$SUMMARY"
 git push origin op-acceptor/$VERSION
 ```
 
+Finally, approve the hold on the 'release' workflow in [CircleCI](https://app.circleci.com/pipelines/github/ethereum-optimism/infra)
 
 ### Future Development
 We track our public roadmap and issues on [Github](https://github.com/ethereum-optimism/infra/issues). Feel free to:
