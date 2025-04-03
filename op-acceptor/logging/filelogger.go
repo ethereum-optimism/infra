@@ -30,6 +30,7 @@ type FileLogger struct {
 	sinks        []ResultSink          // Collection of result consumers
 	resultBuffer []*types.TestResult   // Buffer for storing results
 	asyncWriters map[string]*AsyncFile // Map of async file writers
+	runID        string                // Current run ID
 }
 
 // AsyncFile provides non-blocking file writing capabilities
@@ -137,12 +138,14 @@ func NewFileLogger(baseDir string, runID string) (*FileLogger, error) {
 		allLogsFile:  filepath.Join(runDir, "all.log"),
 		asyncWriters: make(map[string]*AsyncFile),
 		resultBuffer: make([]*types.TestResult, 0),
+		runID:        runID,
 	}
 
 	// Add default sinks
 	logger.sinks = append(logger.sinks, &IndividualTestFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
+	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
 
 	return logger, nil
 }
@@ -303,8 +306,7 @@ func (l *FileLogger) GetSummaryFileForRunID(runID string) (string, error) {
 	return filepath.Join(baseDir, "summary.log"), nil
 }
 
-// GetAllLogsFileForRunID returns the all logs file for a specific runID
-// The runID must be provided, otherwise an error is returned
+// GetAllLogsFileForRunID returns the path to the all.log file for the given runID
 func (l *FileLogger) GetAllLogsFileForRunID(runID string) (string, error) {
 	if runID == "" {
 		return "", fmt.Errorf("runID is required")
@@ -314,6 +316,38 @@ func (l *FileLogger) GetAllLogsFileForRunID(runID string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(baseDir, "all.log"), nil
+}
+
+// GetRawEventsFileForRunID returns the path to the raw_go_events.log file for the given runID
+func (l *FileLogger) GetRawEventsFileForRunID(runID string) (string, error) {
+	if runID == "" {
+		return "", fmt.Errorf("runID is required")
+	}
+	baseDir, err := l.GetDirectoryForRunID(runID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "raw_go_events.log"), nil
+}
+
+// GetSinkByType returns a sink of the specified type if it exists
+// The type is determined by the name of the sink's struct
+func (l *FileLogger) GetSinkByType(sinkType string) (ResultSink, bool) {
+	for _, sink := range l.sinks {
+		// Get the type name of the sink
+		typeName := fmt.Sprintf("%T", sink)
+		// Strip package prefix if present
+		if idx := strings.LastIndex(typeName, "."); idx >= 0 {
+			typeName = typeName[idx+1:]
+		}
+		// Remove pointer symbol if present
+		typeName = strings.TrimPrefix(typeName, "*")
+
+		if typeName == sinkType {
+			return sink, true
+		}
+	}
+	return nil, false
 }
 
 // Helper functions
@@ -680,4 +714,9 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 
 	// Write the summary
 	return writer.Write([]byte(summary.String()))
+}
+
+// GetRunID returns the current runID
+func (l *FileLogger) GetRunID() string {
+	return l.runID
 }
