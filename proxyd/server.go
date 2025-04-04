@@ -532,7 +532,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
 					return nil, false, "", err
 				}
-				log.Error(
+				logfn := log.Error
+				// If the context was canceled, downgrade the log level to debug.
+				if errors.Is(err, context.Canceled) {
+					logfn = log.Debug
+				}
+				logfn(
 					"error forwarding RPC batch",
 					"batch_size", len(elems),
 					"backend_group", group,
