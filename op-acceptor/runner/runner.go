@@ -467,6 +467,7 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 	for _, testName := range testNames {
 		// Create a new metadata with the specific test name
 		testMetadata := metadata
+		testMetadata.RunAll = false
 		testMetadata.FuncName = testName
 
 		// Run the individual test
