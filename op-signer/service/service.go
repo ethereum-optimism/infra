@@ -194,7 +194,7 @@ func (s *OpsignerService) signBlockPayload(
 
 	labels := prometheus.Labels{"client": clientInfo.ClientName, "status": "error", "error": ""}
 	defer func() {
-		MetricSignTransactionTotal.With(labels).Inc()
+		MetricSignBlockPayloadTotal.With(labels).Inc()
 	}()
 
 	msg, err := getMsg()
