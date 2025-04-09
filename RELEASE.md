@@ -1,6 +1,6 @@
 # Release Process
 
-This document the process for releasing a new version of one or more services in the `ethereum-optimism/infra` repository.
+This documents the process of releasing a new version of one or more services in the `ethereum-optimism/infra` repository.
 The release process is driven by CircleCI to build and publish components
 
 ## Release Process Overview
