@@ -53,6 +53,18 @@ def get_network(network: str):
     network_obj.update()
     return network_obj
 
+@app.command()
+def list_networks():
+    """List all the networks in the config"""
+    table = Table(
+        "Networks",
+    )
+    for net in NETWORKS.keys():
+        table.add_row(
+            net
+        )
+    console.print(table)
+
 
 @app.command()
 def status(network: str):
