@@ -111,6 +111,19 @@ def status(network: str):
 
 
 @app.command()
+def list_networks():
+    """List all the networks in the config"""
+    table = Table(
+        "Networks",
+    )
+    for net in NETWORKS.keys():
+        table.add_row(
+            net
+        )
+    console.print(table)
+
+
+@app.command()
 def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     """Transfer leadership to a specific sequencer."""
     network_obj = get_network(network)
@@ -131,13 +144,16 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
 
     if not force:
         if not sequencer.sequencer_healthy:
-            print_error(f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
+            print_error(
+                f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
             raise typer.Exit(code=1)
         if not sequencer.conductor_active:
-            print_error(f"Target sequencer {sequencer_id} conductor is paused. Please run 'resume' command first.")
+            print_error(
+                f"Target sequencer {sequencer_id} conductor is paused. Please run 'resume' command first.")
             raise typer.Exit(code=1)
         if not leader.conductor_active:
-            print_error(f"Current leader {leader.sequencer_id} conductor is paused. Please run 'resume' command first.")
+            print_error(
+                f"Current leader {leader.sequencer_id} conductor is paused. Please run 'resume' command first.")
 
     resp = requests.post(
         leader.conductor_rpc_url,
@@ -237,10 +253,13 @@ def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bo
 
     if remove:
         if y:
-            print_warn("You are trying to remove the override. This would require you to explicitly restart op-node.")
+            print_warn(
+                "You are trying to remove the override. This would require you to explicitly restart op-node.")
         else:
-            typer.echo("Note: you are trying to remove the override. This would require you to explicitly restart op-node.")
-            typer.echo("Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':")
+            typer.echo(
+                "Note: you are trying to remove the override. This would require you to explicitly restart op-node.")
+            typer.echo(
+                "Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':")
             user_input = input().lower()
             if user_input not in ['y', 'n']:
                 print_error("Wrong input provided")
@@ -271,9 +290,11 @@ def override_leader(network: str, sequencer_id: str, remove: bool = False, y: bo
             )
             raise typer.Exit(code=1)
 
-    typer.echo(f"Successfully overrode leader for {sequencer_id} to {not remove}")
+    typer.echo(
+        f"Successfully overrode leader for {sequencer_id} to {not remove}")
     if remove:
-        typer.echo("As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it.")
+        typer.echo(
+            "As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it.")
 
 
 @app.command()
@@ -356,6 +377,7 @@ def update_cluster_membership(network: str):
     if error:
         raise typer.Exit(code=1)
 
+
 @app.command()
 def halt_sequencer(network: str, force: bool = False):
     """Halts the currently active sequencer."""
@@ -373,7 +395,8 @@ def halt_sequencer(network: str, force: bool = False):
 
     active_sequencer = network_obj.find_active_sequencer()
     if active_sequencer is None:
-        print_error(f"Could not find an active sequencer in the network: {network}")
+        print_error(
+            f"Could not find an active sequencer in the network: {network}")
         raise typer.Exit(code=1)
 
     try:
@@ -402,12 +425,14 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
     network_obj = get_network(network)
     sequencer = network_obj.get_sequencer_by_id(sequencer_id)
     if sequencer is None:
-        typer.echo(f"sequencer ID {sequencer_id} not found in network {network}")
+        typer.echo(
+            f"sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
 
     # Pre-flight check: Ensure all conductors are paused
     sequencers = network_obj.sequencers
-    all_paused = all(not sequencer.conductor_active for sequencer in sequencers)
+    all_paused = all(
+        not sequencer.conductor_active for sequencer in sequencers)
     if not all_paused and not force:
         print_error("Not all conductors are paused. Run 'pause' command first.")
         raise typer.Exit(code=1)
@@ -416,16 +441,17 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
 
     active_sequencer = network_obj.find_active_sequencer()
     if active_sequencer:
-      typer.echo(f"Stopping {active_sequencer.sequencer_id}")
-      resp = requests.post(
-          active_sequencer.node_rpc_url,
-          json=make_rpc_payload("admin_stopSequencer", params=[]),
-      )
-      resp.raise_for_status()
-      if "error" in resp.json():
-          typer.echo(f"Failed to stop {active_sequencer.sequencer_id}: {resp.json()['error']}")
-          raise typer.Exit(code=1)
-      hash = resp.json()["result"]
+        typer.echo(f"Stopping {active_sequencer.sequencer_id}")
+        resp = requests.post(
+            active_sequencer.node_rpc_url,
+            json=make_rpc_payload("admin_stopSequencer", params=[]),
+        )
+        resp.raise_for_status()
+        if "error" in resp.json():
+            typer.echo(
+                f"Failed to stop {active_sequencer.sequencer_id}: {resp.json()['error']}")
+            raise typer.Exit(code=1)
+        hash = resp.json()["result"]
 
     if not hash:
         typer.echo(f"Failed to get a hash to start sequencer")
@@ -464,7 +490,8 @@ def wait_for_condition(description, condition_func, timeout_seconds=300, retry_s
     start_time = time.time()
     while not condition_func():
         if time.time() - start_time > timeout_seconds:
-            print_error(f"Timed out waiting for {description} after {timeout_seconds//60} minutes.")
+            print_error(
+                f"Timed out waiting for {description} after {timeout_seconds//60} minutes.")
             raise typer.Exit(code=1)
         typer.echo(f"Waiting {retry_seconds} seconds for {description}...")
         time.sleep(retry_seconds)
@@ -475,17 +502,17 @@ def wait_for_condition(description, condition_func, timeout_seconds=300, retry_s
 
 @app.command()
 def bootstrap_cluster(
-  network: str,
-  sequencer_start_timeout: Annotated[int, typer.Option(
-    "--sequencer-start-timeout",
-    help="Timeout for sequencer start in seconds. Default is 300 seconds.",
-    envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
-  )] = 300,
-  sequencer_healthy_timeout: Annotated[int, typer.Option(
-    "--sequencer-healthy-timeout",
-    help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
-    envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
-  )] = 300,
+    network: str,
+    sequencer_start_timeout: Annotated[int, typer.Option(
+        "--sequencer-start-timeout",
+        help="Timeout for sequencer start in seconds. Default is 300 seconds.",
+        envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
+    )] = 300,
+    sequencer_healthy_timeout: Annotated[int, typer.Option(
+        "--sequencer-healthy-timeout",
+        help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
+        envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
+    )] = 300,
 ):
     """Bootstraps a new cluster.
 
@@ -506,8 +533,8 @@ def bootstrap_cluster(
 
     # abort if all sequencer are already healthy
     if network_obj.is_healthy():
-      typer.echo("All sequencers are already healthy. Skipping bootstrap.")
-      raise typer.Exit(code=0)
+        typer.echo("All sequencers are already healthy. Skipping bootstrap.")
+        raise typer.Exit(code=0)
 
     leader = network_obj.find_conductor_leader()
     if leader is None:
@@ -515,16 +542,18 @@ def bootstrap_cluster(
         raise typer.Exit(code=1)
 
     if leader.conductor_active:
-      print_error("Current leader is active. Please pause conductor first.")
-      raise typer.Exit(code=1)
-
-    for sequencer in network_obj.sequencers:
-      if sequencer.sequencer_id != leader.sequencer_id and sequencer.sequencer_active:
-        print_error(f"Sequencer {sequencer.sequencer_id} is active even though its not the leader. Please stop it first.")
+        print_error("Current leader is active. Please pause conductor first.")
         raise typer.Exit(code=1)
 
+    for sequencer in network_obj.sequencers:
+        if sequencer.sequencer_id != leader.sequencer_id and sequencer.sequencer_active:
+            print_error(
+                f"Sequencer {sequencer.sequencer_id} is active even though its not the leader. Please stop it first.")
+            raise typer.Exit(code=1)
+
     if not leader.sequencer_active:
-        typer.echo(f"Current leader {leader.sequencer_id} is not sequencing. Forcing it to start...")
+        typer.echo(
+            f"Current leader {leader.sequencer_id} is not sequencing. Forcing it to start...")
         force_active_sequencer(network, leader.sequencer_id, force=True)
 
     wait_for_condition(
