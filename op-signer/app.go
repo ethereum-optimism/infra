@@ -94,6 +94,7 @@ func (s *SignerApp) initPprof(cfg *Config) error {
 func (s *SignerApp) initMetrics(cfg *Config) error {
 	registry := opmetrics.NewRegistry()
 	registry.MustRegister(service.MetricSignTransactionTotal)
+	registry.MustRegister(service.MetricSignBlockPayloadTotal)
 	s.registry = registry // some things require metrics registry
 
 	if !cfg.MetricsConfig.Enabled {
