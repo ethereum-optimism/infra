@@ -3,6 +3,7 @@
 import os
 import time
 import requests
+import logging
 from rich.console import Console
 from rich.table import Table
 import typer
@@ -17,6 +18,7 @@ app = typer.Typer(
 )
 
 console = Console()
+VERBOSE = False
 
 
 @app.callback()
@@ -38,7 +40,29 @@ def load_config(
             envvar="CONDUCTOR_CONFIG",
         ),
     ] = "./config.toml",
+    verbose: Annotated[
+        int,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Increase logging verbosity. Repeat for more detail (e.g., -vv).",
+            envvar="CONDUCTOR_VERBOSE",
+            count=True,
+        ),
+    ] = 0,
 ):
+    # Map verbosity count to logging level
+    if verbose == 0:
+        log_level = logging.WARNING
+    elif verbose == 1:
+        log_level = logging.INFO
+    else:  # 2 or more
+        log_level = logging.DEBUG
+
+    logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
+    logging.debug("Verbose logging enabled (level DEBUG).")
+    logging.info("Informational logging enabled (level INFO).")
+
     networks, config_cert_path = read_config(config_path)
     global NETWORKS
     NETWORKS = networks
@@ -50,6 +74,7 @@ def load_config(
     if cert_path:
         os.environ["REQUESTS_CA_BUNDLE"] = cert_path
         os.environ["SSL_CERT_FILE"] = cert_path
+        logging.info(f"Using certificate: {cert_path}")
 
 
 def get_network(network: str):
@@ -77,7 +102,12 @@ def status(network: str):
     """Print the status of all sequencers in a network."""
     network_obj = get_network(network)
     sequencers = network_obj.sequencers
-    table = Table(
+
+    # Check if any sequencer has a builder_rpc_url
+    has_rollup_boost = any(getattr(s, "builder_rpc_url", None) for s in sequencers)
+
+    # Define base columns
+    columns = [
         "Sequencer ID",
         "Active",
         "Healthy",
@@ -86,9 +116,19 @@ def status(network: str):
         "Voting",
         "Unsafe Number",
         "Unsafe Hash",
-    )
+    ]
+
+    # Add rollup boost column if present
+    if has_rollup_boost:
+        logging.debug("sequencer has builder_rpc_url")
+        columns.append("Builder Synced")
+        columns.append("Rollup Boost Mode")
+
+    table = Table(*columns)  # Unpack columns
+
     for sequencer in sequencers:
-        table.add_row(
+        # Base row data
+        row_data = [
             sequencer.sequencer_id,
             print_boolean(sequencer.conductor_active),
             print_boolean(sequencer.sequencer_healthy),
@@ -97,7 +137,26 @@ def status(network: str):
             print_boolean(sequencer.voting),
             str(sequencer.unsafe_l2_number),
             str(sequencer.unsafe_l2_hash),
-        )
+        ]
+        # Add rollup boost data if the column exists
+        if has_rollup_boost:
+            logging.debug(
+                f"{sequencer.sequencer_id}.l2_unsafe_number: {sequencer.unsafe_l2_number}"
+            )
+            logging.debug(
+                f"{sequencer.sequencer_id}.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
+            )
+            builder_diff = (
+                2
+                > (sequencer.unsafe_l2_number - sequencer.builder_unsafe_l2_number)
+                > -1
+            )
+            logging.debug(f"builder diff: {builder_diff}")
+            row_data.append(print_boolean(builder_diff))
+            row_data.append(sequencer.rollup_boost_execution_mode)
+
+        table.add_row(*row_data)  # Unpack row data
+
     console.print(table)
 
     leader = network_obj.find_conductor_leader()
@@ -139,6 +198,9 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
         print_error(f"Could not find current leader in network {network}")
         raise typer.Exit(code=1)
 
+    logging.debug(f"Found leader: {leader.sequencer_id} at {leader.conductor_rpc_url}")
+    logging.debug(f"Target sequencer: {sequencer.sequencer_id} ({sequencer.raft_addr})")
+
     if sequencer is None:
         print_error(f"Sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
@@ -171,6 +233,8 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     )
     resp.raise_for_status()
     if "error" in resp.json():
+        # Log the full error response if verbose
+        logging.debug(f"Error response body: {resp.text}")
         print_error(
             f"Failed to transfer leader to {sequencer_id}: {resp.json()['error']}"
         )
@@ -477,6 +541,46 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
         raise typer.Exit(code=1)
 
     typer.echo(f"Successfully forced {sequencer_id} to become active")
+
+
+@app.command()
+def set_rollup_boost_mode(network: str, sequencer_id: str, mode: str):
+    """Set the rollup-boost mode: disabled, enabled, or dry_run."""
+    network_obj = get_network(network)
+
+    sequencer = network_obj.get_sequencer_by_id(sequencer_id)
+
+    if mode not in ["disabled", "enabled", "dry_run"]:
+        print_error(
+            f"Invalid mode: {mode}. Please use 'disabled', 'enabled', or 'dry_run'."
+        )
+        raise typer.Exit(code=1)
+
+    if sequencer is None:
+        print_error(f"Sequencer ID {sequencer_id} not found in network {network}")
+        raise typer.Exit(code=1)
+
+    if getattr(sequencer, "rollup_boost_rpc_url", None) is None:
+        print_error(f"Sequencer {sequencer_id} does not have a rollup-boost RPC URL")
+        raise typer.Exit(code=1)
+
+    resp = requests.post(
+        sequencer.rollup_boost_rpc_url,
+        json=make_rpc_payload(
+            "debug_setExecutionMode",
+            params=[{"execution_mode": mode}],
+        ),
+    )
+    resp.raise_for_status()
+    if "error" in resp.json():
+        # Log the full error response if verbose
+        logging.debug(f"Error response body: {resp.text}")
+        print_error(
+            f"Failed to set execution mode for {sequencer_id}: {resp.json()['error']}"
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Successfully updated execution mode to {mode} on {sequencer_id}")
 
 
 def wait_for_condition(
