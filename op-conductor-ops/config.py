@@ -14,12 +14,14 @@ def read_config(config_path: str) -> tuple[dict[str, Sequencer], str]:
     # load sequencers into a map
     sequencers = {}
     for name, seq_config in config['sequencers'].items():
+
         sequencers[name] = Sequencer(
             sequencer_id=name,
             raft_addr=seq_config['raft_addr'],
             conductor_rpc_url=seq_config['conductor_rpc_url'],
             node_rpc_url=seq_config['node_rpc_url'],
-            voting=seq_config['voting']
+            voting=seq_config['voting'],
+            builder_rpc_url=seq_config.get('builder_rpc_url')
         )
 
     # Initialize network, with list of sequencers
