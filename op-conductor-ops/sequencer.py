@@ -8,12 +8,21 @@ from utils import make_rpc_payload
 
 class Sequencer:
     def __init__(
-        self, sequencer_id, raft_addr, conductor_rpc_url, node_rpc_url, voting
+        self,
+        sequencer_id,
+        raft_addr,
+        conductor_rpc_url,
+        node_rpc_url,
+        voting,
+        rollup_boost_rpc_url=None,
+        builder_rpc_url=None,
     ):
         self.sequencer_id = sequencer_id
         self.raft_addr = raft_addr
         self.conductor_rpc_url = conductor_rpc_url
         self.node_rpc_url = node_rpc_url
+        self.rollup_boost_rpc_url = rollup_boost_rpc_url
+        self.builder_rpc_url = builder_rpc_url
         self.voting = voting
         self.conductor_active = None
         self.conductor_leader = None
@@ -21,7 +30,10 @@ class Sequencer:
         self.sequencer_active = None
         self.unsafe_l2_hash = None
         self.unsafe_l2_number = None
+        self.builder_unsafe_l2_number = None
+        self.builder_unsafe_l2_hash = None
         self.update_successful = False
+        self.rollup_boost_execution_mode = None
 
     def _get_sequencer_active(self):
         resp = requests.post(
@@ -67,6 +79,30 @@ class Sequencer:
             return None
         self.conductor_leader = resp.json()["result"]
 
+    def _get_rollup_boost_execution_mode(self):
+        resp = requests.post(
+            self.rollup_boost_rpc_url,
+            json=make_rpc_payload("debug_getExecutionMode"),
+        )
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            return None
+        self.rollup_boost_execution_mode = resp.json()["execution_mode"]
+
+    def _get_builder_unsafe_l2(self):
+        resp = requests.post(
+            self.builder_rpc_url,
+            json=make_rpc_payload("optimism_syncStatus"),
+        )
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            return None
+        result = resp.json()["result"]
+        self.builder_unsafe_l2_number = result["unsafe_l2"]["number"]
+        self.builder_unsafe_l2_hash = result["unsafe_l2"]["hash"]
+
     def _get_unsafe_l2(self):
         resp = requests.post(
             self.node_rpc_url,
@@ -96,6 +132,13 @@ class Sequencer:
             self._get_sequencer_active,
             self._get_unsafe_l2,
         ]
+
+        if self.builder_rpc_url:
+            functions.append(
+                # self._get_rollup_boost_execution_mode,
+                self._get_builder_unsafe_l2,
+            )
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(func): func for func in functions}
             for future in concurrent.futures.as_completed(futures):
