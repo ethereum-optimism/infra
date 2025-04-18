@@ -57,8 +57,16 @@ func TestSenderRateLimitValidation(t *testing.T) {
 		require.NoError(t, err)
 		t.Run(name, func(t *testing.T) {
 			res, _, err := client.SendRequest([]byte(body))
-			require.NoError(t, err)
-			RequireEqualJSON(t, []byte(expResponseBody), res)
+
+			// An update to geth now causes this case to fail.
+			// Legacy transactions are now disabled by default on the modern signer: https://github.com/ethereum/go-ethereum/pull/31434
+			if strings.Contains(name, "no chain id (pre eip-155)") {
+				require.Error(t, err)
+				return
+			} else {
+				require.NoError(t, err)
+				RequireEqualJSON(t, []byte(expResponseBody), res)
+			}
 		})
 	}
 }
