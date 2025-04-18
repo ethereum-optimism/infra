@@ -1428,22 +1428,42 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
 
+			// below are errors that we explicitly handle so that we don't
+			// mark this request as unserviceable (unserviceable requests
+			// indicate a problem with our backends, but there is nothing
+			// wrong with our backends for these errors)
+
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+				// context canceled happens when either the client cancels the request
+				// or proxyd cancels the request. Proxyd only cancels requests when
+				// the server is shutting down, so this must be the client cancelling
+				// the request.
+				errors.Is(err, context.Canceled) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
+
+			if errors.Is(err, ErrBackendResponseTooLarge) ||
+				// we check for "request body too large" when first serving a request,
+				// so this is a special case where the backend has its own rules around
+				// request body size and returns a 413 error. We've seen this with quicknode
+				errors.Is(err, ErrRequestBodyTooLarge) ||
 				errors.Is(err, ErrMethodNotWhitelisted) {
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
-					ServedBy: "",
+					ServedBy: servedBy,
 					error:    err,
 				}
 			}
-			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return &BackendGroupRPCResponse{
-					RPCRes:   nil,
-					ServedBy: "",
-					error:    err,
-				}
-			}
+
+			// below are errors that do indicate a problem with our backends
+			// and if these errors are encountered for all backends, we will
+			// mark this request as unserviceable
+
 			if errors.Is(err, ErrBackendOffline) {
 				log.Warn(
 					"skipping offline backend",
