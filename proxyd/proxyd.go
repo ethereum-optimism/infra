@@ -574,6 +574,8 @@ func Start(config *Config) (*Server, func(), error) {
 	log.Info("started proxyd")
 
 	shutdownFunc := func() {
+		log.Info("draining proxyd")
+		srv.Drain()
 		log.Info("shutting down proxyd")
 		srv.Shutdown()
 		log.Info("goodbye")
