@@ -404,6 +404,8 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 		res, err := b.doForward(ctx, reqs, isBatch)
 		switch err {
 		case nil: // do nothing
+		case context.Canceled:
+			return nil, err
 		case ErrBackendResponseTooLarge:
 			log.Warn(
 				"backend response too large",
@@ -604,6 +606,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
+		// if it's canceld, we don't want to count it as an error
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, wrapErr(err, "error in backend request")
@@ -819,7 +825,12 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	backendResp := <-ch
 
 	if backendResp.error != nil {
-		log.Error("error serving requests",
+		logfn := log.Error
+		// If the context was canceled, downgrade the log level to debug.
+		if errors.Is(backendResp.error, context.Canceled) {
+			logfn = log.Debug
+		}
+		logfn("error serving requests",
 			"req_id", GetReqID(ctx),
 			"auth", GetAuthCtx(ctx),
 			"err", backendResp.error,
@@ -1348,6 +1359,9 @@ type LimitedHTTPClient struct {
 
 func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error) {
 	if err := c.sem.Acquire(req.Context(), 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
 		return nil, wrapErr(err, "too many requests")
 	}
@@ -1427,6 +1441,14 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		if len(rpcReqs) > 0 {
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
+			if errors.Is(err, context.Canceled) {
+				log.Info("context canceled", "req_id", GetReqID(ctx), "auth", GetAuthCtx(ctx))
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
 
 			// below are errors that we explicitly handle so that we don't
 			// mark this request as unserviceable (unserviceable requests
