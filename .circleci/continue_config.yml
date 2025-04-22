@@ -267,7 +267,7 @@ jobs:
 
       - when:
           condition:
-            equal: ["main", <<pipeline.git.branch>>]
+            equal: ['main', <<pipeline.git.branch>>]
           steps:
             - gcp-oidc-authenticate:
                 service_account_email: GCP_SERVICE_ATTESTOR_ACCOUNT_EMAIL
@@ -472,7 +472,7 @@ workflows:
               ignore: /.*/
   op-conductor-mon:
     when:
-      or: [ << pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-conductor-mon-lint
@@ -488,7 +488,7 @@ workflows:
           docker_context: .
   op-conductor-ops:
     when:
-      or: [ << pipeline.parameters.run-build-op-conductor-ops >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-conductor-ops >>, << pipeline.parameters.run-all >>]
     jobs:
       - op-conductor-ops-lint
       - docker-build:
@@ -499,7 +499,7 @@ workflows:
           docker_context: .
   op-signer:
     when:
-      or: [ << pipeline.parameters.run-build-op-signer >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-signer >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-signer-lint
@@ -515,7 +515,7 @@ workflows:
           docker_context: .
   peer-mgmt-service:
     when:
-      or: [ << pipeline.parameters.run-build-pms >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-pms >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: pms-lint
@@ -531,7 +531,7 @@ workflows:
           docker_context: .
   op-txproxy:
     when:
-      or: [ << pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-txproxy >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-txproxy-lint
@@ -547,7 +547,7 @@ workflows:
           docker_context: .
   op-ufm:
     when:
-      or: [ << pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-ufm >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-ufm-lint
@@ -563,7 +563,7 @@ workflows:
           docker_context: .
   op-proxyd:
     when:
-      or: [ << pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-proxyd >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: proxyd-lint
@@ -595,7 +595,7 @@ workflows:
           docker_context: .
   op-acceptor:
     when:
-      or: [ << pipeline.parameters.run-build-op-acceptor >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-op-acceptor >>, << pipeline.parameters.run-all >>]
     jobs:
       - go-lint:
           name: op-acceptor-lint
@@ -611,7 +611,7 @@ workflows:
           docker_context: .
   replica-healthcheck:
     when:
-      or: [ << pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >> ]
+      or: [<< pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >>]
     jobs:
       - docker-build:
           name: replica-healthcheck-docker-build
