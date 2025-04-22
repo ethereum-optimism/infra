@@ -12,6 +12,28 @@ typer = "^0.12.3"
 requests = "^2.31.0"
 toml = "^0.10.2"
 
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | __pycache
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''

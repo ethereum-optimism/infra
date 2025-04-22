@@ -10,9 +10,12 @@ class Network:
     def update(self):
         def _update(sequencer):
             sequencer.update()
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             list(executor.map(_update, self.sequencers))
-        self.update_successful = all(sequencer.update_successful for sequencer in self.sequencers)
+        self.update_successful = all(
+            sequencer.update_successful for sequencer in self.sequencers
+        )
 
     def get_sequencer_by_id(self, sequencer_id: str):
         return next(
