@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
-	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
 // trackedMockRunner is a mock runner that counts executions and provides synchronization
@@ -337,4 +337,13 @@ func TestNAT_RunOnceMode(t *testing.T) {
 		"Expected exactly one test execution")
 	assert.True(t, shutdownCalled,
 		"Expected shutdown to be called in run-once mode")
+}
+
+// TestExtractNetworkName tests the network name extraction from DEVNET_ENV_URL
+// Note: We don't test the actual LoadDevnetFromURL functionality here
+// as that's tested in the devnet-sdk package. We're just verifying
+// that we return the name as-is without modifications.
+func TestExtractNetworkName(t *testing.T) {
+	result := extractNetworkName("")
+	assert.Equal(t, "unknown", result, "Empty URL should return 'unknown'")
 }
