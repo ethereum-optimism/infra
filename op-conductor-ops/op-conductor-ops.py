@@ -23,22 +23,33 @@ VERBOSE = False
 
 @app.callback()
 def load_config(
-    cert: Annotated[str, typer.Option(
-        "--cert",
-        help="[Optional] Certificate file path for https. Takes precedece over cert_path config",
-        envvar="CONDUCTOR_CERT",
-    )] = "",
-    config_path: Annotated[str, typer.Option(
-        "--config", "-c",
-        help="Path to config file.",
-        envvar="CONDUCTOR_CONFIG",
-    )] = "./config.toml",
-    verbose: Annotated[int, typer.Option(
-        "--verbose", "-v",
-        help="Increase logging verbosity. Repeat for more detail (e.g., -vv).",
-        envvar="CONDUCTOR_VERBOSE",
-        count=True,
-    )] = 0,
+    cert: Annotated[
+        str,
+        typer.Option(
+            "--cert",
+            help="[Optional] Certificate file path for https. Takes precedece over cert_path config",
+            envvar="CONDUCTOR_CERT",
+        ),
+    ] = "",
+    config_path: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to config file.",
+            envvar="CONDUCTOR_CONFIG",
+        ),
+    ] = "./config.toml",
+    verbose: Annotated[
+        int,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Increase logging verbosity. Repeat for more detail (e.g., -vv).",
+            envvar="CONDUCTOR_VERBOSE",
+            count=True,
+        ),
+    ] = 0,
 ):
     # Map verbosity count to logging level
     if verbose == 0:
@@ -48,7 +59,7 @@ def load_config(
     else:  # 2 or more
         log_level = logging.DEBUG
 
-    logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
+    logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
     logging.debug("Verbose logging enabled (level DEBUG).")
     logging.info("Informational logging enabled (level INFO).")
 
@@ -93,8 +104,7 @@ def status(network: str):
     sequencers = network_obj.sequencers
 
     # Check if any sequencer has a builder_rpc_url
-    has_rollup_boost = any(getattr(s, 'builder_rpc_url', None)
-                           for s in sequencers)
+    has_rollup_boost = any(getattr(s, "builder_rpc_url", None) for s in sequencers)
 
     # Define base columns
     columns = [
@@ -129,12 +139,15 @@ def status(network: str):
         ]
         # Add rollup boost data if the column exists
         if has_rollup_boost and sequencer.builder_unsafe_l2_number:
+            logging.debug(f"sequencer.l2_unsafe_number: {sequencer.unsafe_l2_number}")
             logging.debug(
-                f"sequencer.l2_unsafe_number: {sequencer.unsafe_l2_number}")
-            logging.debug(
-                f"sequencer.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}")
-            builder_diff = 2 > (sequencer.unsafe_l2_number -
-                                sequencer.builder_unsafe_l2_number) > -1
+                f"sequencer.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
+            )
+            builder_diff = (
+                2
+                > (sequencer.unsafe_l2_number - sequencer.builder_unsafe_l2_number)
+                > -1
+            )
             row_data.append(print_boolean(builder_diff))
 
         table.add_row(*row_data)  # Unpack row data
@@ -180,10 +193,8 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
         print_error(f"Could not find current leader in network {network}")
         raise typer.Exit(code=1)
 
-    logging.debug(
-        f"Found leader: {leader.sequencer_id} at {leader.conductor_rpc_url}")
-    logging.debug(
-        f"Target sequencer: {sequencer.sequencer_id} ({sequencer.raft_addr})")
+    logging.debug(f"Found leader: {leader.sequencer_id} at {leader.conductor_rpc_url}")
+    logging.debug(f"Target sequencer: {sequencer.sequencer_id} ({sequencer.raft_addr})")
 
     if sequencer is None:
         print_error(f"Sequencer ID {sequencer_id} not found in network {network}")
@@ -195,15 +206,18 @@ def transfer_leader(network: str, sequencer_id: str, force: bool = False):
     if not force:
         if not sequencer.sequencer_healthy:
             print_error(
-                f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force.")
+                f"Target sequencer {sequencer_id} is not healthy. To still perform the leadership transfer, please use --force."
+            )
             raise typer.Exit(code=1)
         if not sequencer.conductor_active:
             print_error(
-                f"Target sequencer {sequencer_id} conductor is paused. Please run 'resume' command first.")
+                f"Target sequencer {sequencer_id} conductor is paused. Please run 'resume' command first."
+            )
             raise typer.Exit(code=1)
         if not leader.conductor_active:
             print_error(
-                f"Current leader {leader.sequencer_id} conductor is paused. Please run 'resume' command first.")
+                f"Current leader {leader.sequencer_id} conductor is paused. Please run 'resume' command first."
+            )
 
     resp = requests.post(
         leader.conductor_rpc_url,
@@ -305,12 +319,15 @@ def override_leader(
     if remove:
         if y:
             print_warn(
-                "You are trying to remove the override. This would require you to explicitly restart op-node.")
+                "You are trying to remove the override. This would require you to explicitly restart op-node."
+            )
         else:
             typer.echo(
-                "Note: you are trying to remove the override. This would require you to explicitly restart op-node.")
+                "Note: you are trying to remove the override. This would require you to explicitly restart op-node."
+            )
             typer.echo(
-                "Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':")
+                "Please be carefully sure of that and proceed by entering 'y' or exit by entering 'n':"
+            )
             user_input = input().lower()
             if user_input not in ["y", "n"]:
                 print_error("Wrong input provided")
@@ -341,11 +358,11 @@ def override_leader(
             )
             raise typer.Exit(code=1)
 
-    typer.echo(
-        f"Successfully overrode leader for {sequencer_id} to {not remove}")
+    typer.echo(f"Successfully overrode leader for {sequencer_id} to {not remove}")
     if remove:
         typer.echo(
-            "As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it.")
+            "As you provided --remove, do remember to restart the op-node pod to remove the leadership-override from it."
+        )
 
 
 @app.command()
@@ -444,8 +461,7 @@ def halt_sequencer(network: str, force: bool = False):
 
     active_sequencer = network_obj.find_active_sequencer()
     if active_sequencer is None:
-        print_error(
-            f"Could not find an active sequencer in the network: {network}")
+        print_error(f"Could not find an active sequencer in the network: {network}")
         raise typer.Exit(code=1)
 
     try:
@@ -474,14 +490,12 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
     network_obj = get_network(network)
     sequencer = network_obj.get_sequencer_by_id(sequencer_id)
     if sequencer is None:
-        typer.echo(
-            f"sequencer ID {sequencer_id} not found in network {network}")
+        typer.echo(f"sequencer ID {sequencer_id} not found in network {network}")
         raise typer.Exit(code=1)
 
     # Pre-flight check: Ensure all conductors are paused
     sequencers = network_obj.sequencers
-    all_paused = all(
-        not sequencer.conductor_active for sequencer in sequencers)
+    all_paused = all(not sequencer.conductor_active for sequencer in sequencers)
     if not all_paused and not force:
         print_error("Not all conductors are paused. Run 'pause' command first.")
         raise typer.Exit(code=1)
@@ -498,7 +512,8 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
         resp.raise_for_status()
         if "error" in resp.json():
             typer.echo(
-                f"Failed to stop {active_sequencer.sequencer_id}: {resp.json()['error']}")
+                f"Failed to stop {active_sequencer.sequencer_id}: {resp.json()['error']}"
+            )
             raise typer.Exit(code=1)
         hash = resp.json()["result"]
 
@@ -542,7 +557,8 @@ def wait_for_condition(
     while not condition_func():
         if time.time() - start_time > timeout_seconds:
             print_error(
-                f"Timed out waiting for {description} after {timeout_seconds//60} minutes.")
+                f"Timed out waiting for {description} after {timeout_seconds//60} minutes."
+            )
             raise typer.Exit(code=1)
         typer.echo(f"Waiting {retry_seconds} seconds for {description}...")
         time.sleep(retry_seconds)
@@ -554,16 +570,22 @@ def wait_for_condition(
 @app.command()
 def bootstrap_cluster(
     network: str,
-    sequencer_start_timeout: Annotated[int, typer.Option(
-        "--sequencer-start-timeout",
-        help="Timeout for sequencer start in seconds. Default is 300 seconds.",
-        envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
-    )] = 300,
-    sequencer_healthy_timeout: Annotated[int, typer.Option(
-        "--sequencer-healthy-timeout",
-        help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
-        envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
-    )] = 300,
+    sequencer_start_timeout: Annotated[
+        int,
+        typer.Option(
+            "--sequencer-start-timeout",
+            help="Timeout for sequencer start in seconds. Default is 300 seconds.",
+            envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
+        ),
+    ] = 300,
+    sequencer_healthy_timeout: Annotated[
+        int,
+        typer.Option(
+            "--sequencer-healthy-timeout",
+            help="Timeout for sequencer healthy in seconds. Default is 300 seconds.",
+            envvar="BOOTSTRAP_SEQUENCER_HEALTHY_TIMEOUT",
+        ),
+    ] = 300,
 ):
     """Bootstraps a new cluster.
 
@@ -599,12 +621,14 @@ def bootstrap_cluster(
     for sequencer in network_obj.sequencers:
         if sequencer.sequencer_id != leader.sequencer_id and sequencer.sequencer_active:
             print_error(
-                f"Sequencer {sequencer.sequencer_id} is active even though its not the leader. Please stop it first.")
+                f"Sequencer {sequencer.sequencer_id} is active even though its not the leader. Please stop it first."
+            )
             raise typer.Exit(code=1)
 
     if not leader.sequencer_active:
         typer.echo(
-            f"Current leader {leader.sequencer_id} is not sequencing. Forcing it to start...")
+            f"Current leader {leader.sequencer_id} is not sequencing. Forcing it to start..."
+        )
         force_active_sequencer(network, leader.sequencer_id, force=True)
 
     wait_for_condition(
