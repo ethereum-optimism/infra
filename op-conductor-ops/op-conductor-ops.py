@@ -139,15 +139,18 @@ def status(network: str):
         ]
         # Add rollup boost data if the column exists
         if has_rollup_boost and sequencer.builder_unsafe_l2_number:
-            logging.debug(f"sequencer.l2_unsafe_number: {sequencer.unsafe_l2_number}")
             logging.debug(
-                f"sequencer.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
+                f"{sequencer.sequencer_id}.l2_unsafe_number: {sequencer.unsafe_l2_number}"
+            )
+            logging.debug(
+                f"{sequencer.sequencer_id}.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
             )
             builder_diff = (
                 2
                 > (sequencer.unsafe_l2_number - sequencer.builder_unsafe_l2_number)
                 > -1
             )
+            logging.debug(f"builder diff: {builder_diff}")
             row_data.append(print_boolean(builder_diff))
 
         table.add_row(*row_data)  # Unpack row data
