@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
 func TestErrToLabel(t *testing.T) {
@@ -74,4 +76,11 @@ func TestRecordAcceptance(t *testing.T) {
 	// Test acceptance scenarios
 	RecordAcceptance("test-network", "run1", "pass", 1, 1, 0, time.Second)
 	RecordAcceptance("test-network", "run1", "fail", 1, 0, 1, time.Second)
+}
+
+func TestRecordIndividualTest(t *testing.T) {
+	// Test individual test recording for different status values
+	RecordIndividualTest("test-network", "run1", "TestFoo", "gate1", "", types.TestStatusPass, time.Second)
+	RecordIndividualTest("test-network", "run1", "TestBar", "gate1", "suite1", types.TestStatusFail, 500*time.Millisecond)
+	RecordIndividualTest("test-network", "run1", "TestBaz", "gate1", "suite1", types.TestStatusSkip, 100*time.Millisecond)
 }

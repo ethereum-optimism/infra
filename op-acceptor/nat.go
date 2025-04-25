@@ -309,6 +309,74 @@ func (n *nat) runTests() error {
 		logDir = n.fileLogger.GetBaseDir()
 	}
 
+	// Record metrics for the test run
+	metrics.RecordAcceptance(
+		n.networkName,
+		result.RunID,
+		string(n.result.Status),
+		n.result.Stats.Total,
+		n.result.Stats.Passed,
+		n.result.Stats.Failed,
+		n.result.Duration,
+	)
+
+	// Record metrics for individual tests
+	for _, gate := range n.result.Gates {
+		// Record direct gate tests
+		for testName, test := range gate.Tests {
+			metrics.RecordIndividualTest(
+				n.networkName,
+				result.RunID,
+				testName,
+				gate.ID,
+				"", // No suite for direct gate tests
+				test.Status,
+				test.Duration,
+			)
+
+			// Record subtests if present
+			for subTestName, subTest := range test.SubTests {
+				metrics.RecordIndividualTest(
+					n.networkName,
+					result.RunID,
+					subTestName,
+					gate.ID,
+					"", // No suite for direct gate tests
+					subTest.Status,
+					subTest.Duration,
+				)
+			}
+		}
+
+		// Record suite tests
+		for suiteName, suite := range gate.Suites {
+			for testName, test := range suite.Tests {
+				metrics.RecordIndividualTest(
+					n.networkName,
+					result.RunID,
+					testName,
+					gate.ID,
+					suiteName,
+					test.Status,
+					test.Duration,
+				)
+
+				// Record subtests if present
+				for subTestName, subTest := range test.SubTests {
+					metrics.RecordIndividualTest(
+						n.networkName,
+						result.RunID,
+						subTestName,
+						gate.ID,
+						suiteName,
+						subTest.Status,
+						subTest.Duration,
+					)
+				}
+			}
+		}
+	}
+
 	n.config.Log.Info("Test run completed",
 		"run_id", result.RunID,
 		"status", n.result.Status,
@@ -545,17 +613,6 @@ func (n *nat) printResultsTable(runID string) {
 	})
 
 	t.Render()
-
-	// Emit metrics
-	metrics.RecordAcceptance(
-		n.networkName,
-		runID,
-		string(n.result.Status),
-		n.result.Stats.Total,
-		n.result.Stats.Passed,
-		n.result.Stats.Failed,
-		n.result.Duration,
-	)
 }
 
 // Helper function to convert bool to int
