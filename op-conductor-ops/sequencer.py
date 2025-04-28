@@ -33,7 +33,7 @@ class Sequencer:
         self.builder_unsafe_l2_number = None
         self.builder_unsafe_l2_hash = None
         self.update_successful = False
-        # self.rollup_boost_execution_mode = None
+        self.rollup_boost_execution_mode = None
 
     def _get_sequencer_active(self):
         resp = requests.post(
@@ -88,7 +88,7 @@ class Sequencer:
             resp.raise_for_status()
         except Exception as e:
             return None
-        self.rollup_boost_execution_mode = resp.json()["execution_mode"]
+        self.rollup_boost_execution_mode = resp.json()["result"]["execution_mode"]
 
     def _get_builder_unsafe_l2(self):
         resp = requests.post(

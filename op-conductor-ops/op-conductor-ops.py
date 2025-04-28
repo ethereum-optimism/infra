@@ -122,7 +122,7 @@ def status(network: str):
     if has_rollup_boost:
         logging.debug("sequencer has builder_rpc_url")
         columns.append("Builder Synced")
-        # columns.append("Rollup Boost Mode")
+        columns.append("Rollup Boost Mode")
 
     table = Table(*columns)  # Unpack columns
 
@@ -153,7 +153,7 @@ def status(network: str):
             )
             logging.debug(f"builder diff: {builder_diff}")
             row_data.append(print_boolean(builder_diff))
-            # row_data.append(sequencer.rollup_boost_execution_mode)
+            row_data.append(sequencer.rollup_boost_execution_mode)
 
         table.add_row(*row_data)  # Unpack row data
 
