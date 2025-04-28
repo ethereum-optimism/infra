@@ -122,6 +122,7 @@ def status(network: str):
     if has_rollup_boost:
         logging.debug("sequencer has builder_rpc_url")
         columns.append("Builder Synced")
+        # columns.append("Rollup Boost Mode")
 
     table = Table(*columns)  # Unpack columns
 
@@ -138,7 +139,7 @@ def status(network: str):
             str(sequencer.unsafe_l2_hash),
         ]
         # Add rollup boost data if the column exists
-        if has_rollup_boost and sequencer.builder_unsafe_l2_number:
+        if has_rollup_boost:
             logging.debug(
                 f"{sequencer.sequencer_id}.l2_unsafe_number: {sequencer.unsafe_l2_number}"
             )
@@ -152,6 +153,7 @@ def status(network: str):
             )
             logging.debug(f"builder diff: {builder_diff}")
             row_data.append(print_boolean(builder_diff))
+            # row_data.append(sequencer.rollup_boost_execution_mode)
 
         table.add_row(*row_data)  # Unpack row data
 

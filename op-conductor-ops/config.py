@@ -22,6 +22,7 @@ def read_config(config_path: str) -> tuple[dict[str, Sequencer], str]:
             node_rpc_url=seq_config["node_rpc_url"],
             voting=seq_config["voting"],
             builder_rpc_url=seq_config.get("builder_rpc_url"),
+            rollup_boost_rpc_url=seq_config.get("rollup_boost_debug_rpc_url"),
         )
 
     # Initialize network, with list of sequencers

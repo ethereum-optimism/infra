@@ -33,7 +33,7 @@ class Sequencer:
         self.builder_unsafe_l2_number = None
         self.builder_unsafe_l2_hash = None
         self.update_successful = False
-        self.rollup_boost_execution_mode = None
+        # self.rollup_boost_execution_mode = None
 
     def _get_sequencer_active(self):
         resp = requests.post(
@@ -137,10 +137,9 @@ class Sequencer:
         ]
 
         if self.builder_rpc_url:
-            functions.append(
-                # self._get_rollup_boost_execution_mode,
-                self._get_builder_unsafe_l2,
-            )
+            functions.append(self._get_builder_unsafe_l2)
+        if self.rollup_boost_rpc_url:
+            functions.append(self._get_rollup_boost_execution_mode)
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(func): func for func in functions}
