@@ -11,7 +11,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/semaphore"
@@ -339,6 +341,11 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
+	interopValidatingBackends := []miner.BackendWithInterop{}
+	for _, url := range config.InteropValidationConfig.Urls {
+		interopValidatingBackends = append(interopValidatingBackends, interop.NewInteropClient(url))
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -356,6 +363,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
+		interopValidatingBackends,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

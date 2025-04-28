@@ -20,7 +20,10 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/miner"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
@@ -51,31 +54,32 @@ const (
 var emptyArrayResponse = json.RawMessage("[]")
 
 type Server struct {
-	BackendGroups          map[string]*BackendGroup
-	wsBackendGroup         *BackendGroup
-	wsMethodWhitelist      *StringSet
-	rpcMethodMappings      map[string]string
-	maxBodySize            int64
-	enableRequestLog       bool
-	maxRequestBodyLogLen   int
-	authenticatedPaths     map[string]string
-	timeout                time.Duration
-	maxUpstreamBatchSize   int
-	maxBatchSize           int
-	enableServedByHeader   bool
-	upgrader               *websocket.Upgrader
-	mainLim                FrontendRateLimiter
-	overrideLims           map[string]FrontendRateLimiter
-	senderLim              FrontendRateLimiter
-	allowedChainIds        []*big.Int
-	limExemptOrigins       []*regexp.Regexp
-	limExemptUserAgents    []*regexp.Regexp
-	globallyLimitedMethods map[string]bool
-	rpcServer              *http.Server
-	wsServer               *http.Server
-	cache                  RPCCache
-	srvMu                  sync.Mutex
-	rateLimitHeader        string
+	BackendGroups             map[string]*BackendGroup
+	wsBackendGroup            *BackendGroup
+	wsMethodWhitelist         *StringSet
+	rpcMethodMappings         map[string]string
+	maxBodySize               int64
+	enableRequestLog          bool
+	maxRequestBodyLogLen      int
+	authenticatedPaths        map[string]string
+	timeout                   time.Duration
+	maxUpstreamBatchSize      int
+	maxBatchSize              int
+	enableServedByHeader      bool
+	upgrader                  *websocket.Upgrader
+	mainLim                   FrontendRateLimiter
+	overrideLims              map[string]FrontendRateLimiter
+	senderLim                 FrontendRateLimiter
+	allowedChainIds           []*big.Int
+	limExemptOrigins          []*regexp.Regexp
+	limExemptUserAgents       []*regexp.Regexp
+	globallyLimitedMethods    map[string]bool
+	rpcServer                 *http.Server
+	wsServer                  *http.Server
+	cache                     RPCCache
+	srvMu                     sync.Mutex
+	rateLimitHeader           string
+	interopValidatingBackends []miner.BackendWithInterop
 }
 
 type limiterFunc func(method string) bool
@@ -99,6 +103,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
+	interopValidatingBackends []miner.BackendWithInterop,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -183,14 +188,15 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                mainLim,
-		overrideLims:           overrideLims,
-		globallyLimitedMethods: globalMethodLims,
-		senderLim:              senderLim,
-		allowedChainIds:        senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:       limExemptOrigins,
-		limExemptUserAgents:    limExemptUserAgents,
-		rateLimitHeader:        rateLimitHeader,
+		mainLim:                   mainLim,
+		overrideLims:              overrideLims,
+		globallyLimitedMethods:    globalMethodLims,
+		senderLim:                 senderLim,
+		allowedChainIds:           senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:          limExemptOrigins,
+		limExemptUserAgents:       limExemptUserAgents,
+		rateLimitHeader:           rateLimitHeader,
+		interopValidatingBackends: interopValidatingBackends,
 	}, nil
 }
 
@@ -388,6 +394,84 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
+func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
+	if len(s.interopValidatingBackends) == 0 {
+		// use unknown below to prevent DOS vector that fills up memory
+		// with arbitrary method names.
+		log.Debug(
+			"no validating backends found",
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+		)
+		return nil
+	}
+
+	tx, err := convertSendReqToSendTx(ctx, rpcReq)
+	if err != nil {
+		return fmt.Errorf("error parsing transaction: %w", err)
+	}
+
+	interopAccessList := interoptypes.TxToInteropAccessList(tx)
+	if len(interopAccessList) == 0 {
+		return nil // avoid an RPC check if there are no executing messages to verify.
+	}
+
+	resultChan := make(chan error, len(s.interopValidatingBackends))
+
+	// concurrently broadcast the checkAccessList operation to all the validating backends
+	var wg sync.WaitGroup
+	for _, validatingBackend := range s.interopValidatingBackends {
+		wg.Add(1)
+		go func(b miner.BackendWithInterop) {
+			defer wg.Done()
+			err := b.CheckAccessList(ctx, interopAccessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
+				Timestamp: uint64(time.Now().Second() + 1000),
+			})
+			resultChan <- err
+		}(validatingBackend)
+	}
+
+	// goroutine which waits for all the sender goroutines created above to be done, and drain and close the resultChan
+	go func() {
+		wg.Wait()
+		for range resultChan {
+		} // drain the channel
+		close(resultChan)
+	}()
+
+	// Success: if at least one backend responds successfully
+	// Failure: the first error response if all the backends respond with an error
+	var firstErr error
+	for range len(s.interopValidatingBackends) {
+		err := <-resultChan
+		if err == nil { // at least one success observed
+			return nil
+		} else if firstErr == nil { // record the first error for returning it if no validating backend succeeds
+			firstErr = err
+		}
+	}
+
+	if httpErr, ok := firstErr.(rpc.HTTPError); ok {
+		var rpcErr rpcResJSON
+		if err := json.Unmarshal(httpErr.Body, &rpcErr); err == nil {
+			return &RPCErr{
+				Code:    rpcErr.Error.Code,
+				Message: rpcErr.Error.Message,
+				Data:    rpcErr.Error.Data,
+
+				HTTPErrorCode: httpErr.StatusCode,
+			}
+		}
+
+		return &RPCErr{
+			Code:          -32602,
+			Message:       string(httpErr.Body),
+			HTTPErrorCode: httpErr.StatusCode,
+		}
+	}
+	return firstErr
+}
+
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool) ([]*RPCRes, bool, string, error) {
 	// A request set is transformed into groups of batches.
 	// Each batch group maps to a forwarded JSON-RPC batch request (subject to maxUpstreamBatchSize constraints)
@@ -478,12 +562,20 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
-		if parsedReq.Method == "eth_sendRawTransaction" && s.senderLim != nil {
-			if err := s.rateLimitSender(ctx, parsedReq); err != nil {
+		if parsedReq.Method == "eth_sendRawTransaction" {
+			if s.senderLim != nil {
+				if err := s.rateLimitSender(ctx, parsedReq); err != nil {
+					RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+					responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+					continue
+				}
+			}
+			if err := s.validateInteropSendRpcRequest(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
+
 		}
 
 		id := string(parsedReq.ID)
@@ -677,33 +769,45 @@ func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transaction, error) {
+	if req.Method != "eth_sendRawTransaction" {
+		return nil, ErrInvalidRequest("expected method eth_sendRawTransaction, got " + req.Method)
+	}
+
 	var params []string
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
-		return ErrParseErr
+		return nil, ErrParseErr
 	}
 
 	if len(params) != 1 {
 		log.Debug("raw transaction request has invalid number of params", "req_id", GetReqID(ctx))
 		// The error below is identical to the one Geth responds with.
-		return ErrInvalidParams("missing value for required argument 0")
+		return nil, ErrInvalidParams("missing value for required argument 0")
 	}
 
 	var data hexutil.Bytes
 	if err := data.UnmarshalText([]byte(params[0])); err != nil {
 		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
 		// Geth returns the raw error from UnmarshalText.
-		return ErrInvalidParams(err.Error())
+		return nil, ErrInvalidParams(err.Error())
 	}
 
 	// Inflates a types.Transaction object from the transaction's raw bytes.
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(data); err != nil {
 		log.Debug("could not unmarshal transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
+		return nil, ErrInvalidParams(err.Error())
 	}
 
+	return tx, nil
+}
+
+func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+	tx, err := convertSendReqToSendTx(ctx, req)
+	if err != nil {
+		return err
+	}
 	// Check if the transaction is for the expected chain,
 	// otherwise reject before rate limiting to avoid replay attacks.
 	if !s.isAllowedChainId(tx.ChainId()) {
