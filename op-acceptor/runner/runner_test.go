@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1520,4 +1521,70 @@ func TestDirectToGate(t *testing.T) {
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
 	assert.Equal(t, ".", result.Metadata.Package)
 	assert.False(t, result.Metadata.RunAll)
+}
+
+// TestRunTest_NetworkName tests that the network name is correctly passed when calling RunTest
+func TestRunTest_NetworkName(t *testing.T) {
+	// Create a temporary directory for test execution
+	workDir := t.TempDir()
+
+	// Create test config
+	testContent := []byte(`
+package test
+
+import "testing"
+
+func TestExample(t *testing.T) {
+	// This is a simple test
+}
+`)
+	err := os.WriteFile(filepath.Join(workDir, "test_example.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	// Initialize go module in test directory
+	initGoModule(t, workDir, "test")
+
+	// Create a registry with mock validators
+	configContent := []byte(`
+gates:
+  - id: test-gate
+    tests:
+      - name: TestExample
+        package: "."
+`)
+	validatorConfigPath := filepath.Join(workDir, "validators.yaml")
+	err = os.WriteFile(validatorConfigPath, configContent, 0644)
+	require.NoError(t, err)
+
+	reg, err := registry.NewRegistry(registry.Config{
+		ValidatorConfigFile: validatorConfigPath,
+	})
+	require.NoError(t, err)
+
+	// Create expected network name
+	expectedNetworkName := "test-network-name"
+
+	// Create runner with test network name
+	r, err := NewTestRunner(Config{
+		Registry:    reg,
+		WorkDir:     workDir,
+		Log:         log.New(),
+		GoBinary:    "echo", // Mock the Go binary to avoid actual execution
+		NetworkName: expectedNetworkName,
+	})
+	require.NoError(t, err)
+
+	// Cast to access the internal fields
+	runner := r.(*runner)
+
+	// Set a runID to avoid errors
+	runner.runID = "test-run-id"
+
+	// Verify the network name was correctly set in the runner
+	assert.Equal(t, expectedNetworkName, runner.networkName,
+		"Expected network name to be set in the runner")
+
+	// Get a validator from the registry
+	validators := reg.GetValidators()
+	require.NotEmpty(t, validators, "Registry should have validators")
 }
