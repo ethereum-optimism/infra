@@ -64,7 +64,6 @@ var (
 		Name:      "rpc_supervisor_checks_total",
 		Help:      "Count of total supervisor checks.",
 	}, []string{
-		"auth",
 		"supervisor_url",
 		"status_code",
 		"strategy",

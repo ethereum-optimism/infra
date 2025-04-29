@@ -396,7 +396,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
-	log.Debug(
+	log.Info(
 		"validating interop access list",
 		"source", "rpc",
 		"req_id", GetReqID(ctx),
@@ -417,7 +417,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 
 	tx, err := convertSendReqToSendTx(ctx, rpcReq)
 	if err != nil {
-		return ErrInvalidRequest(fmt.Sprintf("error parsing transaction: %w", err))
+		return ErrInvalidRequest(fmt.Sprintf("error parsing transaction: %s", err.Error()))
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
@@ -447,7 +447,6 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			}
 		}
 		rpcSupervisorChecksTotal.WithLabelValues(
-			GetAuthCtx(ctx),
 			url,
 			statusCode,
 			strategy,
@@ -463,10 +462,12 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return err
 	}
 
+	var finalErr error
+
 	switch s.interopValidatingConfig.Strategy {
 	case FirstSupervisorStrategy, EmptyStrategy:
 		err := performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
-		return parseInteropError(err)
+		finalErr = parseInteropError(err)
 	case MulticallStrategy:
 		resultChan := make(chan error, len(s.interopValidatingConfig.Urls))
 		// concurrently broadcast the checkAccessList operation to all the validating backends
@@ -505,10 +506,15 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 				firstErr = err
 			}
 		}
-		return parseInteropError(firstErr)
+		finalErr = parseInteropError(firstErr)
 	default:
-		return ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
+		finalErr = ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
 	}
+
+	if finalErr == nil {
+		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "method", rpcReq.Method)
+	}
+	return finalErr
 }
 
 func getInteropExecutingDescriptorTimestamp() uint64 {
