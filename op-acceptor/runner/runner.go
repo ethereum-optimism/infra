@@ -84,25 +84,29 @@ type TestRunnerWithFileLogger interface {
 	SetFileLogger(logger *logging.FileLogger)
 }
 
+// runner struct implements TestRunner interface
 type runner struct {
-	registry   *registry.Registry
-	validators []types.ValidatorMetadata
-	workDir    string // Directory for running tests
-	log        log.Logger
-	runID      string
-	goBinary   string              // Path to the Go binary
-	allowSkips bool                // Whether to allow skipping tests when preconditions are not met
-	fileLogger *logging.FileLogger // Logger for storing test results
+	registry    *registry.Registry
+	validators  []types.ValidatorMetadata
+	workDir     string // Directory for running tests
+	log         log.Logger
+	runID       string
+	goBinary    string              // Path to the Go binary
+	allowSkips  bool                // Whether to allow skipping tests when preconditions are not met
+	fileLogger  *logging.FileLogger // Logger for storing test results
+	networkName string              // Name of the network being tested
 }
 
+// Config holds configuration for creating a new runner
 type Config struct {
-	Registry   *registry.Registry
-	TargetGate string
-	WorkDir    string
-	Log        log.Logger
-	GoBinary   string              // path to the Go binary
-	AllowSkips bool                // Whether to allow skipping tests when preconditions are not met
-	FileLogger *logging.FileLogger // Logger for storing test results
+	Registry    *registry.Registry
+	TargetGate  string
+	WorkDir     string
+	Log         log.Logger
+	GoBinary    string              // path to the Go binary
+	AllowSkips  bool                // Whether to allow skipping tests when preconditions are not met
+	FileLogger  *logging.FileLogger // Logger for storing test results
+	NetworkName string              // Name of the network being tested
 }
 
 // NewTestRunner creates a new test runner instance
@@ -132,16 +136,24 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cfg.GoBinary = "go" // Default to "go" if not specified
 	}
 
-	cfg.Log.Debug("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir, "allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary)
+	// Default network name if not specified
+	networkName := cfg.NetworkName
+	if networkName == "" {
+		networkName = "unknown"
+	}
+
+	cfg.Log.Debug("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir,
+		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName)
 
 	return &runner{
-		registry:   cfg.Registry,
-		validators: validators,
-		workDir:    cfg.WorkDir,
-		log:        cfg.Log,
-		goBinary:   cfg.GoBinary,
-		allowSkips: cfg.AllowSkips,
-		fileLogger: cfg.FileLogger,
+		registry:    cfg.Registry,
+		validators:  validators,
+		workDir:     cfg.WorkDir,
+		log:         cfg.Log,
+		goBinary:    cfg.GoBinary,
+		allowSkips:  cfg.AllowSkips,
+		fileLogger:  cfg.FileLogger,
+		networkName: networkName,
 	}, nil
 }
 
@@ -367,9 +379,7 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 	} else {
 		status = types.TestStatusError
 	}
-	// TODO: handle network
-	// https://github.com/ethereum-optimism/infra/issues/193
-	metrics.RecordValidation("todo", r.runID, metadata.ID, metadata.Type.String(), status)
+	metrics.RecordValidation(r.networkName, r.runID, metadata.ID, metadata.Type.String(), status)
 
 	return result, err
 }

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
@@ -19,6 +20,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/google/uuid"
 )
@@ -28,13 +30,14 @@ var _ cliapp.Lifecycle = &nat{}
 
 // nat is a Network Acceptance Tester that runs tests.
 type nat struct {
-	ctx        context.Context
-	config     *Config
-	version    string
-	registry   *registry.Registry
-	runner     runner.TestRunner
-	result     *runner.RunnerResult
-	fileLogger *logging.FileLogger
+	ctx         context.Context
+	config      *Config
+	version     string
+	registry    *registry.Registry
+	runner      runner.TestRunner
+	result      *runner.RunnerResult
+	fileLogger  *logging.FileLogger
+	networkName string
 
 	running atomic.Bool
 	done    chan struct{}
@@ -57,14 +60,19 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("failed to create registry: %w", err)
 	}
 
+	// Extract network name from DEVNET_ENV_URL environment variable
+	networkName := extractNetworkName(os.Getenv("DEVNET_ENV_URL"))
+	config.Log.Info("Using network name for metrics", "network", networkName)
+
 	// Create runner with registry
 	testRunner, err := runner.NewTestRunner(runner.Config{
-		Registry:   reg,
-		WorkDir:    config.TestDir,
-		Log:        config.Log,
-		TargetGate: config.TargetGate,
-		GoBinary:   config.GoBinary,
-		AllowSkips: config.AllowSkips,
+		Registry:    reg,
+		WorkDir:     config.TestDir,
+		Log:         config.Log,
+		TargetGate:  config.TargetGate,
+		GoBinary:    config.GoBinary,
+		AllowSkips:  config.AllowSkips,
+		NetworkName: networkName,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -82,6 +90,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		"allowSkips", config.AllowSkips,
 		"goBinary", config.GoBinary,
 		"logDir", config.LogDir,
+		"network", networkName,
 	)
 
 	return &nat{
@@ -92,7 +101,32 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		runner:           testRunner,
 		done:             make(chan struct{}),
 		shutdownCallback: shutdownCallback,
+		networkName:      networkName,
 	}, nil
+}
+
+// extractNetworkName extracts the network name from the DEVNET_ENV_URL.
+func extractNetworkName(envURL string) string {
+	fallbackName := "unknown"
+	if envURL == "" {
+		return fallbackName // Default if not set
+	}
+
+	// Try to load the devnet from the URL
+	devnetEnv, err := env.LoadDevnetFromURL(envURL)
+	if err != nil {
+		log.Debug("Failed to load devnet from URL", "url", envURL, "error", err)
+		return fallbackName
+	}
+
+	// Extract name from the devnet environment
+	if devnetEnv.Env.Name != "" {
+		return devnetEnv.Env.Name
+	}
+
+	// If name is empty in the environment, return unknown
+	log.Debug("Devnet environment has empty name", "url", envURL)
+	return fallbackName
 }
 
 // Start runs the acceptance tests periodically at the configured interval.
@@ -514,7 +548,7 @@ func (n *nat) printResultsTable(runID string) {
 
 	// Emit metrics
 	metrics.RecordAcceptance(
-		"todo",
+		n.networkName,
 		runID,
 		string(n.result.Status),
 		n.result.Stats.Total,
