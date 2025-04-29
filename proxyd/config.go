@@ -229,8 +229,17 @@ type Config struct {
 }
 
 type InteropValidationConfig struct {
-	Urls []string `toml:"urls"`
+	Urls     []string                  `toml:"urls"`
+	Strategy InteropValidationStrategy `toml:"strategy" default:"first-supervisor"`
 }
+
+type InteropValidationStrategy string
+
+const (
+	EmptyStrategy           InteropValidationStrategy = ""
+	FirstSupervisorStrategy InteropValidationStrategy = "first-supervisor"
+	MulticallStrategy       InteropValidationStrategy = "multicall"
+)
 
 func ReadFromEnvOrConfig(value string) (string, error) {
 	if strings.HasPrefix(value, "$") {

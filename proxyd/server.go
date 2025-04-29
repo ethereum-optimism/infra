@@ -17,12 +17,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/types/interoptypes"
+	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -54,32 +55,32 @@ const (
 var emptyArrayResponse = json.RawMessage("[]")
 
 type Server struct {
-	BackendGroups             map[string]*BackendGroup
-	wsBackendGroup            *BackendGroup
-	wsMethodWhitelist         *StringSet
-	rpcMethodMappings         map[string]string
-	maxBodySize               int64
-	enableRequestLog          bool
-	maxRequestBodyLogLen      int
-	authenticatedPaths        map[string]string
-	timeout                   time.Duration
-	maxUpstreamBatchSize      int
-	maxBatchSize              int
-	enableServedByHeader      bool
-	upgrader                  *websocket.Upgrader
-	mainLim                   FrontendRateLimiter
-	overrideLims              map[string]FrontendRateLimiter
-	senderLim                 FrontendRateLimiter
-	allowedChainIds           []*big.Int
-	limExemptOrigins          []*regexp.Regexp
-	limExemptUserAgents       []*regexp.Regexp
-	globallyLimitedMethods    map[string]bool
-	rpcServer                 *http.Server
-	wsServer                  *http.Server
-	cache                     RPCCache
-	srvMu                     sync.Mutex
-	rateLimitHeader           string
-	interopValidatingBackends []miner.BackendWithInterop
+	BackendGroups           map[string]*BackendGroup
+	wsBackendGroup          *BackendGroup
+	wsMethodWhitelist       *StringSet
+	rpcMethodMappings       map[string]string
+	maxBodySize             int64
+	enableRequestLog        bool
+	maxRequestBodyLogLen    int
+	authenticatedPaths      map[string]string
+	timeout                 time.Duration
+	maxUpstreamBatchSize    int
+	maxBatchSize            int
+	enableServedByHeader    bool
+	upgrader                *websocket.Upgrader
+	mainLim                 FrontendRateLimiter
+	overrideLims            map[string]FrontendRateLimiter
+	senderLim               FrontendRateLimiter
+	allowedChainIds         []*big.Int
+	limExemptOrigins        []*regexp.Regexp
+	limExemptUserAgents     []*regexp.Regexp
+	globallyLimitedMethods  map[string]bool
+	rpcServer               *http.Server
+	wsServer                *http.Server
+	cache                   RPCCache
+	srvMu                   sync.Mutex
+	rateLimitHeader         string
+	interopValidatingConfig InteropValidationConfig
 }
 
 type limiterFunc func(method string) bool
@@ -103,7 +104,7 @@ func NewServer(
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
-	interopValidatingBackends []miner.BackendWithInterop,
+	interopValidatingConfig InteropValidationConfig,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -188,15 +189,15 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                   mainLim,
-		overrideLims:              overrideLims,
-		globallyLimitedMethods:    globalMethodLims,
-		senderLim:                 senderLim,
-		allowedChainIds:           senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:          limExemptOrigins,
-		limExemptUserAgents:       limExemptUserAgents,
-		rateLimitHeader:           rateLimitHeader,
-		interopValidatingBackends: interopValidatingBackends,
+		mainLim:                 mainLim,
+		overrideLims:            overrideLims,
+		globallyLimitedMethods:  globalMethodLims,
+		senderLim:               senderLim,
+		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:        limExemptOrigins,
+		limExemptUserAgents:     limExemptUserAgents,
+		rateLimitHeader:         rateLimitHeader,
+		interopValidatingConfig: interopValidatingConfig,
 	}, nil
 }
 
@@ -395,7 +396,15 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
-	if len(s.interopValidatingBackends) == 0 {
+	log.Debug(
+		"validating interop access list",
+		"source", "rpc",
+		"req_id", GetReqID(ctx),
+		"method", rpcReq.Method,
+		"strategy", s.interopValidatingConfig.Strategy,
+	)
+
+	if len(s.interopValidatingConfig.Urls) == 0 {
 		// use unknown below to prevent DOS vector that fills up memory
 		// with arbitrary method names.
 		log.Debug(
@@ -408,68 +417,128 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 
 	tx, err := convertSendReqToSendTx(ctx, rpcReq)
 	if err != nil {
-		return fmt.Errorf("error parsing transaction: %w", err)
+		return ErrInvalidRequest(fmt.Sprintf("error parsing transaction: %w", err))
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
 	if len(interopAccessList) == 0 {
-		return nil // avoid an RPC check if there are no executing messages to verify.
+		log.Debug(
+			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
+			"source", "rpc",
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+		)
+		return nil
 	}
 
-	resultChan := make(chan error, len(s.interopValidatingBackends))
+	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
+		validatingBackend := interop.NewInteropClient(url)
+		err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
+			Timestamp: getInteropExecutingDescriptorTimestamp(),
+		})
 
-	// concurrently broadcast the checkAccessList operation to all the validating backends
-	var wg sync.WaitGroup
-	for _, validatingBackend := range s.interopValidatingBackends {
-		wg.Add(1)
-		go func(b miner.BackendWithInterop) {
-			defer wg.Done()
-			err := b.CheckAccessList(ctx, interopAccessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-				Timestamp: uint64(time.Now().Second() + 1000),
-			})
-			resultChan <- err
-		}(validatingBackend)
-	}
-
-	// goroutine which waits for all the sender goroutines created above to be done, and drain and close the resultChan
-	go func() {
-		wg.Wait()
-		for range resultChan {
-		} // drain the channel
-		close(resultChan)
-	}()
-
-	// Success: if at least one backend responds successfully
-	// Failure: the first error response if all the backends respond with an error
-	var firstErr error
-	for range len(s.interopValidatingBackends) {
-		err := <-resultChan
-		if err == nil { // at least one success observed
-			return nil
-		} else if firstErr == nil { // record the first error for returning it if no validating backend succeeds
-			firstErr = err
-		}
-	}
-
-	if httpErr, ok := firstErr.(rpc.HTTPError); ok {
-		var rpcErr rpcResJSON
-		if err := json.Unmarshal(httpErr.Body, &rpcErr); err == nil {
-			return &RPCErr{
-				Code:    rpcErr.Error.Code,
-				Message: rpcErr.Error.Message,
-				Data:    rpcErr.Error.Data,
-
-				HTTPErrorCode: httpErr.StatusCode,
+		statusCode := "200"
+		if err != nil {
+			httpErr, ok := err.(rpc.HTTPError)
+			if ok {
+				statusCode = strconv.Itoa(httpErr.StatusCode)
+			} else {
+				statusCode = "500"
 			}
 		}
+		rpcSupervisorChecksTotal.WithLabelValues(
+			GetAuthCtx(ctx),
+			url,
+			statusCode,
+			strategy,
+		).Inc()
 
+		log.Debug(
+			"an interop validating backend has responded",
+			"supervisor_url", url,
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+			"error", err,
+		)
+		return err
+	}
+
+	switch s.interopValidatingConfig.Strategy {
+	case FirstSupervisorStrategy, EmptyStrategy:
+		err := performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
+		return parseInteropError(err)
+	case MulticallStrategy:
+		resultChan := make(chan error, len(s.interopValidatingConfig.Urls))
+		// concurrently broadcast the checkAccessList operation to all the validating backends
+		var wg sync.WaitGroup
+		for _, url := range s.interopValidatingConfig.Urls {
+			wg.Add(1)
+			go func(ctx context.Context, url string) {
+				defer wg.Done()
+				err := performCheckAccessListOp(ctx, interopAccessList, url, string(MulticallStrategy))
+				resultChan <- err
+			}(ctx, url)
+		}
+
+		// goroutine which waits for all the sender goroutines created above to be done, and drain and close the resultChan
+		go func() {
+			wg.Wait()
+			log.Debug(
+				"all interop validating backends have responded",
+				"source", "rpc",
+				"req_id", GetReqID(ctx),
+				"method", rpcReq.Method,
+			)
+			for range resultChan {
+			} // drain the channel
+			close(resultChan)
+		}()
+
+		// Success: if at least one backend responds successfully
+		// Failure: the first error response if all the backends respond with an error
+		var firstErr error
+		for range len(s.interopValidatingConfig.Urls) {
+			err := <-resultChan
+			if err == nil { // at least one success observed
+				return nil
+			} else if firstErr == nil { // record the first error for returning it if no validating backend succeeds
+				firstErr = err
+			}
+		}
+		return parseInteropError(firstErr)
+	default:
+		return ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
+	}
+}
+
+func getInteropExecutingDescriptorTimestamp() uint64 {
+	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
+	return uint64(time.Now().Second() + 1000)
+}
+
+func parseInteropError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	httpErr, ok := err.(rpc.HTTPError)
+	if !ok {
+		return err
+	}
+
+	var rpcErr rpcResJSON
+	if err := json.Unmarshal(httpErr.Body, &rpcErr); err == nil {
 		return &RPCErr{
-			Code:          -32602,
-			Message:       string(httpErr.Body),
+			Code:          rpcErr.Error.Code,
+			Message:       rpcErr.Error.Message,
+			Data:          rpcErr.Error.Data,
 			HTTPErrorCode: httpErr.StatusCode,
 		}
 	}
-	return firstErr
+
+	outputErr := ErrInvalidParams(string(httpErr.Body))
+	outputErr.HTTPErrorCode = httpErr.StatusCode
+	return outputErr
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool) ([]*RPCRes, bool, string, error) {

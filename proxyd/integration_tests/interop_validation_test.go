@@ -59,46 +59,7 @@ func fakeInteropReqParams() (string, error) {
 	return convertTxToReqParams(fakeTx)
 }
 
-func TestInteropValidationSurvivingPath(t *testing.T) {
-	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
-	defer goodBackend.Close()
-
-	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
-
-	errResp1 := fmt.Sprintf(errResTmpl, -320600, errors.New("conflicting data"))
-	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(429, errResp1))
-	defer badValidatingBackend1.Close()
-
-	goodValidatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
-	defer goodValidatingBackend1.Close()
-
-	url1 := badValidatingBackend1.URL()
-	url2 := goodValidatingBackend1.URL()
-
-	require.NoError(t, os.Setenv("VALIDATING_BACKEND_RPC_URL_1", url1))
-	require.NoError(t, os.Setenv("VALIDATING_BACKEND_RPC_URL_2", url2))
-
-	config := ReadConfig("interop_validation")
-	config.InteropValidationConfig.Urls = []string{url1, url2}
-	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
-	client := NewProxydClient("http://127.0.0.1:8545")
-	_, shutdown, err := proxyd.Start(config)
-	require.NoError(t, err)
-	defer shutdown()
-
-	fakeInteropReqParams, err := fakeInteropReqParams()
-	require.NoError(t, err)
-
-	// running the same request 5 times to avoid lucky flakes of the request never getting routed to the bad backend
-	for i := 0; i < 5; i++ {
-		res1, code1, err := client.SendRequest(makeSendRawTransaction(fakeInteropReqParams))
-		require.NoError(t, err, "iteration %d", i)
-		require.Equal(t, 200, code1, "iteration %d: response observed: %s", i, string(res1))
-		RequireEqualJSON(t, []byte(dummyHealthyRes), res1)
-	}
-}
-
-func TestInteropValidationBadPath(t *testing.T) {
+func TestInteropValidation(t *testing.T) {
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer goodBackend.Close()
 
@@ -112,26 +73,105 @@ func TestInteropValidationBadPath(t *testing.T) {
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
-	require.NoError(t, os.Setenv("VALIDATING_BACKEND_RPC_URL_1", badValidatingBackend1.URL()))
-	require.NoError(t, os.Setenv("VALIDATING_BACKEND_RPC_URL_2", badValidatingBackend2.URL()))
+	goodValidatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodValidatingBackend1.Close()
+
+	badSupervisorUrl1 := badValidatingBackend1.URL()
+	badSupervisorUrl2 := badValidatingBackend2.URL()
+	goodSupervisorUrl := goodValidatingBackend1.URL()
 
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
-	config.InteropValidationConfig.Urls = []string{badValidatingBackend1.URL(), badValidatingBackend2.URL()}
-	client := NewProxydClient("http://127.0.0.1:8545")
-	_, shutdown, err := proxyd.Start(config)
-	require.NoError(t, err)
-	defer shutdown()
+
+	type respDetails struct {
+		code         int
+		jsonResponse []byte
+	}
+	type testCase struct {
+		name                  string
+		strategy              proxyd.InteropValidationStrategy
+		urls                  []string
+		expectedResp          respDetails
+		possibilities         []respDetails
+		multiplePossibilities bool
+	}
+	cases := []testCase{
+		{
+			name:     "first-supervisor strategy with first url returning error",
+			strategy: proxyd.FirstSupervisorStrategy,
+			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
+			expectedResp: respDetails{
+				code:         409,
+				jsonResponse: []byte(errResp1),
+			},
+		},
+		{
+			name:     "default strategy with first url returning success",
+			strategy: proxyd.EmptyStrategy,
+			urls:     []string{goodSupervisorUrl, badSupervisorUrl1},
+			expectedResp: respDetails{
+				code:         200,
+				jsonResponse: []byte(dummyHealthyRes),
+			},
+		},
+		{
+			name:     "multicall strategy with atleast one good url",
+			strategy: proxyd.MulticallStrategy,
+			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
+			expectedResp: respDetails{
+				code:         200,
+				jsonResponse: []byte(dummyHealthyRes),
+			},
+		},
+		{
+			name:                  "multicall strategy with all bad urls",
+			strategy:              proxyd.MulticallStrategy,
+			urls:                  []string{badSupervisorUrl1, badSupervisorUrl2},
+			multiplePossibilities: true,
+			possibilities: []respDetails{
+				{
+					code:         409,
+					jsonResponse: []byte(errResp1),
+				},
+				{
+					code:         400,
+					jsonResponse: []byte(errResp2),
+				},
+			},
+		},
+	}
 
 	fakeInteropReqParams, err := fakeInteropReqParams()
 	require.NoError(t, err)
 
-	res1, code1, err := client.SendRequest(makeSendRawTransaction(fakeInteropReqParams))
-	require.NoError(t, err)
-	require.Contains(t, []int{409, 400}, code1)
-	if code1 == 429 {
-		RequireEqualJSON(t, []byte(errResp1), res1)
-	} else {
-		RequireEqualJSON(t, []byte(errResp2), res1)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			config.InteropValidationConfig.Strategy = c.strategy
+			config.InteropValidationConfig.Urls = c.urls
+			_, shutdown, err := proxyd.Start(config)
+			require.NoError(t, err)
+			defer shutdown()
+
+			client := NewProxydClient("http://127.0.0.1:8545")
+			for i := 0; i < 5; i++ {
+				observedResp, observedCode, err := client.SendRequest(makeSendRawTransaction(fakeInteropReqParams))
+				require.NoError(t, err, "iteration %d", i)
+
+				if c.multiplePossibilities {
+					onePossibilityMatched := false
+					for _, expectedResp := range c.possibilities {
+						if expectedResp.code == observedCode {
+							RequireEqualJSON(t, expectedResp.jsonResponse, observedResp)
+							onePossibilityMatched = true
+							break
+						}
+					}
+					require.True(t, onePossibilityMatched, "could not find any expectated possibility matching the observed response code: observed status code %d", observedCode)
+				} else {
+					require.Equal(t, c.expectedResp.code, observedCode, "iteration %d: response observed: %s", i, string(observedResp))
+					RequireEqualJSON(t, c.expectedResp.jsonResponse, observedResp)
+				}
+			}
+		})
 	}
 }
