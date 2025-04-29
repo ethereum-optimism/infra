@@ -102,9 +102,6 @@ class Sequencer:
         result = resp.json()["result"]
         self.builder_unsafe_l2_number = result["unsafe_l2"]["number"]
         self.builder_unsafe_l2_hash = result["unsafe_l2"]["hash"]
-        print(
-            f"{self.sequencer_id} getting builder unsafe_l2: {self.builder_unsafe_l2_number}"
-        )
 
     def _get_unsafe_l2(self):
         resp = requests.post(

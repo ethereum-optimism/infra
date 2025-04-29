@@ -543,6 +543,46 @@ def force_active_sequencer(network: str, sequencer_id: str, force: bool = False)
     typer.echo(f"Successfully forced {sequencer_id} to become active")
 
 
+@app.command()
+def set_rollup_boost_mode(network: str, sequencer_id: str, mode: str):
+    """Set the rollup-boost mode: disabled, enabled, or dry_run."""
+    network_obj = get_network(network)
+
+    sequencer = network_obj.get_sequencer_by_id(sequencer_id)
+
+    if mode not in ["disabled", "enabled", "dry_run"]:
+        print_error(
+            f"Invalid mode: {mode}. Please use 'disabled', 'enabled', or 'dry_run'."
+        )
+        raise typer.Exit(code=1)
+
+    if sequencer is None:
+        print_error(f"Sequencer ID {sequencer_id} not found in network {network}")
+        raise typer.Exit(code=1)
+
+    if getattr(sequencer, "rollup_boost_rpc_url", None) is None:
+        print_error(f"Sequencer {sequencer_id} does not have a rollup-boost RPC URL")
+        raise typer.Exit(code=1)
+
+    resp = requests.post(
+        sequencer.rollup_boost_rpc_url,
+        json=make_rpc_payload(
+            "debug_setExecutionMode",
+            params=[{"execution_mode": mode}],
+        ),
+    )
+    resp.raise_for_status()
+    if "error" in resp.json():
+        # Log the full error response if verbose
+        logging.debug(f"Error response body: {resp.text}")
+        print_error(
+            f"Failed to set execution mode for {sequencer_id}: {resp.json()['error']}"
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Successfully updated execution mode to {mode} on {sequencer_id}")
+
+
 def wait_for_condition(
     description, condition_func, timeout_seconds=300, retry_seconds=10, update_func=None
 ):
