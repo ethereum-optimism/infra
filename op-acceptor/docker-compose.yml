@@ -34,9 +34,12 @@ services:
       dockerfile: op-acceptor/Dockerfile
     volumes:
       - ./devnets:/devnets
+      - ../../optimism/op-acceptance-tests:/acceptance-tests
+    tmpfs:
+      - /app/logs:exec,mode=0777
     environment:
       - DEVNET_ENV_URL=/devnets/simple-devnet.json
-    command: ["--gate", "localnet", "--testdir", "../../optimism", "--validators", "example-validators.yaml", "--log.level", "debug"]
+    command: ["--gate", "base", "--testdir", "/acceptance-tests", "--validators", "/acceptance-tests/acceptance-tests.yaml", "--log.level", "debug", "--run-interval", "60s"]
     depends_on:
       - prometheus
       - grafana
@@ -50,7 +53,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    restart: unless-stopped
+    restart: "no"
 
 networks:
   monitoring:
