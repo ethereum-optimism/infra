@@ -14,8 +14,11 @@ import (
 )
 
 type Cache interface {
+	// Get fetches a value from the cache
 	Get(ctx context.Context, key string) (string, error)
-	Put(ctx context.Context, key string, value string) error
+
+	// Put updates a value in the cache with a TTL
+	Put(ctx context.Context, key string, value string, shortLived bool) error
 }
 
 const (
@@ -39,7 +42,11 @@ func (c *cache) Get(ctx context.Context, key string) (string, error) {
 	return "", nil
 }
 
-func (c *cache) Put(ctx context.Context, key string, value string) error {
+func (c *cache) Put(ctx context.Context, key string, value string, shortLived bool) error {
+	// ignore value with short lived flag
+	if shortLived {
+		return nil
+	}
 	c.lru.Add(key, value)
 	return nil
 }
@@ -61,10 +68,10 @@ func (c *fallbackCache) Get(ctx context.Context, key string) (string, error) {
 	return val, nil
 }
 
-func (c *fallbackCache) Put(ctx context.Context, key string, value string) error {
-	err := c.primaryCache.Put(ctx, key, value)
+func (c *fallbackCache) Put(ctx context.Context, key string, value string, shortLived bool) error {
+	err := c.primaryCache.Put(ctx, key, value, shortLived)
 	if err != nil {
-		return c.secondaryCache.Put(ctx, key, value)
+		return c.secondaryCache.Put(ctx, key, value, shortLived)
 	}
 	return nil
 }
@@ -73,11 +80,12 @@ type redisCache struct {
 	redisClient     redis.UniversalClient
 	redisReadClient redis.UniversalClient
 	prefix          string
-	ttl             time.Duration
+	defaultTTL      time.Duration
+	shortLivedTTL   time.Duration
 }
 
-func newRedisCache(redisClient redis.UniversalClient, redisReadClient redis.UniversalClient, prefix string, ttl time.Duration) *redisCache {
-	return &redisCache{redisClient, redisReadClient, prefix, ttl}
+func newRedisCache(redisClient redis.UniversalClient, redisReadClient redis.UniversalClient, prefix string, defaultTTL time.Duration, shortLivedTTL time.Duration) *redisCache {
+	return &redisCache{redisClient, redisReadClient, prefix, defaultTTL, shortLivedTTL}
 }
 
 func (c *redisCache) namespaced(key string) string {
@@ -101,9 +109,19 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 	return val, nil
 }
 
-func (c *redisCache) Put(ctx context.Context, key string, value string) error {
+func (c *redisCache) Put(ctx context.Context, key string, value string, shortLived bool) error {
+	ttl := c.defaultTTL
+
+	// disable PUT on short lived key if shortLivedTTL is not set
+	if shortLived {
+		if c.shortLivedTTL == 0 {
+			return nil
+		}
+		ttl = c.shortLivedTTL
+	}
+
 	start := time.Now()
-	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
+	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, ttl).Err()
 	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err != nil {
@@ -135,9 +153,9 @@ func (c *cacheWithCompression) Get(ctx context.Context, key string) (string, err
 	return string(val), nil
 }
 
-func (c *cacheWithCompression) Put(ctx context.Context, key string, value string) error {
+func (c *cacheWithCompression) Put(ctx context.Context, key string, value string, shortLived bool) error {
 	encodedVal := snappy.Encode(nil, []byte(value))
-	return c.cache.Put(ctx, key, string(encodedVal))
+	return c.cache.Put(ctx, key, string(encodedVal), shortLived)
 }
 
 type RPCCache interface {
@@ -152,6 +170,7 @@ type rpcCache struct {
 
 func newRPCCache(cache Cache) RPCCache {
 	staticHandler := &StaticMethodHandler{cache: cache}
+	shortLivedHandler := &StaticMethodHandler{cache: cache, shortLived: true}
 	debugGetRawReceiptsHandler := &StaticMethodHandler{cache: cache,
 		filterGet: func(req *RPCReq) bool {
 			// cache only if the request is for a block hash
@@ -176,14 +195,24 @@ func newRPCCache(cache Cache) RPCCache {
 		},
 	}
 	handlers := map[string]RPCMethodHandler{
-		"eth_chainId":                           staticHandler,
-		"net_version":                           staticHandler,
-		"eth_getBlockTransactionCountByHash":    staticHandler,
-		"eth_getUncleCountByBlockHash":          staticHandler,
-		"eth_getBlockByHash":                    staticHandler,
-		"eth_getTransactionByBlockHashAndIndex": staticHandler,
-		"eth_getUncleByBlockHashAndIndex":       staticHandler,
-		"debug_getRawReceipts":                  debugGetRawReceiptsHandler,
+		"eth_chainId":                             staticHandler,
+		"net_version":                             staticHandler,
+		"eth_getBlockTransactionCountByHash":      staticHandler,
+		"eth_getUncleCountByBlockHash":            staticHandler,
+		"eth_getBlockByHash":                      staticHandler,
+		"eth_getTransactionByBlockHashAndIndex":   staticHandler,
+		"eth_getUncleByBlockHashAndIndex":         staticHandler,
+		"debug_getRawReceipts":                    debugGetRawReceiptsHandler,
+		"eth_getBlockByNumber":                    shortLivedHandler,
+		"eth_blockNumber":                         shortLivedHandler,
+		"eth_getBalance":                          shortLivedHandler,
+		"eth_getStorageAt":                        shortLivedHandler,
+		"eth_getTransactionCount":                 shortLivedHandler,
+		"eth_getBlockTransactionCountByNumber":    shortLivedHandler,
+		"eth_getUncleCountByBlockNumber":          shortLivedHandler,
+		"eth_getCode":                             shortLivedHandler,
+		"eth_getTransactionByBlockNumberAndIndex": shortLivedHandler,
+		"eth_getUncleByBlockNumberAndIndex":       shortLivedHandler,
 	}
 	return &rpcCache{
 		cache:    cache,
