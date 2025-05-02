@@ -230,7 +230,7 @@ type Config struct {
 
 type InteropValidationConfig struct {
 	Urls     []string                  `toml:"urls"`
-	Strategy InteropValidationStrategy `toml:"strategy" default:"first-supervisor"`
+	Strategy InteropValidationStrategy `toml:"strategy"`
 }
 
 type InteropValidationStrategy string

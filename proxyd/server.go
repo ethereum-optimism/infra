@@ -33,23 +33,24 @@ import (
 )
 
 const (
-	ContextKeyAuth               = "authorization"
-	ContextKeyReqID              = "req_id"
-	ContextKeyXForwardedFor      = "x_forwarded_for"
-	ContextKeyOpTxProxyAuth      = "op_txproxy_auth"
-	DefaultOpTxProxyAuthHeader   = "X-Optimism-Signature"
-	DefaultMaxBatchRPCCallsLimit = 100
-	MaxBatchRPCCallsHardLimit    = 1000
-	cacheStatusHdr               = "X-Proxyd-Cache-Status"
-	defaultRPCTimeout            = 10 * time.Second
-	defaultBodySizeLimit         = 256 * opt.KiB
-	defaultWSHandshakeTimeout    = 10 * time.Second
-	defaultWSReadTimeout         = 2 * time.Minute
-	defaultWSWriteTimeout        = 10 * time.Second
-	defaultCacheTtl              = 1 * time.Hour
-	maxRequestBodyLogLen         = 2000
-	defaultMaxUpstreamBatchSize  = 10
-	defaultRateLimitHeader       = "X-Forwarded-For"
+	ContextKeyAuth                   = "authorization"
+	ContextKeyReqID                  = "req_id"
+	ContextKeyXForwardedFor          = "x_forwarded_for"
+	ContextKeyOpTxProxyAuth          = "op_txproxy_auth"
+	DefaultOpTxProxyAuthHeader       = "X-Optimism-Signature"
+	DefaultMaxBatchRPCCallsLimit     = 100
+	MaxBatchRPCCallsHardLimit        = 1000
+	cacheStatusHdr                   = "X-Proxyd-Cache-Status"
+	defaultRPCTimeout                = 10 * time.Second
+	defaultBodySizeLimit             = 256 * opt.KiB
+	defaultWSHandshakeTimeout        = 10 * time.Second
+	defaultWSReadTimeout             = 2 * time.Minute
+	defaultWSWriteTimeout            = 10 * time.Second
+	defaultCacheTtl                  = 1 * time.Hour
+	maxRequestBodyLogLen             = 2000
+	defaultMaxUpstreamBatchSize      = 10
+	defaultRateLimitHeader           = "X-Forwarded-For"
+	defaultInteropValidationStrategy = FirstSupervisorStrategy
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
@@ -421,15 +422,15 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	if len(interopAccessList) == 0 {
-		log.Debug(
-			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
-			"source", "rpc",
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-		)
-		return nil
-	}
+	// if len(interopAccessList) == 0 {
+	// 	log.Debug(
+	// 		"no interop access list found, inferring the absence of executing messages and skipping interop validation",
+	// 		"source", "rpc",
+	// 		"req_id", GetReqID(ctx),
+	// 		"method", rpcReq.Method,
+	// 	)
+	// 	return nil
+	// }
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
 		validatingBackend := interop.NewInteropClient(url)
@@ -513,6 +514,8 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 
 	if finalErr == nil {
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "method", rpcReq.Method)
+	} else {
+		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "method", rpcReq.Method, "error", finalErr)
 	}
 	return finalErr
 }

@@ -31,14 +31,14 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 }
 
 func fakeInteropReqParams() (string, error) {
-	toAddress := common.BytesToAddress([]byte{143, 61, 221, 15, 191, 62, 120, 202, 29, 108, 209, 115, 121, 237, 136, 226, 97, 36, 155, 82})
+	toAddress := common.HexToAddress("0x8f3Ddd0FBf3e78CA1D6cd17379eD88E261249B53")
 
 	v, r, s := big.NewInt(0), big.NewInt(0), big.NewInt(0)
 	r.SetString("32221253762185627567561170530332760991541284345642488431105080034438681047063", 10)
 	s.SetString("53477774121840563707688019836183722736827235081472376095392631194490753506882", 10)
 
 	fakeTx := types.NewTx(&types.AccessListTx{
-		ChainID: big.NewInt(420),
+		ChainID: big.NewInt(420120003),
 		Nonce:   6,
 		Value:   big.NewInt(0),
 		To:      &toAddress,
