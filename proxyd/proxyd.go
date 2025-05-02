@@ -220,7 +220,7 @@ func Start(config *Config) (*Server, func(), error) {
 			"ws_url", wsURL)
 	}
 
-	if (config.InteropValidationConfig.Strategy == "") {
+	if config.InteropValidationConfig.Strategy == "" {
 		log.Warn("no interop validation strategy provided, using default strategy", "strategy", defaultInteropValidationStrategy)
 		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
 	}
