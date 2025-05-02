@@ -220,6 +220,14 @@ func Start(config *Config) (*Server, func(), error) {
 			"ws_url", wsURL)
 	}
 
+	if config.InteropValidationConfig.Strategy == "" {
+		log.Warn("no interop validation strategy provided, using default strategy", "strategy", defaultInteropValidationStrategy)
+		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
+	}
+
+	log.Info("configured interop validation urls", "urls", config.InteropValidationConfig.Urls)
+	log.Info("configured interop validation strategy", "strategy", config.InteropValidationConfig.Strategy)
+
 	backendGroups := make(map[string]*BackendGroup)
 	for bgName, bg := range config.BackendGroups {
 		backends := make([]*Backend, 0)
@@ -356,6 +364,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
+		config.InteropValidationConfig,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
