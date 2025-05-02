@@ -422,15 +422,15 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	// if len(interopAccessList) == 0 {
-	// 	log.Debug(
-	// 		"no interop access list found, inferring the absence of executing messages and skipping interop validation",
-	// 		"source", "rpc",
-	// 		"req_id", GetReqID(ctx),
-	// 		"method", rpcReq.Method,
-	// 	)
-	// 	return nil
-	// }
+	if len(interopAccessList) == 0 {
+		log.Debug(
+			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
+			"source", "rpc",
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+		)
+		return nil
+	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
 		validatingBackend := interop.NewInteropClient(url)
