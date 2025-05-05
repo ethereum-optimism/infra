@@ -49,7 +49,7 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 
 	t.Run("exempt origin over limit", func(t *testing.T) {
 		h := make(http.Header)
-		h.Set("Origin", "exempt_origin")
+		h.Set("Origin", "exempt.origin.example")
 		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
 		_, codes := spamReqs(t, client, ethChainID, 429, 3)
 		require.Equal(t, 3, codes[200])
