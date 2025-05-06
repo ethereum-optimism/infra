@@ -468,7 +468,9 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 	switch s.interopValidatingConfig.Strategy {
 	case FirstSupervisorStrategy, EmptyStrategy:
 		err := performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
-		finalErr = parseInteropError(err)
+		if err != nil {
+			finalErr = ParseInteropError(err)
+		}
 	case MulticallStrategy:
 		resultChan := make(chan error, len(s.interopValidatingConfig.Urls))
 		// concurrently broadcast the checkAccessList operation to all the validating backends
@@ -507,7 +509,9 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 				firstErr = err
 			}
 		}
-		finalErr = parseInteropError(firstErr)
+		if firstErr != nil { // must be true
+			finalErr = ParseInteropError(firstErr)
+		}
 	default:
 		finalErr = ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
 	}
@@ -523,31 +527,6 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 func getInteropExecutingDescriptorTimestamp() uint64 {
 	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
 	return uint64(time.Now().Second() + 1000)
-}
-
-func parseInteropError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	httpErr, ok := err.(rpc.HTTPError)
-	if !ok {
-		return err
-	}
-
-	var rpcErr rpcResJSON
-	if err := json.Unmarshal(httpErr.Body, &rpcErr); err == nil {
-		return &RPCErr{
-			Code:          rpcErr.Error.Code,
-			Message:       rpcErr.Error.Message,
-			Data:          rpcErr.Error.Data,
-			HTTPErrorCode: httpErr.StatusCode,
-		}
-	}
-
-	outputErr := ErrInvalidParams(string(httpErr.Body))
-	outputErr.HTTPErrorCode = httpErr.StatusCode
-	return outputErr
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool) ([]*RPCRes, bool, string, error) {

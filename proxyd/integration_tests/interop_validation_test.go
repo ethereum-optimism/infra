@@ -1,7 +1,6 @@
 package integration_tests
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -65,11 +65,11 @@ func TestInteropValidation(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -320600, errors.New("conflicting data"))
+	errResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())
 	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badValidatingBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -321501, errors.New("data corruption"))
+	errResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error())
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
@@ -130,11 +130,11 @@ func TestInteropValidation(t *testing.T) {
 			multiplePossibilities: true,
 			possibilities: []respDetails{
 				{
-					code:         409,
+					code:         409, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
 					jsonResponse: []byte(errResp1),
 				},
 				{
-					code:         400,
+					code:         422, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
 					jsonResponse: []byte(errResp2),
 				},
 			},

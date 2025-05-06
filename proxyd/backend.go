@@ -18,6 +18,8 @@ import (
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
+	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -116,6 +118,112 @@ var (
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
 	ErrConsensusGetReceiptsInvalidTarget = errors.New("unsupported consensus_receipts_target")
 )
+
+var interopRPCErrorMap = map[error]*RPCErr{
+	supervisorTypes.ErrUninitialized: {
+		Code:          -320400,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrSkipped: {
+		Code:          -320500,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrUnknownChain: {
+		Code:          -320501,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrConflict: {
+		Code:          -320600,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrIneffective: {
+		Code:          -320601,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrOutOfOrder: {
+		Code:          -320900,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrAwaitReplacementBlock: {
+		Code:          -320901,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrStop: {
+		Code:          -321000,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrOutOfScope: {
+		Code:          -321100,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrPreviousToFirst: {
+		Code:          -321200,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrFuture: {
+		Code:          -321401,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrNotExact: {
+		Code:          -321500,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrDataCorruption: {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+	errors.New("stopped access-list check early"): {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+	errors.New("failed to read data"): {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+}
+
+func ParseInteropError(err error) *RPCErr {
+	var fallbackErr *RPCErr
+	httpErr, isHTTPError := err.(rpc.HTTPError)
+	if !isHTTPError {
+		fallbackErr = &RPCErr{
+			Code:          JSONRPCErrorInternal,
+			Message:       err.Error(),
+			HTTPErrorCode: 500,
+		}
+	} else {
+		// if the underlying error is a JSON-RPC error, overwrite it with the inherent error message body
+		var rpcErrJson rpcResJSON
+		unmarshalErr := json.Unmarshal(httpErr.Body, &rpcErrJson)
+		if unmarshalErr != nil {
+			fallbackErr = ErrInvalidParams(string(httpErr.Body))
+			fallbackErr.HTTPErrorCode = httpErr.StatusCode
+		} else {
+			fallbackErr = &RPCErr{
+				Code:          rpcErrJson.Error.Code,
+				Message:       rpcErrJson.Error.Message,
+				Data:          rpcErrJson.Error.Data,
+				HTTPErrorCode: httpErr.StatusCode,
+			}
+
+			err = fmt.Errorf(rpcErrJson.Error.Message)
+		}
+	}
+
+	errStr := err.Error()
+	for errSubStr, errCodes := range interopRPCErrorMap {
+		if strings.Contains(errStr, errSubStr.Error()) {
+			interopParsedErr := errCodes.Clone()
+			interopParsedErr.Message = errStr
+			return interopParsedErr
+		}
+	}
+	return fallbackErr
+}
 
 func ErrInvalidRequest(msg string) *RPCErr {
 	return &RPCErr{
