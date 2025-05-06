@@ -24,7 +24,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
@@ -438,21 +437,6 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			Timestamp: getInteropExecutingDescriptorTimestamp(),
 		})
 
-		statusCode := "200"
-		if err != nil {
-			httpErr, ok := err.(rpc.HTTPError)
-			if ok {
-				statusCode = strconv.Itoa(httpErr.StatusCode)
-			} else {
-				statusCode = "500"
-			}
-		}
-		rpcSupervisorChecksTotal.WithLabelValues(
-			url,
-			statusCode,
-			strategy,
-		).Inc()
-
 		log.Debug(
 			"an interop validating backend has responded",
 			"supervisor_url", url,
@@ -460,6 +444,26 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			"method", rpcReq.Method,
 			"error", err,
 		)
+
+		var httpCode, rpcErrorCode string
+		if err == nil {
+			httpCode = "200"
+			rpcErrorCode = "-"
+		} else {
+			interopErr := ParseInteropError(err)
+			httpCode = strconv.Itoa(interopErr.HTTPErrorCode)
+			rpcErrorCode = strconv.Itoa(interopErr.Code)
+
+			err = interopErr
+		}
+
+		rpcSupervisorChecksTotal.WithLabelValues(
+			url,
+			httpCode,
+			rpcErrorCode,
+			strategy,
+		).Inc()
+
 		return err
 	}
 
@@ -467,10 +471,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 
 	switch s.interopValidatingConfig.Strategy {
 	case FirstSupervisorStrategy, EmptyStrategy:
-		err := performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
-		if err != nil {
-			finalErr = ParseInteropError(err)
-		}
+		return performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
 	case MulticallStrategy:
 		resultChan := make(chan error, len(s.interopValidatingConfig.Urls))
 		// concurrently broadcast the checkAccessList operation to all the validating backends
@@ -509,9 +510,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 				firstErr = err
 			}
 		}
-		if firstErr != nil { // must be true
-			finalErr = ParseInteropError(firstErr)
-		}
+		finalErr = ParseInteropError(firstErr)
 	default:
 		finalErr = ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
 	}
