@@ -65,11 +65,11 @@ func TestInteropValidation(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())
+	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
 	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badValidatingBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error())
+	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
@@ -82,6 +82,9 @@ func TestInteropValidation(t *testing.T) {
 
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
+
+	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
+	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
 
 	type respDetails struct {
 		code         int
@@ -102,7 +105,7 @@ func TestInteropValidation(t *testing.T) {
 			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
 			expectedResp: respDetails{
 				code:         409,
-				jsonResponse: []byte(errResp1),
+				jsonResponse: []byte(expectedErrResp1),
 			},
 		},
 		{
@@ -131,11 +134,11 @@ func TestInteropValidation(t *testing.T) {
 			possibilities: []respDetails{
 				{
 					code:         409, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
-					jsonResponse: []byte(errResp1),
+					jsonResponse: []byte(expectedErrResp1),
 				},
 				{
 					code:         422, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
-					jsonResponse: []byte(errResp2),
+					jsonResponse: []byte(expectedErrResp2),
 				},
 			},
 		},
