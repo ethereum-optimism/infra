@@ -173,16 +173,16 @@ var interopRPCErrorMap = map[error]*RPCErr{
 		HTTPErrorCode: 422,
 	},
 	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
-		Code:          -321501,
-		HTTPErrorCode: 422,
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
 	},
-	errors.New("stopped access-list check early"): {
-		Code:          -321501,
-		HTTPErrorCode: 422,
+	errors.New("stopped acces-list check early"): {
+		Code:          JSONRPCErrorInternal,
+		HTTPErrorCode: 500,
 	},
 	errors.New("failed to read data"): {
-		Code:          -321501,
-		HTTPErrorCode: 422,
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
 	},
 }
 
