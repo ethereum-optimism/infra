@@ -8,10 +8,12 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +33,21 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 }
 
 func fakeInteropReqParams() (string, error) {
+	checksumArgs := supervisorTypes.ChecksumArgs{
+		BlockNumber: 3519561,
+		Timestamp:   1746536469,
+		LogIndex:    1,
+		ChainID:     eth.ChainIDFromUInt64(420120003),
+		LogHash: supervisorTypes.PayloadHashToLogHash(
+			crypto.Keccak256Hash([]byte("Hello, World!")),
+			common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
+		),
+	}
+
+	accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+		checksumArgs.Access(),
+	})
+
 	toAddress := common.HexToAddress("0x8f3Ddd0FBf3e78CA1D6cd17379eD88E261249B53")
 
 	v, r, s := big.NewInt(0), big.NewInt(0), big.NewInt(0)
@@ -47,11 +64,8 @@ func fakeInteropReqParams() (string, error) {
 		S:       s,
 		AccessList: types.AccessList{
 			{
-				Address: params.InteropCrossL2InboxAddress,
-				StorageKeys: []common.Hash{
-					common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-					common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
-				},
+				Address:     params.InteropCrossL2InboxAddress,
+				StorageKeys: accessListEntries,
 			},
 		},
 	})
@@ -157,7 +171,8 @@ func TestInteropValidation(t *testing.T) {
 
 			client := NewProxydClient("http://127.0.0.1:8545")
 			for i := 0; i < 5; i++ {
-				observedResp, observedCode, err := client.SendRequest(makeSendRawTransaction(fakeInteropReqParams))
+				sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+				observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 				require.NoError(t, err, "iteration %d", i)
 
 				if c.multiplePossibilities {
