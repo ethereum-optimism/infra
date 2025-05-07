@@ -438,7 +438,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		})
 
 		log.Debug(
-			"an interop validating backend has responded",
+			"an interop validating backend has respondedfoo",
 			"supervisor_url", url,
 			"req_id", GetReqID(ctx),
 			"method", rpcReq.Method,
