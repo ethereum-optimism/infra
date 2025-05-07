@@ -13,6 +13,8 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
@@ -43,6 +45,7 @@ type nat struct {
 	done    chan struct{}
 	wg      sync.WaitGroup
 
+	tracer           trace.Tracer
 	shutdownCallback func(error) // Callback to signal application shutdown
 }
 
@@ -102,6 +105,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		done:             make(chan struct{}),
 		shutdownCallback: shutdownCallback,
 		networkName:      networkName,
+		tracer:           otel.Tracer("op-acceptor"),
 	}, nil
 }
 
@@ -140,6 +144,9 @@ func (n *nat) Start(ctx context.Context) error {
 		}
 	}()
 
+	ctx, span := n.tracer.Start(ctx, "acceptance tests")
+	defer span.End()
+
 	n.ctx = ctx
 	n.done = make(chan struct{})
 	n.running.Store(true)
@@ -156,7 +163,7 @@ func (n *nat) Start(ctx context.Context) error {
 		"config.LogDir", n.config.LogDir)
 
 	// Run tests immediately on startup
-	err := n.runTests()
+	err := n.runTests(ctx)
 	if err != nil {
 		// For runtime errors (like panics or configuration issues), return exit code 2
 		n.config.Log.Error("Runtime error running tests", "error", err)
@@ -197,7 +204,7 @@ func (n *nat) Start(ctx context.Context) error {
 
 				// Run tests
 				n.config.Log.Info("Running periodic tests")
-				if err := n.runTests(); err != nil {
+				if err := n.runTests(ctx); err != nil {
 					n.config.Log.Error("Error running periodic tests", "error", err)
 				}
 				n.config.Log.Info("Test run interval", "interval", n.config.RunInterval)
@@ -218,7 +225,7 @@ func (n *nat) Start(ctx context.Context) error {
 }
 
 // runTests runs all tests and processes the results
-func (n *nat) runTests() error {
+func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Info("Running all tests...")
 
 	// Generate a runID for this test run
@@ -245,7 +252,7 @@ func (n *nat) runTests() error {
 	}
 
 	// Run the tests with our new logger
-	result, err := n.runner.RunAllTests()
+	result, err := n.runner.RunAllTests(ctx)
 	if err != nil {
 		// This is a runtime error (not a test failure)
 		n.config.Log.Error("Runtime error running tests", "error", err)

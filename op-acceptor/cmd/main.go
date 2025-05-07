@@ -6,11 +6,13 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/honeycombio/otel-config-go/otelconfig"
 	"github.com/urfave/cli/v2"
 
 	nat "github.com/ethereum-optimism/infra/op-acceptor"
 	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/service"
+	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
@@ -49,14 +51,25 @@ func main() {
 		}
 	}
 
+	// Start telemetry
+	ctx, shutdown, err := telemetry.SetupOpenTelemetry(
+		context.Background(),
+		otelconfig.WithServiceName(app.Name),
+		otelconfig.WithServiceVersion(app.Version),
+	)
+	if err != nil {
+		log.Crit("Failed to setup open telemetry", "message", err)
+	}
+	defer shutdown()
+
 	// Start server
 	svc := service.New()
-	svc.Start(context.Background())
+	svc.Start(ctx)
 	defer svc.Shutdown()
 
 	// Start CLI
-	ctx := ctxinterrupt.WithSignalWaiterMain(context.Background())
-	err := app.RunContext(ctx, os.Args)
+	ctx = ctxinterrupt.WithSignalWaiterMain(ctx)
+	err = app.RunContext(ctx, os.Args)
 	if err != nil {
 		log.Crit("Application failed", "message", err)
 	}

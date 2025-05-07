@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 )
@@ -29,12 +30,12 @@ func newTrackedMockRunner() *trackedMockRunner {
 	}
 }
 
-func (m *trackedMockRunner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+func (m *trackedMockRunner) RunTest(_ context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	args := m.Called(metadata)
 	return args.Get(0).(*types.TestResult), args.Error(1)
 }
 
-func (m *trackedMockRunner) RunAllTests() (*runner.RunnerResult, error) {
+func (m *trackedMockRunner) RunAllTests(_ context.Context) (*runner.RunnerResult, error) {
 	args := m.Called()
 
 	// Track execution and signal on channel
@@ -106,6 +107,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 		runner:     mockRunner,
 		fileLogger: mockFileLogger,
 		done:       make(chan struct{}),
+		tracer:     otel.Tracer("test"),
 	}
 
 	return mockRunner, service, ctx, cancel

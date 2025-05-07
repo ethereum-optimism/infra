@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -42,7 +43,7 @@ gates:
 	r := setupTestRunner(t, testContent, configContent)
 
 	// Run the test
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusFail, result.Status)
 
