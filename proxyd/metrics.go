@@ -65,7 +65,8 @@ var (
 		Help:      "Count of total supervisor checks.",
 	}, []string{
 		"supervisor_url",
-		"status_code",
+		"http_code",
+		"rpc_error_code",
 		"strategy",
 	})
 
