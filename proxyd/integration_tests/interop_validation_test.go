@@ -1,7 +1,6 @@
 package integration_tests
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -9,9 +8,12 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +33,21 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 }
 
 func fakeInteropReqParams() (string, error) {
+	checksumArgs := supervisorTypes.ChecksumArgs{
+		BlockNumber: 3519561,
+		Timestamp:   1746536469,
+		LogIndex:    1,
+		ChainID:     eth.ChainIDFromUInt64(420120003),
+		LogHash: supervisorTypes.PayloadHashToLogHash(
+			crypto.Keccak256Hash([]byte("Hello, World!")),
+			common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
+		),
+	}
+
+	accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+		checksumArgs.Access(),
+	})
+
 	toAddress := common.HexToAddress("0x8f3Ddd0FBf3e78CA1D6cd17379eD88E261249B53")
 
 	v, r, s := big.NewInt(0), big.NewInt(0), big.NewInt(0)
@@ -47,11 +64,8 @@ func fakeInteropReqParams() (string, error) {
 		S:       s,
 		AccessList: types.AccessList{
 			{
-				Address: params.InteropCrossL2InboxAddress,
-				StorageKeys: []common.Hash{
-					common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-					common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
-				},
+				Address:     params.InteropCrossL2InboxAddress,
+				StorageKeys: accessListEntries,
 			},
 		},
 	})
@@ -65,11 +79,11 @@ func TestInteropValidation(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -320600, errors.New("conflicting data"))
+	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
 	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badValidatingBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -321501, errors.New("data corruption"))
+	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
@@ -82,6 +96,9 @@ func TestInteropValidation(t *testing.T) {
 
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
+
+	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
+	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
 
 	type respDetails struct {
 		code         int
@@ -102,7 +119,7 @@ func TestInteropValidation(t *testing.T) {
 			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
 			expectedResp: respDetails{
 				code:         409,
-				jsonResponse: []byte(errResp1),
+				jsonResponse: []byte(expectedErrResp1),
 			},
 		},
 		{
@@ -130,12 +147,12 @@ func TestInteropValidation(t *testing.T) {
 			multiplePossibilities: true,
 			possibilities: []respDetails{
 				{
-					code:         409,
-					jsonResponse: []byte(errResp1),
+					code:         409, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
+					jsonResponse: []byte(expectedErrResp1),
 				},
 				{
-					code:         400,
-					jsonResponse: []byte(errResp2),
+					code:         422, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
+					jsonResponse: []byte(expectedErrResp2),
 				},
 			},
 		},
@@ -154,7 +171,8 @@ func TestInteropValidation(t *testing.T) {
 
 			client := NewProxydClient("http://127.0.0.1:8545")
 			for i := 0; i < 5; i++ {
-				observedResp, observedCode, err := client.SendRequest(makeSendRawTransaction(fakeInteropReqParams))
+				sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+				observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 				require.NoError(t, err, "iteration %d", i)
 
 				if c.multiplePossibilities {

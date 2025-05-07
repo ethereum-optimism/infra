@@ -18,6 +18,8 @@ import (
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
+	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -116,6 +118,140 @@ var (
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
 	ErrConsensusGetReceiptsInvalidTarget = errors.New("unsupported consensus_receipts_target")
 )
+
+/*
+These adhere to the interop RPC error codes defined in the supervisor spec
+Ref: https://github.com/ethereum-optimism/specs/blob/41a2ea8d362ac132ad2edf7f577bd393ec8beccc/specs/interop/supervisor.md
+Summary:
+
+	-3204XX DEADLINE_EXCEEDED errors
+	  -320400 UNINITIALIZED_CHAIN_DATABASE
+	-3205XX NOT_FOUND errors
+	  -320500 SKIPPED_DATA
+	  -320501 UNKNOWN_CHAIN
+	-3206XX ALREADY_EXISTS errors
+	  -320600 CONFLICTING_DATA
+	  -320601 INEFFECTIVE_DATA
+	-3209XX FAILED_PRECONDITION errors
+	  -320900 OUT_OF_ORDER
+	  -320901 AWAITING_REPLACEMENT_BLOCK
+	-3210XX ABORTED errors
+	  -321000 ITER_STOP
+	-3211XX OUT_OF_RANGE errors
+	  -321100 OUT_OF_SCOPE
+	-3212XX UNIMPLEMENTED errors
+	  -321200 CANNOT_GET_PARENT_OF_FIRST_BLOCK_IN_DB
+	-3214XX UNAVAILABLE errors
+	  -321401 FUTURE_DATA
+	-3215XX DATA_LOSS errors
+	  -321500 MISSED_DATA
+	  -321501 DATA_CORRUPTION
+*/
+var interopRPCErrorMap = map[error]*RPCErr{
+	supervisorTypes.ErrUninitialized: {
+		Code:          -320400,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrSkipped: {
+		Code:          -320500,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrUnknownChain: {
+		Code:          -320501,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrConflict: {
+		Code:          -320600,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrIneffective: {
+		Code:          -320601,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrOutOfOrder: {
+		Code:          -320900,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrAwaitReplacementBlock: {
+		Code:          -320901,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrStop: {
+		Code:          -321000,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrOutOfScope: {
+		Code:          -321100,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrPreviousToFirst: {
+		Code:          -321200,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrFuture: {
+		Code:          -321401,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrNotExact: {
+		Code:          -321500,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrDataCorruption: {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
+	},
+	errors.New("stopped acces-list check early"): {
+		Code:          JSONRPCErrorInternal,
+		HTTPErrorCode: 500,
+	},
+	errors.New("failed to read data"): {
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
+	},
+}
+
+func ParseInteropError(err error) *RPCErr {
+	var fallbackErr *RPCErr
+	httpErr, isHTTPError := err.(rpc.HTTPError)
+	if !isHTTPError {
+		fallbackErr = &RPCErr{
+			Code:          JSONRPCErrorInternal,
+			Message:       err.Error(),
+			HTTPErrorCode: 500,
+		}
+	} else {
+		// if the underlying error is a JSON-RPC error, overwrite it with the inherent error message body
+		var rpcErrJson rpcResJSON
+		unmarshalErr := json.Unmarshal(httpErr.Body, &rpcErrJson)
+		if unmarshalErr != nil {
+			fallbackErr = ErrInvalidParams(string(httpErr.Body))
+			fallbackErr.HTTPErrorCode = httpErr.StatusCode
+		} else {
+			fallbackErr = &RPCErr{
+				Code:          rpcErrJson.Error.Code,
+				Message:       rpcErrJson.Error.Message,
+				Data:          rpcErrJson.Error.Data,
+				HTTPErrorCode: httpErr.StatusCode,
+			}
+
+			err = fmt.Errorf(rpcErrJson.Error.Message)
+		}
+	}
+
+	errStr := err.Error()
+	for errSubStr, errCodes := range interopRPCErrorMap {
+		if strings.Contains(errStr, errSubStr.Error()) {
+			interopParsedErr := errCodes.Clone()
+			interopParsedErr.Message = errStr
+			return interopParsedErr
+		}
+	}
+	return fallbackErr
+}
 
 func ErrInvalidRequest(msg string) *RPCErr {
 	return &RPCErr{
