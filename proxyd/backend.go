@@ -119,6 +119,34 @@ var (
 	ErrConsensusGetReceiptsInvalidTarget = errors.New("unsupported consensus_receipts_target")
 )
 
+/*
+These adhere to the interop RPC error codes defined in the supervisor spec
+Ref: https://github.com/ethereum-optimism/specs/blob/41a2ea8d362ac132ad2edf7f577bd393ec8beccc/specs/interop/supervisor.md
+Summary:
+
+	-3204XX DEADLINE_EXCEEDED errors
+	  -320400 UNINITIALIZED_CHAIN_DATABASE
+	-3205XX NOT_FOUND errors
+	  -320500 SKIPPED_DATA
+	  -320501 UNKNOWN_CHAIN
+	-3206XX ALREADY_EXISTS errors
+	  -320600 CONFLICTING_DATA
+	  -320601 INEFFECTIVE_DATA
+	-3209XX FAILED_PRECONDITION errors
+	  -320900 OUT_OF_ORDER
+	  -320901 AWAITING_REPLACEMENT_BLOCK
+	-3210XX ABORTED errors
+	  -321000 ITER_STOP
+	-3211XX OUT_OF_RANGE errors
+	  -321100 OUT_OF_SCOPE
+	-3212XX UNIMPLEMENTED errors
+	  -321200 CANNOT_GET_PARENT_OF_FIRST_BLOCK_IN_DB
+	-3214XX UNAVAILABLE errors
+	  -321401 FUTURE_DATA
+	-3215XX DATA_LOSS errors
+	  -321500 MISSED_DATA
+	  -321501 DATA_CORRUPTION
+*/
 var interopRPCErrorMap = map[error]*RPCErr{
 	supervisorTypes.ErrUninitialized: {
 		Code:          -320400,
