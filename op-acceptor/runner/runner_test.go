@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -93,6 +94,7 @@ gates:
 }
 
 func TestRunTest_SingleTest(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
 	// Create a simple test file in the work directory
@@ -108,7 +110,7 @@ func TestDirectToGate(t *testing.T) {
 	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
 	require.NoError(t, err)
 
-	result, err := r.RunTest(types.ValidatorMetadata{
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
 		ID:       "test1",
 		Gate:     "test-gate",
 		FuncName: "TestDirectToGate",
@@ -124,9 +126,10 @@ func TestDirectToGate(t *testing.T) {
 }
 
 func TestRunTest_RunAll(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
-	result, err := r.RunTest(types.ValidatorMetadata{
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
 		ID:      "all-tests",
 		Gate:    "test-gate",
 		Package: "./feature",
@@ -143,10 +146,11 @@ func TestRunTest_RunAll(t *testing.T) {
 }
 
 func TestRunAllTests(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
 	// Run all tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusPass, result.Status)
 
@@ -262,6 +266,7 @@ func TestFormatErrors(t *testing.T) {
 }
 
 func TestGate(t *testing.T) {
+	ctx := context.Background()
 	t.Run("gate with direct tests", func(t *testing.T) {
 		configContent := []byte(`
 gates:
@@ -287,7 +292,7 @@ func TestTwo(t *testing.T) {
 }
 `)
 		r := setupTestRunner(t, testContent, configContent)
-		result, err := r.RunAllTests()
+		result, err := r.RunAllTests(ctx)
 		require.NoError(t, err)
 
 		// Verify gate structure
@@ -327,7 +332,7 @@ func TestChild(t *testing.T) {
 }
 `)
 		r := setupTestRunner(t, testContent, configContent)
-		result, err := r.RunAllTests()
+		result, err := r.RunAllTests(ctx)
 		require.NoError(t, err)
 
 		// Verify inherited tests are present
@@ -338,6 +343,7 @@ func TestChild(t *testing.T) {
 }
 
 func TestSuite(t *testing.T) {
+	ctx := context.Background()
 	t.Run("suite configuration", func(t *testing.T) {
 		configContent := []byte(`
 gates:
@@ -372,7 +378,7 @@ func TestSuiteTwo(t *testing.T) {
 	`)
 
 		r := setupTestRunner(t, testContent, configContent)
-		result, err := r.RunAllTests()
+		result, err := r.RunAllTests(ctx)
 		require.NoError(t, err)
 
 		// Verify suite structure
@@ -393,6 +399,7 @@ func TestSuiteTwo(t *testing.T) {
 
 // Add a new test for skipped tests
 func TestRunTest_SkippedTest(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
 	// Create a test file with a skipped test
@@ -408,7 +415,7 @@ func TestSkipped(t *testing.T) {
 	err := os.WriteFile(filepath.Join(r.workDir, "skip_test.go"), testContent, 0644)
 	require.NoError(t, err)
 
-	result, err := r.RunTest(types.ValidatorMetadata{
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
 		ID:       "skip-test",
 		Gate:     "test-gate",
 		FuncName: "TestSkipped",
@@ -551,6 +558,7 @@ func TestSuiteStatusDetermination(t *testing.T) {
 }
 
 func TestRunPackageTests(t *testing.T) {
+	ctx := context.Background()
 	// Setup test with multiple tests in a package
 	testContent := []byte(`
 package feature_test
@@ -588,7 +596,7 @@ gates:
 	r := setupTestRunner(t, testContent, configContent)
 
 	// Run all tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusPass, result.Status)
 
@@ -640,6 +648,7 @@ gates:
 }
 
 func TestRunPackageWithFailingTests(t *testing.T) {
+	ctx := context.Background()
 	// Setup test with a failing test in a package
 	testContent := []byte(`
 package feature_test
@@ -665,7 +674,7 @@ gates:
 	r := setupTestRunner(t, testContent, configContent)
 
 	// Run all tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, types.TestStatusFail, result.Status, "overall result should be failure when any test fails")
 
@@ -723,6 +732,7 @@ gates:
 }
 
 func TestMultiplePackageTests(t *testing.T) {
+	ctx := context.Background()
 	// Setup tests in two different packages
 	packageOneContent := []byte(`
 package pkg1_test
@@ -785,7 +795,7 @@ gates:
 	require.NoError(t, err)
 
 	// Run all tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	require.NoError(t, err)
 
 	// Verify structure
@@ -832,6 +842,7 @@ gates:
 }
 
 func TestMultiplePackageTestsInGate(t *testing.T) {
+	ctx := context.Background()
 	// Setup tests in two different packages
 	packageOneContent := []byte(`
 package pkg1_test
@@ -891,7 +902,7 @@ gates:
 	require.NoError(t, err)
 
 	// Run all tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	require.NoError(t, err)
 
 	// Verify structure
@@ -935,6 +946,7 @@ gates:
 
 // TestRunTest_PanicRecovery verifies that the RunTest method properly handles and recovers from panics
 func TestRunTest_PanicRecovery(t *testing.T) {
+	ctx := context.Background()
 	// Create a test runner with a test file that will panic when executed
 	testContent := []byte(`
 package feature_test
@@ -969,7 +981,7 @@ gates:
 	}
 
 	// The panic should be caught and converted to a test failure
-	result, err := r.RunTest(metadata)
+	result, err := r.RunTest(ctx, metadata)
 
 	// The RunTest method actually returns the result but not an error for panics
 	// because the Go test command captures the panic and returns a failed test result
@@ -993,6 +1005,7 @@ gates:
 
 // TestRunAllTests_PanicHandling verifies that the RunAllTests method properly handles tests that panic
 func TestRunAllTests_PanicHandling(t *testing.T) {
+	ctx := context.Background()
 	// Create a test runner with a mix of normal and panicking tests
 	testContent := []byte(`
 package feature_test
@@ -1025,7 +1038,7 @@ gates:
 	r := setupTestRunner(t, testContent, configContent)
 
 	// Run all tests - the runner should handle the panic and continue
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 
 	// There should be no error at the top level because the runner handles test panics
 	require.NoError(t, err, "RunAllTests should not return an error even with panicking tests")
@@ -1455,6 +1468,7 @@ func TestSubTestDurationCalculation(t *testing.T) {
 }
 
 func TestRunTestTimeout_SingleTest_ExceedsTimeout(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
 	// Create a simple test file in the work directory
@@ -1472,7 +1486,7 @@ func TestDirectToGate(t *testing.T) {
 	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
 	require.NoError(t, err)
 
-	result, err := r.RunTest(types.ValidatorMetadata{
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
 		ID:       "test1",
 		Gate:     "test-gate",
 		FuncName: "TestDirectToGate",
@@ -1490,6 +1504,7 @@ func TestDirectToGate(t *testing.T) {
 }
 
 func TestRunTestTimeout_SingleTest_DoesNotExceedTimeout(t *testing.T) {
+	ctx := context.Background()
 	r := setupDefaultTestRunner(t)
 
 	// Create a simple test file in the work directory
@@ -1507,7 +1522,7 @@ func TestDirectToGate(t *testing.T) {
 	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
 	require.NoError(t, err)
 
-	result, err := r.RunTest(types.ValidatorMetadata{
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
 		ID:       "test1",
 		Gate:     "test-gate",
 		FuncName: "TestDirectToGate",
