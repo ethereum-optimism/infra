@@ -16,8 +16,11 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Go test2json (TestEvent)action constants for JSON test output
@@ -73,8 +76,8 @@ type ResultStats struct {
 
 // TestRunner defines the interface for running acceptance tests
 type TestRunner interface {
-	RunAllTests() (*RunnerResult, error)
-	RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error)
+	RunAllTests(ctx context.Context) (*RunnerResult, error)
+	RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error)
 }
 
 // TestRunnerWithFileLogger extends the TestRunner interface with a method
@@ -95,6 +98,7 @@ type runner struct {
 	allowSkips  bool                // Whether to allow skipping tests when preconditions are not met
 	fileLogger  *logging.FileLogger // Logger for storing test results
 	networkName string              // Name of the network being tested
+	tracer      trace.Tracer
 }
 
 // Config holds configuration for creating a new runner
@@ -154,11 +158,12 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		allowSkips:  cfg.AllowSkips,
 		fileLogger:  cfg.FileLogger,
 		networkName: networkName,
+		tracer:      otel.Tracer("test runner"),
 	}, nil
 }
 
 // RunAllTests implements the TestRunner interface
-func (r *runner) RunAllTests() (*RunnerResult, error) {
+func (r *runner) RunAllTests(ctx context.Context) (*RunnerResult, error) {
 	// Use fileLogger's runID if available, otherwise generate new
 	if r.fileLogger != nil {
 		r.runID = r.fileLogger.GetRunID()
@@ -177,7 +182,7 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 		Stats: ResultStats{StartTime: start},
 	}
 
-	if err := r.processAllGates(result); err != nil {
+	if err := r.processAllGates(ctx, result); err != nil {
 		return nil, err
 	}
 
@@ -189,13 +194,13 @@ func (r *runner) RunAllTests() (*RunnerResult, error) {
 }
 
 // processAllGates handles the execution of all gates
-func (r *runner) processAllGates(result *RunnerResult) error {
+func (r *runner) processAllGates(ctx context.Context, result *RunnerResult) error {
 	// Group validators by gate
 	gateValidators := r.groupValidatorsByGate()
 
 	// Process each gate
 	for gateName, validators := range gateValidators {
-		if err := r.processGate(gateName, validators, result); err != nil {
+		if err := r.processGate(ctx, gateName, validators, result); err != nil {
 			return fmt.Errorf("processing gate %s: %w", gateName, err)
 		}
 	}
@@ -212,7 +217,10 @@ func (r *runner) groupValidatorsByGate() map[string][]types.ValidatorMetadata {
 }
 
 // processGate handles the execution of a single gate and its tests
-func (r *runner) processGate(gateName string, validators []types.ValidatorMetadata, result *RunnerResult) error {
+func (r *runner) processGate(ctx context.Context, gateName string, validators []types.ValidatorMetadata, result *RunnerResult) error {
+	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("gate %s", gateName))
+	defer span.End()
+
 	gateStart := time.Now()
 	gateResult := &GateResult{
 		ID:     gateName,
@@ -226,12 +234,12 @@ func (r *runner) processGate(gateName string, validators []types.ValidatorMetada
 	suiteValidators, directTests := r.categorizeValidators(validators)
 
 	// Process suites first
-	if err := r.processSuites(suiteValidators, gateResult, result); err != nil {
+	if err := r.processSuites(ctx, suiteValidators, gateResult, result); err != nil {
 		return err
 	}
 
 	// Then process direct gate tests
-	if err := r.processDirectTests(directTests, gateResult, result); err != nil {
+	if err := r.processDirectTests(ctx, directTests, gateResult, result); err != nil {
 		return err
 	}
 
@@ -258,9 +266,9 @@ func (r *runner) categorizeValidators(validators []types.ValidatorMetadata) (map
 }
 
 // processSuites handles the execution of all suites in a gate
-func (r *runner) processSuites(suiteValidators map[string][]types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+func (r *runner) processSuites(ctx context.Context, suiteValidators map[string][]types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
 	for suiteName, suiteTests := range suiteValidators {
-		if err := r.processSuite(suiteName, suiteTests, gateResult, result); err != nil {
+		if err := r.processSuite(ctx, suiteName, suiteTests, gateResult, result); err != nil {
 			return fmt.Errorf("processing suite %s: %w", suiteName, err)
 		}
 	}
@@ -268,7 +276,10 @@ func (r *runner) processSuites(suiteValidators map[string][]types.ValidatorMetad
 }
 
 // processSuite handles the execution of a single suite
-func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+func (r *runner) processSuite(ctx context.Context, suiteName string, suiteTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("suite %s", suiteName))
+	defer span.End()
+
 	suiteStart := time.Now()
 	suiteResult := &SuiteResult{
 		ID:    suiteName,
@@ -279,7 +290,7 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 
 	// Run all tests in the suite
 	for _, validator := range suiteTests {
-		if err := r.processTestAndAddToResults(validator, gateResult, suiteResult, result); err != nil {
+		if err := r.processTestAndAddToResults(ctx, validator, gateResult, suiteResult, result); err != nil {
 			return err
 		}
 	}
@@ -292,9 +303,9 @@ func (r *runner) processSuite(suiteName string, suiteTests []types.ValidatorMeta
 }
 
 // processDirectTests handles the execution of direct gate tests
-func (r *runner) processDirectTests(directTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+func (r *runner) processDirectTests(ctx context.Context, directTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
 	for _, validator := range directTests {
-		if err := r.processTestAndAddToResults(validator, gateResult, nil, result); err != nil {
+		if err := r.processTestAndAddToResults(ctx, validator, gateResult, nil, result); err != nil {
 			return err
 		}
 	}
@@ -302,8 +313,8 @@ func (r *runner) processDirectTests(directTests []types.ValidatorMetadata, gateR
 }
 
 // processTestAndAddToResults runs a single test and adds its results to the appropriate result containers
-func (r *runner) processTestAndAddToResults(validator types.ValidatorMetadata, gateResult *GateResult, suiteResult *SuiteResult, result *RunnerResult) error {
-	testResult, err := r.RunTest(validator)
+func (r *runner) processTestAndAddToResults(ctx context.Context, validator types.ValidatorMetadata, gateResult *GateResult, suiteResult *SuiteResult, result *RunnerResult) error {
+	testResult, err := r.RunTest(ctx, validator)
 	if err != nil {
 		return fmt.Errorf("running test %s: %w", validator.ID, err)
 	}
@@ -335,7 +346,7 @@ func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
 }
 
 // RunTest implements the TestRunner interface
-func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	// Use defer and recover to catch panics and convert them to errors
 	var result *types.TestResult
 	var err error
@@ -367,9 +378,9 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 	r.log.Info("Running test", "validator", metadata.ID)
 
 	if metadata.RunAll {
-		result, err = r.runAllTestsInPackage(metadata)
+		result, err = r.runAllTestsInPackage(ctx, metadata)
 	} else {
-		result, err = r.runSingleTest(metadata)
+		result, err = r.runSingleTest(ctx, metadata)
 	}
 
 	var status types.TestStatus
@@ -385,7 +396,7 @@ func (r *runner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, e
 }
 
 // runAllTestsInPackage discovers and runs all tests in a package
-func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	testNames, err := r.listTestsInPackage(metadata.Package)
 	if err != nil {
 		return nil, fmt.Errorf("listing tests in package %s: %w", metadata.Package, err)
@@ -396,7 +407,7 @@ func (r *runner) runAllTestsInPackage(metadata types.ValidatorMetadata) (*types.
 		"count", len(testNames),
 		"tests", strings.Join(testNames, ", "))
 
-	return r.runTestList(metadata, testNames)
+	return r.runTestList(ctx, metadata, testNames)
 }
 
 // listTestsInPackage returns all test names in a package
@@ -456,7 +467,7 @@ func isValidTestName(name string) bool {
 }
 
 // runTestList runs a list of tests and aggregates their results
-func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
+func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetadata, testNames []string) (*types.TestResult, error) {
 	if len(testNames) == 0 {
 		r.log.Warn("No tests found to run in package", "package", metadata.Package)
 		return &types.TestResult{
@@ -481,7 +492,7 @@ func (r *runner) runTestList(metadata types.ValidatorMetadata, testNames []strin
 		testMetadata.FuncName = testName
 
 		// Run the individual test
-		testResult, err := r.runSingleTest(testMetadata)
+		testResult, err := r.runSingleTest(ctx, testMetadata)
 		if err != nil {
 			return nil, fmt.Errorf("running test %s: %w", testName, err)
 		}
@@ -535,8 +546,10 @@ type TestEvent struct {
 }
 
 // runSingleTest runs a specific test
-func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
-	ctx := context.Background()
+func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("test %s", metadata.FuncName))
+	defer span.End()
+
 	if metadata.Timeout != 0 {
 		var cancel func()
 		// This parent process timeout is redundant, add 200ms to allow child process
@@ -555,7 +568,7 @@ func (r *runner) runSingleTest(metadata types.ValidatorMetadata) (*types.TestRes
 		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 		env = append(env, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
 	}
-	cmd.Env = env
+	cmd.Env = telemetry.InstrumentEnvironment(ctx, env)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -857,7 +870,10 @@ func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
 }
 
 // RunGate runs all tests in a specific gate
-func (r *runner) RunGate(gate string) error {
+func (r *runner) RunGate(ctx context.Context, gate string) error {
+	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("gate %s", gate))
+	defer span.End()
+
 	validators := r.registry.GetValidators()
 
 	// Filter tests for this gate
@@ -873,7 +889,7 @@ func (r *runner) RunGate(gate string) error {
 	}
 
 	// Run the tests
-	result, err := r.RunAllTests()
+	result, err := r.RunAllTests(ctx)
 	if err != nil {
 		return err
 	}
