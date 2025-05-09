@@ -65,7 +65,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 
 	// Extract network name from DEVNET_ENV_URL environment variable
 	networkName := extractNetworkName(os.Getenv("DEVNET_ENV_URL"))
-	config.Log.Info("Using network name for metrics", "network", networkName)
+	config.Log.Info("Network name", "network", networkName)
 
 	// Create runner with registry
 	testRunner, err := runner.NewTestRunner(runner.Config{
@@ -447,7 +447,7 @@ func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (%s)", formatDuration(n.result.Duration)))
+	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName))
 
 	// Configure columns
 	t.AppendHeader(table.Row{

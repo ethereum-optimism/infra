@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func TestFileLogger(t *testing.T) {
 	// Verify the directory structure
 	baseDir := logger.GetBaseDir()
 	assert.DirExists(t, baseDir)
-	assert.DirExists(t, filepath.Join(baseDir, "tests"))
+	assert.DirExists(t, filepath.Join(baseDir, "passed"))
 	assert.DirExists(t, filepath.Join(baseDir, "failed"))
 
 	// Create multiple test results
@@ -86,19 +87,16 @@ func TestFileLogger(t *testing.T) {
 	// Wait a short time to ensure async writes complete
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify individual test log files exist
-	expectedPassFilename := filepath.Join(baseDir, "tests", "test-gate-test-suite_package_TestPassingFunction.log")
+	// Verify test log files exist in the appropriate directories
+	expectedPassFilename := filepath.Join(baseDir, "passed", "test-gate-test-suite_package_TestPassingFunction.log")
 	assert.FileExists(t, expectedPassFilename)
 
-	expectedFailFilename := filepath.Join(baseDir, "tests", "test-gate-test-suite_package_TestFailingFunction.log")
-	assert.FileExists(t, expectedFailFilename)
-
-	expectedSkipFilename := filepath.Join(baseDir, "tests", "test-gate-test-suite_package_TestSkippedFunction.log")
+	expectedSkipFilename := filepath.Join(baseDir, "passed", "test-gate-test-suite_package_TestSkippedFunction.log")
 	assert.FileExists(t, expectedSkipFilename)
 
-	// Check that a copy of the failing test exists in the failed directory
-	expectedFailedCopyFilename := filepath.Join(baseDir, "failed", "test-gate-test-suite_package_TestFailingFunction.log")
-	assert.FileExists(t, expectedFailedCopyFilename)
+	// Check that failing test exists in the failed directory
+	expectedFailedFilename := filepath.Join(baseDir, "failed", "test-gate-test-suite_package_TestFailingFunction.log")
+	assert.FileExists(t, expectedFailedFilename)
 
 	// Verify all.log file exists
 	allLogsFile := logger.GetAllLogsFile()
@@ -189,6 +187,17 @@ func TestLoggingWithRunID(t *testing.T) {
 	// We'll use a different runID for this test
 	differentRunID := "different-run-id"
 
+	// Create the directory structure for the different runID
+	differentRunIDDir := filepath.Join(tmpDir, "testrun-"+differentRunID)
+	passedDir := filepath.Join(differentRunIDDir, "passed")
+	failedDir := filepath.Join(differentRunIDDir, "failed")
+
+	// Create the directory structure for the different runID
+	for _, dir := range []string{differentRunIDDir, passedDir, failedDir} {
+		err := os.MkdirAll(dir, 0755)
+		require.NoError(t, err, "Failed to create directory: %s", dir)
+	}
+
 	// Create a test result
 	testResult := &types.TestResult{
 		Metadata: types.ValidatorMetadata{
@@ -220,7 +229,7 @@ func TestLoggingWithRunID(t *testing.T) {
 
 	// Verify the directory structure was created
 	assert.DirExists(t, runIDDir)
-	assert.DirExists(t, filepath.Join(runIDDir, "tests"))
+	assert.DirExists(t, filepath.Join(runIDDir, "passed"))
 	assert.DirExists(t, filepath.Join(runIDDir, "failed"))
 
 	// Verify that the runID is used in the directory name
@@ -228,7 +237,7 @@ func TestLoggingWithRunID(t *testing.T) {
 	assert.Equal(t, expectedDirName, runIDDir)
 
 	// Verify the test log file exists in the runID directory
-	expectedFilename := filepath.Join(runIDDir, "tests", "test-gate-test-suite_package_TestFunction.log")
+	expectedFilename := filepath.Join(runIDDir, "passed", "test-gate-test-suite_package_TestFunction.log")
 	assert.FileExists(t, expectedFilename)
 
 	// Verify all.log file exists for this runID
@@ -358,4 +367,337 @@ func (s *testCustomSink) Consume(result *types.TestResult, runID string) error {
 func (s *testCustomSink) Complete(runID string) error {
 	s.completed = true
 	return nil
+}
+
+// TestPerTestFileSink_WritesTestOutput tests that PerTestFileSink writes test output to passed/failed directories
+func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-pertest-sink"
+
+	// Create a file logger
+	logger, err := NewFileLogger(tmpDir, runID)
+	require.NoError(t, err)
+
+	// Access the PerTestFileSink directly
+	sink, ok := logger.GetSinkByType("PerTestFileSink")
+	require.True(t, ok, "PerTestFileSink should be available")
+	perTestSink, ok := sink.(*PerTestFileSink)
+	require.True(t, ok, "Sink should be of type *PerTestFileSink")
+
+	// Create test metadata for a passing test
+	passingMeta := types.ValidatorMetadata{
+		ID:       "test-pass",
+		FuncName: "TestPass",
+		Package:  "github.com/example/package",
+		Gate:     "gate1",
+		Suite:    "suite1",
+	}
+
+	// Create a passing test result with JSON-formatted output
+	passingResult := &types.TestResult{
+		Metadata: passingMeta,
+		Status:   types.TestStatusPass,
+		Duration: 1 * time.Second,
+		Stdout: `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestPass","Output":"=== RUN   TestPass\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"github.com/example/package","Test":"TestPass","Output":"--- PASS: TestPass (1.00s)\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"pass","Package":"github.com/example/package","Test":"TestPass","Elapsed":1}`,
+	}
+
+	// Create test metadata for a failing test
+	failingMeta := types.ValidatorMetadata{
+		ID:       "test-fail",
+		FuncName: "TestFail",
+		Package:  "github.com/example/package",
+		Gate:     "gate1",
+		Suite:    "suite1",
+	}
+
+	// Create a failing test result with JSON-formatted output including error information
+	failingResult := &types.TestResult{
+		Metadata: failingMeta,
+		Status:   types.TestStatusFail,
+		Duration: 500 * time.Millisecond,
+		Stdout: `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"=== RUN   TestFail\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"    Error Trace:    /path/to/file.go:123\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"    Error:          Test failed: assertion error\n"}
+{"Time":"2025-05-09T16:31:48.748571+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"                    expected: int(42)\n"}
+{"Time":"2025-05-09T16:31:48.748572+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"                    actual  : int(43)\n"}
+{"Time":"2025-05-09T16:31:48.748573+10:00","Action":"output","Package":"github.com/example/package","Test":"TestFail","Output":"    Messages:       Expected values to be equal\n"}
+{"Time":"2025-05-09T16:31:48.748580+10:00","Action":"fail","Package":"github.com/example/package","Test":"TestFail","Elapsed":0.5}`,
+		Error: fmt.Errorf("Test failed: assertion error"),
+	}
+
+	// Process test results through the sink
+	require.NoError(t, perTestSink.Consume(passingResult, runID))
+	require.NoError(t, perTestSink.Consume(failingResult, runID))
+
+	// Get directory paths
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	passedDir := filepath.Join(baseDir, "passed")
+	failedDir := filepath.Join(baseDir, "failed")
+
+	// Finalize to ensure all files are written
+	require.NoError(t, logger.Complete(runID))
+
+	// Verify the file in passed directory
+	passedFileName := getReadableTestFilename(passingMeta) + ".log"
+	passedFilePath := filepath.Join(passedDir, passedFileName)
+	passedContent, err := os.ReadFile(passedFilePath)
+	require.NoError(t, err, "Should be able to read the passing test file")
+
+	// Verify passing test file content
+	passedContentStr := string(passedContent)
+	assert.Contains(t, passedContentStr, "PLAINTEXT OUTPUT:")
+	assert.Contains(t, passedContentStr, "=== RUN   TestPass")
+	assert.Contains(t, passedContentStr, "--- PASS: TestPass (1.00s)")
+	assert.Contains(t, passedContentStr, "JSON OUTPUT:")
+	assert.Contains(t, passedContentStr, "RESULT SUMMARY:")
+	assert.Contains(t, passedContentStr, "Test passed:")
+	assert.Contains(t, passedContentStr, "Duration:")
+
+	// Verify the file in failed directory
+	failedFileName := getReadableTestFilename(failingMeta) + ".log"
+	failedFilePath := filepath.Join(failedDir, failedFileName)
+	failedContent, err := os.ReadFile(failedFilePath)
+	require.NoError(t, err, "Should be able to read the failing test file")
+
+	// Verify failing test file content
+	failedContentStr := string(failedContent)
+
+	// Verify that the plaintext section is included
+	assert.Contains(t, failedContentStr, "PLAINTEXT OUTPUT:")
+	assert.Contains(t, failedContentStr, "=== RUN   TestFail")
+	assert.Contains(t, failedContentStr, "Error Trace:")
+	assert.Contains(t, failedContentStr, "Error:")
+	assert.Contains(t, failedContentStr, "expected: int(42)")
+	assert.Contains(t, failedContentStr, "actual  : int(43)")
+	assert.Contains(t, failedContentStr, "Messages:")
+
+	// Verify that the JSON output is preserved
+	assert.Contains(t, failedContentStr, "JSON OUTPUT:")
+	assert.Contains(t, failedContentStr, `"Action":"output"`)
+	assert.Contains(t, failedContentStr, `"Package":"github.com/example/package"`)
+
+	// Verify the error summary contains the important error information
+	assert.Contains(t, failedContentStr, "ERROR SUMMARY:")
+	assert.Contains(t, failedContentStr, "Test:       TestFail")
+	assert.Contains(t, failedContentStr, "Error:      Test failed: assertion error")
+	assert.Contains(t, failedContentStr, "Message:    Expected values to be equal")
+	assert.Contains(t, failedContentStr, "Error Trace:")
+}
+
+// TestHTMLSummarySink_GeneratesHTMLReport tests that the HTML summary sink generates a proper HTML report
+func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-html-summary"
+
+	// Create a file logger
+	logger, err := NewFileLogger(tmpDir, runID)
+	require.NoError(t, err)
+
+	// Access the HTMLSummarySink directly
+	sink, ok := logger.GetSinkByType("HTMLSummarySink")
+	require.True(t, ok, "HTMLSummarySink should be available")
+	htmlSink, ok := sink.(*HTMLSummarySink)
+	require.True(t, ok, "Sink should be of type *HTMLSummarySink")
+
+	// Create a mix of test results
+	testResults := []*types.TestResult{
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-pass-1",
+				FuncName: "TestPassingOne",
+				Package:  "github.com/example/package1",
+				Gate:     "gate1",
+				Suite:    "suite1",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 1 * time.Second,
+			Stdout:   "Passing test output",
+		},
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-pass-2",
+				FuncName: "TestPassingTwo",
+				Package:  "github.com/example/package2",
+				Gate:     "gate1",
+				Suite:    "suite2",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 500 * time.Millisecond,
+			Stdout:   "Another passing test",
+		},
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-fail-1",
+				FuncName: "TestFailingOne",
+				Package:  "github.com/example/package1",
+				Gate:     "gate2",
+				Suite:    "suite1",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 1500 * time.Millisecond,
+			Stdout:   "Failing test output",
+			Error:    fmt.Errorf("Test assertion failed"),
+		},
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-skip-1",
+				FuncName: "TestSkipped",
+				Package:  "github.com/example/package3",
+				Gate:     "gate2",
+				Suite:    "suite3",
+			},
+			Status:   types.TestStatusSkip,
+			Duration: 100 * time.Millisecond,
+			Stdout:   "Skipped test",
+		},
+	}
+
+	// Process all test results
+	for _, result := range testResults {
+		err := htmlSink.Consume(result, runID)
+		require.NoError(t, err)
+	}
+
+	// Complete the report generation
+	err = htmlSink.Complete(runID)
+	require.NoError(t, err)
+
+	// Check that the HTML file was created
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	htmlFile := filepath.Join(baseDir, "test-summary.html")
+
+	// Ensure the file exists
+	_, err = os.Stat(htmlFile)
+	require.NoError(t, err, "HTML report file should exist")
+
+	// Read the file content
+	content, err := os.ReadFile(htmlFile)
+	require.NoError(t, err)
+	htmlContent := string(content)
+
+	// Verify the HTML content contains expected elements
+	assert.Contains(t, htmlContent, "<title>Test Results</title>")
+	assert.Contains(t, htmlContent, "<div>Total</div>")
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">4</div>")
+	assert.Contains(t, htmlContent, "<div>Passed</div>")
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">2</div>") // 2 passing tests
+	assert.Contains(t, htmlContent, "<div>Failed</div>")
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">1</div>") // 1 failing test
+	assert.Contains(t, htmlContent, "<div>Skipped</div>")
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">1</div>") // 1 skipped test
+
+	// Check that all test names are in the HTML
+	assert.Contains(t, htmlContent, "TestPassingOne")
+	assert.Contains(t, htmlContent, "TestPassingTwo")
+	assert.Contains(t, htmlContent, "TestFailingOne")
+	assert.Contains(t, htmlContent, "TestSkipped")
+
+	// Check that there are links to the log files
+	assert.Contains(t, htmlContent, "passed/gate1-suite1_package1_TestPassingOne.log")
+	assert.Contains(t, htmlContent, "passed/gate1-suite2_package2_TestPassingTwo.log")
+	assert.Contains(t, htmlContent, "failed/gate2-suite1_package1_TestFailingOne.log")
+	assert.Contains(t, htmlContent, "passed/gate2-suite3_package3_TestSkipped.log")
+
+	// Check for JavaScript functionality
+	assert.Contains(t, htmlContent, "function filterTests()")
+	assert.Contains(t, htmlContent, "function showOnlyFailed()")
+	assert.Contains(t, htmlContent, "function showAll()")
+}
+
+// TestExtractErrorInfoFromJSON verifies that error information is correctly extracted from test output
+func TestExtractErrorInfoFromJSON(t *testing.T) {
+	// Test with mixed content containing error information
+	mixedOutput := `Running tests
+=== RUN   TestExample
+{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
+{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestExample"}
+{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error Trace:    /path/to/file.go:123\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error:          Not equal: \n"}
+{"Time":"2025-05-09T16:31:48.748571+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    expected: int(42)\n"}
+{"Time":"2025-05-09T16:31:48.748572+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    actual  : int(43)\n"}
+{"Time":"2025-05-09T16:31:48.748573+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Messages:       Values should match\n"}
+{"Time":"2025-05-09T16:31:48.748580+10:00","Action":"fail","Package":"simple","Test":"TestExample","Elapsed":0}`
+
+	// Extract the error information
+	errorInfo := extractErrorInfoFromJSON(mixedOutput)
+
+	// Verify extracted fields
+	assert.Equal(t, "TestExample", errorInfo.TestName)
+	assert.Contains(t, errorInfo.ErrorTrace, "/path/to/file.go:123")
+	assert.Contains(t, errorInfo.ErrorMessage, "Not equal")
+
+	// The expected and actual values are extracted from different lines,
+	// so they need to be checked separately without int(42)/int(43) directly
+	assert.NotEmpty(t, errorInfo.Expected)
+	assert.NotEmpty(t, errorInfo.Actual)
+
+	// Verify message extraction
+	assert.Contains(t, errorInfo.Messages, "Values should match")
+
+	// Test with no error information
+	noErrorOutput := `{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
+{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestPass"}
+{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"=== RUN   TestPass\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"--- PASS: TestPass (0.00s)\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"pass","Package":"simple","Test":"TestPass","Elapsed":0}`
+
+	// Extract from passing test with no errors
+	passingInfo := extractErrorInfoFromJSON(noErrorOutput)
+
+	// Verify minimal information is available
+	assert.Equal(t, "TestPass", passingInfo.TestName)
+	assert.Empty(t, passingInfo.ErrorMessage)
+	assert.Empty(t, passingInfo.Expected)
+	assert.Empty(t, passingInfo.Actual)
+	assert.Empty(t, passingInfo.Messages)
+	assert.Empty(t, passingInfo.ErrorTrace)
+
+	// Test with empty input
+	emptyInfo := extractErrorInfoFromJSON("")
+	assert.Empty(t, emptyInfo.TestName)
+	assert.Empty(t, emptyInfo.ErrorMessage)
+}
+
+// TestExtractPlaintextFromJSON tests the extraction of output fields from JSON
+func TestExtractPlaintextFromJSON(t *testing.T) {
+	// Test with standard JSON output from go test -json
+	jsonOutput := `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"This is line 1\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"This is line 2\n"}
+{"Time":"2025-05-09T16:31:48.748575+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"--- PASS: TestExample (0.01s)\n"}`
+
+	// Expected plaintext output
+	expectedOutput := "=== RUN   TestExample\nThis is line 1\nThis is line 2\n--- PASS: TestExample (0.01s)\n"
+
+	// Extract the plaintext
+	plaintext := extractPlaintextFromJSON(jsonOutput)
+
+	// Verify the extraction
+	assert.Equal(t, expectedOutput, plaintext)
+
+	// Test with mixed content
+	mixedOutput := `This is not JSON
+{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"run","Package":"simple","Test":"TestExample"}
+{"Time":"2025-05-09T16:31:48.748575+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"Test output\n"}`
+
+	// Expected output from mixed content
+	expectedMixedOutput := "=== RUN   TestExample\nTest output\n"
+
+	// Extract plaintext from mixed content
+	mixedPlaintext := extractPlaintextFromJSON(mixedOutput)
+
+	// Verify the extraction skips non-output actions and non-JSON lines
+	assert.Equal(t, expectedMixedOutput, mixedPlaintext)
+
+	// Test with empty input
+	emptyPlaintext := extractPlaintextFromJSON("")
+	assert.Equal(t, "", emptyPlaintext)
 }
