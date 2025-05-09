@@ -169,6 +169,12 @@ type BackendGroupConfig struct {
 
 	MulticallRPCErrorCheck bool `toml:"multicall_rpc_error_check"`
 
+	// MaxBlockRange for eth_getLogs that works in both consensus and nonconsensus mode
+	MaxBlockRange uint64 `toml:"max_block_range"`
+
+	// RateLimitRange controls if eth_getLogs is rate limited by the request block range
+	RateLimitRange bool `toml:"rate_limit_range"`
+
 	/*
 		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance
 	*/
@@ -186,6 +192,8 @@ type BackendGroupConfig struct {
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`
 	ConsensusHALockPeriod        TOMLDuration `toml:"consensus_ha_lock_period"`
 	ConsensusHARedis             RedisConfig  `toml:"consensus_ha_redis"`
+
+	NonconsensusPollerInterval TOMLDuration `toml:"nonconsensus_poller_interval"`
 
 	Fallbacks []string `toml:"fallbacks"`
 }

@@ -83,7 +83,7 @@ type Server struct {
 	interopValidatingConfig InteropValidationConfig
 }
 
-type limiterFunc func(method string) bool
+type limiterFunc func(method string, amount int) bool
 
 type limiterFactoryFunc func(dur time.Duration, max int, prefix string) FrontendRateLimiter
 
@@ -277,7 +277,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isLimited := func(method string) bool {
+	isLimited := func(method string, amount int) bool {
 		isGloballyLimitedMethod := s.isGlobalLimit(method)
 		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
 			return false
@@ -294,7 +294,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 
-		ok, err := lim.Take(ctx, xff)
+		ok, err := lim.Take(ctx, xff, amount)
 		if err != nil {
 			log.Warn("error taking rate limit", "err", err)
 			return true
@@ -589,8 +589,28 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			continue
 		}
 
+		limitAmount := 1
+		backendGroup := s.BackendGroups[group]
+		if blockRange := ExtractBlockRange(parsedReq, backendGroup); blockRange != nil {
+			blockCount := int(blockRange.ToBlock) - int(blockRange.FromBlock) + 1
+			if backendGroup.RateLimitRange {
+				limitAmount = max(limitAmount, blockCount)
+			}
+			if backendGroup.MaxBlockRange > 0 && blockCount > int(backendGroup.MaxBlockRange) {
+				log.Debug(
+					"RPC request over max block range",
+					"source", "rpc",
+					"req_id", parsedReq.ID,
+					"method", parsedReq.Method,
+				)
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrBlockOutOfRange)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, ErrBlockOutOfRange)
+				continue
+			}
+		}
+
 		// Take base rate limit first
-		if isLimited("") {
+		if isLimited("", 1) {
 			log.Debug(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
@@ -603,7 +623,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		}
 
 		// Take rate limit for specific methods.
-		if _, ok := s.overrideLims[parsedReq.Method]; ok && isLimited(parsedReq.Method) {
+		if _, ok := s.overrideLims[parsedReq.Method]; ok && isLimited(parsedReq.Method, limitAmount) {
 			log.Debug(
 				"rate limited specific RPC",
 				"source", "rpc",
@@ -877,7 +897,7 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 		return ErrInvalidParams(err.Error())
 	}
-	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
+	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()), 1)
 	if err != nil {
 		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal
