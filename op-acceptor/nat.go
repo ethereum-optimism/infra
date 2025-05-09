@@ -472,7 +472,7 @@ func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (%s)", formatDuration(n.result.Duration)))
+	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName))
 
 	// Configure columns
 	t.AppendHeader(table.Row{
