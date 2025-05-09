@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,12 +117,13 @@ func NewFileLogger(baseDir string, runID string) (*FileLogger, error) {
 	dirName := fmt.Sprintf("testrun-%s", runID)
 	runDir := filepath.Join(baseDir, dirName)
 	failDir := filepath.Join(runDir, "failed")
+	passedDir := filepath.Join(runDir, "passed")
 
 	// Create directories
 	dirs := []string{
 		runDir,
-		filepath.Join(runDir, "tests"),
 		failDir,
+		passedDir,
 	}
 
 	for _, dir := range dirs {
@@ -142,10 +144,11 @@ func NewFileLogger(baseDir string, runID string) (*FileLogger, error) {
 	}
 
 	// Add default sinks
-	logger.sinks = append(logger.sinks, &IndividualTestFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
 	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
+	logger.sinks = append(logger.sinks, &PerTestFileSink{logger: logger})
+	logger.sinks = append(logger.sinks, &HTMLSummarySink{logger: logger})
 
 	return logger, nil
 }
@@ -512,13 +515,38 @@ func (s *IndividualTestFileSink) Consume(result *types.TestResult, runID string)
 		return err
 	}
 
-	// If test failed, create a link in the failed directory
+	// If test failed, create a dedicated file in the failed directory with complete information
 	if result.Status == types.TestStatusFail {
 		failedFilePath := filepath.Join(failedDir, filename+".log")
 
-		// For failed tests, we'll create the file directly for simplicity
-		// instead of using a hard link which might not work across different filesystems
-		if err := os.WriteFile(failedFilePath, []byte(content.String()), 0644); err != nil {
+		// Create a more comprehensive log for failed tests
+		var failedContent strings.Builder
+
+		// Start with the same header information
+		fmt.Fprintf(&failedContent, "Test: %s\n", result.Metadata.FuncName)
+		fmt.Fprintf(&failedContent, "Package: %s\n", result.Metadata.Package)
+		fmt.Fprintf(&failedContent, "Status: %s\n", result.Status)
+		fmt.Fprintf(&failedContent, "Duration: %s\n", result.Duration)
+		fmt.Fprintf(&failedContent, "Gate: %s\n", result.Metadata.Gate)
+		fmt.Fprintf(&failedContent, "Suite: %s\n", result.Metadata.Suite)
+		fmt.Fprintf(&failedContent, "---------------------------------------------------\n\n")
+
+		// Add error information with emphasis
+		if result.Error != nil {
+			fmt.Fprintf(&failedContent, "ERROR DETAILS:\n")
+			fmt.Fprintf(&failedContent, "=============\n")
+			fmt.Fprintf(&failedContent, "%s\n\n", result.Error.Error())
+		}
+
+		// Include complete stdout
+		if result.Stdout != "" {
+			fmt.Fprintf(&failedContent, "COMPLETE OUTPUT:\n")
+			fmt.Fprintf(&failedContent, "================\n")
+			fmt.Fprintf(&failedContent, "%s\n", result.Stdout)
+		}
+
+		// Write to the failed test log file
+		if err := os.WriteFile(failedFilePath, []byte(failedContent.String()), 0644); err != nil {
 			return fmt.Errorf("failed to write failed test log: %w", err)
 		}
 	}
@@ -622,16 +650,14 @@ type ConciseSummarySink struct {
 	failed      int
 	skipped     int
 	errored     int
-	startTime   time.Time
 	failedTests []string
+	testResults []*types.TestResult
 }
 
 // Consume updates the summary statistics
 func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) error {
-	// Initialize start time if this is the first result
-	if s.startTime.IsZero() {
-		s.startTime = time.Now()
-	}
+	// Store the test result
+	s.testResults = append(s.testResults, result)
 
 	// Update statistics based on test status
 	switch result.Status {
@@ -676,7 +702,12 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 
 	// Calculate totals and duration
 	total := s.passed + s.failed + s.skipped + s.errored
-	duration := time.Since(s.startTime)
+
+	// Calculate total duration from sum of all test durations
+	var totalDuration time.Duration
+	for _, result := range s.testResults {
+		totalDuration += result.Duration
+	}
 
 	// Build the concise summary
 	var summary strings.Builder
@@ -684,7 +715,7 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 	fmt.Fprintf(&summary, "============\n")
 	fmt.Fprintf(&summary, "Run ID: %s\n", runID)
 	fmt.Fprintf(&summary, "Time: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&summary, "Duration: %s\n\n", duration)
+	fmt.Fprintf(&summary, "Duration: %s\n\n", totalDuration)
 
 	fmt.Fprintf(&summary, "Results:\n")
 	fmt.Fprintf(&summary, "  Total:   %d\n", total)
@@ -719,4 +750,637 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 // GetRunID returns the current runID
 func (l *FileLogger) GetRunID() string {
 	return l.runID
+}
+
+// PerTestFileSink creates dedicated log files for each test in passed/failed directories
+// containing the complete go test output that would be shown by `go test`
+type PerTestFileSink struct {
+	logger *FileLogger
+}
+
+// Consume writes a complete test result to a dedicated file in the passed or failed directory
+func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error {
+	// Use the specified runID directory
+	baseDir, err := s.logger.GetDirectoryForRunID(runID)
+	if err != nil {
+		return err
+	}
+
+	// Create passed and failed directories if they don't exist
+	passedDir := filepath.Join(baseDir, "passed")
+	failedDir := filepath.Join(baseDir, "failed")
+
+	dirs := []string{
+		baseDir,
+		passedDir,
+		failedDir,
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	// Generate a safe filename based on the test metadata
+	filename := getReadableTestFilename(result.Metadata)
+
+	// Determine which directory to use based on test status
+	var targetDir string
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		targetDir = failedDir
+	} else {
+		targetDir = passedDir
+	}
+
+	// Full path to the test log file
+	testFilePath := filepath.Join(targetDir, filename+".log")
+
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(testFilePath)
+	if err != nil {
+		return err
+	}
+
+	// Prepare the log content
+	var content strings.Builder
+
+	// Extract the plaintext output first from all JSON Output fields
+	plaintext := extractPlaintextFromJSON(result.Stdout)
+
+	// 1. Write the plaintext output first
+	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
+	fmt.Fprintf(&content, "================\n\n")
+	fmt.Fprintf(&content, "%s\n", plaintext)
+
+	// 2. Add a clear separator between plaintext and JSON
+	fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+	fmt.Fprintf(&content, "JSON OUTPUT:\n")
+	fmt.Fprintf(&content, "============\n\n")
+
+	// 3. Include the raw JSON output for full debug information
+	if result.Stdout != "" {
+		fmt.Fprintf(&content, "%s\n", result.Stdout)
+	}
+
+	// 4. Add a separator before the error summary section
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+		fmt.Fprintf(&content, "ERROR SUMMARY:\n")
+		fmt.Fprintf(&content, "=============\n\n")
+
+		// Extract critical error information
+		errorInfo := extractErrorInfoFromJSON(result.Stdout)
+
+		if errorInfo.TestName != "" {
+			fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
+		}
+
+		if errorInfo.ErrorMessage != "" {
+			fmt.Fprintf(&content, "Error:      %s\n", errorInfo.ErrorMessage)
+		}
+
+		if errorInfo.Expected != "" && errorInfo.Actual != "" {
+			fmt.Fprintf(&content, "Expected:   %s\n", errorInfo.Expected)
+			fmt.Fprintf(&content, "Actual:     %s\n", errorInfo.Actual)
+		}
+
+		if errorInfo.Messages != "" {
+			fmt.Fprintf(&content, "Message:    %s\n", errorInfo.Messages)
+		}
+
+		if errorInfo.ErrorTrace != "" {
+			fmt.Fprintf(&content, "\nError Trace:\n%s\n", errorInfo.ErrorTrace)
+		}
+	} else {
+		// For passed tests, a simpler summary at the end
+		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+		fmt.Fprintf(&content, "RESULT SUMMARY:\n")
+		fmt.Fprintf(&content, "===============\n\n")
+		fmt.Fprintf(&content, "Test passed: %s\n", result.Metadata.FuncName)
+		fmt.Fprintf(&content, "Duration:    %s\n", formatDuration(result.Duration))
+	}
+
+	// Write the content to the file
+	return writer.Write([]byte(content.String()))
+}
+
+// extractPlaintextFromJSON extracts all "Output" fields from JSON to reconstruct the complete plaintext output
+func extractPlaintextFromJSON(jsonOutput string) string {
+	if jsonOutput == "" {
+		return ""
+	}
+
+	var outputBuilder strings.Builder
+	lines := strings.Split(jsonOutput, "\n")
+
+	for _, line := range lines {
+		// Skip empty lines
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// Only process JSON lines
+		if !strings.HasPrefix(strings.TrimSpace(line), "{") || !strings.HasSuffix(strings.TrimSpace(line), "}") {
+			continue
+		}
+
+		// Try to parse as JSON
+		var jsonData map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &jsonData); err != nil {
+			continue
+		}
+
+		// Extract information only from output actions
+		action, ok := jsonData["Action"].(string)
+		if !ok || action != "output" {
+			continue
+		}
+
+		// Extract the output text
+		outputText, ok := jsonData["Output"].(string)
+		if !ok || outputText == "" {
+			continue
+		}
+
+		// Add the output text to our builder
+		outputBuilder.WriteString(outputText)
+	}
+
+	return outputBuilder.String()
+}
+
+// ErrorInfo holds extracted error information from test output
+type ErrorInfo struct {
+	TestName     string
+	ErrorMessage string
+	Expected     string
+	Actual       string
+	Messages     string
+	ErrorTrace   string
+}
+
+// extractErrorInfoFromJSON parses JSON test output to extract human-readable error information
+func extractErrorInfoFromJSON(output string) ErrorInfo {
+	var info ErrorInfo
+
+	if output == "" {
+		return info
+	}
+
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		// Skip empty lines
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// Only process JSON lines
+		if !strings.HasPrefix(strings.TrimSpace(line), "{") || !strings.HasSuffix(strings.TrimSpace(line), "}") {
+			continue
+		}
+
+		// Try to parse as JSON
+		var jsonData map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &jsonData); err != nil {
+			continue
+		}
+
+		// Extract information only from output actions
+		action, ok := jsonData["Action"].(string)
+		if !ok || action != "output" {
+			continue
+		}
+
+		// Extract the output text
+		outputText, ok := jsonData["Output"].(string)
+		if !ok || outputText == "" {
+			continue
+		}
+
+		// Extract test name
+		if testName, ok := jsonData["Test"].(string); ok && testName != "" {
+			info.TestName = testName
+		}
+
+		// Extract error trace
+		if strings.Contains(outputText, "Error Trace:") {
+			parts := strings.Split(outputText, "Error Trace:")
+			if len(parts) > 1 {
+				trace := strings.TrimSpace(parts[1])
+				endIdx := strings.Index(trace, "Error:")
+				if endIdx > 0 {
+					info.ErrorTrace = trace[:endIdx]
+				} else {
+					info.ErrorTrace = trace
+				}
+			}
+		}
+
+		// Extract error message
+		if strings.Contains(outputText, "Error:") {
+			parts := strings.Split(outputText, "Error:")
+			if len(parts) > 1 {
+				errorLine := strings.TrimSpace(parts[1])
+				endIdx := strings.Index(errorLine, "\n")
+				if endIdx > 0 {
+					info.ErrorMessage = errorLine[:endIdx]
+				} else {
+					info.ErrorMessage = errorLine
+				}
+			}
+		}
+
+		// Extract expected value
+		if strings.Contains(outputText, "expected:") {
+			parts := strings.Split(outputText, "expected:")
+			if len(parts) > 1 {
+				expectedLine := strings.TrimSpace(parts[1])
+				endIdx := strings.Index(expectedLine, "\n")
+				if endIdx > 0 {
+					info.Expected = expectedLine[:endIdx]
+				} else {
+					info.Expected = expectedLine
+				}
+			}
+		}
+
+		// Extract actual value
+		if strings.Contains(outputText, "actual") {
+			parts := strings.Split(outputText, "actual")
+			if len(parts) > 1 {
+				actualLine := strings.TrimSpace(parts[1])
+				endIdx := strings.Index(actualLine, "\n")
+				if endIdx > 0 {
+					info.Actual = actualLine[:endIdx]
+				} else {
+					info.Actual = actualLine
+				}
+			}
+		}
+
+		// Extract messages
+		if strings.Contains(outputText, "Messages:") {
+			parts := strings.Split(outputText, "Messages:")
+			if len(parts) > 1 {
+				message := strings.TrimSpace(parts[1])
+				endIdx := strings.Index(message, "\n")
+				if endIdx > 0 {
+					info.Messages += message[:endIdx] + "\n"
+				} else {
+					info.Messages += message + "\n"
+				}
+			}
+		}
+	}
+
+	return info
+}
+
+// Complete is a no-op for PerTestFileSink
+func (s *PerTestFileSink) Complete(runID string) error {
+	return nil
+}
+
+// HTMLSummarySink creates an HTML report for better visualization of test results
+type HTMLSummarySink struct {
+	logger      *FileLogger
+	passed      int
+	failed      int
+	skipped     int
+	errored     int
+	testResults []*types.TestResult
+}
+
+// Consume collects test results for later HTML generation
+func (s *HTMLSummarySink) Consume(result *types.TestResult, runID string) error {
+	// Store the test result for later processing
+	s.testResults = append(s.testResults, result)
+
+	// Update statistics based on test status
+	switch result.Status {
+	case types.TestStatusPass:
+		s.passed++
+	case types.TestStatusFail:
+		s.failed++
+	case types.TestStatusSkip:
+		s.skipped++
+	case types.TestStatusError:
+		s.errored++
+	}
+
+	return nil
+}
+
+// Complete generates the HTML summary file
+func (s *HTMLSummarySink) Complete(runID string) error {
+	// Get the base directory for this runID
+	baseDir, err := s.logger.GetDirectoryForRunID(runID)
+	if err != nil {
+		return err
+	}
+
+	// Create the HTML report filepath
+	htmlFile := filepath.Join(baseDir, "test-summary.html")
+
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(htmlFile)
+	if err != nil {
+		return err
+	}
+
+	// Calculate totals and duration
+	total := s.passed + s.failed + s.skipped + s.errored
+
+	// Calculate total duration from sum of all test durations
+	var totalDuration time.Duration
+	for _, result := range s.testResults {
+		totalDuration += result.Duration
+	}
+
+	passRate := 0.0
+	if total > 0 {
+		passRate = float64(s.passed) / float64(total) * 100
+	}
+
+	// Build the HTML content
+	var html strings.Builder
+
+	// HTML header
+	html.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Results</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3 {
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .summary {
+            background-color: #f8f8f8;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .stat-box {
+            padding: 10px 15px;
+            border-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            min-width: 80px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .pass { background-color: #dff0d8; color: #3c763d; }
+        .fail { background-color: #f2dede; color: #a94442; }
+        .skip { background-color: #fcf8e3; color: #8a6d3b; }
+        .error { background-color: #f2dede; color: #a94442; }
+        .test-list {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+        .test-list th, .test-list td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .test-list th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        .test-list tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .test-list tr:hover {
+            background-color: #f1f1f1;
+        }
+        .status-cell {
+            text-align: center;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #e0e0e0;
+        }
+        .search {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 250px;
+        }
+        .hidden {
+            display: none;
+        }
+        a {
+            color: #337ab7;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .duration {
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Results</h1>
+    <div class="summary">
+        <p><strong>Run ID:</strong> ` + runID + `</p>
+        <p><strong>Time:</strong> ` + time.Now().Format(time.RFC3339) + `</p>
+        <p><strong>Duration:</strong> ` + formatDuration(totalDuration) + `</p>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <div>Total</div>
+                <div class="stat-value">` + fmt.Sprintf("%d", total) + `</div>
+            </div>
+            <div class="stat-box pass">
+                <div>Passed</div>
+                <div class="stat-value">` + fmt.Sprintf("%d", s.passed) + `</div>
+            </div>
+            <div class="stat-box fail">
+                <div>Failed</div>
+                <div class="stat-value">` + fmt.Sprintf("%d", s.failed) + `</div>
+            </div>
+            <div class="stat-box skip">
+                <div>Skipped</div>
+                <div class="stat-value">` + fmt.Sprintf("%d", s.skipped) + `</div>
+            </div>
+            <div class="stat-box error">
+                <div>Errors</div>
+                <div class="stat-value">` + fmt.Sprintf("%d", s.errored) + `</div>
+            </div>
+            <div class="stat-box" style="min-width: 120px;">
+                <div>Pass Rate</div>
+                <div class="stat-value">` + fmt.Sprintf("%.1f%%", passRate) + `</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="actions">
+        <input type="text" id="searchInput" class="search" placeholder="Search tests, packages, gates..." oninput="filterTests()">
+        <button onclick="showOnlyFailed()">Show Failed Only</button>
+        <button onclick="showAll()">Show All</button>
+    </div>
+    
+    <table class="test-list" id="testTable">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Test</th>
+                <th>Package</th>
+                <th>Gate</th>
+                <th>Suite</th>
+                <th>Duration</th>
+                <th>Log</th>
+            </tr>
+        </thead>
+        <tbody>`)
+
+	// Add rows for each test
+	for _, result := range s.testResults {
+		// Determine status class
+		statusClass := ""
+		statusText := ""
+		switch result.Status {
+		case types.TestStatusPass:
+			statusClass = "pass"
+			statusText = "PASS"
+		case types.TestStatusFail:
+			statusClass = "fail"
+			statusText = "FAIL"
+		case types.TestStatusSkip:
+			statusClass = "skip"
+			statusText = "SKIP"
+		case types.TestStatusError:
+			statusClass = "error"
+			statusText = "ERROR"
+		}
+
+		// Generate filename
+		filename := getReadableTestFilename(result.Metadata) + ".log"
+		logPath := ""
+		if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+			logPath = "failed/" + filename
+		} else {
+			logPath = "passed/" + filename
+		}
+
+		testName := result.Metadata.FuncName
+		if testName == "" {
+			if result.Metadata.RunAll {
+				testName = "AllTests"
+			} else {
+				testName = result.Metadata.ID
+			}
+		}
+
+		// Add the table row
+		html.WriteString("<tr class=\"" + statusClass + "\">\n")
+		html.WriteString("    <td class=\"status-cell " + statusClass + "\">" + statusText + "</td>\n")
+		html.WriteString("    <td>" + testName + "</td>\n")
+		html.WriteString("    <td>" + result.Metadata.Package + "</td>\n")
+		html.WriteString("    <td>" + result.Metadata.Gate + "</td>\n")
+		html.WriteString("    <td>" + result.Metadata.Suite + "</td>\n")
+		html.WriteString("    <td class=\"duration\">" + formatDuration(result.Duration) + "</td>\n")
+		html.WriteString("    <td><a href=\"" + logPath + "\" target=\"_blank\">View Log</a></td>\n")
+		html.WriteString("</tr>\n")
+	}
+
+	// Close the HTML document
+	html.WriteString(`
+        </tbody>
+    </table>
+
+    <script>
+        function filterTests() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#testTable tbody tr');
+            
+            for (const row of rows) {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    row.classList.remove('hidden');
+                } else {
+                    row.classList.add('hidden');
+                }
+            }
+        }
+        
+        function showOnlyFailed() {
+            document.getElementById('searchInput').value = '';
+            const rows = document.querySelectorAll('#testTable tbody tr');
+            
+            for (const row of rows) {
+                if (row.classList.contains('fail') || row.classList.contains('error')) {
+                    row.classList.remove('hidden');
+                } else {
+                    row.classList.add('hidden');
+                }
+            }
+        }
+        
+        function showAll() {
+            document.getElementById('searchInput').value = '';
+            const rows = document.querySelectorAll('#testTable tbody tr');
+            
+            for (const row of rows) {
+                row.classList.remove('hidden');
+            }
+        }
+        
+        // If there are failures, show only failed tests by default
+        window.onload = function() {
+            if (` + fmt.Sprintf("%d", s.failed+s.errored) + ` > 0) {
+                showOnlyFailed();
+            }
+        };
+    </script>
+</body>
+</html>`)
+
+	// Write the HTML content
+	return writer.Write([]byte(html.String()))
+}
+
+// formatDuration formats a time.Duration to a human-readable string
+// Extracted from the existing formatDuration function
+func formatDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%.2fms", float64(d.Milliseconds()))
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }
