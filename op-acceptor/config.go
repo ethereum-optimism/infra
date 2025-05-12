@@ -22,6 +22,7 @@ type Config struct {
 	AllowSkips      bool          // Allow tests to be skipped instead of failing when preconditions are not met
 	DefaultTimeout  time.Duration // Default timeout for individual tests, can be overridden by test config
 	LogDir          string        // Directory to store test logs
+	EmbedFaucet     bool          // Embed the op-faucet in the test environment
 
 	Log log.Logger
 }
@@ -74,5 +75,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		DefaultTimeout:  ctx.Duration(flags.DefaultTimeout.Name),
 		LogDir:          logDir,
 		Log:             log,
+		EmbedFaucet:     ctx.Bool(flags.EmbedFaucet.Name),
 	}, nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/addons"
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
@@ -43,6 +44,9 @@ type nat struct {
 	done    chan struct{}
 	wg      sync.WaitGroup
 
+	env           *env.DevnetEnv
+	addonsManager *addons.AddonsManager
+
 	shutdownCallback func(error) // Callback to signal application shutdown
 }
 
@@ -60,8 +64,12 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("failed to create registry: %w", err)
 	}
 
-	// Extract network name from DEVNET_ENV_URL environment variable
-	networkName := extractNetworkName(os.Getenv("DEVNET_ENV_URL"))
+	env, err := env.LoadDevnetFromURL(os.Getenv(env.EnvURLVar))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load devnet from URL: %w", err)
+	}
+
+	networkName := extractNetworkName(env)
 	config.Log.Info("Using network name for metrics", "network", networkName)
 
 	// Create runner with registry
@@ -73,6 +81,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		GoBinary:    config.GoBinary,
 		AllowSkips:  config.AllowSkips,
 		NetworkName: networkName,
+		DevnetEnv:   env,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -93,6 +102,16 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		"network", networkName,
 	)
 
+	addonsOpts := []addons.Option{}
+	if config.EmbedFaucet {
+		addonsOpts = append(addonsOpts, addons.WithFaucet())
+	}
+
+	addonsManager, err := addons.NewAddonsManager(ctx, env, addonsOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create addons manager: %w", err)
+	}
+
 	return &nat{
 		ctx:              ctx,
 		config:           config,
@@ -102,30 +121,22 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		done:             make(chan struct{}),
 		shutdownCallback: shutdownCallback,
 		networkName:      networkName,
+		env:              env,
+		addonsManager:    addonsManager,
 	}, nil
 }
 
 // extractNetworkName extracts the network name from the DEVNET_ENV_URL.
-func extractNetworkName(envURL string) string {
+func extractNetworkName(env *env.DevnetEnv) string {
 	fallbackName := "unknown"
-	if envURL == "" {
-		return fallbackName // Default if not set
-	}
-
-	// Try to load the devnet from the URL
-	devnetEnv, err := env.LoadDevnetFromURL(envURL)
-	if err != nil {
-		log.Debug("Failed to load devnet from URL", "url", envURL, "error", err)
-		return fallbackName
-	}
 
 	// Extract name from the devnet environment
-	if devnetEnv.Env.Name != "" {
-		return devnetEnv.Env.Name
+	if env.Env.Name != "" {
+		return env.Env.Name
 	}
 
 	// If name is empty in the environment, return unknown
-	log.Debug("Devnet environment has empty name", "url", envURL)
+	log.Debug("Devnet environment has empty name")
 	return fallbackName
 }
 
@@ -139,6 +150,10 @@ func (n *nat) Start(ctx context.Context) error {
 			os.Exit(exitcodes.RuntimeErr)
 		}
 	}()
+
+	if err := n.addonsManager.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start addons: %w", err)
+	}
 
 	n.ctx = ctx
 	n.done = make(chan struct{})
@@ -426,6 +441,11 @@ func (n *nat) Stop(ctx context.Context) error {
 	close(n.done)
 
 	n.config.Log.Info("op-acceptor stopped successfully")
+
+	if err := n.addonsManager.Stop(ctx); err != nil {
+		return fmt.Errorf("failed to stop addons: %w", err)
+	}
+
 	return nil
 }
 

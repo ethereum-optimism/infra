@@ -66,6 +66,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "LOGDIR"),
 		Usage:   "Directory to store test logs. Defaults to 'logs' if not specified.",
 	}
+	EmbedFaucet = &cli.BoolFlag{
+		Name:    "embed-faucet",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "EMBED_FAUCET"),
+		Usage:   "Embed the op-faucet in the test environment. Defaults to 'false' if not specified.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
