@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -32,24 +33,26 @@ import (
 )
 
 const (
-	ContextKeyAuth                   = "authorization"
-	ContextKeyReqID                  = "req_id"
-	ContextKeyXForwardedFor          = "x_forwarded_for"
-	ContextKeyOpTxProxyAuth          = "op_txproxy_auth"
-	DefaultOpTxProxyAuthHeader       = "X-Optimism-Signature"
-	DefaultMaxBatchRPCCallsLimit     = 100
-	MaxBatchRPCCallsHardLimit        = 1000
-	cacheStatusHdr                   = "X-Proxyd-Cache-Status"
-	defaultRPCTimeout                = 10 * time.Second
-	defaultBodySizeLimit             = 256 * opt.KiB
-	defaultWSHandshakeTimeout        = 10 * time.Second
-	defaultWSReadTimeout             = 2 * time.Minute
-	defaultWSWriteTimeout            = 10 * time.Second
-	defaultCacheTtl                  = 1 * time.Hour
-	maxRequestBodyLogLen             = 2000
-	defaultMaxUpstreamBatchSize      = 10
-	defaultRateLimitHeader           = "X-Forwarded-For"
-	defaultInteropValidationStrategy = FirstSupervisorStrategy
+	ContextKeyAuth                    = "authorization"
+	ContextKeyReqID                   = "req_id"
+	ContextKeyXForwardedFor           = "x_forwarded_for"
+	ContextKeyOpTxProxyAuth           = "op_txproxy_auth"
+	DefaultOpTxProxyAuthHeader        = "X-Optimism-Signature"
+	DefaultMaxBatchRPCCallsLimit      = 100
+	MaxBatchRPCCallsHardLimit         = 1000
+	cacheStatusHdr                    = "X-Proxyd-Cache-Status"
+	defaultRPCTimeout                 = 10 * time.Second
+	defaultBodySizeLimit              = 256 * opt.KiB
+	defaultWSHandshakeTimeout         = 10 * time.Second
+	defaultWSReadTimeout              = 2 * time.Minute
+	defaultWSWriteTimeout             = 10 * time.Second
+	defaultCacheTtl                   = 1 * time.Hour
+	maxRequestBodyLogLen              = 2000
+	defaultMaxUpstreamBatchSize       = 10
+	defaultRateLimitHeader            = "X-Forwarded-For"
+	defaultInteropValidationStrategy  = FirstSupervisorStrategy
+	defaultInteropReqParamsSizeLimit  = 128 * 1024 // 128KB
+	defaultInteropAccessListSizeLimit = 1000
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
@@ -395,6 +398,70 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
+func deduplicateInteropAccessList(interopAccessList []common.Hash) []common.Hash {
+	deduplicatedInteropAccessList := []common.Hash{}
+
+	interopAccessListSet := make(map[common.Hash]any)
+
+	// the following implementation strictly preserves the order of the inbox entries as the underlying parsing depends on it
+	for _, inboxEntry := range interopAccessList {
+		if _, alreadyFound := interopAccessListSet[inboxEntry]; !alreadyFound {
+			interopAccessListSet[inboxEntry] = struct{}{}
+			deduplicatedInteropAccessList = append(deduplicatedInteropAccessList, inboxEntry)
+		}
+	}
+	return deduplicatedInteropAccessList
+}
+
+func senderReqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxTxSize int) error {
+	var params []string
+	if err := json.Unmarshal(rpcReq.Params, &params); err != nil {
+		log.Debug("error unmarshalling raw transaction params", "err", err, "req_id", GetReqID(ctx))
+		return ErrParseErr
+	}
+
+	if len(params) > 0 {
+		// Calculate the size of the raw transaction data
+		txSize := len(params[0])
+
+		if maxTxSize > 0 && txSize > maxTxSize {
+			log.Info(
+				"transaction exceeds maximum size limit",
+				"size", txSize,
+				"max_size", maxTxSize,
+				"req_id", GetReqID(ctx),
+			)
+			return ErrRequestBodyTooLarge
+		}
+	}
+	return nil
+}
+
+func (s *Server) prevalidateAndTrimInteropAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, error) {
+	if len(interopAccessList) == 0 {
+		return interopAccessList, nil
+	}
+
+	tobeUnprocessed, processableAccessList, err := supervisorTypes.ParseAccess(interopAccessList)
+	if err != nil {
+		_, _, _ = supervisorTypes.ParseAccess(interopAccessList)
+		return nil, err
+	}
+	if len(tobeUnprocessed) > 0 {
+		if s.interopValidatingConfig.SkipUnprocessedEntries {
+			log.Info(
+				"unprocessable interop access list entries found, skipping them",
+				"source", "rpc",
+				"req_id", GetReqID(ctx),
+			)
+		} else {
+			return nil, fmt.Errorf("unprocessable interop access list entries found: %v", tobeUnprocessed)
+		}
+	}
+
+	return supervisorTypes.EncodeAccessList([]supervisorTypes.Access{processableAccessList}), nil
+}
+
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
 	log.Info(
 		"validating interop access list",
@@ -417,10 +484,21 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 
 	tx, err := convertSendReqToSendTx(ctx, rpcReq)
 	if err != nil {
-		return ErrInvalidRequest(fmt.Sprintf("error parsing transaction: %s", err.Error()))
+		return err
+	}
+
+	if err := senderReqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqParamsSizeLimit); err != nil {
+		return err
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
+	interopAccessList = deduplicateInteropAccessList(interopAccessList)
+
+	interopAccessList, err = s.prevalidateAndTrimInteropAccessList(ctx, interopAccessList)
+	if err != nil {
+		return ErrInvalidParams(err.Error())
+	}
+
 	if len(interopAccessList) == 0 {
 		log.Debug(
 			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
@@ -429,6 +507,14 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			"method", rpcReq.Method,
 		)
 		return nil
+	}
+	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
+		log.Info(
+			"interop access list exceeds maximum size limit",
+			"size", len(interopAccessList),
+			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
+		)
+		return ErrInteropAccessListOutOfBounds
 	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {

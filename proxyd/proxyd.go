@@ -225,6 +225,16 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
 	}
 
+	if config.InteropValidationConfig.ReqParamsSizeLimit == 0 {
+		log.Warn("no interop validation request params size limit provided, using default size limit", "size_limit", defaultInteropReqParamsSizeLimit)
+		config.InteropValidationConfig.ReqParamsSizeLimit = defaultInteropReqParamsSizeLimit
+	}
+
+	if config.InteropValidationConfig.AccessListSizeLimit == 0 {
+		log.Warn("no interop validation access list size limit provided, using default size limit", "size_limit", defaultInteropAccessListSizeLimit)
+		config.InteropValidationConfig.AccessListSizeLimit = defaultInteropAccessListSizeLimit
+	}
+
 	log.Info("configured interop validation urls", "urls", config.InteropValidationConfig.Urls)
 	log.Info("configured interop validation strategy", "strategy", config.InteropValidationConfig.Strategy)
 
