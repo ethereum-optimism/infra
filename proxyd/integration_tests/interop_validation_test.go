@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -13,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
@@ -32,7 +34,7 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 	return hexutil.Encode(bytes), nil
 }
 
-func fakeInteropReqParams() (string, error) {
+func fakeTxBuilder(txModifiers ...func(tx *types.AccessListTx)) *types.Transaction {
 	checksumArgs := supervisorTypes.ChecksumArgs{
 		BlockNumber: 3519561,
 		Timestamp:   1746536469,
@@ -54,7 +56,7 @@ func fakeInteropReqParams() (string, error) {
 	r.SetString("32221253762185627567561170530332760991541284345642488431105080034438681047063", 10)
 	s.SetString("53477774121840563707688019836183722736827235081472376095392631194490753506882", 10)
 
-	fakeTx := types.NewTx(&types.AccessListTx{
+	accessListArgument := &types.AccessListTx{
 		ChainID: big.NewInt(420120003),
 		Nonce:   6,
 		Value:   big.NewInt(0),
@@ -68,9 +70,13 @@ func fakeInteropReqParams() (string, error) {
 				StorageKeys: accessListEntries,
 			},
 		},
-	})
+	}
 
-	return convertTxToReqParams(fakeTx)
+	for _, opt := range txModifiers {
+		opt(accessListArgument)
+	}
+
+	return types.NewTx(accessListArgument)
 }
 
 func TestInteropValidation_NormalFlow(t *testing.T) {
@@ -158,7 +164,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		},
 	}
 
-	fakeInteropReqParams, err := fakeInteropReqParams()
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -235,7 +241,7 @@ func TestInteropValidation_AccessListSizeLimit(t *testing.T) {
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
 
-	fakeInteropReqParams, err := fakeInteropReqParams()
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -294,7 +300,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 			expectedCallsToBackend: 0,
 		},
 		{
-			name:                   "Req params size limit of 1000 bytes",
+			name:                   "Req params size limit of 1000 bytes (2000 hex characters)",
 			reqParamsSizeLimit:     1000,
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
@@ -311,7 +317,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
 
-	fakeInteropReqParams, err := fakeInteropReqParams()
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -346,3 +352,115 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 	}
 }
 
+func TestInteropValidation_SenderRateLimit(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
+
+	config.InteropValidationConfig.RateLimit.Enabled = true
+	config.InteropValidationConfig.RateLimit.Limit = 1
+
+	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend1.Close()
+
+	validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend2.Close()
+
+	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+	_, observedCode1, err1 := client.SendRequest(sendRawTransaction)
+	observedResp2, observedCode2, err2 := client.SendRequest(sendRawTransaction)
+
+	// ensuring the first call succeeded
+	require.NoError(t, err1)
+	require.Equal(t, 200, observedCode1)
+
+	require.Equal(t, len(validatingBackend1.requests), 1)
+
+	// ensuring the second call failed due to rate limiting
+	require.NoError(t, err2)
+	require.Equal(t, 429, observedCode2)
+	require.Contains(t, string(observedResp2), "sender is over rate limit")
+	require.Contains(t, string(observedResp2), fmt.Sprintf("\"code\":%d", -32017))
+
+	// ensuring that the second call didn't contribute to additional validating backend (supervisor) requests
+	require.Equal(t, len(validatingBackend1.requests), 1)
+
+	// waiting for the rate limit to reset
+	time.Sleep(1100 * time.Millisecond)
+
+	// ensuring the third call succeeds
+	_, observedCode3, err3 := client.SendRequest(sendRawTransaction)
+	require.NoError(t, err3)
+	require.Equal(t, 200, observedCode3)
+
+	// ensuring that this call did contribute to additional validating backend (supervisor) requests due to being within the rate limit
+	require.Equal(t, len(validatingBackend1.requests), 2)
+}
+
+func TestInteropValidation_Deduplication(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
+
+	config.InteropValidationConfig.AccessListSizeLimit = 2 // only 2 entries are allowed in the access list
+
+	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend1.Close()
+
+	validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend2.Close()
+
+	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	fakeTx := fakeTxBuilder(func(tx *types.AccessListTx) {
+		oneAccessListEntry := tx.AccessList[0]
+
+		// duplicate the access list itself with same entries
+		tx.AccessList = append(tx.AccessList, oneAccessListEntry)
+
+		// duplicate intra-access list entries
+		tx.AccessList[0].StorageKeys = append(tx.AccessList[0].StorageKeys, oneAccessListEntry.StorageKeys...)
+	})
+
+	{
+		// assert that the (duplicated) access list is now 3x the size of the original
+		// and higher than the access list size limit
+		fakeTxStorageEntries := interoptypes.TxToInteropAccessList(fakeTx)
+		require.Equal(t, len(fakeTxStorageEntries), 6)
+		require.Greater(t, len(fakeTxStorageEntries), config.InteropValidationConfig.AccessListSizeLimit)
+	}
+
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTx)
+	require.NoError(t, err)
+
+	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+	_, observedCode, err := client.SendRequest(sendRawTransaction)
+
+	// yet the call succeeds because the deduplicated access list is still within the access list size limit
+	require.NoError(t, err)
+	require.Equal(t, 200, observedCode)
+	require.Equal(t, len(validatingBackend1.requests), 1)
+}

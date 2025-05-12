@@ -370,6 +370,7 @@ func Start(config *Config) (*Server, func(), error) {
 		rpcCache,
 		config.RateLimit,
 		config.SenderRateLimit,
+		config.InteropValidationConfig.RateLimit,
 		config.Server.EnableRequestLog,
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,

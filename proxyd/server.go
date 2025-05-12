@@ -74,6 +74,7 @@ type Server struct {
 	mainLim                 FrontendRateLimiter
 	overrideLims            map[string]FrontendRateLimiter
 	senderLim               FrontendRateLimiter
+	interopSenderLim        FrontendRateLimiter
 	allowedChainIds         []*big.Int
 	limExemptOrigins        []*regexp.Regexp
 	limExemptUserAgents     []*regexp.Regexp
@@ -103,6 +104,7 @@ func NewServer(
 	cache RPCCache,
 	rateLimitConfig RateLimitConfig,
 	senderRateLimitConfig SenderRateLimitConfig,
+	interopSenderRateLimitConfig SenderRateLimitConfig,
 	enableRequestLog bool,
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
@@ -170,6 +172,11 @@ func NewServer(
 		senderLim = limiterFactory(time.Duration(senderRateLimitConfig.Interval), senderRateLimitConfig.Limit, "senders")
 	}
 
+	var interopSenderLim FrontendRateLimiter
+	if interopSenderRateLimitConfig.Enabled {
+		interopSenderLim = limiterFactory(time.Duration(interopSenderRateLimitConfig.Interval), interopSenderRateLimitConfig.Limit, "interop_senders")
+	}
+
 	rateLimitHeader := defaultRateLimitHeader
 	if rateLimitConfig.IPHeaderOverride != "" {
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
@@ -196,6 +203,7 @@ func NewServer(
 		overrideLims:            overrideLims,
 		globallyLimitedMethods:  globalMethodLims,
 		senderLim:               senderLim,
+		interopSenderLim:        interopSenderLim,
 		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
 		limExemptOrigins:        limExemptOrigins,
 		limExemptUserAgents:     limExemptUserAgents,
@@ -437,31 +445,6 @@ func senderReqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxTxSize int)
 	return nil
 }
 
-func (s *Server) prevalidateAndTrimInteropAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, error) {
-	if len(interopAccessList) == 0 {
-		return interopAccessList, nil
-	}
-
-	tobeUnprocessed, processableAccessList, err := supervisorTypes.ParseAccess(interopAccessList)
-	if err != nil {
-		_, _, _ = supervisorTypes.ParseAccess(interopAccessList)
-		return nil, err
-	}
-	if len(tobeUnprocessed) > 0 {
-		if s.interopValidatingConfig.SkipUnprocessedEntries {
-			log.Info(
-				"unprocessable interop access list entries found, skipping them",
-				"source", "rpc",
-				"req_id", GetReqID(ctx),
-			)
-		} else {
-			return nil, fmt.Errorf("unprocessable interop access list entries found: %v", tobeUnprocessed)
-		}
-	}
-
-	return supervisorTypes.EncodeAccessList([]supervisorTypes.Access{processableAccessList}), nil
-}
-
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
 	log.Info(
 		"validating interop access list",
@@ -471,19 +454,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		"strategy", s.interopValidatingConfig.Strategy,
 	)
 
-	if len(s.interopValidatingConfig.Urls) == 0 {
-		// use unknown below to prevent DOS vector that fills up memory
-		// with arbitrary method names.
-		log.Debug(
-			"no validating backends found",
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-		)
-		return nil
-	}
-
-	tx, err := convertSendReqToSendTx(ctx, rpcReq)
-	if err != nil {
+	if err := s.rateLimitInteropSender(ctx, rpcReq); err != nil {
 		return err
 	}
 
@@ -491,14 +462,12 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return err
 	}
 
-	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	interopAccessList = deduplicateInteropAccessList(interopAccessList)
-
-	interopAccessList, err = s.prevalidateAndTrimInteropAccessList(ctx, interopAccessList)
+	tx, err := convertSendReqToSendTx(ctx, rpcReq)
 	if err != nil {
-		return ErrInvalidParams(err.Error())
+		return err
 	}
 
+	interopAccessList := interoptypes.TxToInteropAccessList(tx)
 	if len(interopAccessList) == 0 {
 		log.Debug(
 			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
@@ -508,6 +477,19 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		)
 		return nil
 	}
+
+	// at this point, we know it's an interop transaction worthy of being validated
+	if len(s.interopValidatingConfig.Urls) == 0 {
+		log.Error(
+			"no validating backends found for an interop transaction",
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+		)
+		return supervisorTypes.ErrNoRPCSource // Confirm this
+	}
+
+	interopAccessList = deduplicateInteropAccessList(interopAccessList)
+
 	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
 		log.Info(
 			"interop access list exceeds maximum size limit",
@@ -515,6 +497,12 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
 		)
 		return ErrInteropAccessListOutOfBounds
+	}
+
+	// a pre-validation pre-requisite to the checkAccessList operation
+	_, _, err = supervisorTypes.ParseAccess(interopAccessList)
+	if err != nil {
+		return err
 	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
@@ -705,12 +693,10 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
 		if parsedReq.Method == "eth_sendRawTransaction" {
-			if s.senderLim != nil {
-				if err := s.rateLimitSender(ctx, parsedReq); err != nil {
-					RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
-					responses[i] = NewRPCErrorRes(parsedReq.ID, err)
-					continue
-				}
+			if err := s.rateLimitSender(ctx, parsedReq); err != nil {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
 			}
 			if err := s.validateInteropSendRpcRequest(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
@@ -945,7 +931,7 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 	return tx, nil
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+func (s *Server) genericRateLimitSender(ctx context.Context, req *RPCReq, lim FrontendRateLimiter) error {
 	tx, err := convertSendReqToSendTx(ctx, req)
 	if err != nil {
 		return err
@@ -963,7 +949,7 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 		return ErrInvalidParams(err.Error())
 	}
-	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
+	ok, err := lim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
 	if err != nil {
 		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal
@@ -974,6 +960,22 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 	}
 
 	return nil
+}
+
+func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+	if s.senderLim == nil {
+		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}	
+	return s.genericRateLimitSender(ctx, req, s.senderLim)
+}
+
+func (s *Server) rateLimitInteropSender(ctx context.Context, req *RPCReq) error {
+	if s.interopSenderLim == nil {
+		log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}
+	return s.genericRateLimitSender(ctx, req, s.interopSenderLim)
 }
 
 func (s *Server) isAllowedChainId(chainId *big.Int) bool {
