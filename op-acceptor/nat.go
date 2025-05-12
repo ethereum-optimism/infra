@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -406,7 +407,9 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Info("Test run completed",
 		"run_id", result.RunID,
 		"status", n.result.Status,
-		"log_dir", logDir)
+		"log_dir", logDir,
+		"results_html", filepath.Join(logDir, logging.HTMLResultsFilename),
+	)
 	return nil
 }
 

@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,11 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+)
+
+// Common filenames
+const (
+	HTMLResultsFilename = "results.html"
 )
 
 // ResultSink is an interface for different ways of consuming test results
@@ -1056,6 +1062,33 @@ func (s *PerTestFileSink) Complete(runID string) error {
 	return nil
 }
 
+// TestResultRow represents a row in the HTML test results table
+type TestResultRow struct {
+	StatusClass       string
+	StatusText        string
+	TestName          string
+	Package           string
+	Gate              string
+	Suite             string
+	DurationFormatted string
+	LogPath           string
+}
+
+// HTMLSummaryData contains all the data needed for the HTML template
+type HTMLSummaryData struct {
+	RunID             string
+	Time              string
+	TotalDuration     string
+	Total             int
+	Passed            int
+	Failed            int
+	Skipped           int
+	Errored           int
+	PassRateFormatted string
+	HasFailures       bool
+	Tests             []TestResultRow
+}
+
 // HTMLSummarySink creates an HTML report for better visualization of test results
 type HTMLSummarySink struct {
 	logger      *FileLogger
@@ -1095,7 +1128,7 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 	}
 
 	// Create the HTML report filepath
-	htmlFile := filepath.Join(baseDir, "test-summary.html")
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
 
 	// Get or create the async writer
 	writer, err := s.logger.getAsyncWriter(htmlFile)
@@ -1112,178 +1145,14 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		totalDuration += result.Duration
 	}
 
+	// Calculate pass rate
 	passRate := 0.0
 	if total > 0 {
 		passRate = float64(s.passed) / float64(total) * 100
 	}
 
-	// Build the HTML content
-	var html strings.Builder
-
-	// HTML header
-	html.WriteString(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Results</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        h1, h2, h3 {
-            margin-top: 20px;
-            margin-bottom: 10px;
-        }
-        .summary {
-            background-color: #f8f8f8;
-            border-radius: 5px;
-            padding: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .stats {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin: 15px 0;
-        }
-        .stat-box {
-            padding: 10px 15px;
-            border-radius: 4px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-            min-width: 80px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        .pass { background-color: #dff0d8; color: #3c763d; }
-        .fail { background-color: #f2dede; color: #a94442; }
-        .skip { background-color: #fcf8e3; color: #8a6d3b; }
-        .error { background-color: #f2dede; color: #a94442; }
-        .test-list {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .test-list th, .test-list td {
-            border: 1px solid #ddd;
-            padding: 8px 12px;
-            text-align: left;
-        }
-        .test-list th {
-            background-color: #f2f2f2;
-            position: sticky;
-            top: 0;
-        }
-        .test-list tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .test-list tr:hover {
-            background-color: #f1f1f1;
-        }
-        .status-cell {
-            text-align: center;
-        }
-        .actions {
-            display: flex;
-            gap: 10px;
-            margin: 20px 0;
-        }
-        button {
-            padding: 8px 12px;
-            border: none;
-            border-radius: 4px;
-            background-color: #f0f0f0;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #e0e0e0;
-        }
-        .search {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 250px;
-        }
-        .hidden {
-            display: none;
-        }
-        a {
-            color: #337ab7;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .duration {
-            text-align: right;
-        }
-    </style>
-</head>
-<body>
-    <h1>Test Results</h1>
-    <div class="summary">
-        <p><strong>Run ID:</strong> ` + runID + `</p>
-        <p><strong>Time:</strong> ` + time.Now().Format(time.RFC3339) + `</p>
-        <p><strong>Duration:</strong> ` + formatDuration(totalDuration) + `</p>
-        
-        <div class="stats">
-            <div class="stat-box">
-                <div>Total</div>
-                <div class="stat-value">` + fmt.Sprintf("%d", total) + `</div>
-            </div>
-            <div class="stat-box pass">
-                <div>Passed</div>
-                <div class="stat-value">` + fmt.Sprintf("%d", s.passed) + `</div>
-            </div>
-            <div class="stat-box fail">
-                <div>Failed</div>
-                <div class="stat-value">` + fmt.Sprintf("%d", s.failed) + `</div>
-            </div>
-            <div class="stat-box skip">
-                <div>Skipped</div>
-                <div class="stat-value">` + fmt.Sprintf("%d", s.skipped) + `</div>
-            </div>
-            <div class="stat-box error">
-                <div>Errors</div>
-                <div class="stat-value">` + fmt.Sprintf("%d", s.errored) + `</div>
-            </div>
-            <div class="stat-box" style="min-width: 120px;">
-                <div>Pass Rate</div>
-                <div class="stat-value">` + fmt.Sprintf("%.1f%%", passRate) + `</div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="actions">
-        <input type="text" id="searchInput" class="search" placeholder="Search tests, packages, gates..." oninput="filterTests()">
-        <button onclick="showOnlyFailed()">Show Failed Only</button>
-        <button onclick="showAll()">Show All</button>
-    </div>
-    
-    <table class="test-list" id="testTable">
-        <thead>
-            <tr>
-                <th>Status</th>
-                <th>Test</th>
-                <th>Package</th>
-                <th>Gate</th>
-                <th>Suite</th>
-                <th>Duration</th>
-                <th>Log</th>
-            </tr>
-        </thead>
-        <tbody>`)
-
-	// Add rows for each test
+	// Prepare the test result rows
+	tests := make([]TestResultRow, 0, len(s.testResults))
 	for _, result := range s.testResults {
 		// Determine status class
 		statusClass := ""
@@ -1322,71 +1191,47 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		}
 
 		// Add the table row
-		html.WriteString("<tr class=\"" + statusClass + "\">\n")
-		html.WriteString("    <td class=\"status-cell " + statusClass + "\">" + statusText + "</td>\n")
-		html.WriteString("    <td>" + testName + "</td>\n")
-		html.WriteString("    <td>" + result.Metadata.Package + "</td>\n")
-		html.WriteString("    <td>" + result.Metadata.Gate + "</td>\n")
-		html.WriteString("    <td>" + result.Metadata.Suite + "</td>\n")
-		html.WriteString("    <td class=\"duration\">" + formatDuration(result.Duration) + "</td>\n")
-		html.WriteString("    <td><a href=\"" + logPath + "\" target=\"_blank\">View Log</a></td>\n")
-		html.WriteString("</tr>\n")
+		tests = append(tests, TestResultRow{
+			StatusClass:       statusClass,
+			StatusText:        statusText,
+			TestName:          testName,
+			Package:           result.Metadata.Package,
+			Gate:              result.Metadata.Gate,
+			Suite:             result.Metadata.Suite,
+			DurationFormatted: formatDuration(result.Duration),
+			LogPath:           logPath,
+		})
 	}
 
-	// Close the HTML document
-	html.WriteString(`
-        </tbody>
-    </table>
+	// Prepare the template data
+	data := HTMLSummaryData{
+		RunID:             runID,
+		Time:              time.Now().Format(time.RFC3339),
+		TotalDuration:     formatDuration(totalDuration),
+		Total:             total,
+		Passed:            s.passed,
+		Failed:            s.failed,
+		Skipped:           s.skipped,
+		Errored:           s.errored,
+		PassRateFormatted: fmt.Sprintf("%.1f", passRate),
+		HasFailures:       s.failed+s.errored > 0,
+		Tests:             tests,
+	}
 
-    <script>
-        function filterTests() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                const text = row.textContent.toLowerCase();
-                if (text.includes(query)) {
-                    row.classList.remove('hidden');
-                } else {
-                    row.classList.add('hidden');
-                }
-            }
-        }
-        
-        function showOnlyFailed() {
-            document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                if (row.classList.contains('fail') || row.classList.contains('error')) {
-                    row.classList.remove('hidden');
-                } else {
-                    row.classList.add('hidden');
-                }
-            }
-        }
-        
-        function showAll() {
-            document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                row.classList.remove('hidden');
-            }
-        }
-        
-        // If there are failures, show only failed tests by default
-        window.onload = function() {
-            if (` + fmt.Sprintf("%d", s.failed+s.errored) + ` > 0) {
-                showOnlyFailed();
-            }
-        };
-    </script>
-</body>
-</html>`)
+	// Parse the template
+	tmpl, err := GetHTMLTemplate(HTMLResultsFilename + ".tmpl")
+	if err != nil {
+		return fmt.Errorf("failed to parse HTML template: %w", err)
+	}
+
+	// Execute the template
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("failed to execute HTML template: %w", err)
+	}
 
 	// Write the HTML content
-	return writer.Write([]byte(html.String()))
+	return writer.Write(buf.Bytes())
 }
 
 // formatDuration formats a time.Duration to a human-readable string

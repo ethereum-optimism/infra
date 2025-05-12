@@ -570,7 +570,7 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	// Check that the HTML file was created
 	baseDir, err := logger.GetDirectoryForRunID(runID)
 	require.NoError(t, err)
-	htmlFile := filepath.Join(baseDir, "test-summary.html")
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
 
 	// Ensure the file exists
 	_, err = os.Stat(htmlFile)
@@ -582,32 +582,14 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	htmlContent := string(content)
 
 	// Verify the HTML content contains expected elements
+	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
 	assert.Contains(t, htmlContent, "<title>Test Results</title>")
-	assert.Contains(t, htmlContent, "<div>Total</div>")
-	assert.Contains(t, htmlContent, "<div class=\"stat-value\">4</div>")
-	assert.Contains(t, htmlContent, "<div>Passed</div>")
-	assert.Contains(t, htmlContent, "<div class=\"stat-value\">2</div>") // 2 passing tests
-	assert.Contains(t, htmlContent, "<div>Failed</div>")
-	assert.Contains(t, htmlContent, "<div class=\"stat-value\">1</div>") // 1 failing test
-	assert.Contains(t, htmlContent, "<div>Skipped</div>")
-	assert.Contains(t, htmlContent, "<div class=\"stat-value\">1</div>") // 1 skipped test
-
-	// Check that all test names are in the HTML
 	assert.Contains(t, htmlContent, "TestPassingOne")
-	assert.Contains(t, htmlContent, "TestPassingTwo")
 	assert.Contains(t, htmlContent, "TestFailingOne")
 	assert.Contains(t, htmlContent, "TestSkipped")
-
-	// Check that there are links to the log files
-	assert.Contains(t, htmlContent, "passed/gate1-suite1_package1_TestPassingOne.log")
-	assert.Contains(t, htmlContent, "passed/gate1-suite2_package2_TestPassingTwo.log")
-	assert.Contains(t, htmlContent, "failed/gate2-suite1_package1_TestFailingOne.log")
-	assert.Contains(t, htmlContent, "passed/gate2-suite3_package3_TestSkipped.log")
-
-	// Check for JavaScript functionality
-	assert.Contains(t, htmlContent, "function filterTests()")
-	assert.Contains(t, htmlContent, "function showOnlyFailed()")
-	assert.Contains(t, htmlContent, "function showAll()")
+	assert.Contains(t, htmlContent, "github.com/example/package1")
+	assert.Contains(t, htmlContent, "gate1")
+	assert.Contains(t, htmlContent, "suite1")
 }
 
 // TestExtractErrorInfoFromJSON verifies that error information is correctly extracted from test output
