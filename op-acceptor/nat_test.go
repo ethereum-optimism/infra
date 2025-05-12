@@ -340,12 +340,3 @@ func TestNAT_RunOnceMode(t *testing.T) {
 	assert.True(t, shutdownCalled,
 		"Expected shutdown to be called in run-once mode")
 }
-
-// TestExtractNetworkName tests the network name extraction from DEVNET_ENV_URL
-// Note: We don't test the actual LoadDevnetFromURL functionality here
-// as that's tested in the devnet-sdk package. We're just verifying
-// that we return the name as-is without modifications.
-func TestExtractNetworkName(t *testing.T) {
-	result := extractNetworkName("")
-	assert.Equal(t, "unknown", result, "Empty URL should return 'unknown'")
-}
