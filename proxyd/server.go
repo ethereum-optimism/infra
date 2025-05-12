@@ -966,7 +966,7 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 	if s.senderLim == nil {
 		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
 		return nil
-	}	
+	}
 	return s.genericRateLimitSender(ctx, req, s.senderLim)
 }
 
