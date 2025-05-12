@@ -1,8 +1,10 @@
 package logging
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -806,12 +808,16 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 	var content strings.Builder
 
 	// Extract the plaintext output first from all JSON Output fields
-	plaintext := extractPlaintextFromJSON(result.Stdout)
+	var plaintext strings.Builder
+	parser := NewJSONOutputParser(result.Stdout)
+	parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
+		plaintext.WriteString(outputText)
+	})
 
 	// 1. Write the plaintext output first
 	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
 	fmt.Fprintf(&content, "================\n\n")
-	fmt.Fprintf(&content, "%s\n", plaintext)
+	fmt.Fprintf(&content, "%s\n", plaintext.String())
 
 	// 2. Add a clear separator between plaintext and JSON
 	fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
@@ -830,7 +836,7 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 		fmt.Fprintf(&content, "=============\n\n")
 
 		// Extract critical error information
-		errorInfo := extractErrorInfoFromJSON(result.Stdout)
+		errorInfo := extractErrorData(result.Stdout)
 
 		if errorInfo.TestName != "" {
 			fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
@@ -865,16 +871,32 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 	return writer.Write([]byte(content.String()))
 }
 
-// extractPlaintextFromJSON extracts all "Output" fields from JSON to reconstruct the complete plaintext output
-func extractPlaintextFromJSON(jsonOutput string) string {
-	if jsonOutput == "" {
-		return ""
+// JSONOutputParser processes 'go test' JSON test output streams, converting them into structured data
+type JSONOutputParser struct {
+	reader io.Reader
+}
+
+// NewJSONOutputParser creates a new JSON parser from a string input
+func NewJSONOutputParser(input string) *JSONOutputParser {
+	return &JSONOutputParser{
+		reader: strings.NewReader(input),
 	}
+}
 
-	var outputBuilder strings.Builder
-	lines := strings.Split(jsonOutput, "\n")
+// NewJSONOutputParserFromReader creates a new JSON parser from an io.Reader
+func NewJSONOutputParserFromReader(reader io.Reader) *JSONOutputParser {
+	return &JSONOutputParser{
+		reader: reader,
+	}
+}
 
-	for _, line := range lines {
+// ProcessJSONOutput processes JSON output by applying the provided handler to each output line
+// The handler is called for each JSON line that has an "output" action
+func (p *JSONOutputParser) ProcessJSONOutput(handler func(jsonData map[string]interface{}, outputText string)) {
+	scanner := bufio.NewScanner(p.reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+
 		// Skip empty lines
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -903,10 +925,18 @@ func extractPlaintextFromJSON(jsonOutput string) string {
 			continue
 		}
 
-		// Add the output text to our builder
-		outputBuilder.WriteString(outputText)
+		// Call the handler with the JSON data and output text
+		handler(jsonData, outputText)
 	}
+}
 
+// GetOutputAsString extracts and concatenates all "Output" fields from JSON
+// and returns them as a single string
+func (p *JSONOutputParser) GetOutputAsString() string {
+	var outputBuilder strings.Builder
+	p.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
+		outputBuilder.WriteString(outputText)
+	})
 	return outputBuilder.String()
 }
 
@@ -920,45 +950,11 @@ type ErrorInfo struct {
 	ErrorTrace   string
 }
 
-// extractErrorInfoFromJSON parses JSON test output to extract human-readable error information
-func extractErrorInfoFromJSON(output string) ErrorInfo {
+// GetErrorInfo parses the JSON output to extract error information
+func (p *JSONOutputParser) GetErrorInfo() ErrorInfo {
 	var info ErrorInfo
 
-	if output == "" {
-		return info
-	}
-
-	lines := strings.Split(output, "\n")
-
-	for _, line := range lines {
-		// Skip empty lines
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		// Only process JSON lines
-		if !strings.HasPrefix(strings.TrimSpace(line), "{") || !strings.HasSuffix(strings.TrimSpace(line), "}") {
-			continue
-		}
-
-		// Try to parse as JSON
-		var jsonData map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &jsonData); err != nil {
-			continue
-		}
-
-		// Extract information only from output actions
-		action, ok := jsonData["Action"].(string)
-		if !ok || action != "output" {
-			continue
-		}
-
-		// Extract the output text
-		outputText, ok := jsonData["Output"].(string)
-		if !ok || outputText == "" {
-			continue
-		}
-
+	p.ProcessJSONOutput(func(jsonData map[string]interface{}, outputText string) {
 		// Extract test name
 		if testName, ok := jsonData["Test"].(string); ok && testName != "" {
 			info.TestName = testName
@@ -1033,9 +1029,26 @@ func extractErrorInfoFromJSON(output string) ErrorInfo {
 				}
 			}
 		}
-	}
+	})
 
 	return info
+}
+
+// Helper functions for backward compatibility or convenience
+
+// extractPlainText returns all output text from JSON as a string
+func extractPlainText(input string) string {
+	parser := NewJSONOutputParser(input)
+	return parser.GetOutputAsString()
+}
+
+// extractErrorData extracts error information from JSON output
+func extractErrorData(input string) ErrorInfo {
+	if input == "" {
+		return ErrorInfo{}
+	}
+	parser := NewJSONOutputParser(input)
+	return parser.GetErrorInfo()
 }
 
 // Complete is a no-op for PerTestFileSink

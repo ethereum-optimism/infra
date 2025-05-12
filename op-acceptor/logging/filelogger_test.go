@@ -626,7 +626,7 @@ func TestExtractErrorInfoFromJSON(t *testing.T) {
 {"Time":"2025-05-09T16:31:48.748580+10:00","Action":"fail","Package":"simple","Test":"TestExample","Elapsed":0}`
 
 	// Extract the error information
-	errorInfo := extractErrorInfoFromJSON(mixedOutput)
+	errorInfo := extractErrorData(mixedOutput)
 
 	// Verify extracted fields
 	assert.Equal(t, "TestExample", errorInfo.TestName)
@@ -649,7 +649,7 @@ func TestExtractErrorInfoFromJSON(t *testing.T) {
 {"Time":"2025-05-09T16:31:48.748570+10:00","Action":"pass","Package":"simple","Test":"TestPass","Elapsed":0}`
 
 	// Extract from passing test with no errors
-	passingInfo := extractErrorInfoFromJSON(noErrorOutput)
+	passingInfo := extractErrorData(noErrorOutput)
 
 	// Verify minimal information is available
 	assert.Equal(t, "TestPass", passingInfo.TestName)
@@ -660,7 +660,7 @@ func TestExtractErrorInfoFromJSON(t *testing.T) {
 	assert.Empty(t, passingInfo.ErrorTrace)
 
 	// Test with empty input
-	emptyInfo := extractErrorInfoFromJSON("")
+	emptyInfo := extractErrorData("")
 	assert.Empty(t, emptyInfo.TestName)
 	assert.Empty(t, emptyInfo.ErrorMessage)
 }
@@ -677,7 +677,7 @@ func TestExtractPlaintextFromJSON(t *testing.T) {
 	expectedOutput := "=== RUN   TestExample\nThis is line 1\nThis is line 2\n--- PASS: TestExample (0.01s)\n"
 
 	// Extract the plaintext
-	plaintext := extractPlaintextFromJSON(jsonOutput)
+	plaintext := extractPlainText(jsonOutput)
 
 	// Verify the extraction
 	assert.Equal(t, expectedOutput, plaintext)
@@ -692,12 +692,12 @@ func TestExtractPlaintextFromJSON(t *testing.T) {
 	expectedMixedOutput := "=== RUN   TestExample\nTest output\n"
 
 	// Extract plaintext from mixed content
-	mixedPlaintext := extractPlaintextFromJSON(mixedOutput)
+	mixedPlaintext := extractPlainText(mixedOutput)
 
 	// Verify the extraction skips non-output actions and non-JSON lines
 	assert.Equal(t, expectedMixedOutput, mixedPlaintext)
 
 	// Test with empty input
-	emptyPlaintext := extractPlaintextFromJSON("")
+	emptyPlaintext := extractPlainText("")
 	assert.Equal(t, "", emptyPlaintext)
 }
