@@ -33,25 +33,26 @@ import (
 )
 
 const (
-	ContextKeyAuth                   = "authorization"
-	ContextKeyReqID                  = "req_id"
-	ContextKeyXForwardedFor          = "x_forwarded_for"
-	ContextKeyOpTxProxyAuth          = "op_txproxy_auth"
-	DefaultOpTxProxyAuthHeader       = "X-Optimism-Signature"
-	DefaultMaxBatchRPCCallsLimit     = 100
-	MaxBatchRPCCallsHardLimit        = 1000
-	cacheStatusHdr                   = "X-Proxyd-Cache-Status"
-	defaultRPCTimeout                = 10 * time.Second
-	defaultBodySizeLimit             = 256 * opt.KiB
-	defaultWSHandshakeTimeout        = 10 * time.Second
-	defaultWSReadTimeout             = 2 * time.Minute
-	defaultWSWriteTimeout            = 10 * time.Second
-	defaultCacheTtl                  = 1 * time.Hour
-	maxRequestBodyLogLen             = 2000
-	defaultMaxUpstreamBatchSize      = 10
-	defaultRateLimitHeader           = "X-Forwarded-For"
-	defaultInteropValidationStrategy = FirstSupervisorStrategy
-	defaultInteropReqSizeLimit       = 128 * opt.KiB
+	ContextKeyAuth                    = "authorization"
+	ContextKeyReqID                   = "req_id"
+	ContextKeyXForwardedFor           = "x_forwarded_for"
+	ContextKeyOpTxProxyAuth           = "op_txproxy_auth"
+	DefaultOpTxProxyAuthHeader        = "X-Optimism-Signature"
+	DefaultMaxBatchRPCCallsLimit      = 100
+	MaxBatchRPCCallsHardLimit         = 1000
+	cacheStatusHdr                    = "X-Proxyd-Cache-Status"
+	defaultRPCTimeout                 = 10 * time.Second
+	defaultBodySizeLimit              = 256 * opt.KiB
+	defaultWSHandshakeTimeout         = 10 * time.Second
+	defaultWSReadTimeout              = 2 * time.Minute
+	defaultWSWriteTimeout             = 10 * time.Second
+	defaultCacheTtl                   = 1 * time.Hour
+	maxRequestBodyLogLen              = 2000
+	defaultMaxUpstreamBatchSize       = 10
+	defaultRateLimitHeader            = "X-Forwarded-For"
+	defaultInteropValidationStrategy  = FirstSupervisorStrategy
+	defaultInteropReqSizeLimit        = 128 * opt.KiB
+	defaultInteropAccessListSizeLimit = 1000
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
@@ -460,6 +461,15 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			"method", rpcReq.Method,
 		)
 		return supervisorTypes.ErrNoRPCSource
+	}
+
+	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
+		log.Info(
+			"interop access list exceeds maximum size limit",
+			"size", len(interopAccessList),
+			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
+		)
+		return ErrInteropAccessListOutOfBounds
 	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {

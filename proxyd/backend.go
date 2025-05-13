@@ -113,6 +113,12 @@ var (
 		HTTPErrorCode: 500,
 	}
 
+	ErrInteropAccessListOutOfBounds = &RPCErr{
+		Code:          JSONRPCErrorInternal - 22,
+		Message:       "access list out of bounds",
+		HTTPErrorCode: 413,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
