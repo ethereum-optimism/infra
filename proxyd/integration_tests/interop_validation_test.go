@@ -273,3 +273,79 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestInteropValidation_AccessListSizeLimit(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	type testCase struct {
+		name                   string
+		accessListSizeLimit    int
+		expectedHTTPCode       int
+		expectedRpcCode        int
+		expectedErrSubStr      string
+		expectedCallsToBackend int
+	}
+	cases := []testCase{
+		{
+			name:                   "access list size limit of 1",
+			accessListSizeLimit:    1,
+			expectedHTTPCode:       413,
+			expectedRpcCode:        -32022,
+			expectedErrSubStr:      "access list out of bounds",
+			expectedCallsToBackend: 0,
+		},
+		{
+			name:                   "access list size limit of 2",
+			accessListSizeLimit:    2,
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 1,
+		},
+		{
+			name:                   "access list size limit of 0 or not provided",
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 1,
+		},
+	}
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
+
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+			defer validatingBackend1.Close()
+
+			validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+			defer validatingBackend2.Close()
+
+			config.InteropValidationConfig.AccessListSizeLimit = c.accessListSizeLimit
+			config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+			_, shutdown, err := proxyd.Start(config)
+			require.NoError(t, err)
+			defer shutdown()
+
+			client := NewProxydClient("http://127.0.0.1:8545")
+			sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+			observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
+			require.NoError(t, err)
+
+			require.Equal(t, c.expectedHTTPCode, observedCode)
+			require.Contains(t, string(observedResp), c.expectedErrSubStr)
+
+			if c.expectedRpcCode != 0 {
+				require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", c.expectedRpcCode))
+			}
+
+			require.Equal(t, len(validatingBackend1.requests), c.expectedCallsToBackend)
+		})
+	}
+}
