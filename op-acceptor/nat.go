@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -406,7 +407,9 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Info("Test run completed",
 		"run_id", result.RunID,
 		"status", n.result.Status,
-		"log_dir", logDir)
+		"log_dir", logDir,
+		"results_html", filepath.Join(logDir, logging.HTMLResultsFilename),
+	)
 	return nil
 }
 
@@ -472,7 +475,7 @@ func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (%s)", formatDuration(n.result.Duration)))
+	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName))
 
 	// Configure columns
 	t.AppendHeader(table.Row{

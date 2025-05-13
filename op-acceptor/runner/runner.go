@@ -619,8 +619,8 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		}
 	}
 
-	// Capture stdout in the test result when failing
-	if (parsedResult.Status == types.TestStatusFail || parsedResult.Status == types.TestStatusSkip) && stdout.Len() > 0 {
+	// Capture stdout in the test result for all tests
+	if stdout.Len() > 0 {
 		parsedResult.Stdout = stdout.String()
 	}
 
