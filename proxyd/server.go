@@ -51,7 +51,7 @@ const (
 	defaultMaxUpstreamBatchSize      = 10
 	defaultRateLimitHeader           = "X-Forwarded-For"
 	defaultInteropValidationStrategy = FirstSupervisorStrategy
-	defaultInteropReqParamsSizeLimit = 128 * 1024 // 128KB
+	defaultInteropReqSizeLimit       = 128 * opt.KiB
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
@@ -397,27 +397,29 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
-func senderReqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxTxSize int) error {
-	var params []string
-	if err := json.Unmarshal(rpcReq.Params, &params); err != nil {
-		log.Debug("error unmarshalling raw transaction params", "err", err, "req_id", GetReqID(ctx))
-		return ErrParseErr
+// reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_request_body_size_bytes" setting.
+// Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_request_body_size_bytes"
+func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
+	if maxSize <= 0 {
+		return nil
 	}
 
-	if len(params) > 0 {
-		// Calculate the size of the raw transaction data
-		txSize := len(params[0])
-
-		if maxTxSize > 0 && txSize > maxTxSize {
-			log.Info(
-				"transaction exceeds maximum size limit",
-				"size", txSize,
-				"max_size", maxTxSize,
-				"req_id", GetReqID(ctx),
-			)
-			return ErrRequestBodyTooLarge
-		}
+	reqBytes, err := json.Marshal(rpcReq)
+	if err != nil {
+		log.Error("error marshalling RPC request", "err", err, "req_id", GetReqID(ctx))
+		return ErrInternal
 	}
+
+	if len(reqBytes) > maxSize {
+		log.Error(
+			"request exceeds maximum size limit",
+			"size", len(reqBytes),
+			"max_size", maxSize,
+			"req_id", GetReqID(ctx),
+		)
+		return ErrRequestBodyTooLarge
+	}
+
 	return nil
 }
 
@@ -430,7 +432,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		"strategy", s.interopValidatingConfig.Strategy,
 	)
 
-	if err := senderReqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqParamsSizeLimit); err != nil {
+	if err := reqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqSizeLimit); err != nil {
 		return err
 	}
 

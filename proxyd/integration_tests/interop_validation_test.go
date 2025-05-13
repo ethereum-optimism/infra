@@ -198,7 +198,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 	}
 }
 
-func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
+func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer goodBackend.Close()
 
@@ -206,7 +206,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 
 	type testCase struct {
 		name                   string
-		reqParamsSizeLimit     int
+		reqSizeLimit           int
 		expectedHTTPCode       int
 		expectedRpcCode        int
 		expectedErrSubStr      string
@@ -215,7 +215,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 	cases := []testCase{
 		{
 			name:                   "Req params size limit of 1 byte",
-			reqParamsSizeLimit:     1,
+			reqSizeLimit:           1,
 			expectedHTTPCode:       413,
 			expectedRpcCode:        -32021,
 			expectedErrSubStr:      "request body too large",
@@ -223,7 +223,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 		},
 		{
 			name:                   "Req params size limit of 1000 bytes (2000 hex characters)",
-			reqParamsSizeLimit:     1000,
+			reqSizeLimit:           1000,
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
 			expectedCallsToBackend: 1,
@@ -250,7 +250,7 @@ func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
 			validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 			defer validatingBackend2.Close()
 
-			config.InteropValidationConfig.ReqParamsSizeLimit = c.reqParamsSizeLimit
+			config.InteropValidationConfig.ReqSizeLimit = c.reqSizeLimit
 			config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
 
 			_, shutdown, err := proxyd.Start(config)
