@@ -405,3 +405,67 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 	require.Equal(t, 200, observedCode)
 	require.Equal(t, len(validatingBackend1.requests), 1)
 }
+
+func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
+
+	config.InteropValidationConfig.AccessListSizeLimit = 2 // only 2 entries are allowed in the access list
+
+	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend1.Close()
+
+	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	// subroutine for checking the bad path
+	// i.e. a request with an invalid access list that is rejected by the ParseAccess check itself
+	// without needing to reach the validating backend (supervisor)
+	{
+		wrongTx := fakeTxBuilder(func(tx *types.AccessListTx) {
+			// make the access list's storage keys invalid enough to be failed by the ParseAccess check itself
+			tx.AccessList[0].StorageKeys = []common.Hash{
+				common.HexToHash("0x123"),
+				common.HexToHash("0x456"),
+			}
+		})
+
+		wrongInteropReqParams, err := convertTxToReqParams(wrongTx)
+		require.NoError(t, err)
+
+		sendRawTransactionWithWrongAccessList := makeSendRawTransaction(wrongInteropReqParams)
+		observedResp, observedCode, err := client.SendRequest(sendRawTransactionWithWrongAccessList)
+		require.NoError(t, err)
+		require.Equal(t, 400, observedCode)
+		require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", -32602))
+
+		// request failed aptly without needing to reach the validating backend (supervisor)
+		require.Equal(t, len(validatingBackend1.requests), 0)
+	}
+
+	// subroutine for checking the good path
+	// i.e. a request with a valid access list that is validated by the ParseAccess check itself
+	// is allowed to the validating backend (supervisor) for potentially other validation checks which can only be performed by the supervisor
+	{
+		rightTx := fakeTxBuilder()
+		rightInteropReqParams, err := convertTxToReqParams(rightTx)
+		require.NoError(t, err)
+
+		sendRawTransactionWithRightAccessList := makeSendRawTransaction(rightInteropReqParams)
+		_, observedCode, err := client.SendRequest(sendRawTransactionWithRightAccessList)
+		require.NoError(t, err)
+		require.Equal(t, 200, observedCode)
+		require.Equal(t, len(validatingBackend1.requests), 1)
+	}
+
+}

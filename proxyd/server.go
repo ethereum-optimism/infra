@@ -491,6 +491,12 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return ErrInteropAccessListOutOfBounds
 	}
 
+	// a pre-validation pre-requisite to the checkAccessList operation
+	_, _, err = supervisorTypes.ParseAccess(interopAccessList)
+	if err != nil {
+		return ParseInteropError(fmt.Errorf("failed to read data: %w", err))
+	}
+
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
 		validatingBackend := interop.NewInteropClient(url)
 		err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
