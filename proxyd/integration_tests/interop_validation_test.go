@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -468,4 +469,62 @@ func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
 		require.Equal(t, len(validatingBackend1.requests), 1)
 	}
 
+}
+
+func TestInteropValidation_SenderRateLimit(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
+
+	config.InteropValidationConfig.RateLimit.Enabled = true
+	config.InteropValidationConfig.RateLimit.Limit = 1
+
+	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend1.Close()
+
+	validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend2.Close()
+
+	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+	_, observedCode1, err1 := client.SendRequest(sendRawTransaction)
+	observedResp2, observedCode2, err2 := client.SendRequest(sendRawTransaction)
+
+	// ensuring the first call succeeded
+	require.NoError(t, err1)
+	require.Equal(t, 200, observedCode1)
+
+	require.Equal(t, len(validatingBackend1.requests), 1)
+
+	// ensuring the second call failed due to rate limiting
+	require.NoError(t, err2)
+	require.Equal(t, 429, observedCode2)
+	require.Contains(t, string(observedResp2), "sender is over rate limit")
+	require.Contains(t, string(observedResp2), fmt.Sprintf("\"code\":%d", -32017))
+
+	// ensuring that the second call didn't contribute to additional validating backend (supervisor) requests
+	require.Equal(t, len(validatingBackend1.requests), 1)
+
+	// waiting for the rate limit to reset
+	time.Sleep(1100 * time.Millisecond)
+
+	// ensuring the third call succeeds
+	_, observedCode3, err3 := client.SendRequest(sendRawTransaction)
+	require.NoError(t, err3)
+	require.Equal(t, 200, observedCode3)
+
+	// ensuring that this call did contribute to additional validating backend (supervisor) requests due to being within the rate limit
+	require.Equal(t, len(validatingBackend1.requests), 2)
 }

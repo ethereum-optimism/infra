@@ -74,6 +74,7 @@ type Server struct {
 	mainLim                 FrontendRateLimiter
 	overrideLims            map[string]FrontendRateLimiter
 	senderLim               FrontendRateLimiter
+	interopSenderLim        FrontendRateLimiter
 	allowedChainIds         []*big.Int
 	limExemptOrigins        []*regexp.Regexp
 	limExemptUserAgents     []*regexp.Regexp
@@ -103,6 +104,7 @@ func NewServer(
 	cache RPCCache,
 	rateLimitConfig RateLimitConfig,
 	senderRateLimitConfig SenderRateLimitConfig,
+	interopSenderRateLimitConfig SenderRateLimitConfig,
 	enableRequestLog bool,
 	maxRequestBodyLogLen int,
 	maxBatchSize int,
@@ -170,6 +172,11 @@ func NewServer(
 		senderLim = limiterFactory(time.Duration(senderRateLimitConfig.Interval), senderRateLimitConfig.Limit, "senders")
 	}
 
+	var interopSenderLim FrontendRateLimiter
+	if interopSenderRateLimitConfig.Enabled {
+		interopSenderLim = limiterFactory(time.Duration(interopSenderRateLimitConfig.Interval), interopSenderRateLimitConfig.Limit, "interop_senders")
+	}
+
 	rateLimitHeader := defaultRateLimitHeader
 	if rateLimitConfig.IPHeaderOverride != "" {
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
@@ -196,6 +203,7 @@ func NewServer(
 		overrideLims:            overrideLims,
 		globallyLimitedMethods:  globalMethodLims,
 		senderLim:               senderLim,
+		interopSenderLim:        interopSenderLim,
 		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
 		limExemptOrigins:        limExemptOrigins,
 		limExemptUserAgents:     limExemptUserAgents,
@@ -450,6 +458,10 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		"strategy", s.interopValidatingConfig.Strategy,
 	)
 
+	if err := s.rateLimitInteropSender(ctx, rpcReq); err != nil {
+		return err
+	}
+
 	if err := reqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqSizeLimit); err != nil {
 		return err
 	}
@@ -685,12 +697,10 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
 		if parsedReq.Method == "eth_sendRawTransaction" {
-			if s.senderLim != nil {
-				if err := s.rateLimitSender(ctx, parsedReq); err != nil {
-					RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
-					responses[i] = NewRPCErrorRes(parsedReq.ID, err)
-					continue
-				}
+			if err := s.rateLimitSender(ctx, parsedReq); err != nil {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
 			}
 			if err := s.validateInteropSendRpcRequest(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
@@ -925,7 +935,7 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 	return tx, nil
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+func (s *Server) genericRateLimitSender(ctx context.Context, req *RPCReq, lim FrontendRateLimiter) error {
 	tx, err := convertSendReqToSendTx(ctx, req)
 	if err != nil {
 		return err
@@ -943,7 +953,7 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 		return ErrInvalidParams(err.Error())
 	}
-	ok, err := s.senderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
+	ok, err := lim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
 	if err != nil {
 		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal
@@ -954,6 +964,22 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 	}
 
 	return nil
+}
+
+func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+	if s.senderLim == nil {
+		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}
+	return s.genericRateLimitSender(ctx, req, s.senderLim)
+}
+
+func (s *Server) rateLimitInteropSender(ctx context.Context, req *RPCReq) error {
+	if s.interopSenderLim == nil {
+		log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}
+	return s.genericRateLimitSender(ctx, req, s.interopSenderLim)
 }
 
 func (s *Server) isAllowedChainId(chainId *big.Int) bool {
