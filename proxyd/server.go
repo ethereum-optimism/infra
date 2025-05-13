@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -50,6 +51,7 @@ const (
 	defaultMaxUpstreamBatchSize      = 10
 	defaultRateLimitHeader           = "X-Forwarded-For"
 	defaultInteropValidationStrategy = FirstSupervisorStrategy
+	defaultInteropReqParamsSizeLimit = 128 * 1024 // 128KB
 )
 
 var emptyArrayResponse = json.RawMessage("[]")
@@ -395,6 +397,30 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
+func senderReqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxTxSize int) error {
+	var params []string
+	if err := json.Unmarshal(rpcReq.Params, &params); err != nil {
+		log.Debug("error unmarshalling raw transaction params", "err", err, "req_id", GetReqID(ctx))
+		return ErrParseErr
+	}
+
+	if len(params) > 0 {
+		// Calculate the size of the raw transaction data
+		txSize := len(params[0])
+
+		if maxTxSize > 0 && txSize > maxTxSize {
+			log.Info(
+				"transaction exceeds maximum size limit",
+				"size", txSize,
+				"max_size", maxTxSize,
+				"req_id", GetReqID(ctx),
+			)
+			return ErrRequestBodyTooLarge
+		}
+	}
+	return nil
+}
+
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
 	log.Info(
 		"validating interop access list",
@@ -404,20 +430,13 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		"strategy", s.interopValidatingConfig.Strategy,
 	)
 
-	if len(s.interopValidatingConfig.Urls) == 0 {
-		// use unknown below to prevent DOS vector that fills up memory
-		// with arbitrary method names.
-		log.Debug(
-			"no validating backends found",
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-		)
-		return nil
+	if err := senderReqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqParamsSizeLimit); err != nil {
+		return err
 	}
 
 	tx, err := convertSendReqToSendTx(ctx, rpcReq)
 	if err != nil {
-		return ErrInvalidRequest(fmt.Sprintf("error parsing transaction: %s", err.Error()))
+		return err
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
@@ -429,6 +448,16 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 			"method", rpcReq.Method,
 		)
 		return nil
+	}
+
+	// at this point, we know it's an interop transaction worthy of being validated
+	if len(s.interopValidatingConfig.Urls) == 0 {
+		log.Error(
+			"no validating backends found for an interop transaction",
+			"req_id", GetReqID(ctx),
+			"method", rpcReq.Method,
+		)
+		return supervisorTypes.ErrNoRPCSource
 	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
