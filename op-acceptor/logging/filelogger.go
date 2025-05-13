@@ -15,8 +15,8 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
-// Common filenames
 const (
+	HTMLResultsTemplate = "results.tmpl.html"
 	HTMLResultsFilename = "results.html"
 )
 
@@ -1219,7 +1219,7 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 	}
 
 	// Parse the template
-	tmpl, err := GetHTMLTemplate(HTMLResultsFilename + ".tmpl")
+	tmpl, err := GetHTMLTemplate(HTMLResultsTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse HTML template: %w", err)
 	}

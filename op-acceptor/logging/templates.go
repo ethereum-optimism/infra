@@ -5,7 +5,7 @@ import (
 	"html/template"
 )
 
-//go:embed templates/*.html.tmpl
+//go:embed templates/*.tmpl.html
 var templateFS embed.FS
 
 // GetHTMLTemplate returns the HTML template for the specified name
