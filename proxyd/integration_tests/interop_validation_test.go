@@ -32,7 +32,7 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 	return hexutil.Encode(bytes), nil
 }
 
-func fakeInteropReqParams() (string, error) {
+func fakeTxBuilder(txModifiers ...func(tx *types.AccessListTx)) *types.Transaction {
 	checksumArgs := supervisorTypes.ChecksumArgs{
 		BlockNumber: 3519561,
 		Timestamp:   1746536469,
@@ -54,7 +54,7 @@ func fakeInteropReqParams() (string, error) {
 	r.SetString("32221253762185627567561170530332760991541284345642488431105080034438681047063", 10)
 	s.SetString("53477774121840563707688019836183722736827235081472376095392631194490753506882", 10)
 
-	fakeTx := types.NewTx(&types.AccessListTx{
+	accessListArgument := &types.AccessListTx{
 		ChainID: big.NewInt(420120003),
 		Nonce:   6,
 		Value:   big.NewInt(0),
@@ -68,12 +68,16 @@ func fakeInteropReqParams() (string, error) {
 				StorageKeys: accessListEntries,
 			},
 		},
-	})
+	}
 
-	return convertTxToReqParams(fakeTx)
+	for _, opt := range txModifiers {
+		opt(accessListArgument)
+	}
+
+	return types.NewTx(accessListArgument)
 }
 
-func TestInteropValidation(t *testing.T) {
+func TestInteropValidation_NormalFlow(t *testing.T) {
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer goodBackend.Close()
 
@@ -158,7 +162,7 @@ func TestInteropValidation(t *testing.T) {
 		},
 	}
 
-	fakeInteropReqParams, err := fakeInteropReqParams()
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -190,6 +194,82 @@ func TestInteropValidation(t *testing.T) {
 					RequireEqualJSON(t, c.expectedResp.jsonResponse, observedResp)
 				}
 			}
+		})
+	}
+}
+
+func TestInteropValidation_ReqParamsSizeLimit(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	type testCase struct {
+		name                   string
+		reqParamsSizeLimit     int
+		expectedHTTPCode       int
+		expectedRpcCode        int
+		expectedErrSubStr      string
+		expectedCallsToBackend int
+	}
+	cases := []testCase{
+		{
+			name:                   "Req params size limit of 1 byte",
+			reqParamsSizeLimit:     1,
+			expectedHTTPCode:       413,
+			expectedRpcCode:        -32021,
+			expectedErrSubStr:      "request body too large",
+			expectedCallsToBackend: 0,
+		},
+		{
+			name:                   "Req params size limit of 1000 bytes (2000 hex characters)",
+			reqParamsSizeLimit:     1000,
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 1,
+		},
+		{
+			name:                   "Req params size limit of 0 or not provided",
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 1,
+		},
+	}
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
+
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+			defer validatingBackend1.Close()
+
+			validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+			defer validatingBackend2.Close()
+
+			config.InteropValidationConfig.ReqParamsSizeLimit = c.reqParamsSizeLimit
+			config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+			_, shutdown, err := proxyd.Start(config)
+			require.NoError(t, err)
+			defer shutdown()
+
+			client := NewProxydClient("http://127.0.0.1:8545")
+			sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+			observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
+			require.NoError(t, err)
+
+			require.Equal(t, c.expectedHTTPCode, observedCode)
+			require.Contains(t, string(observedResp), c.expectedErrSubStr)
+
+			if c.expectedRpcCode != 0 {
+				require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", c.expectedRpcCode))
+			}
+
+			require.Equal(t, len(validatingBackend1.requests), c.expectedCallsToBackend)
 		})
 	}
 }

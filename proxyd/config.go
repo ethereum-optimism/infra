@@ -229,8 +229,9 @@ type Config struct {
 }
 
 type InteropValidationConfig struct {
-	Urls     []string                  `toml:"urls"`
-	Strategy InteropValidationStrategy `toml:"strategy"`
+	Urls               []string                  `toml:"urls"`
+	Strategy           InteropValidationStrategy `toml:"strategy"`
+	ReqParamsSizeLimit int                       `toml:"req_params_size_limit"`
 }
 
 type InteropValidationStrategy string
