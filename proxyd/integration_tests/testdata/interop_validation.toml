@@ -24,6 +24,7 @@ urls = [
 ]
 strategy = "first-supervisor"
 req_params_size_limit = 131072 ## 128KB
+access_list_size_limit = 1000000
 
 [sender_rate_limit]
 allowed_chain_ids = [0, 420120003] # adding 0 allows pre-EIP-155 transactions
