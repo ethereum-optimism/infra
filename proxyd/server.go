@@ -464,7 +464,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 	}
 
 	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
-		log.Info(
+		log.Error(
 			"interop access list exceeds maximum size limit",
 			"size", len(interopAccessList),
 			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
