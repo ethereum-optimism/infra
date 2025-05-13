@@ -354,7 +354,6 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 	// Use defer and recover to catch panics and convert them to errors
 	var result *types.TestResult
 	var err error
-
 	defer func() {
 		if rec := recover(); rec != nil {
 			errMsg := fmt.Sprintf("runtime error: %v", rec)
@@ -378,9 +377,8 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 		}
 	}()
 
+	r.log.Info("Running validator", "validator", metadata.ID)
 	start := time.Now()
-	r.log.Info("Running test", "validator", metadata.ID)
-
 	if metadata.RunAll {
 		result, err = r.runAllTestsInPackage(ctx, metadata)
 	} else {
@@ -406,7 +404,7 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 		return nil, fmt.Errorf("listing tests in package %s: %w", metadata.Package, err)
 	}
 
-	r.log.Info("Found tests in package",
+	r.log.Debug("Found tests in package",
 		"package", metadata.Package,
 		"count", len(testNames),
 		"tests", strings.Join(testNames, ", "))
@@ -570,6 +568,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	r.log.Info("Running test", "test", metadata.FuncName)
 	r.log.Debug("Running test command",
 		"dir", cmd.Dir,
 		"package", metadata.Package,
