@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/uuid"
@@ -98,6 +99,7 @@ type runner struct {
 	allowSkips  bool                // Whether to allow skipping tests when preconditions are not met
 	fileLogger  *logging.FileLogger // Logger for storing test results
 	networkName string              // Name of the network being tested
+	env         *env.DevnetEnv
 	tracer      trace.Tracer
 }
 
@@ -111,6 +113,7 @@ type Config struct {
 	AllowSkips  bool                // Whether to allow skipping tests when preconditions are not met
 	FileLogger  *logging.FileLogger // Logger for storing test results
 	NetworkName string              // Name of the network being tested
+	DevnetEnv   *env.DevnetEnv
 }
 
 // NewTestRunner creates a new test runner instance
@@ -158,6 +161,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		allowSkips:  cfg.AllowSkips,
 		fileLogger:  cfg.FileLogger,
 		networkName: networkName,
+		env:         cfg.DevnetEnv,
 		tracer:      otel.Tracer("test runner"),
 	}, nil
 }
@@ -415,8 +419,8 @@ func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	listCmd := exec.CommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
-	listCmd.Dir = r.workDir
+	listCmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
+	defer cleanup()
 
 	var listOut, listOutErr bytes.Buffer
 	listCmd.Stdout = &listOut
@@ -559,16 +563,8 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	}
 
 	args := r.buildTestArgs(metadata)
-	cmd := exec.CommandContext(ctx, r.goBinary, args...)
-	cmd.Dir = r.workDir
-
-	// Set environment variables for the test
-	env := os.Environ()
-	if !r.allowSkips {
-		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
-		env = append(env, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
-	}
-	cmd.Env = telemetry.InstrumentEnvironment(ctx, env)
+	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, args...)
+	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -1192,6 +1188,42 @@ func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
 // SetFileLogger sets the file logger for the runner
 func (r *runner) SetFileLogger(logger *logging.FileLogger) {
 	r.fileLogger = logger
+}
+
+func (r *runner) testCommandContext(ctx context.Context, name string, arg ...string) (*exec.Cmd, func()) {
+	cmd := exec.CommandContext(ctx, name, arg...)
+	cmd.Dir = r.workDir
+
+	if r.env == nil {
+		return cmd, func() {}
+	}
+
+	// Create a temporary file for the devnet environment.
+	// We can't rely on the environment that has been passed to the runner as addons may have modified it.
+	envFile, err := os.CreateTemp("", "test-env-*.json")
+	if err != nil {
+		r.log.Error("Failed to create temp env file", "error", err)
+	} else {
+		if err := json.NewEncoder(envFile).Encode(r.env.Env); err != nil {
+			r.log.Error("Failed to write env to temp file", "error", err)
+		}
+
+		env := append(
+			os.Environ(),
+			// override the env URL with the one from the temp file
+			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
+			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
+			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
+		)
+		cmd.Env = telemetry.InstrumentEnvironment(ctx, env)
+	}
+	cleanup := func() {
+		if envFile != nil {
+			// not elegant, but how bad is it, really? A temp file might escape...
+			_ = os.Remove(envFile.Name())
+		}
+	}
+	return cmd, cleanup
 }
 
 // Make sure the runner type implements both interfaces
