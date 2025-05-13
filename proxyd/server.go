@@ -398,6 +398,23 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
+// deduplicateInteropAccessList iterates through all the inbox entries flattened and collected from potentially >=1 interop accessLists
+// and deduplicates them so as to prevent the supervisor from doing duplicate validation for them.
+func deduplicateInteropAccessList(interopAccessListEntries []common.Hash) []common.Hash {
+	deduplicatedInteropAccessList := []common.Hash{}
+
+	interopAccessListSet := make(map[common.Hash]any)
+
+	// the following implementation strictly preserves the order of the inbox entries as the underlying parsing depends on it
+	for _, inboxEntry := range interopAccessListEntries {
+		if _, alreadyFound := interopAccessListSet[inboxEntry]; !alreadyFound {
+			interopAccessListSet[inboxEntry] = true
+			deduplicatedInteropAccessList = append(deduplicatedInteropAccessList, inboxEntry)
+		}
+	}
+	return deduplicatedInteropAccessList
+}
+
 // reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_request_body_size_bytes" setting.
 // Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_request_body_size_bytes"
 func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
@@ -462,6 +479,8 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		)
 		return supervisorTypes.ErrNoRPCSource
 	}
+
+	interopAccessList = deduplicateInteropAccessList(interopAccessList)
 
 	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
 		log.Error(
