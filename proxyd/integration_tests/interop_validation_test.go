@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
@@ -348,4 +349,59 @@ func TestInteropValidation_AccessListSizeLimit(t *testing.T) {
 			require.Equal(t, len(validatingBackend1.requests), c.expectedCallsToBackend)
 		})
 	}
+}
+
+func TestInteropValidation_Deduplication(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
+
+	config.InteropValidationConfig.AccessListSizeLimit = 2 // only 2 entries are allowed in the access list
+
+	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend1.Close()
+
+	validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer validatingBackend2.Close()
+
+	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	fakeTx := fakeTxBuilder(func(tx *types.AccessListTx) {
+		oneAccessListEntry := tx.AccessList[0]
+
+		// duplicate the access list itself with same entries
+		tx.AccessList = append(tx.AccessList, oneAccessListEntry)
+
+		// duplicate intra-access list entries
+		tx.AccessList[0].StorageKeys = append(tx.AccessList[0].StorageKeys, oneAccessListEntry.StorageKeys...)
+	})
+
+	{
+		// assert that the (duplicated) access list is now 3x the size of the original
+		// and higher than the access list size limit
+		fakeTxStorageEntries := interoptypes.TxToInteropAccessList(fakeTx)
+		require.Equal(t, len(fakeTxStorageEntries), 6)
+		require.Greater(t, len(fakeTxStorageEntries), config.InteropValidationConfig.AccessListSizeLimit)
+	}
+
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTx)
+	require.NoError(t, err)
+
+	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+	_, observedCode, err := client.SendRequest(sendRawTransaction)
+
+	// yet the call succeeds because the deduplicated access list is still within the access list size limit
+	require.NoError(t, err)
+	require.Equal(t, 200, observedCode)
+	require.Equal(t, len(validatingBackend1.requests), 1)
 }
