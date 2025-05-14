@@ -430,7 +430,7 @@ func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 
 	if err := listCmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("listing tests timed out after 30s")
+			return nil, fmt.Errorf("listing tests timed out with error: %w", err)
 		}
 		return nil, fmt.Errorf("command error: %w\nstderr: %s", err, listOutErr.String())
 	}
