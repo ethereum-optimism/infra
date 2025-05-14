@@ -272,6 +272,8 @@ func Start(config *Config) (*Server, func(), error) {
 			Backends:               backends,
 			WeightedRouting:        bg.WeightedRouting,
 			FallbackBackends:       fallbackBackends,
+			MaxBlockRange:          bg.MaxBlockRange,
+			RateLimitRange:         bg.RateLimitRange,
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
 		}
@@ -494,6 +496,15 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()
 			}
+		} else {
+			opts := make([]NonconsensusOpt, 0)
+
+			if bgcfg.NonconsensusPollerInterval != 0 {
+				opts = append(opts, WithPollingInterval(time.Duration(bgcfg.NonconsensusPollerInterval)))
+			}
+
+			np := NewNonconsensusPoller(bg, opts...)
+			bg.Nonconsensus = np
 		}
 	}
 

@@ -21,6 +21,7 @@ rpc_url = "$NODE3_URL"
 [backend_groups.node]
 backends = ["node1", "node2", "node3"]
 routing_strategy = "multicall"
+nonconsensus_poller_interval = "-1s"
 
 [rpc_method_mappings]
 eth_call = "node"

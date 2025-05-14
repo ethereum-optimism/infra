@@ -34,28 +34,44 @@ func TestFrontendRateLimiter(t *testing.T) {
 		frl := cfg.frl
 		ctx := context.Background()
 		t.Run(cfg.name, func(t *testing.T) {
+			// Test with increment of 1
 			for i := 0; i < 4; i++ {
-				ok, err := frl.Take(ctx, "foo")
+				ok, err := frl.Take(ctx, "foo", 1)
 				require.NoError(t, err)
 				require.Equal(t, i < max, ok)
-				ok, err = frl.Take(ctx, "bar")
+				ok, err = frl.Take(ctx, "bar", 1)
 				require.NoError(t, err)
 				require.Equal(t, i < max, ok)
 			}
 			time.Sleep(2 * time.Second)
 			for i := 0; i < 4; i++ {
-				ok, _ := frl.Take(ctx, "foo")
+				ok, _ := frl.Take(ctx, "foo", 1)
 				require.Equal(t, i < max, ok)
-				ok, _ = frl.Take(ctx, "bar")
+				ok, _ = frl.Take(ctx, "bar", 1)
 				require.Equal(t, i < max, ok)
 			}
+
+			// Test with increment of 2
+			time.Sleep(2 * time.Second)
+			ok, err := frl.Take(ctx, "baz", 2)
+			require.NoError(t, err)
+			require.True(t, ok)
+			ok, err = frl.Take(ctx, "baz", 1)
+			require.NoError(t, err)
+			require.False(t, ok)
+
+			// Test with increment of 3
+			time.Sleep(2 * time.Second)
+			ok, err = frl.Take(ctx, "baz", 3)
+			require.NoError(t, err)
+			require.False(t, ok)
 		})
 	}
 }
 
 type errorFrontend struct{}
 
-func (e *errorFrontend) Take(ctx context.Context, key string) (bool, error) {
+func (e *errorFrontend) Take(ctx context.Context, key string, amount int) (bool, error) {
 	return false, fmt.Errorf("test error")
 }
 
@@ -74,12 +90,12 @@ func TestFallbackRateLimiter(t *testing.T) {
 
 	ctx := context.Background()
 	for _, frl := range shouldSucceed {
-		ok, err := frl.Take(ctx, "foo")
+		ok, err := frl.Take(ctx, "foo", 1)
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
 	for _, frl := range shouldFail {
-		ok, err := frl.Take(ctx, "foo")
+		ok, err := frl.Take(ctx, "foo", 1)
 		require.Error(t, err)
 		require.False(t, ok)
 	}
