@@ -14,6 +14,8 @@ RUN just build
 
 FROM alpine:3.21
 
+RUN apk add --no-cache ca-certificates
+
 # Increase the proxy connect timeout to 60 seconds
 ENV GOPROXYCONNECTTIMEOUT=60s
 
