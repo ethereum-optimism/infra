@@ -1583,3 +1583,88 @@ gates:
 	validators := reg.GetValidators()
 	require.NotEmpty(t, validators, "Registry should have validators")
 }
+
+func TestRunTest_PackagePath_GitAndLocalScenarios(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	origPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", origPath)
+
+	testCases := []struct {
+		name         string
+		packagePath  string
+		setupGit     bool // if false, PATH is emptied to simulate missing git
+		expectStatus types.TestStatus
+		expectErrMsg string
+	}{
+		{
+			name:         "Local path does not exist",
+			packagePath:  "./does-not-exist",
+			setupGit:     true, // doesn't matter for local
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "local package path does not exist",
+		},
+		{
+			name:         "GitHub path, git present",
+			packagePath:  "github.com/optimism/does-not-exist", // this package should not exist
+			setupGit:     true,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "no required module provides package",
+		},
+		{
+			name:         "GitHub path, git missing",
+			packagePath:  "github.com/optimism/does-not-exist",
+			setupGit:     false,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "git is not installed",
+		},
+		{
+			name:         "Bitbucket path, git missing",
+			packagePath:  "bitbucket.org/optimism/does-not-exist",
+			setupGit:     false,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "git is not installed",
+		},
+		{
+			name:         "Golang.org path, git missing",
+			packagePath:  "golang.org/x/does-not-exist",
+			setupGit:     false,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "git is not installed",
+		},
+		{
+			name:         "git:: protocol, git missing",
+			packagePath:  "git::https://github.com/optimism/does-not-exist",
+			setupGit:     false,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "git is not installed",
+		},
+		{
+			name:         "git@ protocol, git missing",
+			packagePath:  "git@github.com:example/does-not-exist",
+			setupGit:     false,
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "git is not installed",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setupGit {
+				os.Setenv("PATH", origPath)
+			} else {
+				os.Setenv("PATH", "")
+			}
+			result, err := r.RunTest(context.Background(), types.ValidatorMetadata{
+				ID:       "test",
+				Gate:     "test-gate",
+				FuncName: "TestFunc",
+				Package:  tc.packagePath,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectStatus, result.Status)
+			assert.Error(t, result.Error)
+			assert.Contains(t, result.Error.Error(), tc.expectErrMsg)
+		})
+	}
+}

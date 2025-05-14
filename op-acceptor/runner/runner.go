@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -351,6 +352,27 @@ func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
 	return validator.FuncName
 }
 
+func (r *runner) isGitInstalled() error {
+	gitCmd := exec.Command("git", "version")
+	err := gitCmd.Run()
+	if err != nil {
+		return fmt.Errorf("git is not installed")
+	}
+	return nil
+}
+
+func isLocalPath(pkg string) bool {
+	return strings.HasPrefix(pkg, "./") || strings.HasPrefix(pkg, "/") || strings.HasPrefix(pkg, "../")
+}
+
+func isGitRemotePath(pkg string) bool {
+	return strings.HasPrefix(pkg, "git::") ||
+		strings.HasPrefix(pkg, "git@") ||
+		strings.Contains(pkg, "github.com/") ||
+		strings.Contains(pkg, "bitbucket.org/") ||
+		strings.Contains(pkg, "golang.org/")
+}
+
 // RunTest implements the TestRunner interface
 func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	// Use defer and recover to catch panics and convert them to errors
@@ -379,7 +401,30 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 		}
 	}()
 
+	// Check if the path is available locally, otherwise check if git is installed
+	if isLocalPath(metadata.Package) {
+		fullPath := filepath.Join(r.workDir, metadata.Package)
+		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
+			r.log.Error("Local package path does not exist, failing test", "validator", metadata.ID, "package", metadata.Package, "fullPath", fullPath)
+			return &types.TestResult{
+				Metadata: metadata,
+				Status:   types.TestStatusFail,
+				Error:    fmt.Errorf("local package path does not exist: %s", fullPath),
+			}, nil
+		}
+	} else if isGitRemotePath(metadata.Package) {
+		if err := r.isGitInstalled(); err != nil {
+			r.log.Error("Git is not installed but required for remote package, failing test", "validator", metadata.ID, "package", metadata.Package)
+			return &types.TestResult{
+				Metadata: metadata,
+				Status:   types.TestStatusFail,
+				Error:    fmt.Errorf("git is not installed"),
+			}, nil
+		}
+	}
+
 	r.log.Info("Running validator", "validator", metadata.ID)
+
 	start := time.Now()
 	if metadata.RunAll {
 		result, err = r.runAllTestsInPackage(ctx, metadata)
@@ -415,6 +460,7 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 }
 
 // listTestsInPackage returns all test names in a package
+// This may take a while to run as it needs to download all the dependencies
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 	return testlist.FindTestFunctions(pkg, r.workDir)
 }
@@ -567,6 +613,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			Metadata: metadata,
 			Status:   types.TestStatusFail,
 			Error:    fmt.Errorf("failed to parse test output"),
+			Stdout:   stdout.String(),
 		}
 	}
 
@@ -652,7 +699,9 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 		"status", result.Status,
 		"subtests", len(result.SubTests),
 		"hasAnyValidEvent", hasAnyValidEvent,
-		"hasError", result.Error != nil)
+		"hasError", result.Error != nil,
+		"error", result.Error,
+	)
 
 	return result
 }
