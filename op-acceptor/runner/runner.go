@@ -460,7 +460,8 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 // listTestsInPackage returns all test names in a package
 // This may take a while to run as it needs to download all the dependencies
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// 60 seconds is the go proxy connect timeout, add 10 seconds to allow for the test command
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 	defer cancel()
 
 	listCmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
@@ -476,7 +477,7 @@ func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 
 	if err := listCmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("listing tests timed out after 60s")
+			return nil, fmt.Errorf("listing tests timed out after 70s: %s, error: %s", listOut.String(), listOutErr.String())
 		}
 		return nil, fmt.Errorf("command error: %w\nstderr: %s", err, listOutErr.String())
 	}
