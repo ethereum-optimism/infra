@@ -406,23 +406,6 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
-// deduplicateInteropAccessList iterates through all the inbox entries flattened and collected from potentially >=1 interop accessLists
-// and deduplicates them so as to prevent the supervisor from doing duplicate validation for them.
-func deduplicateInteropAccessList(interopAccessListEntries []common.Hash) []common.Hash {
-	deduplicatedInteropAccessList := []common.Hash{}
-
-	interopAccessListSet := make(map[common.Hash]any)
-
-	// the following implementation strictly preserves the order of the inbox entries as the underlying parsing depends on it
-	for _, inboxEntry := range interopAccessListEntries {
-		if _, alreadyFound := interopAccessListSet[inboxEntry]; !alreadyFound {
-			interopAccessListSet[inboxEntry] = true
-			deduplicatedInteropAccessList = append(deduplicatedInteropAccessList, inboxEntry)
-		}
-	}
-	return deduplicatedInteropAccessList
-}
-
 // reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_request_body_size_bytes" setting.
 // Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_request_body_size_bytes"
 func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
@@ -492,21 +475,20 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return supervisorTypes.ErrNoRPCSource
 	}
 
-	interopAccessList = deduplicateInteropAccessList(interopAccessList)
+	interopAccessList, err = validateAndDeduplicateInteropAccessList(interopAccessList)
+	if err != nil {
+		log.Error("error validating and deduplicating interop access list", "req_id", GetReqID(ctx), "error", err)
+		return ParseInteropError(fmt.Errorf("failed to read data: %w", err))
+	}
 
 	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
 		log.Error(
 			"interop access list exceeds maximum size limit",
+			"req_id", GetReqID(ctx),
 			"size", len(interopAccessList),
 			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
 		)
 		return ErrInteropAccessListOutOfBounds
-	}
-
-	// a pre-validation pre-requisite to the checkAccessList operation
-	_, _, err = supervisorTypes.ParseAccess(interopAccessList)
-	if err != nil {
-		return ParseInteropError(fmt.Errorf("failed to read data: %w", err))
 	}
 
 	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
@@ -599,11 +581,6 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "method", rpcReq.Method, "error", finalErr)
 	}
 	return finalErr
-}
-
-func getInteropExecutingDescriptorTimestamp() uint64 {
-	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
-	return uint64(time.Now().Second() + 1000)
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool) ([]*RPCRes, bool, string, error) {
@@ -972,14 +949,6 @@ func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
 		return nil
 	}
 	return s.genericRateLimitSender(ctx, req, s.senderLim)
-}
-
-func (s *Server) rateLimitInteropSender(ctx context.Context, req *RPCReq) error {
-	if s.interopSenderLim == nil {
-		log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
-		return nil
-	}
-	return s.genericRateLimitSender(ctx, req, s.interopSenderLim)
 }
 
 func (s *Server) isAllowedChainId(chainId *big.Int) bool {
