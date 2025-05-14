@@ -79,6 +79,7 @@ type ResultStats struct {
 type TestRunner interface {
 	RunAllTests(ctx context.Context) (*RunnerResult, error)
 	RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error)
+	PrewarmCache(ctx context.Context) error
 }
 
 // TestRunnerWithFileLogger extends the TestRunner interface with a method
@@ -1223,6 +1224,23 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 		}
 	}
 	return cmd, cleanup
+}
+
+// PrewarmCache runs a no-op test to warm up the Go test cache
+func (r *runner) PrewarmCache(ctx context.Context) error {
+	r.log.Info("Pre-warming Go test cache...")
+	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", "-run", "^$", "./...")
+	defer cleanup()
+
+	// Run the command and capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		r.log.Error("Error pre-warming test cache", "error", err, "output", string(output))
+		return fmt.Errorf("failed to pre-warm test cache: %w", err)
+	}
+
+	r.log.Info("Successfully pre-warmed Go test cache")
+	return nil
 }
 
 // Make sure the runner type implements both interfaces

@@ -182,6 +182,12 @@ func (n *nat) Start(ctx context.Context) error {
 		"config.ValidatorConfig", n.config.ValidatorConfig,
 		"config.LogDir", n.config.LogDir)
 
+	// Pre-warm the Go test cache
+	if err := n.runner.PrewarmCache(ctx); err != nil {
+		n.config.Log.Warn("Failed to pre-warm test cache", "error", err)
+		// Continue despite pre-warm failure
+	}
+
 	// Run tests immediately on startup
 	err := n.runTests(ctx)
 	if err != nil {

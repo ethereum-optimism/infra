@@ -1603,3 +1603,12 @@ gates:
 	validators := reg.GetValidators()
 	require.NotEmpty(t, validators, "Registry should have validators")
 }
+
+func TestPrewarmCache(t *testing.T) {
+	ctx := context.Background()
+	r := setupDefaultTestRunner(t)
+
+	// Test pre-warming the cache
+	err := r.PrewarmCache(ctx)
+	require.NoError(t, err, "PrewarmCache should succeed")
+}

@@ -48,6 +48,11 @@ func (m *trackedMockRunner) RunAllTests(_ context.Context) (*runner.RunnerResult
 	return args.Get(0).(*runner.RunnerResult), args.Error(1)
 }
 
+func (m *trackedMockRunner) PrewarmCache(_ context.Context) error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 // waitForExecutions waits for a specific number of executions with timeout
 func (m *trackedMockRunner) waitForExecutions(ctx context.Context, count int32) bool {
 	// Create a timeout context
@@ -88,6 +93,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 
 	// Create a tracked mock runner
 	mockRunner := newTrackedMockRunner()
+	mockRunner.On("PrewarmCache").Return(nil)
 
 	// Create a basic logger
 	logger := log.New()
@@ -109,6 +115,15 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 		done:       make(chan struct{}),
 		tracer:     otel.Tracer("test"),
 	}
+
+	// Create expected result
+	result := &runner.RunnerResult{
+		Status: types.TestStatusPass,
+		RunID:  "test-run-id",
+	}
+
+	// Configure mock for any number of calls
+	mockRunner.On("RunAllTests").Return(result, nil).Maybe()
 
 	return mockRunner, service, ctx, cancel
 }
