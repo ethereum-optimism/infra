@@ -358,53 +358,128 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	config := ReadConfig("interop_validation")
-	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
-
-	config.InteropValidationConfig.AccessListSizeLimit = 2 // only 2 entries are allowed in the access list
-
 	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer validatingBackend1.Close()
 
 	validatingBackend2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer validatingBackend2.Close()
 
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt // Don't perform basic rate limiting in this test since we're only testing interop validation.
 	config.InteropValidationConfig.Urls = []string{validatingBackend1.URL(), validatingBackend2.URL()}
 
-	_, shutdown, err := proxyd.Start(config)
-	require.NoError(t, err)
-	defer shutdown()
-
-	client := NewProxydClient("http://127.0.0.1:8545")
-
 	fakeTx := fakeTxBuilder(func(tx *types.AccessListTx) {
-		oneAccessListEntry := tx.AccessList[0]
+		// corresponds to ["0x01...", "0x03..."] storage keys
+		checksumArgs1 := supervisorTypes.ChecksumArgs{
+			BlockNumber: 3519561,
+			Timestamp:   1746536469,
+			LogIndex:    1,
+			ChainID:     eth.ChainIDFromUInt64(420120003),
+			LogHash: supervisorTypes.PayloadHashToLogHash(
+				crypto.Keccak256Hash([]byte("Hello, World!")),
+				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
+			),
+		}
 
-		// duplicate the access list itself with same entries
-		tx.AccessList = append(tx.AccessList, oneAccessListEntry)
+		// corresponds to ["0x01...", "0x02...","0x03..."] storage keys
+		// (0x02 is the chainIDExtension entry which is a consequence of a larger than uint64 chainID)
+		bigchainId, _ := new(big.Int).SetString("42012000398765432123456765432", 10)
+		checksumArgs2 := supervisorTypes.ChecksumArgs{
+			BlockNumber: 3519561,
+			Timestamp:   1746536469,
+			LogIndex:    1,
+			ChainID:     eth.ChainIDFromBig(bigchainId),
+			LogHash: supervisorTypes.PayloadHashToLogHash(
+				crypto.Keccak256Hash([]byte("Hello, World!")),
+				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
+			),
+		}
 
-		// duplicate intra-access list entries
-		tx.AccessList[0].StorageKeys = append(tx.AccessList[0].StorageKeys, oneAccessListEntry.StorageKeys...)
+		accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+			checksumArgs1.Access(), // 2 entries
+			checksumArgs2.Access(), // 3 entries
+		})
+
+		tx.AccessList = types.AccessList{
+			{
+				Address:     params.InteropCrossL2InboxAddress,
+				StorageKeys: accessListEntries,
+			},
+		}
+
+		// forcing duplication by:
+		// duplicating the 0x01 entry of second access list entry to the 0x01 entry of the first access list entry
+		zeroX01EntryOfFirstAccessList := tx.AccessList[0].StorageKeys[0]
+		tx.AccessList[0].StorageKeys[2] = zeroX01EntryOfFirstAccessList
+
+		// duplicating the 0x03 entry of second access list entry to the 0x03 entry of the first access list entry
+		zeroX03EntryOfFirstAccessList := tx.AccessList[0].StorageKeys[1]
+		tx.AccessList[0].StorageKeys[4] = zeroX03EntryOfFirstAccessList
+
+		// duplicating the entire access list
+		tx.AccessList = append(tx.AccessList, tx.AccessList[0]) // ends up with 10 entries (2x of the five original entries)
 	})
-
-	{
-		// assert that the (duplicated) access list is now 3x the size of the original
-		// and higher than the access list size limit
-		fakeTxStorageEntries := interoptypes.TxToInteropAccessList(fakeTx)
-		require.Equal(t, len(fakeTxStorageEntries), 6)
-		require.Greater(t, len(fakeTxStorageEntries), config.InteropValidationConfig.AccessListSizeLimit)
-	}
 
 	fakeInteropReqParams, err := convertTxToReqParams(fakeTx)
 	require.NoError(t, err)
 
 	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
-	_, observedCode, err := client.SendRequest(sendRawTransaction)
 
-	// yet the call succeeds because the deduplicated access list is still within the access list size limit
+	// Testing plan:
+	// - we want the deduplication to remove the entries such that final output is left with the 5 entries ["0x01...", "0x03...", "0x01...", "0x02...", "0x03..."]
+	// - so, we will test that by first having an access size limit of 4 and failing the check,
+	// followed by resetting the access size limit to 5 and passing the check.
+	// - This will depict that behind the scenes, the 10 entries get deduplicated to 5 entries (because obviously they fail against an access size limit of 4 but not 5)
+
+	oldAccessSizeLimit := 4
+	newAccessSizeLimit := 5
+
+	{
+		// basic checks confirming our fakeTx has 10 (duplicated) entries in it
+		fakeTxStorageEntries := interoptypes.TxToInteropAccessList(fakeTx)
+		require.Equal(t, len(fakeTxStorageEntries), 10)
+
+		// the original duplicated access list is greater than the old as well as new access list size limits
+		// so if the deduplication fails against both the size limit check, that would signify the failure of deduplication logic, thereby testing a bad path
+		require.Greater(t, len(fakeTxStorageEntries), oldAccessSizeLimit)
+		require.Greater(t, len(fakeTxStorageEntries), newAccessSizeLimit)
+	}
+
+	config.InteropValidationConfig.AccessListSizeLimit = oldAccessSizeLimit
+
+	_, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
-	require.Equal(t, 200, observedCode)
-	require.Equal(t, len(validatingBackend1.requests), 1)
+	firstShutdownAlreadyCalled := false
+	defer func() {
+		if !firstShutdownAlreadyCalled {
+			shutdown()
+		}
+	}()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
+
+	require.NoError(t, err)
+	require.Equal(t, 413, observedCode, "the request should have failed because of the expectation of the deduplicated entries being 5")
+	require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", -32022))
+	require.Contains(t, string(observedResp), "access list out of bounds")
+	require.Equal(t, len(validatingBackend1.requests), 0) // no request was sent to the validating backend (supervisor) because the number of entries to be passed were found to be more than the size limit of 4
+
+	shutdown()
+	firstShutdownAlreadyCalled = true
+
+	config.InteropValidationConfig.AccessListSizeLimit = newAccessSizeLimit
+
+	_, shutdown, err = proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	// our expectation of the deduplication entries being 5 is confirmed by the fact that the request now succeeds the access list size limit check against 5
+	_, observedCode, err = client.SendRequest(sendRawTransaction)
+	require.NoError(t, err)
+	require.Equal(t, 200, observedCode, "the request should have succeeded because of the expectation of the deduplicated entries being 5")
+	require.Equal(t, len(validatingBackend1.requests), 1) // the success is represented by the fact that the request was sent to the validating backend (supervisor)
 }
 
 func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
