@@ -12,9 +12,9 @@ COPY op-acceptor/ .
 
 RUN just build
 
-FROM alpine:3.21
+FROM golang:1.23.5-alpine3.21
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates build-base
 
 # Increase the proxy connect timeout to 60 seconds
 ENV GOPROXYCONNECTTIMEOUT=60s
