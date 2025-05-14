@@ -1,5 +1,8 @@
 FROM golang:1.23.5-alpine3.21 AS builder
 
+# Increase the proxy connect timeout to 60 seconds
+ENV GOPROXYCONNECTTIMEOUT=60s
+
 WORKDIR /app
 
 # Install dependencies first for better caching
@@ -10,6 +13,9 @@ COPY op-acceptor/ .
 RUN just build
 
 FROM alpine:3.21
+
+# Increase the proxy connect timeout to 60 seconds
+ENV GOPROXYCONNECTTIMEOUT=60s
 
 # Install Go binary
 # (we copy Go directly from the builder stage for simplicity and consistency)
@@ -30,7 +36,12 @@ chown -R app:app /go
 
 COPY --from=builder /app/bin/op-acceptor /app/
 COPY op-acceptor/example-validators.yaml /app/
+
+# Set ownership of the /app directory to allow the application to write logs and other files at runtime
+RUN chown -R app:app /app/
+
 USER app
 
 VOLUME /devnets
+
 ENTRYPOINT ["/app/op-acceptor"]
