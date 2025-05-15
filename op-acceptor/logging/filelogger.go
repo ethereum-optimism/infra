@@ -1135,6 +1135,7 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 	if err != nil {
 		return err
 	}
+	defer writer.Close()
 
 	// Calculate totals and duration
 	total := s.passed + s.failed + s.skipped + s.errored
