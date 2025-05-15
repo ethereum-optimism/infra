@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -1147,6 +1148,9 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 		return cmd, func() {}
 	}
 
+	// at this point we've already parsed the URL once before to load the environment, so no need to check for errors
+	url, _ := url.Parse(r.env.URL)
+
 	// Create a temporary file for the devnet environment.
 	// We can't rely on the environment that has been passed to the runner as addons may have modified it.
 	envFile, err := os.CreateTemp("", "test-env-*.json")
@@ -1161,6 +1165,8 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			os.Environ(),
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
+			// override the control resolution scheme with the original one
+			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
 			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
 		)
