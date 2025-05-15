@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
+	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
@@ -414,58 +415,7 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 
 // listTestsInPackage returns all test names in a package
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	listCmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", pkg, "-list", "^Test")
-	defer cleanup()
-
-	var listOut, listOutErr bytes.Buffer
-	listCmd.Stdout = &listOut
-	listCmd.Stderr = &listOutErr
-
-	r.log.Debug("Listing tests in package",
-		"package", pkg,
-		"command", listCmd.String())
-
-	if err := listCmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("listing tests timed out after 30s")
-		}
-		return nil, fmt.Errorf("command error: %w\nstderr: %s", err, listOutErr.String())
-	}
-
-	return parseTestListOutput(listOut.Bytes()), nil
-}
-
-// parseTestListOutput extracts valid test names from go test -list output
-func parseTestListOutput(output []byte) []string {
-	var testNames []string
-
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		testName := string(bytes.TrimSpace(line))
-		if isValidTestName(testName) {
-			testNames = append(testNames, testName)
-		}
-	}
-
-	return testNames
-}
-
-// isValidTestName returns true if the name represents a valid test
-func isValidTestName(name string) bool {
-	// Reject empty or specific strings like "ok" and strings with question marks
-	if name == "" || name == "ok" || strings.HasPrefix(name, "?") {
-		return false
-	}
-
-	// Filter out lines that start with "ok" and have the package name and timing info
-	// Example: "ok github.com/ethereum-optimism/optimism/kurtosis-devnet/pkg/kurtosis 0.335s"
-	if strings.HasPrefix(name, "ok ") && strings.Contains(name, ".") && strings.HasSuffix(name, "s") {
-		return false
-	}
-
-	return true
+	return testlist.FindTestFunctions(pkg, r.workDir)
 }
 
 // runTestList runs a list of tests and aggregates their results

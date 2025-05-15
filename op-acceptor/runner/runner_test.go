@@ -212,26 +212,6 @@ func TestBuildTestArgs(t *testing.T) {
 	}
 }
 
-func TestIsValidTestName(t *testing.T) {
-	tests := []struct {
-		name string
-		want bool
-	}{
-		{"TestFoo", true},
-		{"", false},
-		{"ok", false},
-		{"?   pkg/foo", false},
-		{"TestBar_SubTest", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isValidTestName(tt.name)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestFormatErrors(t *testing.T) {
 	r := setupDefaultTestRunner(t)
 
