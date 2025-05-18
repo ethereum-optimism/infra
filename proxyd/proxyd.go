@@ -367,6 +367,28 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
+	var interopStrategy InteropStrategy
+
+	opts := CommonStrategyOpts(
+		WithReqSizeLimit(config.InteropValidationConfig.ReqSizeLimit),
+		WithAccessListSizeLimit(config.InteropValidationConfig.AccessListSizeLimit),
+	)
+
+	switch config.InteropValidationConfig.Strategy {
+	case FirstSupervisorStrategy, EmptyStrategy:
+		interopStrategy = NewFirstSupervisorStrategy(
+			config.InteropValidationConfig.Urls,
+			opts...,
+		)
+	case MulticallStrategy:
+		interopStrategy = NewMulticallStrategy(
+			config.InteropValidationConfig.Urls,
+			opts...,
+		)
+	default:
+		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -386,6 +408,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.BatchConfig.MaxSize,
 		limiterFactory,
 		config.InteropValidationConfig,
+		interopStrategy,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
