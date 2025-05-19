@@ -385,6 +385,11 @@ func Start(config *Config) (*Server, func(), error) {
 			config.InteropValidationConfig.Urls,
 			opts...,
 		)
+	case HealthAwareLoadBalancingStrategy:
+		interopStrategy = NewHealthAwareLoadBalancingStrategy(
+			config.InteropValidationConfig.Urls,
+			opts...,
+		)
 	default:
 		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
 	}

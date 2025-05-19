@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -251,6 +252,120 @@ func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error
 	return ParseInteropError(firstErr)
 }
 
+type healthAwareLoadBalancingStrategyImpl struct {
+	*commonInteropStrategy
+	backends *loadBalancingBuffer
+}
+
+func NewHealthAwareLoadBalancingStrategy(urls []string, opts ...commonStrategyOpt) *healthAwareLoadBalancingStrategyImpl {
+	s := &healthAwareLoadBalancingStrategyImpl{
+		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
+		backends:              NewLoadBalancingBuffer(urls),
+	}
+	return s
+}
+
+func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
+	defer s.backends.NextBackend() // move to the next backend after the request is done
+
+	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if !proceedFurther {
+		return nil
+	}
+
+	// retry only in case of encountering unhealthy backends
+	// retries prevents an infinite loop in case all backends are unhealthy
+	maxRetries := s.backends.Size()
+
+	// NOTE: races can still happen between the backend selection and the validation, yet they're are harmless
+	// The harmeless races are just a trade-off against avoiding lock contention for the duration of the entire request
+	backend := s.backends.GetBackend()
+	for retryCount := 0; retryCount < maxRetries; retryCount++ {
+		if !backend.IsHealthy() {
+			backend = s.backends.NextBackend()
+			continue
+		}
+
+		httpCode, err := backend.Validate(ctx, accessListToValidate, req)
+		if err == nil {
+			return nil
+		}
+
+		failedValidation := httpCode < 500
+		if failedValidation {
+			return err
+		}
+
+		// just the backend is unhealthy, so we mark it as such and try the next backend
+		backend.MarkUnhealthy()
+		backend = s.backends.NextBackend()
+	}
+
+	// retries exhausted
+	return ParseInteropError(fmt.Errorf("no healthy supervisor backends found"))
+}
+
+type healthAwareBackend struct {
+	url           string
+	lastUnhealthy time.Time
+}
+
+func NewHealthAwareBackend(url string) *healthAwareBackend {
+	return &healthAwareBackend{
+		url:           url,
+		lastUnhealthy: time.Time{},
+	}
+}
+
+func (b *healthAwareBackend) IsHealthy() bool {
+	if b.lastUnhealthy.IsZero() {
+		return true
+	}
+
+	timeOneMinuteAgo := time.Now().Add(-10 * time.Second)
+	return b.lastUnhealthy.Before(timeOneMinuteAgo)
+}
+
+func (b *healthAwareBackend) MarkUnhealthy() {
+	b.lastUnhealthy = time.Now()
+}
+
+func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash, req *RPCReq) (int, error) {
+	var outputHttpCode int
+	var outputErr error
+
+	httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessList, b.url)
+	if err != nil {
+		outputErr = ParseInteropError(err)
+	}
+
+	log.Debug(
+		"an interop validating backend has responded",
+		"supervisor_url", b.url,
+		"req_id", GetReqID(ctx),
+		"method", "eth_sendRawTransaction",
+		"error", err,
+	)
+
+	rpcSupervisorChecksTotal.WithLabelValues(
+		b.url,
+		httpCode,
+		rpcErrorCode,
+		string(HealthAwareLoadBalancingStrategy),
+	).Inc()
+
+	outputHttpCode, parseErr := strconv.Atoi(httpCode)
+	if parseErr != nil {
+		outputHttpCode = 0
+	}
+
+	return outputHttpCode, outputErr
+}
+
 func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (string, string, error) {
 	validatingBackend := interop.NewInteropClient(url)
 	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
@@ -270,4 +385,61 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 	}
 
 	return httpCode, rpcErrorCode, err
+}
+
+type loadBalancingBuffer struct {
+	mu                  *sync.RWMutex
+	backends            []*healthAwareBackend
+	currentBackendIndex int
+}
+
+func NewLoadBalancingBuffer(urls []string) *loadBalancingBuffer {
+	b := &loadBalancingBuffer{
+		mu:                  &sync.RWMutex{},
+		backends:            make([]*healthAwareBackend, len(urls)),
+		currentBackendIndex: 0,
+	}
+
+	for i, url := range urls {
+		b.backends[i] = NewHealthAwareBackend(url)
+	}
+
+	return b
+}
+
+func (b *loadBalancingBuffer) Size() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.backends)
+}
+
+func (b *loadBalancingBuffer) GetBackend() *healthAwareBackend {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.backends[b.currentBackendIndex]
+}
+
+// func (b *loadBalancingBuffer) RefreshIndexToHealthyBackend() {
+// 	b.mu.Lock()
+// 	defer b.mu.Unlock()
+// 	// keep on incrementing the backend index until we find a healthy one (statically) or we've checked all backends
+// 	startIndex := b.currentBackendIndex
+// 	nextHealthyIndex := b.currentBackendIndex
+// 	for {
+// 		nextHealthyIndex = (nextHealthyIndex + 1) % len(b.backends)
+// 		if nextHealthyIndex == startIndex {
+// 			return
+// 		}
+// 		if b.backends[nextHealthyIndex].IsHealthy() {
+// 			break
+// 		}
+// 	}
+// 	b.currentBackendIndex = nextHealthyIndex
+// }
+
+func (b *loadBalancingBuffer) NextBackend() *healthAwareBackend {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.currentBackendIndex = (b.currentBackendIndex + 1) % len(b.backends)
+	return b.backends[b.currentBackendIndex]
 }

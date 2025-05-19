@@ -239,9 +239,10 @@ type InteropValidationConfig struct {
 type InteropValidationStrategy string
 
 const (
-	EmptyStrategy           InteropValidationStrategy = ""
-	FirstSupervisorStrategy InteropValidationStrategy = "first-supervisor"
-	MulticallStrategy       InteropValidationStrategy = "multicall"
+	EmptyStrategy                    InteropValidationStrategy = ""
+	FirstSupervisorStrategy          InteropValidationStrategy = "first-supervisor"
+	MulticallStrategy                InteropValidationStrategy = "multicall"
+	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
 )
 
 func ReadFromEnvOrConfig(value string) (string, error) {
