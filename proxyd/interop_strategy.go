@@ -71,14 +71,14 @@ var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonS
 	}
 }
 
-func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context, req *RPCReq) ([]common.Hash, error) {
+func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context, req *RPCReq) ([]common.Hash, bool, error) {
 	tx, err := convertSendReqToSendTx(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	if err := reqSizeLimitCheck(ctx, req, s.reqSizeLimit); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
@@ -89,7 +89,7 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 			"req_id", GetReqID(ctx),
 			"method", "eth_sendRawTransaction",
 		)
-		return nil, nil
+		return nil, false, nil
 	}
 
 	// at this point, we know it's an interop transaction worthy of being validated
@@ -100,21 +100,21 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 				"req_id", GetReqID(ctx),
 				"method", "eth_sendRawTransaction",
 			)
-			return nil, nil
+			return nil, false, nil
 		}
 		log.Error(
 			"no validating backends found for an interop transaction",
 			"req_id", GetReqID(ctx),
 			"method", "eth_sendRawTransaction",
 		)
-		return nil, supervisorTypes.ErrNoRPCSource
+		return nil, false, supervisorTypes.ErrNoRPCSource
 	}
 
 	if s.validateAndDeduplicateInteropAccessList {
 		interopAccessList, err = validateAndDeduplicateInteropAccessList(interopAccessList)
 		if err != nil {
 			log.Error("error validating and deduplicating interop access list", "req_id", GetReqID(ctx), "error", err)
-			return nil, ParseInteropError(fmt.Errorf("failed to read data: %w", err))
+			return nil, false, ParseInteropError(fmt.Errorf("failed to read data: %w", err))
 		}
 	}
 
@@ -126,11 +126,11 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 				"size", len(interopAccessList),
 				"max_size", s.accessListSizeLimit,
 			)
-			return nil, ErrInteropAccessListOutOfBounds
+			return nil, false, ErrInteropAccessListOutOfBounds
 		}
 	}
 
-	return interopAccessList, nil
+	return interopAccessList, true, nil
 }
 
 type firstSupervisorStrategyImpl struct {
@@ -144,9 +144,13 @@ func NewFirstSupervisorStrategy(urls []string, opts ...commonStrategyOpt) *first
 }
 
 func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
-	accessListToValidate, err := s.preflightChecksToAccessList(ctx, req)
+	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
 	if err != nil {
 		return err
+	}
+
+	if !proceedFurther {
+		return nil
 	}
 
 	firstSupervisorUrl := s.urls[0]
@@ -182,9 +186,13 @@ func NewMulticallStrategy(urls []string, opts ...commonStrategyOpt) *multicallSt
 }
 
 func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
-	accessListToValidate, err := s.preflightChecksToAccessList(ctx, req)
+	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
 	if err != nil {
 		return err
+	}
+
+	if !proceedFurther {
+		return nil
 	}
 
 	resultChan := make(chan error, len(s.urls))
