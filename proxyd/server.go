@@ -17,13 +17,9 @@ import (
 	"sync"
 	"time"
 
-	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
-	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -85,6 +81,7 @@ type Server struct {
 	srvMu                   sync.Mutex
 	rateLimitHeader         string
 	interopValidatingConfig InteropValidationConfig
+	interopStrategy         InteropStrategy
 }
 
 type limiterFunc func(method string) bool
@@ -110,6 +107,7 @@ func NewServer(
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
+	interopStrategy InteropStrategy,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -209,6 +207,7 @@ func NewServer(
 		limExemptUserAgents:     limExemptUserAgents,
 		rateLimitHeader:         rateLimitHeader,
 		interopValidatingConfig: interopValidatingConfig,
+		interopStrategy:         interopStrategy,
 	}, nil
 }
 
@@ -445,135 +444,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return err
 	}
 
-	if err := reqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqSizeLimit); err != nil {
-		return err
-	}
-
-	tx, err := convertSendReqToSendTx(ctx, rpcReq)
-	if err != nil {
-		return err
-	}
-
-	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	if len(interopAccessList) == 0 {
-		log.Debug(
-			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
-			"source", "rpc",
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-		)
-		return nil
-	}
-
-	// at this point, we know it's an interop transaction worthy of being validated
-	if len(s.interopValidatingConfig.Urls) == 0 {
-		log.Error(
-			"no validating backends found for an interop transaction",
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-		)
-		return supervisorTypes.ErrNoRPCSource
-	}
-
-	interopAccessList, err = validateAndDeduplicateInteropAccessList(interopAccessList)
-	if err != nil {
-		log.Error("error validating and deduplicating interop access list", "req_id", GetReqID(ctx), "error", err)
-		return ParseInteropError(fmt.Errorf("failed to read data: %w", err))
-	}
-
-	if s.interopValidatingConfig.AccessListSizeLimit > 0 && len(interopAccessList) > s.interopValidatingConfig.AccessListSizeLimit {
-		log.Error(
-			"interop access list exceeds maximum size limit",
-			"req_id", GetReqID(ctx),
-			"size", len(interopAccessList),
-			"max_size", s.interopValidatingConfig.AccessListSizeLimit,
-		)
-		return ErrInteropAccessListOutOfBounds
-	}
-
-	performCheckAccessListOp := func(ctx context.Context, accessList []common.Hash, url, strategy string) error {
-		validatingBackend := interop.NewInteropClient(url)
-		err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-			Timestamp: getInteropExecutingDescriptorTimestamp(),
-		})
-
-		log.Debug(
-			"an interop validating backend has responded",
-			"supervisor_url", url,
-			"req_id", GetReqID(ctx),
-			"method", rpcReq.Method,
-			"error", err,
-		)
-
-		var httpCode, rpcErrorCode string
-		if err == nil {
-			httpCode = "200"
-			rpcErrorCode = "-"
-		} else {
-			interopErr := ParseInteropError(err)
-			httpCode = strconv.Itoa(interopErr.HTTPErrorCode)
-			rpcErrorCode = strconv.Itoa(interopErr.Code)
-
-			err = interopErr
-		}
-
-		rpcSupervisorChecksTotal.WithLabelValues(
-			url,
-			httpCode,
-			rpcErrorCode,
-			strategy,
-		).Inc()
-
-		return err
-	}
-
-	var finalErr error
-
-	switch s.interopValidatingConfig.Strategy {
-	case FirstSupervisorStrategy, EmptyStrategy:
-		return performCheckAccessListOp(ctx, interopAccessList, s.interopValidatingConfig.Urls[0], string(FirstSupervisorStrategy))
-	case MulticallStrategy:
-		resultChan := make(chan error, len(s.interopValidatingConfig.Urls))
-		// concurrently broadcast the checkAccessList operation to all the validating backends
-		var wg sync.WaitGroup
-		for _, url := range s.interopValidatingConfig.Urls {
-			wg.Add(1)
-			go func(ctx context.Context, url string) {
-				defer wg.Done()
-				err := performCheckAccessListOp(ctx, interopAccessList, url, string(MulticallStrategy))
-				resultChan <- err
-			}(ctx, url)
-		}
-
-		// goroutine which waits for all the sender goroutines created above to be done, and drain and close the resultChan
-		go func() {
-			wg.Wait()
-			log.Debug(
-				"all interop validating backends have responded",
-				"source", "rpc",
-				"req_id", GetReqID(ctx),
-				"method", rpcReq.Method,
-			)
-			for range resultChan {
-			} // drain the channel
-			close(resultChan)
-		}()
-
-		// Success: if at least one backend responds successfully
-		// Failure: the first error response if all the backends respond with an error
-		var firstErr error
-		for range len(s.interopValidatingConfig.Urls) {
-			err := <-resultChan
-			if err == nil { // at least one success observed
-				return nil
-			} else if firstErr == nil { // record the first error for returning it if no validating backend succeeds
-				firstErr = err
-			}
-		}
-		finalErr = ParseInteropError(firstErr)
-	default:
-		finalErr = ErrInvalidRequest(fmt.Sprintf("invalid interop validating strategy: %s", s.interopValidatingConfig.Strategy))
-	}
+	finalErr := s.interopStrategy.Validate(ctx, rpcReq)
 
 	if finalErr == nil {
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "method", rpcReq.Method)
