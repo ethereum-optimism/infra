@@ -211,8 +211,8 @@ var interopRPCErrorMap = map[error]*RPCErr{
 		HTTPErrorCode: 400,
 	},
 	errors.New("stopped acces-list check early"): {
-		Code:          JSONRPCErrorInternal,
-		HTTPErrorCode: 500,
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
 	},
 	errors.New("failed to read data"): {
 		Code:          -32602, // invalid params
