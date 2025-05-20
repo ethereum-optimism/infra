@@ -776,7 +776,7 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 
 	// wait for the unhealthiness timeout to expire before trying the next request
 	fmt.Println("\nWaiting 10 seconds for the unhealthiness timeout to expire...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(10 * time.Second) // default one
 	fmt.Println("Done, proceeding with the test...\n ")
 
 	// remember, the last request was served healthily (even if non-successful) from badHealthyBackend2
@@ -806,7 +806,7 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 	})
 }
 
-func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t *testing.T) {
+func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends_CustomUnhealthinessTimeout(t *testing.T) {
 	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer goodBackend.Close()
 
@@ -843,6 +843,7 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 	}
 
 	config.InteropValidationConfig.Strategy = proxyd.HealthAwareLoadBalancingStrategy
+	config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout = 5 * time.Second
 	config.InteropValidationConfig.Urls = []string{
 		unhealthyBackend1.URL(),
 		unhealthyBackend2.URL(),
@@ -913,8 +914,8 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 	})
 
 	// wait for the unhealthiness timeout to expire before trying the next request
-	fmt.Println("\nWaiting 10 seconds for the unhealthiness timeout to expire...")
-	time.Sleep(10 * time.Second)
+	fmt.Println("\nWaiting 5 seconds for the unhealthiness timeout to expire...")
+	time.Sleep(5 * time.Second)
 	fmt.Println("Done, proceeding with the test...\n ")
 
 	// third request

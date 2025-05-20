@@ -225,6 +225,11 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
 	}
 
+	if config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout == 0 && config.InteropValidationConfig.Strategy == HealthAwareLoadBalancingStrategy {
+		log.Warn("no interop validation load balancing unhealthiness timeout provided for health aware strategy, using default timeout", "timeout", defaultInteropLoadBalancingUnhealthinessTimeout)
+		config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout = defaultInteropLoadBalancingUnhealthinessTimeout
+	}
+
 	if config.InteropValidationConfig.ReqSizeLimit == 0 {
 		log.Warn("no interop validation request size limit provided, using default size limit", "size_limit", defaultInteropReqSizeLimit)
 		config.InteropValidationConfig.ReqSizeLimit = defaultInteropReqSizeLimit
@@ -388,6 +393,7 @@ func Start(config *Config) (*Server, func(), error) {
 	case HealthAwareLoadBalancingStrategy:
 		interopStrategy = NewHealthAwareLoadBalancingStrategy(
 			config.InteropValidationConfig.Urls,
+			config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout,
 			opts...,
 		)
 	default:

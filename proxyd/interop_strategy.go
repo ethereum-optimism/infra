@@ -14,8 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-const interopValidationStrategyKey = "interop_validation_strategy"
-
 type InteropStrategy interface {
 	Validate(ctx context.Context, req *RPCReq) error
 }
@@ -158,7 +156,7 @@ func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq)
 
 	firstSupervisorUrl := s.urls[0]
 
-	ctx = context.WithValue(ctx, interopValidationStrategyKey, FirstSupervisorStrategy)
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy)
 	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
 	return err
 }
@@ -228,10 +226,10 @@ type healthAwareLoadBalancingStrategyImpl struct {
 	backends *loadBalancingBuffer
 }
 
-func NewHealthAwareLoadBalancingStrategy(urls []string, opts ...commonStrategyOpt) *healthAwareLoadBalancingStrategyImpl {
+func NewHealthAwareLoadBalancingStrategy(urls []string, unhealthinessTimeout time.Duration, opts ...commonStrategyOpt) *healthAwareLoadBalancingStrategyImpl {
 	s := &healthAwareLoadBalancingStrategyImpl{
 		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
-		backends:              NewLoadBalancingBuffer(urls),
+		backends:              NewLoadBalancingBuffer(urls, unhealthinessTimeout),
 	}
 	return s
 }
@@ -266,14 +264,14 @@ func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req
 			return nil
 		}
 
-		failedValidation := httpCode < 500
-		if failedValidation {
-			return err
+		if backendFoundUnhealthy := httpCode >= 500; backendFoundUnhealthy {
+			backend.MarkUnhealthy()
+			backend = s.backends.NextBackend()
+			continue
 		}
 
-		// just the backend is unhealthy, so we mark it as such and try the next backend
-		backend.MarkUnhealthy()
-		backend = s.backends.NextBackend()
+		// genuine validation error
+		return err
 	}
 
 	// retries exhausted
@@ -281,24 +279,32 @@ func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req
 }
 
 type healthAwareBackend struct {
-	url           string
-	lastUnhealthy time.Time
+	url                  string
+	lastUnhealthy        time.Time
+	unhealthinessTimeout time.Duration
 }
 
-func NewHealthAwareBackend(url string) *healthAwareBackend {
-	return &healthAwareBackend{
-		url:           url,
-		lastUnhealthy: time.Time{},
+func NewHealthAwareBackend(url string, unhealthinessTimeout time.Duration) *healthAwareBackend {
+	b := &healthAwareBackend{
+		url:                  url,
+		lastUnhealthy:        time.Time{},
+		unhealthinessTimeout: unhealthinessTimeout,
 	}
+
+	return b
 }
 
 func (b *healthAwareBackend) IsHealthy() bool {
 	if b.lastUnhealthy.IsZero() {
 		return true
 	}
+	if b.unhealthinessTimeout <= 0 {
+		log.Warn("unhealthiness timeout is corrupted for a health-aware backend. Defaulting it to be healthy",
+			"url", b.url, "unhealthiness_timeout", b.unhealthinessTimeout)
+		return true
+	}
 
-	timeTenSecondsAgo := time.Now().Add(-10 * time.Second)
-	return b.lastUnhealthy.Before(timeTenSecondsAgo)
+	return time.Since(b.lastUnhealthy) > b.unhealthinessTimeout
 }
 
 func (b *healthAwareBackend) MarkUnhealthy() {
@@ -332,7 +338,7 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 		err = interopErr
 	}
 
-	strategy, ok := ctx.Value(interopValidationStrategyKey).(InteropValidationStrategy)
+	strategy, ok := ctx.Value(ContextKeyInteropValidationStrategy).(InteropValidationStrategy)
 	if !ok {
 		strategy = EmptyStrategy
 	}
@@ -362,7 +368,7 @@ type loadBalancingBuffer struct {
 	currentBackendIndex int
 }
 
-func NewLoadBalancingBuffer(urls []string) *loadBalancingBuffer {
+func NewLoadBalancingBuffer(urls []string, unhealthinessTimeout time.Duration) *loadBalancingBuffer {
 	b := &loadBalancingBuffer{
 		mu:                  &sync.RWMutex{},
 		backends:            make([]*healthAwareBackend, len(urls)),
@@ -370,7 +376,7 @@ func NewLoadBalancingBuffer(urls []string) *loadBalancingBuffer {
 	}
 
 	for i, url := range urls {
-		b.backends[i] = NewHealthAwareBackend(url)
+		b.backends[i] = NewHealthAwareBackend(url, unhealthinessTimeout)
 	}
 
 	return b

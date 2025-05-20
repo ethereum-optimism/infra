@@ -229,11 +229,12 @@ type Config struct {
 }
 
 type InteropValidationConfig struct {
-	Urls                []string                  `toml:"urls"`
-	Strategy            InteropValidationStrategy `toml:"strategy"`
-	ReqSizeLimit        int                       `toml:"req_size_limit"`
-	AccessListSizeLimit int                       `toml:"access_list_size_limit"`
-	RateLimit           SenderRateLimitConfig     `toml:"sender_rate_limit"`
+	Urls                              []string                  `toml:"urls"`
+	Strategy                          InteropValidationStrategy `toml:"strategy"`
+	LoadBalancingUnhealthinessTimeout time.Duration             `toml:"load_balancing_unhealthiness_timeout"`
+	ReqSizeLimit                      int                       `toml:"req_size_limit"`
+	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`
+	RateLimit                         SenderRateLimitConfig     `toml:"sender_rate_limit"`
 }
 
 type InteropValidationStrategy string
