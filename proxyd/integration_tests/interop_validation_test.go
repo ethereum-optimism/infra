@@ -681,13 +681,15 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 	// should start with no requests made to any of the backends obviously
 	assertExpectations(t, expectations)
 
-	// first try
+	// First request
 	// expectation:
 	// - unhealthyBackend1 should receive 1 request only to realise that it's unhealthy
 	// - unhealthyBackend2 should receive the next request only to realise that it's unhealthy as well
 	// - badHealthyBackend1 should receive 1 request and return with a bad validation response yet representing a healthy response
 	// - badHealthyBackend2, unhealthyBackend3 should receive 0 requests because of the request already have being treated by badHealthyBackend1
-	{
+	t.Run("First Request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backed called) -> unhealthyBackend2(backend called) -> badHealthyBackend1(backend called)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -705,15 +707,15 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		expectations.badHealthyBackend1++
 
 		assertExpectations(t, expectations)
-	}
+	})
 
-	// second try
+	// second request
 	// expectation:
 	// - next backend to be tried is badHealthyBackend2 (as per it's turn considering the fact that badHealthyBackend1 served the last request)
 	// - badHealthyBackend2 should receive 1 request and return with a healthy (though non-successful) validation response
 	// - the fact that it responds healthily, unhealthyBackend3 should still be untouched and receive 0 requests
-
-	{
+	t.Run("Second request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through badHealthyBackend2(backend called) only")
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -727,16 +729,16 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		assertExpectations(t, expectations)
 
 		time.Sleep(100 * time.Millisecond)
-	}
+	})
 
-	// third try of two requests before the unhealthiness timeouts expire
-	// expectation (for the first request):
+	// third request
+	// expectation
 	// - unhealthyBackend3 gets tried only to realise that it's unhealthy
 	// - circularly, the first backend i.e. unhealthyBackend1, unhealthyBackend2 gets tried again but request won't be sent to it because it's already flagged as an unhealthy backend
 	// - finally, the badHealthyBackend1 should receive a new request to return a healthy (though non-successful) response
-	// expectation (for the second request):
-	// - the next backend to be tried should be badHealthyBackend2, which is suddenly returns a healthy response incrementing its request count alone
-	{
+	t.Run("Third request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend3(backend called) -> unhealthyBackend1(backend skipped) -> unhealthyBackend2(backend skipped) -> badHealthyBackend1(backend called)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -750,10 +752,16 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 
 		expectations.badHealthyBackend1 += 1 // the request tries the badHealthyBackend1 again as the next available healthy backend
 		assertExpectations(t, expectations)
+	})
 
-		// another request
-		sendRawTransaction = makeSendRawTransaction(fakeInteropReqParams)
-		observedResp, observedCode, err = client.SendRequest(sendRawTransaction)
+	// fourth request:
+	// expectation:
+	// - the next backend to be tried should be badHealthyBackend2, which suddenly returns a healthy response incrementing its request count alone
+	t.Run("Fourth request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through badHealthyBackend2(backend called) only")
+
+		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
 
 		require.Equal(t, 422, observedCode)
@@ -764,30 +772,38 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		expectations.badHealthyBackend2++
 
 		assertExpectations(t, expectations)
-	}
+	})
 
-	// fourth try after the unhealthiness timeout expires
-	t.Log("waiting 10 seconds for the unhealthiness timeout to expire...")
+	// wait for the unhealthiness timeout to expire before trying the next request
+	fmt.Println("\nWaiting 10 seconds for the unhealthiness timeout to expire...")
 	time.Sleep(10 * time.Second)
-	t.Log("Done, proceeding with the test...")
+	fmt.Println("Done, proceeding with the test...\n ")
+
 	// remember, the last request was served healthily (even if non-successful) from badHealthyBackend2
 	// so the next request request should go through all the unhealthy backends again while making the requests to the backend because the unhealthiness timeout has expired
+
+	// fifth request
 	// expectation:
 	// - backends should be retried from after badHealthyBackend2 again, until receiving a healthy response i.e. from badHealthyBackend1 after trying all the unhealthy backends
+	t.Run("Fifth request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend3(backend called) -> unhealthyBackend1(backend called) -> unhealthyBackend2(backend called) -> badHealthyBackend1(backend called)\n ")
 
-	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
-	observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
-	require.NoError(t, err)
+		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
+		require.NoError(t, err)
 
-	require.Equal(t, 409, observedCode)
-	require.JSONEq(t, string(observedResp), expectedErrResp1)
+		require.Equal(t, 409, observedCode)
+		require.JSONEq(t, string(observedResp), expectedErrResp1)
 
-	expectations.unhealthyBackend3 += 1
-	expectations.unhealthyBackend1 += 1
-	expectations.unhealthyBackend2 += 1
-	expectations.badHealthyBackend1 += 1
+		// all backends should be called with a request again due to the expiration of the unhealthiness timeout
+		// meaning all the backends should be called circularly until receiving a healthy response from badHealthyBackend1 (the nearest healthy backend)
+		expectations.unhealthyBackend3 += 1
+		expectations.unhealthyBackend1 += 1
+		expectations.unhealthyBackend2 += 1
+		expectations.badHealthyBackend1 += 1
 
-	assertExpectations(t, expectations)
+		assertExpectations(t, expectations)
+	})
 }
 
 func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t *testing.T) {
@@ -814,6 +830,18 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
 
+	type BackendToRequestCountsExpectation struct {
+		unhealthyBackend1 int
+		unhealthyBackend2 int
+		unhealthyBackend3 int
+	}
+
+	assertExpectations := func(t *testing.T, b BackendToRequestCountsExpectation) {
+		require.Equal(t, b.unhealthyBackend1, len(unhealthyBackend1.requests), "unhealthyBackend1 should have received %d requests", b.unhealthyBackend1)
+		require.Equal(t, b.unhealthyBackend2, len(unhealthyBackend2.requests), "unhealthyBackend2 should have received %d requests", b.unhealthyBackend2)
+		require.Equal(t, b.unhealthyBackend3, len(unhealthyBackend3.requests), "unhealthyBackend3 should have received %d requests", b.unhealthyBackend3)
+	}
+
 	config.InteropValidationConfig.Strategy = proxyd.HealthAwareLoadBalancingStrategy
 	config.InteropValidationConfig.Urls = []string{
 		unhealthyBackend1.URL(),
@@ -830,10 +858,21 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 
 	client := NewProxydClient("http://127.0.0.1:8545")
 
-	// first try
+	expectations := BackendToRequestCountsExpectation{
+		unhealthyBackend1: 0,
+		unhealthyBackend2: 0,
+		unhealthyBackend3: 0,
+	}
+
+	// should start with no requests made to any of the backends obviously
+	assertExpectations(t, expectations)
+
+	// first request
 	// expectation:
 	// all backends should be tried and the response should show that none of them were found to be healthy
-	{
+	t.Run("First request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backend called) -> unhealthyBackend2(backend called) -> unhealthyBackend3(backend called) ->`http://bad-url-6969.com` (also called)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -845,16 +884,20 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 		time.Sleep(100 * time.Millisecond)
 
 		// The health-aware load balancing strategy should have tried all unhealthy backends
-		// before finding the healthy one (badHealthyBackend1)
-		require.Equal(t, 1, len(unhealthyBackend1.requests), "unhealthyBackend1 should have received 1 requests")
-		require.Equal(t, 1, len(unhealthyBackend2.requests), "unhealthyBackend2 should have received 1 request")
-		require.Equal(t, 1, len(unhealthyBackend3.requests), "unhealthyBackend3 should have received 1 requests")
-	}
+		// so as to realise that none of them are healthy
+		expectations.unhealthyBackend1++
+		expectations.unhealthyBackend2++
+		expectations.unhealthyBackend3++
 
-	// second try
+		assertExpectations(t, expectations)
+	})
+
+	// second request
 	// expectation:
 	// all the backends should be seen as unhealthy and be ignored
-	{
+	t.Run("Second request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backend skipped) -> unhealthyBackend2(backend skipped) -> unhealthyBackend3(backend skipped) ->`http://bad-url-6969.com` (also skipped)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -863,18 +906,23 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 		require.JSONEq(t, string(observedResp), expectedResp)
 
 		// these backends should stay the same as before as they shouldn't have been touched
-		require.Equal(t, 1, len(unhealthyBackend1.requests), "unhealthyBackend1 should have received 1 requests")
-		require.Equal(t, 1, len(unhealthyBackend2.requests), "unhealthyBackend2 should have received 1 request")
-		require.Equal(t, 1, len(unhealthyBackend3.requests), "unhealthyBackend3 should have received 1 requests")
-	}
+		// because the load balancing strategy should have seen them already marked as unhealthy within the unhealthiness timeout
+		expectations.unhealthyBackend1 += 0
+		expectations.unhealthyBackend2 += 0
+		expectations.unhealthyBackend3 += 0
+	})
 
-	// third try after the unhealthiness timeout expires
-	t.Log("waiting 10 seconds for the unhealthiness timeout to expire...")
+	// wait for the unhealthiness timeout to expire before trying the next request
+	fmt.Println("\nWaiting 10 seconds for the unhealthiness timeout to expire...")
 	time.Sleep(10 * time.Second)
-	t.Log("Done, proceeding with the test...")
+	fmt.Println("Done, proceeding with the test...\n ")
+
+	// third request
 	// expectation:
 	// all backends should be tried because of expired unhealthiness timeout and the response should show that none of them were found to be healthy
-	{
+	t.Run("Third request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backend called) -> unhealthyBackend2(backend called) -> unhealthyBackend3(backend called) ->`http://bad-url-6969.com` (also called)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -886,16 +934,20 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 		time.Sleep(100 * time.Millisecond)
 
 		// The health-aware load balancing strategy should have tried all unhealthy backends
-		// before finding the healthy one (badHealthyBackend1)
-		require.Equal(t, 2, len(unhealthyBackend1.requests), "unhealthyBackend1 should have received 2 requests")
-		require.Equal(t, 2, len(unhealthyBackend2.requests), "unhealthyBackend2 should have received 2 request")
-		require.Equal(t, 2, len(unhealthyBackend3.requests), "unhealthyBackend3 should have received 2 requests")
-	}
+		// because the healthiness timeout is expired potentially making the unhealthiness marker seem stale.
+		expectations.unhealthyBackend1++
+		expectations.unhealthyBackend2++
+		expectations.unhealthyBackend3++
 
-	// fourth try:
-	// expectation
+		assertExpectations(t, expectations)
+	})
+
+	// fourth request
+	// expectation:
 	// again, all of the backends should be seen as unhealthy and be ignored
-	{
+	t.Run("Fourth request", func(t *testing.T) {
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backend skipped) -> unhealthyBackend2(backend skipped) -> unhealthyBackend3(backend skipped) ->`http://bad-url-6969.com` (also skipped)\n ")
+
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 		require.NoError(t, err)
@@ -904,8 +956,9 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends(t 
 		require.JSONEq(t, string(observedResp), expectedResp)
 
 		// these backends should stay the same as before as they shouldn't have been touched
-		require.Equal(t, 2, len(unhealthyBackend1.requests), "unhealthyBackend1 should have received 2 requests")
-		require.Equal(t, 2, len(unhealthyBackend2.requests), "unhealthyBackend2 should have received 2 request")
-		require.Equal(t, 2, len(unhealthyBackend3.requests), "unhealthyBackend3 should have received 2 requests")
-	}
+		// because the load balancing strategy should have seen them already marked as unhealthy within the unhealthiness timeout
+		expectations.unhealthyBackend1 += 0
+		expectations.unhealthyBackend2 += 0
+		expectations.unhealthyBackend3 += 0
+	})
 }
