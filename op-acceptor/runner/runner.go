@@ -161,16 +161,18 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName)
 
 	return &runner{
-		registry:    cfg.Registry,
-		validators:  validators,
-		workDir:     cfg.WorkDir,
-		log:         cfg.Log,
-		goBinary:    cfg.GoBinary,
-		allowSkips:  cfg.AllowSkips,
-		fileLogger:  cfg.FileLogger,
-		networkName: networkName,
-		env:         cfg.DevnetEnv,
-		tracer:      otel.Tracer("test runner"),
+		registry:       cfg.Registry,
+		validators:     validators,
+		workDir:        cfg.WorkDir,
+		log:            cfg.Log,
+		goBinary:       cfg.GoBinary,
+		allowSkips:     cfg.AllowSkips,
+		outputTestLogs: cfg.OutputTestLogs,
+		testLogLevel:   cfg.TestLogLevel,
+		fileLogger:     cfg.FileLogger,
+		networkName:    networkName,
+		env:            cfg.DevnetEnv,
+		tracer:         otel.Tracer("test runner"),
 	}, nil
 }
 
@@ -542,8 +544,12 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 
 	var stdout, stderr bytes.Buffer
 	if r.outputTestLogs {
-		stdoutLogger := &logWriter{logFn: func(msg string) { r.log.Info("Test output", "test", metadata.FuncName, "output", msg) }}
-		stderrLogger := &logWriter{logFn: func(msg string) { r.log.Error("Test error output", "test", metadata.FuncName, "error", msg) }}
+		stdoutLogger := &logWriter{logFn: func(msg string) {
+			r.log.Info("Test output", "test", metadata.FuncName, "output", msg)
+		}}
+		stderrLogger := &logWriter{logFn: func(msg string) {
+			r.log.Error("Test error output", "test", metadata.FuncName, "error", msg)
+		}}
 
 		cmd.Stdout = io.MultiWriter(&stdout, stdoutLogger)
 		cmd.Stderr = io.MultiWriter(&stderr, stderrLogger)
@@ -1181,7 +1187,11 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 	cmd := exec.CommandContext(ctx, name, arg...)
 	cmd.Dir = r.workDir
 
+	// Always set the LOG_LEVEL environment variable
+	runEnv := append([]string{fmt.Sprintf("LOG_LEVEL=%s", r.testLogLevel)}, os.Environ()...)
+
 	if r.env == nil {
+		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
 		return cmd, func() {}
 	}
 
@@ -1198,8 +1208,6 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			r.log.Error("Failed to write env to temp file", "error", err)
 		}
 
-		logLevelStr := r.testLogLevel
-		runEnv := append([]string{fmt.Sprintf("LOG_LEVEL=%s", logLevelStr)}, os.Environ()...)
 		runEnv = append(runEnv,
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
@@ -1235,8 +1243,17 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 			break
 		}
 		line := w.buf[:idx]
-		w.logFn(string(line))
 		w.buf = w.buf[idx+1:]
+
+		// Try to parse as a test event
+		event, err := parseTestEvent(line)
+		if err == nil && event.Action == ActionOutput {
+			// If it's a valid test event with output action, use the Output field
+			w.logFn(event.Output)
+		} else {
+			// If not a valid test event or not an output action, use the raw line
+			w.logFn(string(line))
+		}
 	}
 	return len(p), nil
 }
