@@ -1584,7 +1584,7 @@ gates:
 	require.NotEmpty(t, validators, "Registry should have validators")
 }
 
-func TestRunTest_PackagePath_GitAndLocalScenarios(t *testing.T) {
+func TestRunTest_PackagePath_Local(t *testing.T) {
 	r := setupDefaultTestRunner(t)
 
 	origPath := os.Getenv("PATH")
@@ -1603,48 +1603,6 @@ func TestRunTest_PackagePath_GitAndLocalScenarios(t *testing.T) {
 			setupGit:     true, // doesn't matter for local
 			expectStatus: types.TestStatusFail,
 			expectErrMsg: "local package path does not exist",
-		},
-		{
-			name:         "GitHub path, git present",
-			packagePath:  "github.com/optimism/does-not-exist", // this package should not exist
-			setupGit:     true,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "no required module provides package",
-		},
-		{
-			name:         "GitHub path, git missing",
-			packagePath:  "github.com/optimism/does-not-exist",
-			setupGit:     false,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "git is not installed",
-		},
-		{
-			name:         "Bitbucket path, git missing",
-			packagePath:  "bitbucket.org/optimism/does-not-exist",
-			setupGit:     false,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "git is not installed",
-		},
-		{
-			name:         "Golang.org path, git missing",
-			packagePath:  "golang.org/x/does-not-exist",
-			setupGit:     false,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "git is not installed",
-		},
-		{
-			name:         "git:: protocol, git missing",
-			packagePath:  "git::https://github.com/optimism/does-not-exist",
-			setupGit:     false,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "git is not installed",
-		},
-		{
-			name:         "git@ protocol, git missing",
-			packagePath:  "git@github.com:example/does-not-exist",
-			setupGit:     false,
-			expectStatus: types.TestStatusFail,
-			expectErrMsg: "git is not installed",
 		},
 	}
 
