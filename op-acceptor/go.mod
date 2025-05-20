@@ -6,7 +6,7 @@ go 1.23.5
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101503.4-rc.1
 
 require (
-	github.com/ethereum-optimism/optimism v1.13.3-0.20250516153106-8c8022dba7cd
+	github.com/ethereum-optimism/optimism v1.13.3-0.20250520193008-8200c0756a22
 	github.com/ethereum/go-ethereum v1.15.11
 	github.com/google/uuid v1.6.0
 	github.com/honeycombio/otel-config-go v1.17.0
@@ -178,7 +178,7 @@ require (
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
-	golang.org/x/time v0.10.0 // indirect
+	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250115164207-1a7da9e5054f // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 	google.golang.org/grpc v1.69.4 // indirect
