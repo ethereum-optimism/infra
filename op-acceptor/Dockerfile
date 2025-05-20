@@ -14,7 +14,7 @@ RUN just build
 
 FROM golang:1.23.5-alpine3.21
 
-RUN apk add --no-cache ca-certificates build-base
+RUN apk add --no-cache ca-certificates build-base git
 
 # Increase the proxy connect timeout to 60 seconds
 ENV GOPROXYCONNECTTIMEOUT=60s
@@ -27,6 +27,7 @@ ENV GOPATH="/go"
 ENV PATH="${GOPATH}/bin:${PATH}"
 
 WORKDIR /app
+
 RUN addgroup -S app && adduser -S app -G app && \
     mkdir -p /devnets && \
     chown -R app:app /devnets

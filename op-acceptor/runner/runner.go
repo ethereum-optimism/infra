@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -93,30 +94,34 @@ type TestRunnerWithFileLogger interface {
 
 // runner struct implements TestRunner interface
 type runner struct {
-	registry    *registry.Registry
-	validators  []types.ValidatorMetadata
-	workDir     string // Directory for running tests
-	log         log.Logger
-	runID       string
-	goBinary    string              // Path to the Go binary
-	allowSkips  bool                // Whether to allow skipping tests when preconditions are not met
-	fileLogger  *logging.FileLogger // Logger for storing test results
-	networkName string              // Name of the network being tested
-	env         *env.DevnetEnv
-	tracer      trace.Tracer
+	registry       *registry.Registry
+	validators     []types.ValidatorMetadata
+	workDir        string // Directory for running tests
+	log            log.Logger
+	runID          string
+	goBinary       string              // Path to the Go binary
+	allowSkips     bool                // Whether to allow skipping tests when preconditions are not met
+	outputTestLogs bool                // Whether to output test logs to the console
+	testLogLevel   string              // Log level to be used for the tests
+	fileLogger     *logging.FileLogger // Logger for storing test results
+	networkName    string              // Name of the network being tested
+	env            *env.DevnetEnv
+	tracer         trace.Tracer
 }
 
 // Config holds configuration for creating a new runner
 type Config struct {
-	Registry    *registry.Registry
-	TargetGate  string
-	WorkDir     string
-	Log         log.Logger
-	GoBinary    string              // path to the Go binary
-	AllowSkips  bool                // Whether to allow skipping tests when preconditions are not met
-	FileLogger  *logging.FileLogger // Logger for storing test results
-	NetworkName string              // Name of the network being tested
-	DevnetEnv   *env.DevnetEnv
+	Registry       *registry.Registry
+	TargetGate     string
+	WorkDir        string
+	Log            log.Logger
+	GoBinary       string              // path to the Go binary
+	AllowSkips     bool                // Whether to allow skipping tests when preconditions are not met
+	OutputTestLogs bool                // Whether to output test logs to the console
+	TestLogLevel   string              // Log level to be used for the tests
+	FileLogger     *logging.FileLogger // Logger for storing test results
+	NetworkName    string              // Name of the network being tested
+	DevnetEnv      *env.DevnetEnv
 }
 
 // NewTestRunner creates a new test runner instance
@@ -352,25 +357,8 @@ func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
 	return validator.FuncName
 }
 
-func (r *runner) isGitInstalled() error {
-	gitCmd := exec.Command("git", "version")
-	err := gitCmd.Run()
-	if err != nil {
-		return fmt.Errorf("git is not installed")
-	}
-	return nil
-}
-
 func isLocalPath(pkg string) bool {
 	return strings.HasPrefix(pkg, "./") || strings.HasPrefix(pkg, "/") || strings.HasPrefix(pkg, "../")
-}
-
-func isGitRemotePath(pkg string) bool {
-	return strings.HasPrefix(pkg, "git::") ||
-		strings.HasPrefix(pkg, "git@") ||
-		strings.Contains(pkg, "github.com/") ||
-		strings.Contains(pkg, "bitbucket.org/") ||
-		strings.Contains(pkg, "golang.org/")
 }
 
 // RunTest implements the TestRunner interface
@@ -401,7 +389,7 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 		}
 	}()
 
-	// Check if the path is available locally, otherwise check if git is installed
+	// Check if the path is available locally
 	if isLocalPath(metadata.Package) {
 		fullPath := filepath.Join(r.workDir, metadata.Package)
 		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
@@ -410,15 +398,6 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 				Metadata: metadata,
 				Status:   types.TestStatusFail,
 				Error:    fmt.Errorf("local package path does not exist: %s", fullPath),
-			}, nil
-		}
-	} else if isGitRemotePath(metadata.Package) {
-		if err := r.isGitInstalled(); err != nil {
-			r.log.Error("Git is not installed but required for remote package, failing test", "validator", metadata.ID, "package", metadata.Package)
-			return &types.TestResult{
-				Metadata: metadata,
-				Status:   types.TestStatusFail,
-				Error:    fmt.Errorf("git is not installed"),
 			}, nil
 		}
 	}
@@ -562,8 +541,16 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if r.outputTestLogs {
+		stdoutLogger := &logWriter{logFn: func(msg string) { r.log.Info("Test output", "test", metadata.FuncName, "output", msg) }}
+		stderrLogger := &logWriter{logFn: func(msg string) { r.log.Error("Test error output", "test", metadata.FuncName, "error", msg) }}
+
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutLogger)
+		cmd.Stderr = io.MultiWriter(&stderr, stderrLogger)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	r.log.Info("Running test", "test", metadata.FuncName)
 	r.log.Debug("Running test command",
@@ -609,6 +596,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 
 	// If we couldn't parse the output for some reason, create a minimal failing result
 	if parsedResult == nil {
+		r.log.Error("test exited with non-zero exit code", "exitCode", cmd.ProcessState.ExitCode())
 		parsedResult = &types.TestResult{
 			Metadata: metadata,
 			Status:   types.TestStatusFail,
@@ -1210,16 +1198,16 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			r.log.Error("Failed to write env to temp file", "error", err)
 		}
 
-		env := append(
-			os.Environ(),
+		logLevelStr := r.testLogLevel
+		runEnv := append([]string{fmt.Sprintf("LOG_LEVEL=%s", logLevelStr)}, os.Environ()...)
+		runEnv = append(runEnv,
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
 			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
-			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
 		)
-		cmd.Env = telemetry.InstrumentEnvironment(ctx, env)
+		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
 	}
 	cleanup := func() {
 		if envFile != nil {
@@ -1233,3 +1221,22 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 // Make sure the runner type implements both interfaces
 var _ TestRunner = &runner{}
 var _ TestRunnerWithFileLogger = &runner{}
+
+type logWriter struct {
+	logFn func(msg string)
+	buf   []byte
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	w.buf = append(w.buf, p...)
+	for {
+		idx := bytes.IndexByte(w.buf, '\n')
+		if idx == -1 {
+			break
+		}
+		line := w.buf[:idx]
+		w.logFn(string(line))
+		w.buf = w.buf[idx+1:]
+	}
+	return len(p), nil
+}
