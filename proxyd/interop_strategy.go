@@ -156,7 +156,7 @@ func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq)
 
 	firstSupervisorUrl := s.urls[0]
 
-	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy)
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
 	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
 	return err
 }
