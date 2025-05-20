@@ -326,8 +326,8 @@ func (b *healthAwareBackend) IsHealthy() bool {
 		return true
 	}
 
-	timeOneMinuteAgo := time.Now().Add(-10 * time.Second)
-	return b.lastUnhealthy.Before(timeOneMinuteAgo)
+	timeTenSecondsAgo := time.Now().Add(-10 * time.Second)
+	return b.lastUnhealthy.Before(timeTenSecondsAgo)
 }
 
 func (b *healthAwareBackend) MarkUnhealthy() {
@@ -418,24 +418,6 @@ func (b *loadBalancingBuffer) GetBackend() *healthAwareBackend {
 	defer b.mu.RUnlock()
 	return b.backends[b.currentBackendIndex]
 }
-
-// func (b *loadBalancingBuffer) RefreshIndexToHealthyBackend() {
-// 	b.mu.Lock()
-// 	defer b.mu.Unlock()
-// 	// keep on incrementing the backend index until we find a healthy one (statically) or we've checked all backends
-// 	startIndex := b.currentBackendIndex
-// 	nextHealthyIndex := b.currentBackendIndex
-// 	for {
-// 		nextHealthyIndex = (nextHealthyIndex + 1) % len(b.backends)
-// 		if nextHealthyIndex == startIndex {
-// 			return
-// 		}
-// 		if b.backends[nextHealthyIndex].IsHealthy() {
-// 			break
-// 		}
-// 	}
-// 	b.currentBackendIndex = nextHealthyIndex
-// }
 
 func (b *loadBalancingBuffer) NextBackend() *healthAwareBackend {
 	b.mu.Lock()
