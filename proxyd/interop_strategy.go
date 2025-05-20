@@ -14,6 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+const interopValidationStrategyKey = "interop_validation_strategy"
+
 type InteropStrategy interface {
 	Validate(ctx context.Context, req *RPCReq) error
 }
@@ -156,23 +158,8 @@ func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq)
 
 	firstSupervisorUrl := s.urls[0]
 
-	httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
-
-	log.Debug(
-		"an interop validating backend has responded",
-		"supervisor_url", firstSupervisorUrl,
-		"req_id", GetReqID(ctx),
-		"method", "eth_sendRawTransaction",
-		"error", err,
-	)
-
-	rpcSupervisorChecksTotal.WithLabelValues(
-		firstSupervisorUrl,
-		httpCode,
-		rpcErrorCode,
-		string(FirstSupervisorStrategy),
-	).Inc()
-
+	ctx = context.WithValue(ctx, interopValidationStrategyKey, FirstSupervisorStrategy)
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
 	return err
 }
 
@@ -203,23 +190,7 @@ func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error
 		wg.Add(1)
 		go func(ctx context.Context, url string) {
 			defer wg.Done()
-			httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessListToValidate, url)
-
-			log.Debug(
-				"an interop validating backend has responded",
-				"supervisor_url", url,
-				"req_id", GetReqID(ctx),
-				"method", "eth_sendRawTransaction",
-				"error", err,
-			)
-
-			rpcSupervisorChecksTotal.WithLabelValues(
-				url,
-				httpCode,
-				rpcErrorCode,
-				string(MulticallStrategy),
-			).Inc()
-
+			_, _, err := performCheckAccessListOp(ctx, accessListToValidate, url)
 			resultChan <- err
 		}(ctx, url)
 	}
@@ -335,54 +306,52 @@ func (b *healthAwareBackend) MarkUnhealthy() {
 }
 
 func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash, req *RPCReq) (int, error) {
-	var outputHttpCode int
-	var outputErr error
-
-	httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessList, b.url)
+	httpCode, _, err := performCheckAccessListOp(ctx, accessList, b.url)
 	if err != nil {
-		outputErr = ParseInteropError(err)
+		return httpCode, ParseInteropError(err)
+	}
+	return httpCode, nil
+}
+
+func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (int, string, error) {
+	validatingBackend := interop.NewInteropClient(url)
+	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
+		Timestamp: getInteropExecutingDescriptorTimestamp(),
+	})
+
+	var httpCode int
+	var rpcErrorCode string
+	if err == nil {
+		httpCode = 200
+		rpcErrorCode = "-"
+	} else {
+		interopErr := ParseInteropError(err)
+		httpCode = interopErr.HTTPErrorCode
+		rpcErrorCode = strconv.Itoa(interopErr.Code)
+
+		err = interopErr
+	}
+
+	strategy, ok := ctx.Value(interopValidationStrategyKey).(InteropValidationStrategy)
+	if !ok {
+		strategy = EmptyStrategy
 	}
 
 	log.Debug(
 		"an interop validating backend has responded",
-		"supervisor_url", b.url,
+		"supervisor_url", url,
+		"strategy", strategy,
 		"req_id", GetReqID(ctx),
 		"method", "eth_sendRawTransaction",
 		"error", err,
 	)
 
 	rpcSupervisorChecksTotal.WithLabelValues(
-		b.url,
-		httpCode,
+		url,
+		strconv.Itoa(httpCode),
 		rpcErrorCode,
-		string(HealthAwareLoadBalancingStrategy),
+		string(strategy),
 	).Inc()
-
-	outputHttpCode, parseErr := strconv.Atoi(httpCode)
-	if parseErr != nil {
-		outputHttpCode = 0
-	}
-
-	return outputHttpCode, outputErr
-}
-
-func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (string, string, error) {
-	validatingBackend := interop.NewInteropClient(url)
-	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-		Timestamp: getInteropExecutingDescriptorTimestamp(),
-	})
-
-	var httpCode, rpcErrorCode string
-	if err == nil {
-		httpCode = "200"
-		rpcErrorCode = "-"
-	} else {
-		interopErr := ParseInteropError(err)
-		httpCode = strconv.Itoa(interopErr.HTTPErrorCode)
-		rpcErrorCode = strconv.Itoa(interopErr.Code)
-
-		err = interopErr
-	}
 
 	return httpCode, rpcErrorCode, err
 }
