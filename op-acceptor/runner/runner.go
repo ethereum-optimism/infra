@@ -1186,8 +1186,8 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 	cmd := exec.CommandContext(ctx, name, arg...)
 	cmd.Dir = r.workDir
 
-	// Always set the LOG_LEVEL environment variable
-	runEnv := append([]string{fmt.Sprintf("LOG_LEVEL=%s", r.testLogLevel)}, os.Environ()...)
+	// Always set the TEST_LOG_LEVEL environment variable
+	runEnv := append([]string{fmt.Sprintf("TEST_LOG_LEVEL=%s", r.testLogLevel)}, os.Environ()...)
 
 	if r.env == nil {
 		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
