@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -155,23 +156,8 @@ func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq)
 
 	firstSupervisorUrl := s.urls[0]
 
-	httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
-
-	log.Debug(
-		"an interop validating backend has responded",
-		"supervisor_url", firstSupervisorUrl,
-		"req_id", GetReqID(ctx),
-		"method", "eth_sendRawTransaction",
-		"error", err,
-	)
-
-	rpcSupervisorChecksTotal.WithLabelValues(
-		firstSupervisorUrl,
-		httpCode,
-		rpcErrorCode,
-		string(FirstSupervisorStrategy),
-	).Inc()
-
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
 	return err
 }
 
@@ -202,23 +188,7 @@ func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error
 		wg.Add(1)
 		go func(ctx context.Context, url string) {
 			defer wg.Done()
-			httpCode, rpcErrorCode, err := performCheckAccessListOp(ctx, accessListToValidate, url)
-
-			log.Debug(
-				"an interop validating backend has responded",
-				"supervisor_url", url,
-				"req_id", GetReqID(ctx),
-				"method", "eth_sendRawTransaction",
-				"error", err,
-			)
-
-			rpcSupervisorChecksTotal.WithLabelValues(
-				url,
-				httpCode,
-				rpcErrorCode,
-				string(MulticallStrategy),
-			).Inc()
-
+			_, _, err := performCheckAccessListOp(ctx, accessListToValidate, url)
 			resultChan <- err
 		}(ctx, url)
 	}
@@ -251,23 +221,182 @@ func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error
 	return ParseInteropError(firstErr)
 }
 
-func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (string, string, error) {
+type healthAwareLoadBalancingStrategyImpl struct {
+	*commonInteropStrategy
+	backends *loadBalancingBuffer
+}
+
+func NewHealthAwareLoadBalancingStrategy(urls []string, unhealthinessTimeout time.Duration, opts ...commonStrategyOpt) *healthAwareLoadBalancingStrategyImpl {
+	s := &healthAwareLoadBalancingStrategyImpl{
+		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
+		backends:              NewLoadBalancingBuffer(urls, unhealthinessTimeout),
+	}
+	return s
+}
+
+func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
+	defer s.backends.NextBackend() // move to the next backend after the request is done
+
+	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if !proceedFurther {
+		return nil
+	}
+
+	// retry only in case of encountering unhealthy backends
+	// retries prevents an infinite loop in case all backends are unhealthy
+	maxRetries := s.backends.Size()
+
+	// NOTE: races can still happen between the backend selection and the validation, yet they're are harmless
+	// The harmeless races are just a trade-off against avoiding lock contention for the duration of the entire request
+	backend := s.backends.GetBackend()
+	for retryCount := 0; retryCount < maxRetries; retryCount++ {
+		if !backend.IsHealthy() {
+			backend = s.backends.NextBackend()
+			continue
+		}
+
+		httpCode, err := backend.Validate(ctx, accessListToValidate, req)
+		if err == nil {
+			return nil
+		}
+
+		if backendFoundUnhealthy := httpCode >= 500; backendFoundUnhealthy {
+			backend.MarkUnhealthy()
+			backend = s.backends.NextBackend()
+			continue
+		}
+
+		// genuine validation error
+		return err
+	}
+
+	// retries exhausted
+	return ParseInteropError(fmt.Errorf("no healthy supervisor backends found"))
+}
+
+type healthAwareBackend struct {
+	url                  string
+	lastUnhealthy        time.Time
+	unhealthinessTimeout time.Duration
+}
+
+func NewHealthAwareBackend(url string, unhealthinessTimeout time.Duration) *healthAwareBackend {
+	b := &healthAwareBackend{
+		url:                  url,
+		lastUnhealthy:        time.Time{},
+		unhealthinessTimeout: unhealthinessTimeout,
+	}
+
+	return b
+}
+
+func (b *healthAwareBackend) IsHealthy() bool {
+	if b.lastUnhealthy.IsZero() {
+		return true
+	}
+	if b.unhealthinessTimeout <= 0 {
+		log.Warn("unhealthiness timeout is corrupted for a health-aware backend. Defaulting it to be healthy",
+			"url", b.url, "unhealthiness_timeout", b.unhealthinessTimeout)
+		return true
+	}
+
+	return time.Since(b.lastUnhealthy) > b.unhealthinessTimeout
+}
+
+func (b *healthAwareBackend) MarkUnhealthy() {
+	b.lastUnhealthy = time.Now()
+}
+
+func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash, req *RPCReq) (int, error) {
+	httpCode, _, err := performCheckAccessListOp(ctx, accessList, b.url)
+	if err != nil {
+		return httpCode, ParseInteropError(err)
+	}
+	return httpCode, nil
+}
+
+func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (int, string, error) {
 	validatingBackend := interop.NewInteropClient(url)
 	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
 		Timestamp: getInteropExecutingDescriptorTimestamp(),
 	})
 
-	var httpCode, rpcErrorCode string
+	var httpCode int
+	var rpcErrorCode string
 	if err == nil {
-		httpCode = "200"
+		httpCode = 200
 		rpcErrorCode = "-"
 	} else {
 		interopErr := ParseInteropError(err)
-		httpCode = strconv.Itoa(interopErr.HTTPErrorCode)
+		httpCode = interopErr.HTTPErrorCode
 		rpcErrorCode = strconv.Itoa(interopErr.Code)
 
 		err = interopErr
 	}
 
+	strategy, ok := ctx.Value(ContextKeyInteropValidationStrategy).(InteropValidationStrategy)
+	if !ok {
+		strategy = EmptyStrategy
+	}
+
+	log.Debug(
+		"an interop validating backend has responded",
+		"supervisor_url", url,
+		"strategy", strategy,
+		"req_id", GetReqID(ctx),
+		"method", "eth_sendRawTransaction",
+		"error", err,
+	)
+
+	rpcSupervisorChecksTotal.WithLabelValues(
+		url,
+		strconv.Itoa(httpCode),
+		rpcErrorCode,
+		string(strategy),
+	).Inc()
+
 	return httpCode, rpcErrorCode, err
+}
+
+type loadBalancingBuffer struct {
+	mu                  *sync.RWMutex
+	backends            []*healthAwareBackend
+	currentBackendIndex int
+}
+
+func NewLoadBalancingBuffer(urls []string, unhealthinessTimeout time.Duration) *loadBalancingBuffer {
+	b := &loadBalancingBuffer{
+		mu:                  &sync.RWMutex{},
+		backends:            make([]*healthAwareBackend, len(urls)),
+		currentBackendIndex: 0,
+	}
+
+	for i, url := range urls {
+		b.backends[i] = NewHealthAwareBackend(url, unhealthinessTimeout)
+	}
+
+	return b
+}
+
+func (b *loadBalancingBuffer) Size() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.backends)
+}
+
+func (b *loadBalancingBuffer) GetBackend() *healthAwareBackend {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.backends[b.currentBackendIndex]
+}
+
+func (b *loadBalancingBuffer) NextBackend() *healthAwareBackend {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.currentBackendIndex = (b.currentBackendIndex + 1) % len(b.backends)
+	return b.backends[b.currentBackendIndex]
 }
