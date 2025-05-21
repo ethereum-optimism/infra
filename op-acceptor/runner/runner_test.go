@@ -1593,14 +1593,12 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 	testCases := []struct {
 		name         string
 		packagePath  string
-		setupGit     bool // if false, PATH is emptied to simulate missing git
 		expectStatus types.TestStatus
 		expectErrMsg string
 	}{
 		{
 			name:         "Local path does not exist",
 			packagePath:  "./does-not-exist",
-			setupGit:     true, // doesn't matter for local
 			expectStatus: types.TestStatusFail,
 			expectErrMsg: "local package path does not exist",
 		},
@@ -1608,11 +1606,6 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.setupGit {
-				os.Setenv("PATH", origPath)
-			} else {
-				os.Setenv("PATH", "")
-			}
 			result, err := r.RunTest(context.Background(), types.ValidatorMetadata{
 				ID:       "test",
 				Gate:     "test-gate",

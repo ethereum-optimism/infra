@@ -441,7 +441,6 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 }
 
 // listTestsInPackage returns all test names in a package
-// This may take a while to run as it needs to download all the dependencies
 func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
 	return testlist.FindTestFunctions(pkg, r.workDir)
 }
@@ -1213,6 +1212,7 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
 			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
+			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
 		)
 		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)

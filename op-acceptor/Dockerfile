@@ -1,8 +1,5 @@
 FROM golang:1.23.5-alpine3.21 AS builder
 
-# Increase the proxy connect timeout to 60 seconds
-ENV GOPROXYCONNECTTIMEOUT=60s
-
 WORKDIR /app
 
 # Install dependencies first for better caching
@@ -15,9 +12,6 @@ RUN just build
 FROM golang:1.23.5-alpine3.21
 
 RUN apk add --no-cache ca-certificates build-base git
-
-# Increase the proxy connect timeout to 60 seconds
-ENV GOPROXYCONNECTTIMEOUT=60s
 
 # Install Go binary
 # (we copy Go directly from the builder stage for simplicity and consistency)
