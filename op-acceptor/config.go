@@ -22,8 +22,9 @@ type Config struct {
 	AllowSkips      bool          // Allow tests to be skipped instead of failing when preconditions are not met
 	DefaultTimeout  time.Duration // Default timeout for individual tests, can be overridden by test config
 	LogDir          string        // Directory to store test logs
-
-	Log log.Logger
+	OutputTestLogs  bool          // Whether to output test logs to the console
+	TestLogLevel    string        // Log level to be used for the tests
+	Log             log.Logger
 }
 
 // NewConfig creates a new Config instance
@@ -72,6 +73,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		RunOnce:         runOnce,
 		AllowSkips:      ctx.Bool(flags.AllowSkips.Name),
 		DefaultTimeout:  ctx.Duration(flags.DefaultTimeout.Name),
+		OutputTestLogs:  ctx.Bool(flags.OutputTestLogs.Name),
+		TestLogLevel:    ctx.String(flags.TestLogLevel.Name),
 		LogDir:          logDir,
 		Log:             log,
 	}, nil
