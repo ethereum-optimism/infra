@@ -93,7 +93,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	logger := log.New()
 
 	// Set up a mock file logger
-	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id")
+	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Create service with the mock
