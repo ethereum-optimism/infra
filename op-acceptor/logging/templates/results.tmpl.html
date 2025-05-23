@@ -103,14 +103,28 @@
         .duration {
             text-align: right;
         }
+        .subtest {
+            padding-left: 20px;
+            position: relative;
+        }
+        .subtest::before {
+            content: "└─ ";
+            color: #999;
+            margin-right: 5px;
+        }
+        .subtest-row {
+            background-color: #fafafa;
+        }
     </style>
 </head>
 <body>
     <h1>Test Results</h1>
     <div class="summary">
+        {{if .DevnetName}}<p><strong>Devnet:</strong> {{.DevnetName}}</p>{{end}}
+        {{if .GateRun}}<p><strong>Gate:</strong> {{.GateRun}}</p>{{end}}
         <p><strong>Run ID:</strong> {{.RunID}}</p>
-        <p><strong>Time:</strong> {{.Time}}</p>
         <p><strong>Duration:</strong> {{.TotalDuration}}</p>
+        <p><strong>Time:</strong> {{.Time}}</p>
         
         <div class="stats">
             <div class="stat-box">
@@ -160,9 +174,9 @@
         </thead>
         <tbody>
             {{range .Tests}}
-            <tr class="{{.StatusClass}}">
+            <tr class="{{.StatusClass}}{{if .IsSubTest}} subtest-row{{end}}">
                 <td class="status-cell {{.StatusClass}}">{{.StatusText}}</td>
-                <td>{{.TestName}}</td>
+                <td{{if .IsSubTest}} class="subtest"{{end}}>{{.TestName}}</td>
                 <td>{{.Package}}</td>
                 <td>{{.Gate}}</td>
                 <td>{{.Suite}}</td>
