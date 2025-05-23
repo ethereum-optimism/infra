@@ -24,8 +24,9 @@ type Service struct {
 }
 
 func New() *Service {
+	logger := log.New()
 	s := &Service{
-		Healthz: &HealthzServer{},
+		Healthz: NewHealthzServer(logger),
 		Metrics: &MetricsServer{},
 	}
 	return s
