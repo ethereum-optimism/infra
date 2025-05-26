@@ -37,7 +37,6 @@ type FileLogger struct {
 	allLogsFile  string                // Path to the combined log file
 	mu           sync.Mutex            // Protects concurrent file operations
 	sinks        []ResultSink          // Collection of result consumers
-	resultBuffer []*types.TestResult   // Buffer for storing results
 	asyncWriters map[string]*AsyncFile // Map of async file writers
 	runID        string                // Current run ID
 }
@@ -116,21 +115,21 @@ func (af *AsyncFile) Close() error {
 }
 
 // NewFileLogger creates a new file logger with the specified base directory and runID
-// The runID must be provided, otherwise an error is returned
-func NewFileLogger(baseDir string, runID string) (*FileLogger, error) {
+func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*FileLogger, error) {
 	if runID == "" {
-		return nil, fmt.Errorf("runID is required")
+		return nil, fmt.Errorf("runID cannot be empty")
 	}
 
-	dirName := fmt.Sprintf("testrun-%s", runID)
-	runDir := filepath.Join(baseDir, dirName)
-	failDir := filepath.Join(runDir, "failed")
+	// Create subdirectory for this specific run
+	runDir := filepath.Join(baseDir, fmt.Sprintf("testrun-%s", runID))
+	failedDir := filepath.Join(runDir, "failed")
 	passedDir := filepath.Join(runDir, "passed")
 
-	// Create directories
+	// Create directories if they don't exist
 	dirs := []string{
+		baseDir,
 		runDir,
-		failDir,
+		failedDir,
 		passedDir,
 	}
 
@@ -140,23 +139,26 @@ func NewFileLogger(baseDir string, runID string) (*FileLogger, error) {
 		}
 	}
 
+	summaryFile := filepath.Join(runDir, "summary.log")
+	allLogsFile := filepath.Join(runDir, "all.log")
+
 	logger := &FileLogger{
 		baseDir:      runDir,
 		logDir:       baseDir,
-		failedDir:    failDir,
-		summaryFile:  filepath.Join(runDir, "summary.log"),
-		allLogsFile:  filepath.Join(runDir, "all.log"),
+		failedDir:    failedDir,
+		summaryFile:  summaryFile,
+		allLogsFile:  allLogsFile,
 		asyncWriters: make(map[string]*AsyncFile),
-		resultBuffer: make([]*types.TestResult, 0),
 		runID:        runID,
 	}
 
-	// Add default sinks
+	// Add sinks - order matters
+	logger.sinks = append(logger.sinks, &IndividualTestFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
 	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
 	logger.sinks = append(logger.sinks, &PerTestFileSink{logger: logger})
-	logger.sinks = append(logger.sinks, &HTMLSummarySink{logger: logger})
+	logger.sinks = append(logger.sinks, NewHTMLSummarySink(logger, networkName, gateRun))
 
 	return logger, nil
 }
@@ -197,27 +199,23 @@ func (l *FileLogger) closeAllWriters() {
 // The runID must be provided, otherwise an error is returned
 func (l *FileLogger) GetDirectoryForRunID(runID string) (string, error) {
 	if runID == "" {
-		return "", fmt.Errorf("runID is required")
+		return "", fmt.Errorf("runID cannot be empty")
 	}
-	return filepath.Join(l.logDir, fmt.Sprintf("testrun-%s", runID)), nil
+	dirName := fmt.Sprintf("testrun-%s", runID)
+	return filepath.Join(l.logDir, dirName), nil
 }
 
 // LogTestResult processes a test result through all registered sinks
 // If runID is provided, it will log to that specific run directory
 func (l *FileLogger) LogTestResult(result *types.TestResult, runID string) error {
 	if runID == "" {
-		return fmt.Errorf("runID is required")
+		return fmt.Errorf("runID cannot be empty")
 	}
 
-	// Store the result in the buffer
-	l.mu.Lock()
-	l.resultBuffer = append(l.resultBuffer, result)
-	l.mu.Unlock()
-
-	// Process the result through all sinks
+	// Feed test result to all sinks
 	for _, sink := range l.sinks {
 		if err := sink.Consume(result, runID); err != nil {
-			return err
+			return fmt.Errorf("error in sink: %w", err)
 		}
 	}
 
@@ -228,22 +226,16 @@ func (l *FileLogger) LogTestResult(result *types.TestResult, runID string) error
 // The runID must be provided, otherwise an error is returned
 func (l *FileLogger) LogSummary(summary string, runID string) error {
 	if runID == "" {
-		return fmt.Errorf("runID is required")
+		return fmt.Errorf("runID cannot be empty")
 	}
 
-	// Use the specified runID directory
-	baseDir, err := l.GetDirectoryForRunID(runID)
+	// Get the summary file path for this runID
+	summaryFile, err := l.GetSummaryFileForRunID(runID)
 	if err != nil {
 		return err
 	}
 
-	// Create the directory if it doesn't exist
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", baseDir, err)
-	}
-
-	// Get the async writer for the summary file
-	summaryFile := filepath.Join(baseDir, "summary.log")
+	// Get or create the async writer
 	writer, err := l.getAsyncWriter(summaryFile)
 	if err != nil {
 		return err
@@ -256,18 +248,18 @@ func (l *FileLogger) LogSummary(summary string, runID string) error {
 // Complete finalizes all sinks and closes all file writers
 func (l *FileLogger) Complete(runID string) error {
 	if runID == "" {
-		return fmt.Errorf("runID is required")
+		return fmt.Errorf("runID cannot be empty")
 	}
 
-	// Notify all sinks that we're done
 	for _, sink := range l.sinks {
 		if err := sink.Complete(runID); err != nil {
-			return err
+			return fmt.Errorf("error completing sink: %w", err)
 		}
 	}
 
-	// Close all async writers
+	// Close all writers after completion
 	l.closeAllWriters()
+
 	return nil
 }
 
@@ -295,7 +287,7 @@ func (l *FileLogger) GetAllLogsFile() string {
 // The runID must be provided, otherwise an error is returned
 func (l *FileLogger) GetFailedDirForRunID(runID string) (string, error) {
 	if runID == "" {
-		return "", fmt.Errorf("runID is required")
+		return "", fmt.Errorf("runID cannot be empty")
 	}
 	baseDir, err := l.GetDirectoryForRunID(runID)
 	if err != nil {
@@ -308,7 +300,7 @@ func (l *FileLogger) GetFailedDirForRunID(runID string) (string, error) {
 // The runID must be provided, otherwise an error is returned
 func (l *FileLogger) GetSummaryFileForRunID(runID string) (string, error) {
 	if runID == "" {
-		return "", fmt.Errorf("runID is required")
+		return "", fmt.Errorf("runID cannot be empty")
 	}
 	baseDir, err := l.GetDirectoryForRunID(runID)
 	if err != nil {
@@ -320,7 +312,7 @@ func (l *FileLogger) GetSummaryFileForRunID(runID string) (string, error) {
 // GetAllLogsFileForRunID returns the path to the all.log file for the given runID
 func (l *FileLogger) GetAllLogsFileForRunID(runID string) (string, error) {
 	if runID == "" {
-		return "", fmt.Errorf("runID is required")
+		return "", fmt.Errorf("runID cannot be empty")
 	}
 	baseDir, err := l.GetDirectoryForRunID(runID)
 	if err != nil {
@@ -332,7 +324,7 @@ func (l *FileLogger) GetAllLogsFileForRunID(runID string) (string, error) {
 // GetRawEventsFileForRunID returns the path to the raw_go_events.log file for the given runID
 func (l *FileLogger) GetRawEventsFileForRunID(runID string) (string, error) {
 	if runID == "" {
-		return "", fmt.Errorf("runID is required")
+		return "", fmt.Errorf("runID cannot be empty")
 	}
 	baseDir, err := l.GetDirectoryForRunID(runID)
 	if err != nil {
@@ -790,6 +782,41 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 		}
 	}
 
+	// Create log file for the main test
+	err = s.createTestLogFile(result, passedDir, failedDir, runID)
+	if err != nil {
+		return fmt.Errorf("failed to create main test log file: %w", err)
+	}
+
+	// Create individual log files for each subtest
+	for subTestName, subTest := range result.SubTests {
+		// Create a copy of the subtest with proper metadata for filename generation
+		subTestResult := &types.TestResult{
+			Metadata: types.ValidatorMetadata{
+				ID:       subTest.Metadata.ID,
+				Gate:     result.Metadata.Gate,    // Use parent's gate
+				Suite:    result.Metadata.Suite,   // Use parent's suite
+				FuncName: subTestName,             // Use the subtest name
+				Package:  result.Metadata.Package, // Use parent's package
+				RunAll:   false,
+			},
+			Status:   subTest.Status,
+			Error:    subTest.Error,
+			Duration: subTest.Duration,
+			Stdout:   subTest.Stdout,
+		}
+
+		err = s.createTestLogFile(subTestResult, passedDir, failedDir, runID)
+		if err != nil {
+			return fmt.Errorf("failed to create subtest log file for %s: %w", subTestName, err)
+		}
+	}
+
+	return nil
+}
+
+// createTestLogFile creates a log file for a single test result
+func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir, failedDir string, runID string) error {
 	// Generate a safe filename based on the test metadata
 	filename := getReadableTestFilename(result.Metadata)
 
@@ -815,10 +842,12 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 
 	// Extract the plaintext output first from all JSON Output fields
 	var plaintext strings.Builder
-	parser := NewJSONOutputParser(result.Stdout)
-	parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
-		plaintext.WriteString(outputText)
-	})
+	if result.Stdout != "" {
+		parser := NewJSONOutputParser(result.Stdout)
+		parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
+			plaintext.WriteString(outputText)
+		})
+	}
 
 	// 1. Write the plaintext output first
 	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
@@ -1072,6 +1101,8 @@ type TestResultRow struct {
 	Suite             string
 	DurationFormatted string
 	LogPath           string
+	IsSubTest         bool   // Whether this is a subtest
+	ParentTest        string // Name of the parent test for subtests
 }
 
 // HTMLSummaryData contains all the data needed for the HTML template
@@ -1087,6 +1118,8 @@ type HTMLSummaryData struct {
 	PassRateFormatted string
 	HasFailures       bool
 	Tests             []TestResultRow
+	DevnetName        string // Name of the devnet being tested
+	GateRun           string // Name of the gate being run
 }
 
 // HTMLSummarySink creates an HTML report for better visualization of test results
@@ -1097,6 +1130,18 @@ type HTMLSummarySink struct {
 	skipped     int
 	errored     int
 	testResults []*types.TestResult
+	networkName string // Name of the network being tested
+	gateRun     string // Name of the gate being run
+}
+
+// NewHTMLSummarySink creates a new HTMLSummarySink with network and gate information
+func NewHTMLSummarySink(logger *FileLogger, networkName, gateRun string) *HTMLSummarySink {
+	return &HTMLSummarySink{
+		logger:      logger,
+		testResults: make([]*types.TestResult, 0),
+		networkName: networkName,
+		gateRun:     gateRun,
+	}
 }
 
 // Consume collects test results for later HTML generation
@@ -1114,6 +1159,20 @@ func (s *HTMLSummarySink) Consume(result *types.TestResult, runID string) error 
 		s.skipped++
 	case types.TestStatusError:
 		s.errored++
+	}
+
+	// Update statistics for subtests
+	for _, subTest := range result.SubTests {
+		switch subTest.Status {
+		case types.TestStatusPass:
+			s.passed++
+		case types.TestStatusFail:
+			s.failed++
+		case types.TestStatusSkip:
+			s.skipped++
+		case types.TestStatusError:
+			s.errored++
+		}
 	}
 
 	return nil
@@ -1144,6 +1203,10 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 	var totalDuration time.Duration
 	for _, result := range s.testResults {
 		totalDuration += result.Duration
+		// Add subtest durations
+		for _, subTest := range result.SubTests {
+			totalDuration += subTest.Duration
+		}
 	}
 
 	// Calculate pass rate
@@ -1152,56 +1215,35 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		passRate = float64(s.passed) / float64(total) * 100
 	}
 
-	// Prepare the test result rows
-	tests := make([]TestResultRow, 0, len(s.testResults))
+	// Prepare the test result rows (including subtests)
+	tests := make([]TestResultRow, 0)
 	for _, result := range s.testResults {
-		// Determine status class
-		statusClass := ""
-		statusText := ""
-		switch result.Status {
-		case types.TestStatusPass:
-			statusClass = "pass"
-			statusText = "PASS"
-		case types.TestStatusFail:
-			statusClass = "fail"
-			statusText = "FAIL"
-		case types.TestStatusSkip:
-			statusClass = "skip"
-			statusText = "SKIP"
-		case types.TestStatusError:
-			statusClass = "error"
-			statusText = "ERROR"
-		}
+		// Add the main test row
+		mainTestRow := s.createTestResultRow(result, false, "")
+		tests = append(tests, mainTestRow)
 
-		// Generate filename
-		filename := getReadableTestFilename(result.Metadata) + ".log"
-		logPath := ""
-		if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-			logPath = "failed/" + filename
-		} else {
-			logPath = "passed/" + filename
-		}
-
-		testName := result.Metadata.FuncName
-		if testName == "" {
-			if result.Metadata.RunAll {
-				testName = "AllTests"
-			} else {
-				testName = result.Metadata.ID
+		// Add subtest rows
+		for subTestName, subTest := range result.SubTests {
+			// Create a subtest result with proper metadata for filename generation
+			subTestResult := &types.TestResult{
+				Metadata: types.ValidatorMetadata{
+					ID:       subTest.Metadata.ID,
+					Gate:     result.Metadata.Gate,    // Use parent's gate
+					Suite:    result.Metadata.Suite,   // Use parent's suite
+					FuncName: subTestName,             // Use the subtest name
+					Package:  result.Metadata.Package, // Use parent's package
+					RunAll:   false,
+				},
+				Status:   subTest.Status,
+				Error:    subTest.Error,
+				Duration: subTest.Duration,
+				Stdout:   subTest.Stdout,
 			}
-		}
 
-		// Add the table row
-		tests = append(tests, TestResultRow{
-			StatusClass:       statusClass,
-			StatusText:        statusText,
-			TestName:          testName,
-			Package:           result.Metadata.Package,
-			Gate:              result.Metadata.Gate,
-			Suite:             result.Metadata.Suite,
-			DurationFormatted: formatDuration(result.Duration),
-			LogPath:           logPath,
-		})
+			subTestRow := s.createTestResultRow(subTestResult, true, result.Metadata.FuncName)
+			// The test name is already set correctly from the metadata
+			tests = append(tests, subTestRow)
+		}
 	}
 
 	// Prepare the template data
@@ -1217,6 +1259,8 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		PassRateFormatted: fmt.Sprintf("%.1f", passRate),
 		HasFailures:       s.failed+s.errored > 0,
 		Tests:             tests,
+		DevnetName:        s.networkName,
+		GateRun:           s.gateRun,
 	}
 
 	// Parse the template
@@ -1233,6 +1277,58 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 
 	// Write the HTML content
 	return writer.Write(buf.Bytes())
+}
+
+// createTestResultRow creates a TestResultRow from a TestResult
+func (s *HTMLSummarySink) createTestResultRow(result *types.TestResult, isSubTest bool, parentTest string) TestResultRow {
+	// Determine status class
+	statusClass := ""
+	statusText := ""
+	switch result.Status {
+	case types.TestStatusPass:
+		statusClass = "pass"
+		statusText = "PASS"
+	case types.TestStatusFail:
+		statusClass = "fail"
+		statusText = "FAIL"
+	case types.TestStatusSkip:
+		statusClass = "skip"
+		statusText = "SKIP"
+	case types.TestStatusError:
+		statusClass = "error"
+		statusText = "ERROR"
+	}
+
+	// Generate filename using the test metadata
+	filename := getReadableTestFilename(result.Metadata) + ".log"
+	logPath := ""
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		logPath = "failed/" + filename
+	} else {
+		logPath = "passed/" + filename
+	}
+
+	testName := result.Metadata.FuncName
+	if testName == "" {
+		if result.Metadata.RunAll {
+			testName = "AllTests"
+		} else {
+			testName = result.Metadata.ID
+		}
+	}
+
+	return TestResultRow{
+		StatusClass:       statusClass,
+		StatusText:        statusText,
+		TestName:          testName,
+		Package:           result.Metadata.Package,
+		Gate:              result.Metadata.Gate,
+		Suite:             result.Metadata.Suite,
+		DurationFormatted: formatDuration(result.Duration),
+		LogPath:           logPath,
+		IsSubTest:         isSubTest,
+		ParentTest:        parentTest,
+	}
 }
 
 // formatDuration formats a time.Duration to a human-readable string

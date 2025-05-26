@@ -24,7 +24,7 @@ func TestRawJSONSink(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-raw-json"
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink from the logger
@@ -221,7 +221,7 @@ func TestFail(t *testing.T) {
 
 	// Create a test result and file logger
 	runID := "real-go-test-run"
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink
