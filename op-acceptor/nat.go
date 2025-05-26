@@ -253,7 +253,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Info("Generated new runID for test run", "runID", runID)
 
 	// Create a new file logger with the runID
-	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID)
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
 	if err != nil {
 		n.config.Log.Error("Error creating file logger", "error", err)
 		return fmt.Errorf("failed to create file logger: %w", err)

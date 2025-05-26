@@ -20,7 +20,7 @@ func TestFileLogger(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-123"
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Verify the directory structure
@@ -141,12 +141,12 @@ func TestLoggerWithEmptyRunID(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Test that an error is returned when an empty runID is provided to NewFileLogger
-	_, err = NewFileLogger(tmpDir, "")
+	_, err = NewFileLogger(tmpDir, "", "test-network", "test-gate")
 	assert.Error(t, err, "Expected error when creating logger with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	// Create a valid logger to test the LogTestResult with empty runID
-	logger, err := NewFileLogger(tmpDir, "valid-run-id")
+	logger, err := NewFileLogger(tmpDir, "valid-run-id", "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Create a test result
@@ -160,17 +160,17 @@ func TestLoggerWithEmptyRunID(t *testing.T) {
 	// Test that an error is returned when an empty runID is provided to LogTestResult
 	err = logger.LogTestResult(testResult, "")
 	assert.Error(t, err, "Expected error when logging with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	// Test that an error is returned when an empty runID is provided to LogSummary
 	err = logger.LogSummary("Summary", "")
 	assert.Error(t, err, "Expected error when logging summary with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	// Test that an error is returned when an empty runID is provided to Complete
 	err = logger.Complete("")
 	assert.Error(t, err, "Expected error when completing with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 }
 
 func TestLoggingWithRunID(t *testing.T) {
@@ -181,7 +181,7 @@ func TestLoggingWithRunID(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	defaultRunID := "default-run-id"
-	logger, err := NewFileLogger(tmpDir, defaultRunID)
+	logger, err := NewFileLogger(tmpDir, defaultRunID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// We'll use a different runID for this test
@@ -253,19 +253,19 @@ func TestLoggingWithRunID(t *testing.T) {
 	// Test error cases for directory methods with empty runID
 	_, err = logger.GetDirectoryForRunID("")
 	assert.Error(t, err, "Expected error when getting directory with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	_, err = logger.GetFailedDirForRunID("")
 	assert.Error(t, err, "Expected error when getting failed directory with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	_, err = logger.GetSummaryFileForRunID("")
 	assert.Error(t, err, "Expected error when getting summary file with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	_, err = logger.GetAllLogsFileForRunID("")
 	assert.Error(t, err, "Expected error when getting all logs file with empty runID")
-	assert.Contains(t, err.Error(), "runID is required")
+	assert.Contains(t, err.Error(), "runID cannot be empty")
 }
 
 func TestAsyncFileWriter(t *testing.T) {
@@ -319,7 +319,7 @@ func TestCustomResultSink(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "custom-sink-test"
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Create a custom sink for testing
@@ -376,7 +376,7 @@ func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
 	runID := "test-pertest-sink"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Access the PerTestFileSink directly
@@ -495,7 +495,7 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	runID := "test-html-summary"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Access the HTMLSummarySink directly
@@ -682,4 +682,212 @@ func TestExtractPlaintextFromJSON(t *testing.T) {
 	// Test with empty input
 	emptyPlaintext := extractPlainText("")
 	assert.Equal(t, "", emptyPlaintext)
+}
+
+// TestPerTestFileSink_CreatesSubtestFiles tests that PerTestFileSink creates individual log files for subtests
+func TestPerTestFileSink_CreatesSubtestFiles(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-subtests"
+
+	// Create a file logger
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	require.NoError(t, err)
+
+	// Access the PerTestFileSink directly
+	sink, ok := logger.GetSinkByType("PerTestFileSink")
+	require.True(t, ok, "PerTestFileSink should be available")
+	perTestSink, ok := sink.(*PerTestFileSink)
+	require.True(t, ok, "Sink should be of type *PerTestFileSink")
+
+	// Create test metadata for a main test with subtests
+	mainMeta := types.ValidatorMetadata{
+		ID:       "test-with-subtests",
+		FuncName: "TestWithSubtests",
+		Package:  "github.com/example/package",
+		Gate:     "gate1",
+		Suite:    "suite1",
+	}
+
+	// Create subtests
+	subtests := map[string]*types.TestResult{
+		"TestWithSubtests/subtest_1": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-1",
+				FuncName: "TestWithSubtests/subtest_1",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 500 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_1","Output":"=== RUN   TestWithSubtests/subtest_1\n"}`,
+		},
+		"TestWithSubtests/subtest_2": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-2",
+				FuncName: "TestWithSubtests/subtest_2",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 300 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_2","Output":"=== RUN   TestWithSubtests/subtest_2\n"}`,
+			Error:    fmt.Errorf("Subtest failed"),
+		},
+	}
+
+	// Create a main test result with subtests
+	mainResult := &types.TestResult{
+		Metadata: mainMeta,
+		Status:   types.TestStatusFail, // Main test fails because one subtest failed
+		Duration: 1 * time.Second,
+		Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests","Output":"=== RUN   TestWithSubtests\n"}`,
+		SubTests: subtests,
+	}
+
+	// Process the test result through the sink
+	require.NoError(t, perTestSink.Consume(mainResult, runID))
+
+	// Get directory paths
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	passedDir := filepath.Join(baseDir, "passed")
+	failedDir := filepath.Join(baseDir, "failed")
+
+	// Finalize to ensure all files are written
+	require.NoError(t, logger.Complete(runID))
+
+	// Verify the main test file exists in failed directory (since it failed)
+	mainFileName := getReadableTestFilename(mainMeta) + ".log"
+	mainFilePath := filepath.Join(failedDir, mainFileName)
+	assert.FileExists(t, mainFilePath, "Main test log file should exist")
+
+	// Verify subtest files exist in their respective directories
+	subtest1FileName := "gate1-suite1_package_TestWithSubtests_subtest_1.log"
+	subtest1FilePath := filepath.Join(passedDir, subtest1FileName)
+	assert.FileExists(t, subtest1FilePath, "Passing subtest log file should exist in passed directory")
+
+	subtest2FileName := "gate1-suite1_package_TestWithSubtests_subtest_2.log"
+	subtest2FilePath := filepath.Join(failedDir, subtest2FileName)
+	assert.FileExists(t, subtest2FilePath, "Failing subtest log file should exist in failed directory")
+
+	// Verify the content of the subtest files
+	subtest1Content, err := os.ReadFile(subtest1FilePath)
+	require.NoError(t, err)
+	subtest1ContentStr := string(subtest1Content)
+	assert.Contains(t, subtest1ContentStr, "PLAINTEXT OUTPUT:")
+	assert.Contains(t, subtest1ContentStr, "Test passed: TestWithSubtests/subtest_1")
+
+	subtest2Content, err := os.ReadFile(subtest2FilePath)
+	require.NoError(t, err)
+	subtest2ContentStr := string(subtest2Content)
+	assert.Contains(t, subtest2ContentStr, "PLAINTEXT OUTPUT:")
+	assert.Contains(t, subtest2ContentStr, "ERROR SUMMARY:")
+}
+
+// TestHTMLSummarySink_WithSubtestsAndNetworkInfo tests HTML generation with subtests and network information
+func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-html-with-subtests"
+	networkName := "isthmus-devnet"
+	gateRun := "isthmus"
+
+	// Create a file logger with network and gate information
+	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
+	require.NoError(t, err)
+
+	// Create subtests
+	subtests := map[string]*types.TestResult{
+		"TestWithSubtests/subtest_pass": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-pass",
+				FuncName: "TestWithSubtests/subtest_pass",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 500 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_pass","Output":"=== RUN   TestWithSubtests/subtest_pass\n"}`,
+		},
+		"TestWithSubtests/subtest_fail": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-fail",
+				FuncName: "TestWithSubtests/subtest_fail",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 300 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_fail","Output":"=== RUN   TestWithSubtests/subtest_fail\n"}`,
+			Error:    fmt.Errorf("Subtest failed"),
+		},
+	}
+
+	// Create a main test result with subtests
+	mainResult := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:       "test-with-subtests",
+			FuncName: "TestWithSubtests",
+			Package:  "github.com/example/package",
+			Gate:     "isthmus",
+			Suite:    "acceptance",
+		},
+		Status:   types.TestStatusFail, // Main test fails because one subtest failed
+		Duration: 1 * time.Second,
+		Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests","Output":"=== RUN   TestWithSubtests\n"}`,
+		SubTests: subtests,
+	}
+
+	// Process the test result through all sinks
+	require.NoError(t, logger.LogTestResult(mainResult, runID))
+
+	// Complete the logging process
+	require.NoError(t, logger.Complete(runID))
+
+	// Check that the HTML file was created
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
+
+	// Ensure the HTML file exists
+	_, err = os.Stat(htmlFile)
+	require.NoError(t, err, "HTML report file should exist")
+
+	// Read the HTML file content
+	content, err := os.ReadFile(htmlFile)
+	require.NoError(t, err)
+	htmlContent := string(content)
+
+	// Verify the HTML content contains expected elements
+	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
+	assert.Contains(t, htmlContent, "<title>Test Results</title>")
+
+	// Verify network and gate information is displayed
+	assert.Contains(t, htmlContent, "<strong>Devnet:</strong> isthmus-devnet")
+	assert.Contains(t, htmlContent, "<strong>Gate:</strong> isthmus")
+
+	// Verify main test and subtests are included
+	assert.Contains(t, htmlContent, "TestWithSubtests")
+	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_pass")
+	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_fail")
+
+	// Verify correct package information
+	assert.Contains(t, htmlContent, "github.com/example/package")
+	assert.Contains(t, htmlContent, "isthmus")
+	assert.Contains(t, htmlContent, "acceptance")
+
+	// Verify subtest CSS classes are applied
+	assert.Contains(t, htmlContent, "subtest-row")
+	assert.Contains(t, htmlContent, "class=\"subtest\"")
+
+	// Verify links to log files
+	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
+	assert.Contains(t, htmlContent, "failed/isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
+
+	// Verify the corresponding log files actually exist
+	passedDir := filepath.Join(baseDir, "passed")
+	failedDir := filepath.Join(baseDir, "failed")
+
+	passSubtestFile := filepath.Join(passedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
+	assert.FileExists(t, passSubtestFile, "Passing subtest log file should exist")
+
+	failSubtestFile := filepath.Join(failedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
+	assert.FileExists(t, failSubtestFile, "Failing subtest log file should exist")
+
+	// Verify statistics are correct (main test + 2 subtests = 3 total)
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">3</div>")                                      // Total
+	assert.Contains(t, htmlContent, "Pass Rate</div>\n                <div class=\"stat-value\">33.3%</div>") // Pass rate (1 pass out of 3 total)
 }
