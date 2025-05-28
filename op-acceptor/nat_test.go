@@ -48,6 +48,10 @@ func (m *trackedMockRunner) RunAllTests(_ context.Context) (*runner.RunnerResult
 	return args.Get(0).(*runner.RunnerResult), args.Error(1)
 }
 
+func (m *trackedMockRunner) ReproducibleEnv() runner.Env {
+	return runner.Env{}
+}
+
 // waitForExecutions waits for a specific number of executions with timeout
 func (m *trackedMockRunner) waitForExecutions(ctx context.Context, count int32) bool {
 	// Create a timeout context
