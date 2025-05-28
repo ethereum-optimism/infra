@@ -436,6 +436,7 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	var totalDuration time.Duration
 	testResults := make(map[string]*types.TestResult)
 	var failedTestsStdout strings.Builder
+	var aggregatedRawJSON []byte // Store aggregated raw JSON for the test list
 
 	// Run each test in the list
 	for _, testName := range testNames {
@@ -454,6 +455,12 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 		testResults[testName] = testResult
 		totalDuration += testResult.Duration
 
+		// Aggregate raw JSON from individual tests for the aggregated result
+		if individualRawJSON, exists := r.getRawJSON(testMetadata.ID); exists {
+			// Append this test's raw JSON to the aggregated JSON
+			aggregatedRawJSON = append(aggregatedRawJSON, individualRawJSON...)
+		}
+
 		// Update overall status based on individual test result
 		if testResult.Status == types.TestStatusFail {
 			result = types.TestStatusFail
@@ -467,6 +474,11 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 				failedTestsStdout.WriteString(testResult.Stdout)
 			}
 		}
+	}
+
+	// Store the aggregated raw JSON for the package-level test result
+	if len(aggregatedRawJSON) > 0 {
+		r.storeRawJSON(metadata.ID, aggregatedRawJSON)
 	}
 
 	// If any tests failed, log the collected stdout
@@ -532,22 +544,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	err := cmd.Run()
 
 	// Store the raw JSON output for the RawJSONSink if we have a file logger
-	if r.fileLogger != nil {
-		// Try to get the RawJSONSink from the file logger
-		if sink, ok := r.fileLogger.GetSinkByType("RawJSONSink"); ok {
-			if rawSink, ok := sink.(*logging.RawJSONSink); ok {
-				// Store the raw JSON output using the test's ID as the key
-				rawJSON := stdout.Bytes()
-				rawSink.StoreRawJSON(metadata.ID, rawJSON)
-			} else {
-				r.log.Error("Failed to get RawJSONSink: wrong type", "type", fmt.Sprintf("%T", sink))
-			}
-		} else {
-			r.log.Error("Failed to get RawJSONSink")
-		}
-	} else {
-		r.log.Debug("No file logger available, not storing raw JSON output")
-	}
+	r.storeRawJSON(metadata.ID, stdout.Bytes())
 
 	// Check for timeout first
 	if ctx.Err() == context.DeadlineExceeded {
@@ -962,84 +959,44 @@ func (r *RunnerResult) String() string {
 func (r *RunnerResult) updateStats(gate *GateResult, suite *SuiteResult, test *types.TestResult) {
 	// Update test suite stats if applicable
 	if suite != nil {
-		suite.Stats.Total++
-		switch test.Status {
-		case types.TestStatusPass:
-			suite.Stats.Passed++
-		case types.TestStatusFail:
-			suite.Stats.Failed++
-		case types.TestStatusSkip:
-			suite.Stats.Skipped++
-		}
-		suite.Duration += test.Duration
+		r.updateStatsForContainer(&suite.Stats, &suite.Duration, test.Status, test.Duration)
 	}
 
 	// Update gate stats
-	gate.Stats.Total++
-	switch test.Status {
-	case types.TestStatusPass:
-		gate.Stats.Passed++
-	case types.TestStatusFail:
-		gate.Stats.Failed++
-	case types.TestStatusSkip:
-		gate.Stats.Skipped++
-	}
-	gate.Duration += test.Duration
+	r.updateStatsForContainer(&gate.Stats, &gate.Duration, test.Status, test.Duration)
 
 	// Update overall stats
-	r.Stats.Total++
-	switch test.Status {
-	case types.TestStatusPass:
-		r.Stats.Passed++
-	case types.TestStatusFail:
-		r.Stats.Failed++
-	case types.TestStatusSkip:
-		r.Stats.Skipped++
-	}
-	r.Duration += test.Duration
+	r.updateStatsForContainer(&r.Stats, &r.Duration, test.Status, test.Duration)
 
 	// Update stats for SubTests if they exist
 	if len(test.SubTests) > 0 {
 		for _, subTest := range test.SubTests {
 			// Update the global stats with this sub-test
-			r.Stats.Total++
-			switch subTest.Status {
-			case types.TestStatusPass:
-				r.Stats.Passed++
-			case types.TestStatusFail:
-				r.Stats.Failed++
-			case types.TestStatusSkip:
-				r.Stats.Skipped++
-			}
-			r.Duration += subTest.Duration
+			r.updateStatsForContainer(&r.Stats, &r.Duration, subTest.Status, subTest.Duration)
 
 			// Update gate stats
-			gate.Stats.Total++
-			switch subTest.Status {
-			case types.TestStatusPass:
-				gate.Stats.Passed++
-			case types.TestStatusFail:
-				gate.Stats.Failed++
-			case types.TestStatusSkip:
-				gate.Stats.Skipped++
-			}
-			gate.Duration += subTest.Duration
+			r.updateStatsForContainer(&gate.Stats, &gate.Duration, subTest.Status, subTest.Duration)
 
 			// Update suite stats
 			if suite != nil {
-				suite.Stats.Total++
-				switch subTest.Status {
-				case types.TestStatusPass:
-					suite.Stats.Passed++
-				case types.TestStatusFail:
-					suite.Stats.Failed++
-				case types.TestStatusSkip:
-					suite.Stats.Skipped++
-				}
-				suite.Duration += subTest.Duration
+				r.updateStatsForContainer(&suite.Stats, &suite.Duration, subTest.Status, subTest.Duration)
 			}
 		}
 	}
+}
+
+// updateStatsForContainer is a helper function that updates stats for any container (runner, gate, or suite)
+func (r *RunnerResult) updateStatsForContainer(stats *ResultStats, duration *time.Duration, status types.TestStatus, testDuration time.Duration) {
+	stats.Total++
+	switch status {
+	case types.TestStatusPass:
+		stats.Passed++
+	case types.TestStatusFail:
+		stats.Failed++
+	case types.TestStatusSkip:
+		stats.Skipped++
+	}
+	*duration += testDuration
 }
 
 // determineGateStatus determines the overall status of a gate based on its tests and suites
@@ -1138,6 +1095,45 @@ func determineSuiteStatus(suite *SuiteResult) types.TestStatus {
 // SetFileLogger sets the file logger for the runner
 func (r *runner) SetFileLogger(logger *logging.FileLogger) {
 	r.fileLogger = logger
+}
+
+// getRawJSONSink is a helper method to get the RawJSONSink from the file logger
+// Returns the sink and a boolean indicating if it was found and properly typed
+func (r *runner) getRawJSONSink() (*logging.RawJSONSink, bool) {
+	if r.fileLogger == nil {
+		return nil, false
+	}
+
+	sink, ok := r.fileLogger.GetSinkByType("RawJSONSink")
+	if !ok {
+		r.log.Error("Failed to get RawJSONSink")
+		return nil, false
+	}
+
+	rawSink, ok := sink.(*logging.RawJSONSink)
+	if !ok {
+		r.log.Error("Failed to get RawJSONSink: wrong type", "type", fmt.Sprintf("%T", sink))
+		return nil, false
+	}
+
+	return rawSink, true
+}
+
+// storeRawJSON is a helper method to store raw JSON for a test
+func (r *runner) storeRawJSON(testID string, rawJSON []byte) {
+	if rawSink, ok := r.getRawJSONSink(); ok {
+		rawSink.StoreRawJSON(testID, rawJSON)
+	} else {
+		r.log.Debug("No raw JSON sink available, not storing raw JSON output")
+	}
+}
+
+// getRawJSON is a helper method to retrieve raw JSON for a test
+func (r *runner) getRawJSON(testID string) ([]byte, bool) {
+	if rawSink, ok := r.getRawJSONSink(); ok {
+		return rawSink.GetRawJSON(testID)
+	}
+	return nil, false
 }
 
 func (r *runner) testCommandContext(ctx context.Context, name string, arg ...string) (*exec.Cmd, func()) {

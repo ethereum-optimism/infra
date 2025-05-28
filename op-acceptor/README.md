@@ -133,16 +133,18 @@ go run cmd/main.go \
 
 For each test run, the following outputs are generated in the logs directory:
 
+0. HTML summary of the test run in `logs/results.html`
 1. Individual test log files in `logs/testrun-{run-id}/tests/`
 2. Summary of the test run in `logs/testrun-{run-id}/summary.log`
 3. Combined log of all tests in `logs/testrun-{run-id}/all.log`
 4. Failed test logs in `logs/testrun-{run-id}/failed/`
 5. Raw Go test events in `logs/testrun-{run-id}/raw_go_events.log` (in the format of `go test -json`)
 
-In CI environments, you can easily access all failed test logs with:
-```bash
-cat /path/to/logs/testrun-*/failed/*
-```
+#### Raw JSON Events Logging
+
+The `raw_go_events.log` file contains the complete raw JSON output from all tests. This file is compatible with tools like `gotestsum` and other Go test analysis tools that expect the standard `go test -json` format.
+
+
 
 ### Create a release
 Releases are created by pushing tags which triggers a CircleCI pipeline.
