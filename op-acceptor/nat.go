@@ -76,16 +76,16 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 
 	// Create runner with registry
 	testRunner, err := runner.NewTestRunner(runner.Config{
-		Registry:       reg,
-		WorkDir:        config.TestDir,
-		Log:            config.Log,
-		TargetGate:     config.TargetGate,
-		GoBinary:       config.GoBinary,
-		AllowSkips:     config.AllowSkips,
-		OutputTestLogs: config.OutputTestLogs,
-		TestLogLevel:   config.TestLogLevel,
-		NetworkName:    networkName,
-		DevnetEnv:      env,
+		Registry:           reg,
+		WorkDir:            config.TestDir,
+		Log:                config.Log,
+		TargetGate:         config.TargetGate,
+		GoBinary:           config.GoBinary,
+		AllowSkips:         config.AllowSkips,
+		OutputRealtimeLogs: config.OutputRealtimeLogs,
+		TestLogLevel:       config.TestLogLevel,
+		NetworkName:        networkName,
+		DevnetEnv:          env,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)

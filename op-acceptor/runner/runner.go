@@ -94,34 +94,34 @@ type TestRunnerWithFileLogger interface {
 
 // runner struct implements TestRunner interface
 type runner struct {
-	registry       *registry.Registry
-	validators     []types.ValidatorMetadata
-	workDir        string // Directory for running tests
-	log            log.Logger
-	runID          string
-	goBinary       string              // Path to the Go binary
-	allowSkips     bool                // Whether to allow skipping tests when preconditions are not met
-	outputTestLogs bool                // Whether to output test logs to the console
-	testLogLevel   string              // Log level to be used for the tests
-	fileLogger     *logging.FileLogger // Logger for storing test results
-	networkName    string              // Name of the network being tested
-	env            *env.DevnetEnv
-	tracer         trace.Tracer
+	registry           *registry.Registry
+	validators         []types.ValidatorMetadata
+	workDir            string // Directory for running tests
+	log                log.Logger
+	runID              string
+	goBinary           string              // Path to the Go binary
+	allowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	outputRealtimeLogs bool                // If enabled, test logs will be outputted in realtime
+	testLogLevel       string              // Log level to be used for the tests
+	fileLogger         *logging.FileLogger // Logger for storing test results
+	networkName        string              // Name of the network being tested
+	env                *env.DevnetEnv
+	tracer             trace.Tracer
 }
 
 // Config holds configuration for creating a new runner
 type Config struct {
-	Registry       *registry.Registry
-	TargetGate     string
-	WorkDir        string
-	Log            log.Logger
-	GoBinary       string              // path to the Go binary
-	AllowSkips     bool                // Whether to allow skipping tests when preconditions are not met
-	OutputTestLogs bool                // Whether to output test logs to the console
-	TestLogLevel   string              // Log level to be used for the tests
-	FileLogger     *logging.FileLogger // Logger for storing test results
-	NetworkName    string              // Name of the network being tested
-	DevnetEnv      *env.DevnetEnv
+	Registry           *registry.Registry
+	TargetGate         string
+	WorkDir            string
+	Log                log.Logger
+	GoBinary           string              // path to the Go binary
+	AllowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	OutputRealtimeLogs bool                // Whether to output test logs to the console
+	TestLogLevel       string              // Log level to be used for the tests
+	FileLogger         *logging.FileLogger // Logger for storing test results
+	NetworkName        string              // Name of the network being tested
+	DevnetEnv          *env.DevnetEnv
 }
 
 // NewTestRunner creates a new test runner instance
@@ -161,18 +161,18 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName)
 
 	return &runner{
-		registry:       cfg.Registry,
-		validators:     validators,
-		workDir:        cfg.WorkDir,
-		log:            cfg.Log,
-		goBinary:       cfg.GoBinary,
-		allowSkips:     cfg.AllowSkips,
-		outputTestLogs: cfg.OutputTestLogs,
-		testLogLevel:   cfg.TestLogLevel,
-		fileLogger:     cfg.FileLogger,
-		networkName:    networkName,
-		env:            cfg.DevnetEnv,
-		tracer:         otel.Tracer("test runner"),
+		registry:           cfg.Registry,
+		validators:         validators,
+		workDir:            cfg.WorkDir,
+		log:                cfg.Log,
+		goBinary:           cfg.GoBinary,
+		allowSkips:         cfg.AllowSkips,
+		outputRealtimeLogs: cfg.OutputRealtimeLogs,
+		testLogLevel:       cfg.TestLogLevel,
+		fileLogger:         cfg.FileLogger,
+		networkName:        networkName,
+		env:                cfg.DevnetEnv,
+		tracer:             otel.Tracer("test runner"),
 	}, nil
 }
 
@@ -542,7 +542,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
-	if r.outputTestLogs {
+	if r.outputRealtimeLogs {
 		stdoutLogger := &logWriter{logFn: func(msg string) {
 			r.log.Info("Test output", "test", metadata.FuncName, "output", msg)
 		}}

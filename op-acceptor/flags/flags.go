@@ -72,7 +72,7 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TEST_LOG_LEVEL"),
 		Usage:   "Log level to be used for the tests. Defaults to 'info'.",
 	}
-	OutputTestLogs = &cli.BoolFlag{
+	OutputRealtimeLogs = &cli.BoolFlag{
 		Name:    "output-test-logs",
 		Value:   false,
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_TEST_LOGS"),
@@ -93,7 +93,7 @@ var optionalFlags = []cli.Flag{
 	DefaultTimeout,
 	LogDir,
 	TestLogLevel,
-	OutputTestLogs,
+	OutputRealtimeLogs,
 }
 var Flags []cli.Flag
 

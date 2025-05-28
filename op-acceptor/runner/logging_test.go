@@ -205,8 +205,8 @@ func (l *testLogger) Write(level slog.Level, msg string, attrs ...any) {
 	l.logFn(l.formatMessage(msg, attrs...))
 }
 
-// TestOutputTestLogsRealtime verifies that test logs are output in real-time when outputTestLogs is enabled
-func TestOutputTestLogsRealtime(t *testing.T) {
+// TestOutputRealtimeLogs verifies that test logs are output in real-time when outputRealtimeLogs is enabled
+func TestOutputRealtimeLogs(t *testing.T) {
 	// Create a test file that outputs logs over time
 	testContent := []byte(`
 package feature_test
@@ -248,7 +248,7 @@ gates:
 	}
 
 	r := setupTestRunner(t, testContent, configContent)
-	r.outputTestLogs = true
+	r.outputRealtimeLogs = true
 	r.log = customLogger
 
 	// Run the test in a goroutine
@@ -293,8 +293,8 @@ gates:
 	}
 }
 
-// TestOutputTestLogsRealtimeDisabled verifies that test logs are output in real-time when outputTestLogs is disabled
-func TestOutputTestLogsRealtimeDisabled(t *testing.T) {
+// TestOutputRealtimeLogsDisabled verifies that test logs are output in real-time when outputRealtimeLogs is disabled
+func TestOutputRealtimeLogsDisabled(t *testing.T) {
 	// Create a test file that outputs logs over time
 	testContent := []byte(`
 package feature_test
@@ -336,7 +336,7 @@ gates:
 	}
 
 	r := setupTestRunner(t, testContent, configContent)
-	r.outputTestLogs = false
+	r.outputRealtimeLogs = false
 	r.log = customLogger
 
 	// Run the test in a goroutine
@@ -350,7 +350,7 @@ gates:
 
 	time.Sleep(10 * time.Millisecond)
 
-	// With outputTestLogs disabled, we should not receive any messages in real-time
+	// With outputRealtimeLogs disabled, we should not receive any messages in real-time
 	// Wait for the running message to be logged
 	// go test ./feature -run ^TestWithRealtimeLogs$
 	timeout := time.After(1000 * time.Millisecond)
