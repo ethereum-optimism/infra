@@ -295,8 +295,11 @@ func (n *nat) runTests(ctx context.Context) error {
 		// Continue execution despite file saving errors
 	}
 
+	reproBlurb := "\n\nTo reproduce this run, set the following environment variables:\n\n" + n.runner.ReproducibleEnv().String()
+
 	n.config.Log.Info("Printing results table")
 	n.printResultsTable(result.RunID)
+	n.config.Log.Info(reproBlurb)
 
 	// Complete the file logging
 	if err := n.fileLogger.Complete(result.RunID); err != nil {
@@ -304,7 +307,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	}
 
 	// Save the original detailed summary to the all.log file
-	resultSummary := n.result.String()
+	resultSummary := n.result.String() + reproBlurb
 
 	// Get the all.log file path
 	allLogsFile, err := n.fileLogger.GetAllLogsFileForRunID(result.RunID)
