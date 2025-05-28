@@ -83,6 +83,7 @@ type ResultStats struct {
 type TestRunner interface {
 	RunAllTests(ctx context.Context) (*RunnerResult, error)
 	RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error)
+	ReproducibleEnv() Env
 }
 
 // TestRunnerWithFileLogger extends the TestRunner interface with a method
@@ -1203,13 +1204,12 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			r.log.Error("Failed to write env to temp file", "error", err)
 		}
 
-		runEnv = append(runEnv,
+		runEnv = append(
+			append(runEnv, r.ReproducibleEnv()...),
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
 			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
-			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
-			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
 		)
 		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
 	}
@@ -1220,6 +1220,21 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 		}
 	}
 	return cmd, cleanup
+}
+
+func (r *runner) ReproducibleEnv() Env {
+	return Env{
+		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
+		fmt.Sprintf("%s=%s", env.ExpectPreconditionsMet, "true"),
+		// salt the funder abstraction with the runID
+		fmt.Sprintf("%s=%s", "DEVSTACK_KEYS_SALT", r.runID),
+	}
+}
+
+type Env []string
+
+func (e Env) String() string {
+	return strings.Join(e, "\n")
 }
 
 // Make sure the runner type implements both interfaces
