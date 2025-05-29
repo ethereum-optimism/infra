@@ -52,7 +52,7 @@ func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]co
 
 func getInteropExecutingDescriptorTimestamp() uint64 {
 	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
-	return uint64(time.Now().Second() + 1000)
+	return uint64(time.Now().Unix() + 1000)
 }
 
 func (s *Server) rateLimitInteropSender(ctx context.Context, req *RPCReq) error {
