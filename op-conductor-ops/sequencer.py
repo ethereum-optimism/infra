@@ -93,15 +93,15 @@ class Sequencer:
     def _get_builder_unsafe_l2(self):
         resp = requests.post(
             self.builder_rpc_url,
-            json=make_rpc_payload("optimism_syncStatus"),
+            json=make_rpc_payload("eth_getBlockByNumber", ["latest", False]),
         )
         try:
             resp.raise_for_status()
         except Exception as e:
             return None
         result = resp.json()["result"]
-        self.builder_unsafe_l2_number = result["unsafe_l2"]["number"]
-        self.builder_unsafe_l2_hash = result["unsafe_l2"]["hash"]
+        self.builder_unsafe_l2_number = int(result["number"], 16)
+        self.builder_unsafe_l2_hash = result["hash"]
 
     def _get_unsafe_l2(self):
         resp = requests.post(

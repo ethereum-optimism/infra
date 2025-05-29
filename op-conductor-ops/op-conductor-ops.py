@@ -114,15 +114,15 @@ def status(network: str):
         "Leader",
         "Sequencing",
         "Voting",
-        "Unsafe Number",
+        "Unsafe #",
         "Unsafe Hash",
     ]
 
     # Add rollup boost column if present
     if has_rollup_boost:
         logging.debug("sequencer has builder_rpc_url")
-        columns.append("Builder Synced")
-        columns.append("Rollup Boost Mode")
+        columns.append("Bldr Synced")
+        columns.append("RB Mode")
 
     table = Table(*columns)  # Unpack columns
 
@@ -140,20 +140,27 @@ def status(network: str):
         ]
         # Add rollup boost data if the column exists
         if has_rollup_boost:
-            logging.debug(
-                f"{sequencer.sequencer_id}.l2_unsafe_number: {sequencer.unsafe_l2_number}"
-            )
-            logging.debug(
-                f"{sequencer.sequencer_id}.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
-            )
-            builder_diff = (
-                2
-                > (sequencer.unsafe_l2_number - sequencer.builder_unsafe_l2_number)
-                > -1
-            )
-            logging.debug(f"builder diff: {builder_diff}")
-            row_data.append(print_boolean(builder_diff))
-            row_data.append(sequencer.rollup_boost_execution_mode)
+            if (
+                sequencer.builder_unsafe_l2_number is None
+                or sequencer.unsafe_l2_number is None
+            ):
+                row_data.append(print_boolean(None))
+                row_data.append(print_boolean(None))
+            else:
+                logging.debug(
+                    f"{sequencer.sequencer_id}.l2_unsafe_number: {sequencer.unsafe_l2_number}"
+                )
+                logging.debug(
+                    f"{sequencer.sequencer_id}.builder_l2_unsafe_number: {sequencer.builder_unsafe_l2_number}"
+                )
+                builder_diff = (
+                    2
+                    > (sequencer.unsafe_l2_number - sequencer.builder_unsafe_l2_number)
+                    > -1
+                )
+                logging.debug(f"builder diff: {builder_diff}")
+                row_data.append(print_boolean(builder_diff))
+                row_data.append(sequencer.rollup_boost_execution_mode)
 
         table.add_row(*row_data)  # Unpack row data
 
