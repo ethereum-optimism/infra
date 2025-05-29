@@ -2,7 +2,6 @@ package logging
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
@@ -114,23 +114,27 @@ func (af *AsyncFile) Close() error {
 	return af.file.Close()
 }
 
-// NewFileLogger creates a new file logger with the specified base directory and runID
+// NewFileLogger creates a new FileLogger with given configuration
 func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*FileLogger, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("runID cannot be empty")
 	}
 
-	// Create subdirectory for this specific run
-	runDir := filepath.Join(baseDir, fmt.Sprintf("testrun-%s", runID))
-	failedDir := filepath.Join(runDir, "failed")
-	passedDir := filepath.Join(runDir, "passed")
+	if baseDir == "" {
+		return nil, fmt.Errorf("baseDir cannot be empty")
+	}
+
+	logDir := filepath.Join(baseDir, runID)
+	failedDir := filepath.Join(logDir, "failed")
+	summaryFile := filepath.Join(logDir, "summary.log")
+	allLogsFile := filepath.Join(logDir, "all.log")
 
 	// Create directories if they don't exist
 	dirs := []string{
 		baseDir,
-		runDir,
+		logDir,
 		failedDir,
-		passedDir,
+		filepath.Join(logDir, "passed"),
 	}
 
 	for _, dir := range dirs {
@@ -139,28 +143,49 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 		}
 	}
 
-	summaryFile := filepath.Join(runDir, "summary.log")
-	allLogsFile := filepath.Join(runDir, "all.log")
-
+	// Initialize all sinks
 	logger := &FileLogger{
-		baseDir:      runDir,
-		logDir:       baseDir,
+		baseDir:      baseDir,
+		logDir:       logDir,
 		failedDir:    failedDir,
 		summaryFile:  summaryFile,
 		allLogsFile:  allLogsFile,
+		sinks:        make([]ResultSink, 0),
 		asyncWriters: make(map[string]*AsyncFile),
 		runID:        runID,
 	}
 
-	// Add sinks - order matters
-	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
-	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
-	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
-	logger.sinks = append(logger.sinks, &PerTestFileSink{
+	// Initialize the AllLogsFileSink
+	allLogsSink := &AllLogsFileSink{logger: logger}
+	logger.sinks = append(logger.sinks, allLogsSink)
+
+	// Initialize the PerTestFileSink
+	perTestSink := &PerTestFileSink{
 		logger:         logger,
 		processedTests: make(map[string]bool),
-	})
-	logger.sinks = append(logger.sinks, NewHTMLSummarySink(logger, networkName, gateRun))
+	}
+	logger.sinks = append(logger.sinks, perTestSink)
+
+	// Initialize the RawJSONSink
+	rawJSONSink := &RawJSONSink{logger: logger}
+	logger.sinks = append(logger.sinks, rawJSONSink)
+
+	// Load HTML template
+	templateContent, err := templateFS.ReadFile("templates/" + HTMLResultsTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read HTML template: %w", err)
+	}
+
+	// Initialize the new ReportingHTMLSink
+	htmlSink, err := reporting.NewReportingHTMLSink(baseDir, runID, networkName, gateRun, string(templateContent), getReadableTestFilename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTML sink: %w", err)
+	}
+	logger.sinks = append(logger.sinks, htmlSink)
+
+	// Initialize the new ReportingTextSummarySink
+	textSummarySink := reporting.NewReportingTextSummarySink(baseDir, runID, networkName, gateRun, false)
+	logger.sinks = append(logger.sinks, textSummarySink)
 
 	return logger, nil
 }
@@ -203,8 +228,13 @@ func (l *FileLogger) GetDirectoryForRunID(runID string) (string, error) {
 	if runID == "" {
 		return "", fmt.Errorf("runID cannot be empty")
 	}
+	// If the runID matches the logger's current runID, return logDir
+	if runID == l.runID {
+		return l.logDir, nil
+	}
+	// Otherwise, construct the path for the different runID
 	dirName := fmt.Sprintf("testrun-%s", runID)
-	return filepath.Join(l.logDir, dirName), nil
+	return filepath.Join(l.baseDir, dirName), nil
 }
 
 // LogTestResult processes a test result through all registered sinks
@@ -267,7 +297,7 @@ func (l *FileLogger) Complete(runID string) error {
 
 // GetBaseDir returns the base directory for this test run
 func (l *FileLogger) GetBaseDir() string {
-	return l.baseDir
+	return l.logDir
 }
 
 // GetFailedDir returns the directory containing logs for failed tests
@@ -383,8 +413,23 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 	if metadata.FuncName != "" {
 		fileName = metadata.FuncName
 	} else if metadata.RunAll {
-		// For package tests that run all tests
-		fileName = "AllTests"
+		// For package tests that run all tests, use package basename instead of "AllTests"
+		if metadata.Package != "" {
+			packageParts := strings.Split(metadata.Package, "/")
+			// Find the last non-empty part
+			for i := len(packageParts) - 1; i >= 0; i-- {
+				if packageParts[i] != "" {
+					fileName = packageParts[i]
+					break
+				}
+			}
+			// If we didn't find a package name, use a fallback
+			if fileName == "" {
+				fileName = "PackageSuite"
+			}
+		} else {
+			fileName = "PackageSuite"
+		}
 	} else {
 		fileName = metadata.ID // Fallback to ID if no function name
 	}
@@ -537,162 +582,6 @@ func truncateString(s string, maxLen int) string {
 // Complete is a no-op for AllLogsFileSink
 func (s *AllLogsFileSink) Complete(runID string) error {
 	return nil
-}
-
-// ConciseSummarySink creates a concise summary in summary.log
-type ConciseSummarySink struct {
-	logger       *FileLogger
-	passed       int
-	failed       int
-	skipped      int
-	errored      int
-	timeouts     int // Track timeout failures separately
-	failedTests  []string
-	timeoutTests []string // Track which tests timed out
-	testResults  []*types.TestResult
-}
-
-// Consume updates the summary statistics
-func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) error {
-	// Store the test result
-	s.testResults = append(s.testResults, result)
-
-	// Check if this is a timeout failure
-	isTimeout := result.TimedOut
-	if isTimeout {
-		s.timeouts++
-	}
-
-	// Update statistics based on test status
-	switch result.Status {
-	case types.TestStatusPass:
-		s.passed++
-	case types.TestStatusFail:
-		s.failed++
-		// Keep track of failed tests for the summary
-		testName := result.Metadata.FuncName
-		if result.Metadata.Package != "" {
-			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
-		}
-
-		if isTimeout {
-			s.failedTests = append(s.failedTests, testName+" (TIMEOUT)")
-			s.timeoutTests = append(s.timeoutTests, testName)
-		} else {
-			s.failedTests = append(s.failedTests, testName)
-		}
-	case types.TestStatusSkip:
-		s.skipped++
-	case types.TestStatusError:
-		s.errored++
-		// Keep track of errored tests too
-		testName := result.Metadata.FuncName
-		if result.Metadata.Package != "" {
-			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
-		}
-		s.failedTests = append(s.failedTests, testName+" (ERROR)")
-	}
-
-	// Also check subtests for timeouts
-	if len(result.SubTests) > 0 {
-		for subTestName, subTest := range result.SubTests {
-			if subTest.TimedOut {
-				s.timeouts++
-				fullSubTestName := fmt.Sprintf("%s/%s", result.Metadata.FuncName, subTestName)
-				if result.Metadata.Package != "" {
-					fullSubTestName = fmt.Sprintf("%s.%s", result.Metadata.Package, fullSubTestName)
-				}
-				s.timeoutTests = append(s.timeoutTests, fullSubTestName)
-
-				// Add to failed tests if not already there
-				found := false
-				for _, existing := range s.failedTests {
-					if strings.Contains(existing, fullSubTestName) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					s.failedTests = append(s.failedTests, fullSubTestName+" (SUBTEST TIMEOUT)")
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// Complete generates and writes the final summary
-func (s *ConciseSummarySink) Complete(runID string) error {
-	// Get the summary file path for this runID
-	summaryFile, err := s.logger.GetSummaryFileForRunID(runID)
-	if err != nil {
-		return err
-	}
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(summaryFile)
-	if err != nil {
-		return err
-	}
-
-	// Calculate totals and duration
-	total := s.passed + s.failed + s.skipped + s.errored
-
-	// Calculate total duration from sum of all test durations
-	var totalDuration time.Duration
-	for _, result := range s.testResults {
-		totalDuration += result.Duration
-	}
-
-	// Build the concise summary
-	var summary strings.Builder
-	fmt.Fprintf(&summary, "TEST SUMMARY\n")
-	fmt.Fprintf(&summary, "============\n")
-	fmt.Fprintf(&summary, "Run ID: %s\n", runID)
-	fmt.Fprintf(&summary, "Time: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&summary, "Duration: %s\n\n", totalDuration)
-
-	// Add timeout warning if there were any timeouts
-	if s.timeouts > 0 {
-		fmt.Fprintf(&summary, "⚠️  WARNING: %d TEST(S) TIMED OUT! ⚠️\n\n", s.timeouts)
-	}
-
-	fmt.Fprintf(&summary, "Results:\n")
-	fmt.Fprintf(&summary, "  Total:   %d\n", total)
-	fmt.Fprintf(&summary, "  Passed:  %d\n", s.passed)
-	fmt.Fprintf(&summary, "  Failed:  %d\n", s.failed)
-	fmt.Fprintf(&summary, "  Skipped: %d\n", s.skipped)
-	fmt.Fprintf(&summary, "  Errors:  %d\n", s.errored)
-	if s.timeouts > 0 {
-		fmt.Fprintf(&summary, "  Timeouts: %d\n", s.timeouts)
-	}
-	fmt.Fprintf(&summary, "\n")
-
-	// Add timeout information prominently if there were timeouts
-	if len(s.timeoutTests) > 0 {
-		fmt.Fprintf(&summary, "TIMED OUT TESTS:\n")
-		fmt.Fprintf(&summary, "================\n")
-		for _, test := range s.timeoutTests {
-			fmt.Fprintf(&summary, "  ⏰ %s\n", test)
-		}
-		fmt.Fprintf(&summary, "\n")
-	}
-
-	// Include a list of failed tests if there are any
-	if len(s.failedTests) > 0 {
-		fmt.Fprintf(&summary, "Failed tests:\n")
-		for _, test := range s.failedTests {
-			fmt.Fprintf(&summary, "  - %s\n", test)
-		}
-		fmt.Fprintf(&summary, "\n")
-	}
-
-	// Add location of the detailed logs
-	fmt.Fprintf(&summary, "Full details: see %s\n", s.logger.GetAllLogsFile())
-
-	// Write the summary
-	return writer.Write([]byte(summary.String()))
 }
 
 // GetRunID returns the current runID
@@ -1120,346 +1009,10 @@ func (s *PerTestFileSink) Complete(runID string) error {
 	return nil
 }
 
-// TestResultRow represents a row in the HTML test results table
-type TestResultRow struct {
-	StatusClass       string
-	StatusText        string
-	TestName          string
-	Package           string
-	Gate              string
-	Suite             string
-	DurationFormatted string
-	LogPath           string
-	IsSubTest         bool   // Whether this is a subtest
-	ParentTest        string // Name of the parent test for subtests
-}
-
-// HTMLSummaryData contains all the data needed for the HTML template
-type HTMLSummaryData struct {
-	RunID             string
-	Time              string
-	TotalDuration     string
-	Total             int
-	Passed            int
-	Failed            int
-	Skipped           int
-	Errored           int
-	PassRateFormatted string
-	HasFailures       bool
-	Tests             []TestResultRow
-	DevnetName        string // Name of the devnet being tested
-	GateRun           string // Name of the gate being run
-}
-
-// HTMLSummarySink creates an HTML report for better visualization of test results
-type HTMLSummarySink struct {
-	logger      *FileLogger
-	passed      int
-	failed      int
-	skipped     int
-	errored     int
-	testResults []*types.TestResult
-	networkName string // Name of the network being tested
-	gateRun     string // Name of the gate being run
-}
-
-// NewHTMLSummarySink creates a new HTMLSummarySink with network and gate information
-func NewHTMLSummarySink(logger *FileLogger, networkName, gateRun string) *HTMLSummarySink {
-	return &HTMLSummarySink{
-		logger:      logger,
-		testResults: make([]*types.TestResult, 0),
-		networkName: networkName,
-		gateRun:     gateRun,
-	}
-}
-
-// Consume collects test results for later HTML generation
-func (s *HTMLSummarySink) Consume(result *types.TestResult, runID string) error {
-	// Store the test result for later processing
-	s.testResults = append(s.testResults, result)
-
-	// Update statistics based on test status
-	switch result.Status {
-	case types.TestStatusPass:
-		s.passed++
-	case types.TestStatusFail:
-		s.failed++
-	case types.TestStatusSkip:
-		s.skipped++
-	case types.TestStatusError:
-		s.errored++
-	}
-
-	// Update statistics for subtests
-	for _, subTest := range result.SubTests {
-		switch subTest.Status {
-		case types.TestStatusPass:
-			s.passed++
-		case types.TestStatusFail:
-			s.failed++
-		case types.TestStatusSkip:
-			s.skipped++
-		case types.TestStatusError:
-			s.errored++
-		}
-	}
-
-	return nil
-}
-
-// Complete generates the HTML summary file
-func (s *HTMLSummarySink) Complete(runID string) error {
-	// Get the base directory for this runID
-	baseDir, err := s.logger.GetDirectoryForRunID(runID)
-	if err != nil {
-		return err
-	}
-
-	// Calculate totals and duration
-	total := s.passed + s.failed + s.skipped + s.errored
-
-	// Calculate total duration from sum of all test durations
-	var totalDuration time.Duration
-	for _, result := range s.testResults {
-		totalDuration += result.Duration
-		// Add subtest durations
-		for _, subTest := range result.SubTests {
-			totalDuration += subTest.Duration
-		}
-	}
-
-	// Calculate pass rate
-	passRate := 0.0
-	if total > 0 {
-		passRate = float64(s.passed) / float64(total) * 100
-	}
-
-	// Prepare the test result rows (including subtests)
-	// First, identify package tests and their subtests
-	packageTestsWithSubtests := make(map[string]map[string]bool) // package -> subtest names from package tests
-	packageTests := make([]*types.TestResult, 0)
-	individualTests := make([]*types.TestResult, 0)
-
-	for _, result := range s.testResults {
-		if result.Metadata.RunAll && len(result.SubTests) > 0 {
-			// This is a package test with subtests
-			packageTests = append(packageTests, result)
-			packageName := result.Metadata.Package
-			if packageTestsWithSubtests[packageName] == nil {
-				packageTestsWithSubtests[packageName] = make(map[string]bool)
-			}
-			for subTestName := range result.SubTests {
-				packageTestsWithSubtests[packageName][subTestName] = true
-			}
-		} else {
-			// This is an individual test (including regular tests with subtests)
-			individualTests = append(individualTests, result)
-		}
-	}
-
-	// Filter out individual tests that are duplicated as subtests in package tests in the same package
-	// BUT never filter out tests that have their own subtests
-	filteredIndividualTests := make([]*types.TestResult, 0)
-	for _, result := range individualTests {
-		// Never filter out tests that have their own subtests - they should always be displayed
-		if len(result.SubTests) > 0 {
-			filteredIndividualTests = append(filteredIndividualTests, result)
-			continue
-		}
-
-		// For tests without subtests, check if they're duplicated as subtests in package tests
-		testName := result.Metadata.FuncName
-		if testName == "" {
-			testName = result.Metadata.ID
-		}
-		packageName := result.Metadata.Package
-
-		// Only filter out if this test name exists as a subtest in a package test in the same package
-		// AND this test doesn't have its own subtests
-		if testName != "" && packageName != "" {
-			if subtestsInSamePackage, exists := packageTestsWithSubtests[packageName]; exists && subtestsInSamePackage[testName] {
-				// This individual test is duplicated as a subtest in a package test - filter it out
-				continue
-			}
-		}
-
-		// Keep this individual test
-		filteredIndividualTests = append(filteredIndividualTests, result)
-	}
-
-	tests := make([]TestResultRow, 0)
-
-	// Add filtered individual tests (including their subtests if any)
-	for _, result := range filteredIndividualTests {
-		mainTestRow := s.createTestResultRow(result, false, "")
-		tests = append(tests, mainTestRow)
-
-		// Add subtests for individual tests
-		for subTestName, subTest := range result.SubTests {
-			subTestResult := &types.TestResult{
-				Metadata: types.ValidatorMetadata{
-					ID:       subTest.Metadata.ID,
-					Gate:     result.Metadata.Gate,
-					Suite:    result.Metadata.Suite,
-					FuncName: subTestName,
-					Package:  result.Metadata.Package,
-					RunAll:   false,
-				},
-				Status:   subTest.Status,
-				Error:    subTest.Error,
-				Duration: subTest.Duration,
-				Stdout:   subTest.Stdout,
-			}
-			subTestRow := s.createTestResultRow(subTestResult, true, result.Metadata.FuncName)
-			tests = append(tests, subTestRow)
-		}
-	}
-
-	// Add package tests and their subtests
-	for _, result := range packageTests {
-		// Add the main package test row
-		mainTestRow := s.createTestResultRow(result, false, "")
-		tests = append(tests, mainTestRow)
-
-		// Add subtest rows
-		for subTestName, subTest := range result.SubTests {
-			// Create a subtest result with proper metadata for filename generation
-			subTestResult := &types.TestResult{
-				Metadata: types.ValidatorMetadata{
-					ID:       subTest.Metadata.ID,
-					Gate:     result.Metadata.Gate,    // Use parent's gate
-					Suite:    result.Metadata.Suite,   // Use parent's suite
-					FuncName: subTestName,             // Use the subtest name
-					Package:  result.Metadata.Package, // Use parent's package
-					RunAll:   false,
-				},
-				Status:   subTest.Status,
-				Error:    subTest.Error,
-				Duration: subTest.Duration,
-				Stdout:   subTest.Stdout,
-			}
-
-			subTestRow := s.createTestResultRow(subTestResult, true, result.Metadata.FuncName)
-			// The test name is already set correctly from the metadata
-			tests = append(tests, subTestRow)
-		}
-	}
-
-	// Prepare the template data
-	data := HTMLSummaryData{
-		RunID:             runID,
-		Time:              time.Now().Format(time.RFC3339),
-		TotalDuration:     formatDuration(totalDuration),
-		Total:             total,
-		Passed:            s.passed,
-		Failed:            s.failed,
-		Skipped:           s.skipped,
-		Errored:           s.errored,
-		PassRateFormatted: fmt.Sprintf("%.1f", passRate),
-		HasFailures:       s.failed+s.errored > 0,
-		Tests:             tests,
-		DevnetName:        s.networkName,
-		GateRun:           s.gateRun,
-	}
-
-	// Parse the template
-	tmpl, err := GetHTMLTemplate(HTMLResultsTemplate)
-	if err != nil {
-		return fmt.Errorf("failed to parse HTML template: %w", err)
-	}
-
-	// Execute the template
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Errorf("failed to execute HTML template: %w", err)
-	}
-
-	// Create the HTML report filepath
-	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(htmlFile)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
-
-	// Write the HTML content
-	return writer.Write(buf.Bytes())
-}
-
-// createTestResultRow creates a TestResultRow from a TestResult
-func (s *HTMLSummarySink) createTestResultRow(result *types.TestResult, isSubTest bool, parentTest string) TestResultRow {
-	// Determine status class
-	statusClass := ""
-	statusText := ""
-	switch result.Status {
-	case types.TestStatusPass:
-		statusClass = "pass"
-		statusText = "PASS"
-	case types.TestStatusFail:
-		statusClass = "fail"
-		statusText = "FAIL"
-	case types.TestStatusSkip:
-		statusClass = "skip"
-		statusText = "SKIP"
-	case types.TestStatusError:
-		statusClass = "error"
-		statusText = "ERROR"
-	}
-
-	// Generate filename using the test metadata
-	filename := getReadableTestFilename(result.Metadata) + ".log"
-	logPath := ""
-	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		logPath = "failed/" + filename
-	} else {
-		logPath = "passed/" + filename
-	}
-
-	testName := result.Metadata.FuncName
-	if testName == "" {
-		if result.Metadata.RunAll {
-			testName = "AllTests"
-		} else {
-			testName = result.Metadata.ID
-		}
-	}
-
-	// If still empty, use package name as fallback for better visibility
-	if testName == "" {
-		if result.Metadata.Package != "" {
-			// Extract package basename for display
-			parts := strings.Split(result.Metadata.Package, "/")
-			if len(parts) > 0 {
-				testName = parts[len(parts)-1] + " (package)"
-			} else {
-				testName = result.Metadata.Package + " (package)"
-			}
-		} else {
-			testName = "Unknown Test"
-		}
-	}
-
-	return TestResultRow{
-		StatusClass:       statusClass,
-		StatusText:        statusText,
-		TestName:          testName,
-		Package:           result.Metadata.Package,
-		Gate:              result.Metadata.Gate,
-		Suite:             result.Metadata.Suite,
-		DurationFormatted: formatDuration(result.Duration),
-		LogPath:           logPath,
-		IsSubTest:         isSubTest,
-		ParentTest:        parentTest,
-	}
-}
-
-// formatDuration formats a time.Duration to a human-readable string
-// Extracted from the existing formatDuration function
+// formatDuration formats a duration for display
 func formatDuration(d time.Duration) string {
 	if d < time.Second {
-		return fmt.Sprintf("%.2fms", float64(d.Milliseconds()))
+		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
-	return fmt.Sprintf("%.2fs", d.Seconds())
+	return d.Truncate(time.Millisecond).String()
 }
