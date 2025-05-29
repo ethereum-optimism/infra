@@ -73,10 +73,10 @@ var (
 		Usage:   "Log level to be used for the tests. Defaults to 'info'.",
 	}
 	OutputRealtimeLogs = &cli.BoolFlag{
-		Name:    "output-test-logs",
+		Name:    "output-realtime-logs",
 		Value:   false,
-		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_TEST_LOGS"),
-		Usage:   "Output test logs to the console. Defaults to false.",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
+		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
 	}
 )
 
