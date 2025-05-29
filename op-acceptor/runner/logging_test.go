@@ -2,9 +2,17 @@ package runner
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,4 +75,313 @@ gates:
 	assert.NotEmpty(t, failingTest.Stdout)
 	assert.Contains(t, failingTest.Stdout, "This is some stdout output that should be captured")
 	assert.Contains(t, failingTest.Stdout, "This is a second line of output")
+}
+
+// TestLogLevelEnvironment verifies that the TEST_LOG_LEVEL environment variable is correctly set and used
+func TestLogLevelEnvironment(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a simple test file in the work directory
+	testContent := []byte(`
+package main
+
+import (
+	"os"
+	"testing"
+)
+
+func TestLogLevelEnvironment(t *testing.T) {
+    // Get log level from environment
+    logLevel := os.Getenv("TEST_LOG_LEVEL")
+    if logLevel == "" {
+		t.Log("TEST_LOG_LEVEL not set")
+    } else {
+		t.Log("TEST_LOG_LEVEL set to", logLevel)
+	}
+}
+`)
+	configContent := []byte(`
+gates:
+  - id: logging-gate
+    description: "Gate with a test that outputs logs"
+    suites:
+      logging-suite:
+        description: "Suite with a test that outputs logs"
+        tests:
+          - name: TestLogLevelEnvironment
+            package: "./main"
+`)
+
+	r := setupTestRunner(t, testContent, configContent)
+	r.testLogLevel = "debug"
+	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	result, err := r.RunTest(ctx, types.ValidatorMetadata{
+		ID:       "test1",
+		Gate:     "logging-gate",
+		FuncName: "TestLogLevelEnvironment",
+		Package:  ".",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, types.TestStatusPass, result.Status)
+	assert.Equal(t, "test1", result.Metadata.ID)
+	assert.Equal(t, "logging-gate", result.Metadata.Gate)
+	assert.Equal(t, ".", result.Metadata.Package)
+	assert.False(t, result.Metadata.RunAll)
+	assert.Contains(t, result.Stdout, "TEST_LOG_LEVEL set to debug")
+}
+
+// testLogger implements the go-ethereum/log.Logger interface
+type testLogger struct {
+	logFn func(msg string)
+}
+
+func (l *testLogger) formatMessage(msg string, ctx ...interface{}) string {
+	if len(ctx) == 0 {
+		return msg
+	}
+
+	// Format key-value pairs
+	var pairs []string
+	for i := 0; i < len(ctx); i += 2 {
+		if i+1 < len(ctx) {
+			pairs = append(pairs, fmt.Sprintf("%v=%v", ctx[i], ctx[i+1]))
+		}
+	}
+
+	if len(pairs) > 0 {
+		return fmt.Sprintf("%s %s", msg, strings.Join(pairs, " "))
+	}
+	return msg
+}
+
+func (l *testLogger) Crit(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Error(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Warn(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Info(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Debug(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Trace(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) New(ctx ...interface{}) log.Logger {
+	return l
+}
+
+func (l *testLogger) Enabled(ctx context.Context, level slog.Level) bool {
+	return true // Always enabled for testing
+}
+
+func (l *testLogger) With(ctx ...interface{}) log.Logger {
+	return l
+}
+
+func (l *testLogger) Handler() slog.Handler {
+	return nil // Not needed for testing
+}
+
+func (l *testLogger) Log(level slog.Level, msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) Write(level slog.Level, msg string, attrs ...any) {
+	l.logFn(l.formatMessage(msg, attrs...))
+}
+
+// TestOutputRealtimeLogs verifies that test logs are output in real-time when outputRealtimeLogs is enabled
+func TestOutputRealtimeLogs(t *testing.T) {
+	// Create a test file that outputs logs over time
+	testContent := []byte(`
+package feature_test
+
+import (
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestWithRealtimeLogs(t *testing.T) {
+	fmt.Println("First log message")
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("Second log message")
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("Third log message")
+	time.Sleep(200 * time.Millisecond)
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: logging-gate
+    description: "Gate with a test that outputs logs in real-time"
+    suites:
+      logging-suite:
+        description: "Suite with a test that outputs logs in real-time"
+        tests:
+          - name: TestWithRealtimeLogs
+            package: "./feature"
+`)
+
+	logChan := make(chan string, 10)
+
+	customLogger := &testLogger{
+		logFn: func(msg string) {
+			logChan <- msg
+		},
+	}
+
+	r := setupTestRunner(t, testContent, configContent)
+	r.outputRealtimeLogs = true
+	r.log = customLogger
+
+	// Run the test in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, err := r.RunAllTests(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, types.TestStatusPass, result.Status)
+	}()
+
+	expectedLogs := []string{
+		"First log message",
+		"Second log message",
+		"Third log message",
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Track which message we're expecting next
+	nextExpectedIndex := 0
+	timeout := time.After(1000 * time.Millisecond)
+
+	for nextExpectedIndex < len(expectedLogs) {
+		select {
+		case msg := <-logChan:
+			if strings.Contains(msg, expectedLogs[nextExpectedIndex]) {
+				nextExpectedIndex++
+				t.Logf("Received expected message: %s", msg)
+			}
+		case <-timeout:
+			t.Fatalf("Did not receive all messages in order. Got %d/%d messages. Next expected: %s",
+				nextExpectedIndex, len(expectedLogs), expectedLogs[nextExpectedIndex])
+		}
+	}
+
+	// Wait for the test to complete
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Test did not complete in time")
+	}
+}
+
+// TestOutputRealtimeLogsDisabled verifies that test logs are output in real-time when outputRealtimeLogs is disabled
+func TestOutputRealtimeLogsDisabled(t *testing.T) {
+	// Create a test file that outputs logs over time
+	testContent := []byte(`
+package feature_test
+
+import (
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestWithRealtimeLogs(t *testing.T) {
+	fmt.Println("First log message")
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("Second log message")
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("Third log message")
+	time.Sleep(200 * time.Millisecond)
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: logging-gate
+    description: "Gate with a test that outputs logs in real-time"
+    suites:
+      logging-suite:
+        description: "Suite with a test that outputs logs in real-time"
+        tests:
+          - name: TestWithRealtimeLogs
+            package: "./feature"
+`)
+
+	logChan := make(chan string, 10)
+
+	customLogger := &testLogger{
+		logFn: func(msg string) {
+			logChan <- msg
+		},
+	}
+
+	r := setupTestRunner(t, testContent, configContent)
+	r.outputRealtimeLogs = false
+	r.log = customLogger
+
+	// Run the test in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, err := r.RunAllTests(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, types.TestStatusPass, result.Status)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	// With outputRealtimeLogs disabled, we should not receive any messages in real-time
+	// Wait for the running message to be logged
+	// go test ./feature -run ^TestWithRealtimeLogs$
+	timeout := time.After(1000 * time.Millisecond)
+	found := false
+	for !found {
+		select {
+		case msg := <-logChan:
+			if strings.Contains(msg, "go test ./feature -run ^TestWithRealtimeLogs$") {
+				found = true
+			} else {
+				t.Logf("Received unexpected message: %s", msg)
+			}
+		case <-timeout:
+			t.Fatalf("Did not receive running message in time")
+		}
+	}
+
+	testLogs := []string{
+		"First log message",
+		"Second log message",
+		"Third log message",
+	}
+
+	// Wait for the test to complete
+	select {
+	case <-done:
+	case msg := <-logChan:
+		if slices.Contains(testLogs, msg) {
+			t.Fatalf("Received unexpected log message: %s", msg)
+		}
+	case <-time.After(1000 * time.Millisecond):
+		t.Fatal("Test did not complete in time")
+	}
 }

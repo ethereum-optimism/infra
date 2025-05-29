@@ -66,6 +66,18 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "LOGDIR"),
 		Usage:   "Directory to store test logs. Defaults to 'logs' if not specified.",
 	}
+	TestLogLevel = &cli.StringFlag{
+		Name:    "test-log-level",
+		Value:   "info",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TEST_LOG_LEVEL"),
+		Usage:   "Log level to be used for the tests. Defaults to 'info'.",
+	}
+	OutputRealtimeLogs = &cli.BoolFlag{
+		Name:    "output-realtime-logs",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
+		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -80,6 +92,8 @@ var optionalFlags = []cli.Flag{
 	AllowSkips,
 	DefaultTimeout,
 	LogDir,
+	TestLogLevel,
+	OutputRealtimeLogs,
 }
 var Flags []cli.Flag
 

@@ -1583,3 +1583,39 @@ gates:
 	validators := reg.GetValidators()
 	require.NotEmpty(t, validators, "Registry should have validators")
 }
+
+func TestRunTest_PackagePath_Local(t *testing.T) {
+	r := setupDefaultTestRunner(t)
+
+	origPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", origPath)
+
+	testCases := []struct {
+		name         string
+		packagePath  string
+		expectStatus types.TestStatus
+		expectErrMsg string
+	}{
+		{
+			name:         "Local path does not exist",
+			packagePath:  "./does-not-exist",
+			expectStatus: types.TestStatusFail,
+			expectErrMsg: "local package path does not exist",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := r.RunTest(context.Background(), types.ValidatorMetadata{
+				ID:       "test",
+				Gate:     "test-gate",
+				FuncName: "TestFunc",
+				Package:  tc.packagePath,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectStatus, result.Status)
+			assert.Error(t, result.Error)
+			assert.Contains(t, result.Error.Error(), tc.expectErrMsg)
+		})
+	}
+}
