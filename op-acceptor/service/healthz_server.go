@@ -2,15 +2,22 @@ package service
 
 import (
 	"context"
-	"log"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/rs/cors"
 )
 
 type HealthzServer struct {
 	ctx    context.Context
 	server *http.Server
+	log    log.Logger
+}
+
+func NewHealthzServer(logger log.Logger) *HealthzServer {
+	return &HealthzServer{
+		log: logger,
+	}
 }
 
 func (h *HealthzServer) Start(ctx context.Context, addr string) error {
@@ -33,6 +40,6 @@ func (h *HealthzServer) Shutdown() error {
 }
 
 func (h *HealthzServer) Handle(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received health check request at %s", r.URL.Path)
+	h.log.Debug("Received health check request", "path", r.URL.Path)
 	w.Write([]byte("OK")) //nolint:errcheck
 }
