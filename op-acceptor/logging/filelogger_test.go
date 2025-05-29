@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -499,11 +500,17 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
-	// Access the HTMLSummarySink directly
-	sink, ok := logger.GetSinkByType("HTMLSummarySink")
-	require.True(t, ok, "HTMLSummarySink should be available")
-	htmlSink, ok := sink.(*HTMLSummarySink)
-	require.True(t, ok, "Sink should be of type *HTMLSummarySink")
+	// Find the HTML sink by checking type
+	var htmlSink *reporting.ReportingHTMLSink
+	found := false
+	for _, sink := range logger.sinks {
+		if s, ok := sink.(*reporting.ReportingHTMLSink); ok {
+			htmlSink = s
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "ReportingHTMLSink should be available")
 
 	// Create a mix of test results
 	testResults := []*types.TestResult{
@@ -591,6 +598,117 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	assert.Contains(t, htmlContent, "github.com/example/package1")
 	assert.Contains(t, htmlContent, "gate1")
 	assert.Contains(t, htmlContent, "suite1")
+}
+
+// TestHTMLSummarySink_WithSubtestsAndNetworkInfo tests HTML generation with subtests and network information
+func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-html-with-subtests"
+	networkName := "isthmus-devnet"
+	gateRun := "isthmus"
+
+	// Create a file logger with network and gate information
+	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
+	require.NoError(t, err)
+
+	// Create subtests
+	subtests := map[string]*types.TestResult{
+		"TestWithSubtests/subtest_pass": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-pass",
+				FuncName: "TestWithSubtests/subtest_pass",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 500 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_pass","Output":"=== RUN   TestWithSubtests/subtest_pass\n"}`,
+		},
+		"TestWithSubtests/subtest_fail": {
+			Metadata: types.ValidatorMetadata{
+				ID:       "subtest-fail",
+				FuncName: "TestWithSubtests/subtest_fail",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 300 * time.Millisecond,
+			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_fail","Output":"=== RUN   TestWithSubtests/subtest_fail\n"}`,
+			Error:    fmt.Errorf("Subtest failed"),
+		},
+	}
+
+	// Create a main test result with subtests
+	mainResult := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:       "test-with-subtests",
+			FuncName: "TestWithSubtests",
+			Package:  "github.com/example/package",
+			Gate:     "isthmus",
+			Suite:    "acceptance",
+		},
+		Status:   types.TestStatusFail, // Main test fails because one subtest failed
+		Duration: 1 * time.Second,
+		Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests","Output":"=== RUN   TestWithSubtests\n"}`,
+		SubTests: subtests,
+	}
+
+	// Process the test result through the complete logger (all sinks)
+	require.NoError(t, logger.LogTestResult(mainResult, runID))
+
+	// Complete the logging process for all sinks
+	require.NoError(t, logger.Complete(runID))
+
+	// Check that the HTML file was created
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
+
+	// Ensure the HTML file exists
+	_, err = os.Stat(htmlFile)
+	require.NoError(t, err, "HTML report file should exist")
+
+	// Read the HTML file content
+	content, err := os.ReadFile(htmlFile)
+	require.NoError(t, err)
+	htmlContent := string(content)
+
+	// Verify the HTML content contains expected elements
+	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
+	assert.Contains(t, htmlContent, "<title>Test Results</title>")
+
+	// Verify network and gate information is displayed
+	assert.Contains(t, htmlContent, "<strong>🌐 Network:</strong> isthmus-devnet")
+	assert.Contains(t, htmlContent, "<strong>🚪 Gate:</strong> isthmus")
+
+	// Verify main test and subtests are included
+	assert.Contains(t, htmlContent, "TestWithSubtests")
+	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_pass")
+	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_fail")
+
+	// Verify correct package information
+	assert.Contains(t, htmlContent, "github.com/example/package")
+	assert.Contains(t, htmlContent, "isthmus")
+	assert.Contains(t, htmlContent, "acceptance")
+
+	// Verify subtest CSS classes are applied (updated for new template)
+	assert.Contains(t, htmlContent, "subtest-item")
+	assert.Contains(t, htmlContent, "test-item")
+
+	// Verify links to log files
+	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
+	assert.Contains(t, htmlContent, "failed/isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
+
+	// Verify the corresponding log files actually exist
+	passedDir := filepath.Join(baseDir, "passed")
+	failedDir := filepath.Join(baseDir, "failed")
+
+	passSubtestFile := filepath.Join(passedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
+	assert.FileExists(t, passSubtestFile, "Passing subtest log file should exist")
+
+	failSubtestFile := filepath.Join(failedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
+	assert.FileExists(t, failSubtestFile, "Failing subtest log file should exist")
+
+	// Verify statistics are correct (main test + 2 subtests = 3 total)
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">3</div>")     // Total
+	assert.Contains(t, htmlContent, "<div class=\"stat-value\">33.3%</div>") // Pass rate (1 pass out of 3 total)
 }
 
 // TestExtractErrorInfoFromJSON verifies that error information is correctly extracted from test output
@@ -782,117 +900,6 @@ func TestPerTestFileSink_CreatesSubtestFiles(t *testing.T) {
 	assert.Contains(t, subtest2ContentStr, "ERROR SUMMARY:")
 }
 
-// TestHTMLSummarySink_WithSubtestsAndNetworkInfo tests HTML generation with subtests and network information
-func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
-	// Create a temporary directory
-	tmpDir := t.TempDir()
-	runID := "test-html-with-subtests"
-	networkName := "isthmus-devnet"
-	gateRun := "isthmus"
-
-	// Create a file logger with network and gate information
-	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
-	require.NoError(t, err)
-
-	// Create subtests
-	subtests := map[string]*types.TestResult{
-		"TestWithSubtests/subtest_pass": {
-			Metadata: types.ValidatorMetadata{
-				ID:       "subtest-pass",
-				FuncName: "TestWithSubtests/subtest_pass",
-			},
-			Status:   types.TestStatusPass,
-			Duration: 500 * time.Millisecond,
-			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_pass","Output":"=== RUN   TestWithSubtests/subtest_pass\n"}`,
-		},
-		"TestWithSubtests/subtest_fail": {
-			Metadata: types.ValidatorMetadata{
-				ID:       "subtest-fail",
-				FuncName: "TestWithSubtests/subtest_fail",
-			},
-			Status:   types.TestStatusFail,
-			Duration: 300 * time.Millisecond,
-			Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests/subtest_fail","Output":"=== RUN   TestWithSubtests/subtest_fail\n"}`,
-			Error:    fmt.Errorf("Subtest failed"),
-		},
-	}
-
-	// Create a main test result with subtests
-	mainResult := &types.TestResult{
-		Metadata: types.ValidatorMetadata{
-			ID:       "test-with-subtests",
-			FuncName: "TestWithSubtests",
-			Package:  "github.com/example/package",
-			Gate:     "isthmus",
-			Suite:    "acceptance",
-		},
-		Status:   types.TestStatusFail, // Main test fails because one subtest failed
-		Duration: 1 * time.Second,
-		Stdout:   `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"github.com/example/package","Test":"TestWithSubtests","Output":"=== RUN   TestWithSubtests\n"}`,
-		SubTests: subtests,
-	}
-
-	// Process the test result through all sinks
-	require.NoError(t, logger.LogTestResult(mainResult, runID))
-
-	// Complete the logging process
-	require.NoError(t, logger.Complete(runID))
-
-	// Check that the HTML file was created
-	baseDir, err := logger.GetDirectoryForRunID(runID)
-	require.NoError(t, err)
-	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
-
-	// Ensure the HTML file exists
-	_, err = os.Stat(htmlFile)
-	require.NoError(t, err, "HTML report file should exist")
-
-	// Read the HTML file content
-	content, err := os.ReadFile(htmlFile)
-	require.NoError(t, err)
-	htmlContent := string(content)
-
-	// Verify the HTML content contains expected elements
-	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
-	assert.Contains(t, htmlContent, "<title>Test Results</title>")
-
-	// Verify network and gate information is displayed
-	assert.Contains(t, htmlContent, "<strong>Devnet:</strong> isthmus-devnet")
-	assert.Contains(t, htmlContent, "<strong>Gate:</strong> isthmus")
-
-	// Verify main test and subtests are included
-	assert.Contains(t, htmlContent, "TestWithSubtests")
-	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_pass")
-	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_fail")
-
-	// Verify correct package information
-	assert.Contains(t, htmlContent, "github.com/example/package")
-	assert.Contains(t, htmlContent, "isthmus")
-	assert.Contains(t, htmlContent, "acceptance")
-
-	// Verify subtest CSS classes are applied
-	assert.Contains(t, htmlContent, "subtest-row")
-	assert.Contains(t, htmlContent, "class=\"subtest\"")
-
-	// Verify links to log files
-	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
-	assert.Contains(t, htmlContent, "failed/isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
-
-	// Verify the corresponding log files actually exist
-	passedDir := filepath.Join(baseDir, "passed")
-	failedDir := filepath.Join(baseDir, "failed")
-
-	passSubtestFile := filepath.Join(passedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
-	assert.FileExists(t, passSubtestFile, "Passing subtest log file should exist")
-
-	failSubtestFile := filepath.Join(failedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
-	assert.FileExists(t, failSubtestFile, "Failing subtest log file should exist")
-
-	// Verify statistics are correct (main test + 2 subtests = 3 total)
-	assert.Contains(t, htmlContent, "<div class=\"stat-value\">3</div>")                                      // Total
-	assert.Contains(t, htmlContent, "Pass Rate</div>\n                <div class=\"stat-value\">33.3%</div>") // Pass rate (1 pass out of 3 total)
-}
-
 // TestDuplicationFix verifies that logging the same test multiple times doesn't create duplicate content
 func TestDuplicationFix(t *testing.T) {
 	// Create a temporary directory for logs
@@ -930,8 +937,12 @@ func TestDuplicationFix(t *testing.T) {
 	err = logger.Complete(runID)
 	require.NoError(t, err)
 
-	// Check that only one log file was created
-	failedDir := filepath.Join(logDir, "testrun-"+runID, "failed")
+	// Get the correct base directory for the runID
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+
+	// Check that only one log file was created in the failed directory
+	failedDir := filepath.Join(baseDir, "failed")
 	files, err := os.ReadDir(failedDir)
 	require.NoError(t, err)
 	require.Len(t, files, 1, "Expected exactly one log file in failed directory")
@@ -1042,13 +1053,10 @@ func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
 	assert.Contains(t, htmlContent, "TestFjordTwo", "Subtest should be displayed")
 
 	// Verify the package test is also shown
-	assert.Contains(t, htmlContent, "AllTests", "Package test should be displayed")
+	assert.Contains(t, htmlContent, "(full suite)", "Package test should be displayed")
 	assert.Contains(t, htmlContent, "TestFjordThree", "Package test subtest should be displayed")
 
 	// Count total rows - should have: 1 fjord test + 2 fjord subtests + 1 package test + 1 package subtest = 5 rows
-	tableRowCount := strings.Count(htmlContent, "<tr class=")
-	assert.Equal(t, 5, tableRowCount, "Should have all tests and subtests displayed")
-
-	// Verify statistics are correct (5 total tests: 2 fjord subtests + 1 fjord main + 1 package + 1 package subtest)
-	assert.Contains(t, htmlContent, "5</div>", "Total count should include all tests and subtests")
+	testItemCount := strings.Count(htmlContent, "class=\"test-item")
+	assert.Equal(t, 5, testItemCount, "Should have all tests and subtests displayed")
 }

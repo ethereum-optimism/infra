@@ -9,227 +9,693 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             line-height: 1.6;
             color: #333;
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
+            background-color: #fafafa;
         }
+        
         h1, h2, h3 {
             margin-top: 20px;
             margin-bottom: 10px;
         }
+        
         .summary {
-            background-color: #f8f8f8;
-            border-radius: 5px;
-            padding: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid #007acc;
         }
+        
         .stats {
             display: flex;
             flex-wrap: wrap;
             gap: 15px;
-            margin: 15px 0;
-        }
-        .stat-box {
-            padding: 10px 15px;
-            border-radius: 4px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-            min-width: 80px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        .pass { background-color: #dff0d8; color: #3c763d; }
-        .fail { background-color: #f2dede; color: #a94442; }
-        .skip { background-color: #fcf8e3; color: #8a6d3b; }
-        .error { background-color: #f2dede; color: #a94442; }
-        .test-list {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .test-list th, .test-list td {
-            border: 1px solid #ddd;
-            padding: 8px 12px;
-            text-align: left;
-        }
-        .test-list th {
-            background-color: #f2f2f2;
-            position: sticky;
-            top: 0;
-        }
-        .test-list tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .test-list tr:hover {
-            background-color: #f1f1f1;
-        }
-        .status-cell {
-            text-align: center;
-        }
-        .actions {
-            display: flex;
-            gap: 10px;
             margin: 20px 0;
         }
-        button {
-            padding: 8px 12px;
-            border: none;
-            border-radius: 4px;
-            background-color: #f0f0f0;
-            cursor: pointer;
+        
+        .stat-box {
+            padding: 15px 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-width: 100px;
+            text-align: center;
+            background: white;
         }
-        button:hover {
-            background-color: #e0e0e0;
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
         }
-        .search {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 250px;
+        
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #666;
         }
-        .hidden {
-            display: none;
+        
+        .pass { border-left: 4px solid #28a745; }
+        .fail { border-left: 4px solid #dc3545; }
+        .skip { border-left: 4px solid #ffc107; }
+        .error { border-left: 4px solid #fd7e14; }
+        
+        /* Hierarchical layout */
+        .test-hierarchy {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            overflow: hidden;
         }
-        a {
-            color: #337ab7;
-            text-decoration: none;
+        
+        .package-section {
+            border-left: 5px solid #28a745;
+            margin-bottom: 25px;
         }
-        a:hover {
-            text-decoration: underline;
+        
+        .package-section.fail {
+            border-left: 5px solid #dc3545;
         }
-        .duration {
-            text-align: right;
+        
+        .package-section.skip {
+            border-left: 5px solid #ffc107;
         }
-        .subtest {
-            padding-left: 20px;
+        
+        .package-header {
+            background: linear-gradient(135deg, #28a745, #1e7e34);
+            color: white;
+            padding: 18px 25px;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .package-header.fail {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+        }
+        
+        .package-header.skip {
+            background: linear-gradient(135deg, #ffc107, #e0a800);
+            color: #856404;
+        }
+        
+        .package-name {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+        }
+        
+        .package-stats {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .gate-section {
+            border-left: 4px solid #007acc;
+            margin: 15px 0 15px 25px;
+            background: #f8f9fa;
+        }
+        
+        .gate-header {
+            background: linear-gradient(135deg, #007acc, #0056b3);
+            color: white;
+            padding: 15px 20px;
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .gate-stats {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .suite-section {
+            border-left: 3px solid #6c757d;
+            margin: 15px 0 15px 20px;
+            background: #ffffff;
+        }
+        
+        .suite-header {
+            background: #e9ecef;
+            padding: 12px 15px;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .direct-tests {
+            margin-left: 20px;
+        }
+        
+        .test-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.2s;
+        }
+        
+        .test-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .test-item:last-child {
+            border-bottom: none;
+        }
+        
+        .subtest-item {
+            margin-left: 40px;
+            background-color: #f8f9fa;
+            border-left: 3px solid #dee2e6;
             position: relative;
         }
-        .subtest::before {
-            content: "└─ ";
-            color: #999;
-            margin-right: 5px;
+        
+        .subtest-item::before {
+            content: "";
+            position: absolute;
+            left: -3px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #6c757d;
         }
-        .subtest-row {
-            background-color: #fafafa;
+        
+        .status-badge {
+            min-width: 60px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            text-transform: uppercase;
+            margin-right: 15px;
+        }
+        
+        .status-badge.pass {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.fail {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-badge.skip {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-badge.error {
+            background: #f5c6cb;
+            color: #721c24;
+        }
+        
+        .test-name {
+            flex: 1;
+            font-weight: 500;
+            margin-right: 15px;
+        }
+        
+        .test-details {
+            display: flex;
+            gap: 15px;
+            font-size: 14px;
+            color: #6c757d;
+            align-items: center;
+        }
+        
+        .test-details .package-name {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #e8f5e8;
+            color: #1e7e34;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .duration {
+            font-weight: 500;
+        }
+        
+        .execution-order {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .log-link {
+            color: #007acc;
+            text-decoration: none;
+            font-size: 13px;
+            padding: 4px 8px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        
+        .log-link:hover {
+            background: #007acc;
+            color: white;
+            text-decoration: none;
+        }
+        
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .search-input {
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 300px;
+            transition: border-color 0.2s;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+        
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            background: #f8f9fa;
+            color: #495057;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: 2px solid #dee2e6;
+        }
+        
+        .btn:hover {
+            background: #e9ecef;
+            transform: translateY(-1px);
+        }
+        
+        .btn-primary {
+            background: #007acc;
+            color: white;
+            border-color: #007acc;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn.active {
+            background: #007acc;
+            color: white;
+            border-color: #007acc;
+            box-shadow: 0 2px 4px rgba(0,122,204,0.3);
+        }
+        
+        .btn.active:hover {
+            background: #0056b3;
+            transform: none;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .test-details {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-input {
+                width: 100%;
+            }
+        }
+        
+        /* Loading animation */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007acc;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-    <h1>Test Results</h1>
+    <h1>🧪 Test Results</h1>
+    
     <div class="summary">
-        {{if .DevnetName}}<p><strong>Devnet:</strong> {{.DevnetName}}</p>{{end}}
-        {{if .GateRun}}<p><strong>Gate:</strong> {{.GateRun}}</p>{{end}}
-        <p><strong>Run ID:</strong> {{.RunID}}</p>
-        <p><strong>Duration:</strong> {{.TotalDuration}}</p>
-        <p><strong>Time:</strong> {{.Time}}</p>
+        {{if .DevnetName}}<p><strong>🌐 Network:</strong> {{.DevnetName}}</p>{{end}}
+        {{if .GateRun}}<p><strong>🚪 Gate:</strong> {{.GateRun}}</p>{{end}}
+        <p><strong>🆔 Run ID:</strong> <code>{{.RunID}}</code></p>
+        <p><strong>⏱️ Total Duration:</strong> {{.TotalDuration}}</p>
+        <p><strong>📅 Started:</strong> {{.Time}}</p>
         
         <div class="stats">
             <div class="stat-box">
-                <div>Total</div>
                 <div class="stat-value">{{.Total}}</div>
+                <div class="stat-label">Total Tests</div>
             </div>
             <div class="stat-box pass">
-                <div>Passed</div>
                 <div class="stat-value">{{.Passed}}</div>
+                <div class="stat-label">Passed</div>
             </div>
             <div class="stat-box fail">
-                <div>Failed</div>
                 <div class="stat-value">{{.Failed}}</div>
+                <div class="stat-label">Failed</div>
             </div>
             <div class="stat-box skip">
-                <div>Skipped</div>
                 <div class="stat-value">{{.Skipped}}</div>
+                <div class="stat-label">Skipped</div>
             </div>
             <div class="stat-box error">
-                <div>Errors</div>
                 <div class="stat-value">{{.Errored}}</div>
+                <div class="stat-label">Errors</div>
             </div>
-            <div class="stat-box" style="min-width: 120px;">
-                <div>Pass Rate</div>
+            <div class="stat-box">
                 <div class="stat-value">{{.PassRateFormatted}}%</div>
+                <div class="stat-label">Pass Rate</div>
             </div>
         </div>
     </div>
     
-    <div class="actions">
-        <input type="text" id="searchInput" class="search" placeholder="Search tests, packages, gates..." oninput="filterTests()">
-        <button onclick="showOnlyFailed()">Show Failed Only</button>
-        <button onclick="showAll()">Show All</button>
+    <div class="controls">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search tests, packages, gates..." oninput="filterTests()">
+        <button id="showAllBtn" class="btn active" onclick="showAll()">Show All</button>
+        <button id="showFailedBtn" class="btn" onclick="showOnlyFailed()">Show Failed Only</button>
     </div>
     
-    <table class="test-list" id="testTable">
-        <thead>
-            <tr>
-                <th>Status</th>
-                <th>Test</th>
-                <th>Package</th>
-                <th>Gate</th>
-                <th>Suite</th>
-                <th>Duration</th>
-                <th>Log</th>
-            </tr>
-        </thead>
-        <tbody>
-            {{range .Tests}}
-            <tr class="{{.StatusClass}}{{if .IsSubTest}} subtest-row{{end}}">
-                <td class="status-cell {{.StatusClass}}">{{.StatusText}}</td>
-                <td{{if .IsSubTest}} class="subtest"{{end}}>{{.TestName}}</td>
-                <td>{{.Package}}</td>
-                <td>{{.Gate}}</td>
-                <td>{{.Suite}}</td>
-                <td class="duration">{{.DurationFormatted}}</td>
-                <td><a href="{{.LogPath}}" target="_blank">View Log</a></td>
-            </tr>
-            {{end}}
-        </tbody>
-    </table>
+    <div class="test-hierarchy" id="testHierarchy">
+        <!-- Tests will be organized by gate and rendered in execution order -->
+        {{range .Tests}}
+        <div class="test-item {{.StatusClass}}" data-gate="{{.Gate}}" data-suite="{{.Suite}}" data-package="{{.Package}}" data-name="{{.TestName}}">
+            <span class="status-badge {{.StatusClass}}">{{.StatusText}}</span>
+            <div class="test-name">{{.TestName}}</div>
+            <div class="test-details">
+                {{if .Package}}<span class="package-name">{{.Package}}</span>{{end}}
+                {{if .Gate}}<span>Gate: {{.Gate}}</span>{{end}}
+                {{if .Suite}}<span>Suite: {{.Suite}}</span>{{end}}
+                <span class="duration">{{.DurationFormatted}}</span>
+                {{if .LogPath}}<a href="{{.LogPath}}" target="_blank" class="log-link">View Log</a>{{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
 
     <script>
         function filterTests() {
             const query = document.getElementById('searchInput').value.toLowerCase();
-            const rows = document.querySelectorAll('#testTable tbody tr');
+            const testItems = document.querySelectorAll('.test-item');
             
-            for (const row of rows) {
-                const text = row.textContent.toLowerCase();
+            testItems.forEach(item => {
+                const text = item.textContent.toLowerCase();
                 if (text.includes(query)) {
-                    row.classList.remove('hidden');
+                    item.classList.remove('hidden');
                 } else {
-                    row.classList.add('hidden');
+                    item.classList.add('hidden');
                 }
-            }
+            });
         }
         
         function showOnlyFailed() {
             document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
+            const testItems = document.querySelectorAll('.test-item');
             
-            for (const row of rows) {
-                if (row.classList.contains('fail') || row.classList.contains('error')) {
-                    row.classList.remove('hidden');
+            testItems.forEach(item => {
+                if (item.classList.contains('fail') || item.classList.contains('error')) {
+                    item.classList.remove('hidden');
                 } else {
-                    row.classList.add('hidden');
+                    item.classList.add('hidden');
                 }
-            }
+            });
+            
+            // Update button states
+            document.getElementById('showAllBtn').classList.remove('active');
+            document.getElementById('showFailedBtn').classList.add('active');
         }
         
         function showAll() {
             document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
+            const testItems = document.querySelectorAll('.test-item');
             
-            for (const row of rows) {
-                row.classList.remove('hidden');
-            }
+            testItems.forEach(item => {
+                item.classList.remove('hidden');
+            });
+            
+            // Update button states
+            document.getElementById('showFailedBtn').classList.remove('active');
+            document.getElementById('showAllBtn').classList.add('active');
         }
         
-        // If there are failures, show only failed tests by default
-        // window.onload = function() {
-        //     if ({{.HasFailures}}) {
-        //         showOnlyFailed();
-        //     }
-        // };
+        // Organize tests into proper hierarchy after page load
+        document.addEventListener('DOMContentLoaded', function() {
+            organizeTestHierarchy();
+        });
+        
+        function organizeTestHierarchy() {
+            const hierarchy = document.getElementById('testHierarchy');
+            const testItems = Array.from(hierarchy.querySelectorAll('.test-item'));
+            
+            // Group tests by package first, then by gate, then by suite
+            const packages = {};
+            
+            testItems.forEach(item => {
+                const packageName = item.dataset.package || 'Unknown Package';
+                const gate = item.dataset.gate || 'Unknown Gate';
+                const suite = item.dataset.suite || '';
+                
+                if (!packages[packageName]) {
+                    packages[packageName] = { gates: {} };
+                }
+                
+                if (!packages[packageName].gates[gate]) {
+                    packages[packageName].gates[gate] = { direct: [], suites: {} };
+                }
+                
+                if (suite) {
+                    if (!packages[packageName].gates[gate].suites[suite]) {
+                        packages[packageName].gates[gate].suites[suite] = [];
+                    }
+                    packages[packageName].gates[gate].suites[suite].push(item);
+                } else {
+                    packages[packageName].gates[gate].direct.push(item);
+                }
+            });
+            
+            // Clear and rebuild hierarchy
+            hierarchy.innerHTML = '';
+            
+            Object.keys(packages).sort().forEach(packageName => {
+                const packageSection = document.createElement('div');
+                packageSection.className = 'package-section';
+                
+                const packageHeader = document.createElement('div');
+                packageHeader.className = 'package-header';
+                
+                // Calculate package-level statistics
+                const packageTests = [];
+                Object.values(packages[packageName].gates).forEach(gate => {
+                    packageTests.push(...gate.direct);
+                    Object.values(gate.suites).forEach(suite => {
+                        packageTests.push(...suite);
+                    });
+                });
+                const packageStats = calculateStats(packageTests);
+                
+                // Set package status class based on results
+                if (packageStats.passed === 0 && packageStats.total > 0) {
+                    packageSection.classList.add('fail');
+                    packageHeader.classList.add('fail');
+                } else if (packageStats.passed < packageStats.total && packageStats.total > 0) {
+                    const skipped = packageTests.filter(t => t.classList.contains('skip')).length;
+                    if (skipped === packageStats.total - packageStats.passed) {
+                        packageSection.classList.add('skip');
+                        packageHeader.classList.add('skip');
+                    } else {
+                        packageSection.classList.add('fail');
+                        packageHeader.classList.add('fail');
+                    }
+                }
+                
+                packageHeader.innerHTML = `
+                    <span><span class="package-name">${packageName}</span></span>
+                    <span class="package-stats">${packageStats.passed}/${packageStats.total} passed (${packageStats.passRate}%)</span>
+                `;
+                
+                packageSection.appendChild(packageHeader);
+                
+                // Get all gates for this package
+                const gateNames = Object.keys(packages[packageName].gates);
+                
+                // If there's only one gate, don't show gate headers - just show tests directly
+                if (gateNames.length === 1) {
+                    const gateName = gateNames[0];
+                    const gate = packages[packageName].gates[gateName];
+                    
+                    // Add suites directly under package
+                    Object.keys(gate.suites).forEach(suiteName => {
+                        const suiteSection = document.createElement('div');
+                        suiteSection.className = 'suite-section';
+                        
+                        const suiteHeader = document.createElement('div');
+                        suiteHeader.className = 'suite-header';
+                        
+                        const suiteTests = gate.suites[suiteName];
+                        const suiteStats = calculateStats(suiteTests);
+                        
+                        suiteHeader.innerHTML = `
+                            <span>${suiteName}</span>
+                            <span>${suiteStats.passed}/${suiteStats.total} passed</span>
+                        `;
+                        
+                        suiteSection.appendChild(suiteHeader);
+                        
+                        // Add tests in this suite
+                        suiteTests.forEach(test => {
+                            if (test.querySelector('.test-name').textContent.includes('/')) {
+                                test.classList.add('subtest-item');
+                            }
+                            suiteSection.appendChild(test);
+                        });
+                        
+                        packageSection.appendChild(suiteSection);
+                    });
+                    
+                    // Add direct tests
+                    if (gate.direct.length > 0) {
+                        const directSection = document.createElement('div');
+                        directSection.className = 'direct-tests';
+                        
+                        gate.direct.forEach(test => {
+                            if (test.querySelector('.test-name').textContent.includes('/')) {
+                                test.classList.add('subtest-item');
+                            }
+                            directSection.appendChild(test);
+                        });
+                        
+                        packageSection.appendChild(directSection);
+                    }
+                } else {
+                    // Multiple gates - show gate headers
+                    gateNames.forEach(gateName => {
+                        const gateSection = document.createElement('div');
+                        gateSection.className = 'gate-section';
+                        
+                        const gateHeader = document.createElement('div');
+                        gateHeader.className = 'gate-header';
+                        
+                        const gateTests = [...packages[packageName].gates[gateName].direct, 
+                                         ...Object.values(packages[packageName].gates[gateName].suites).flat()];
+                        const gateStats = calculateStats(gateTests);
+                        
+                        gateHeader.innerHTML = `
+                            <span>${gateName}</span>
+                            <span class="gate-stats">${gateStats.passed}/${gateStats.total} passed (${gateStats.passRate}%)</span>
+                        `;
+                        
+                        gateSection.appendChild(gateHeader);
+                        
+                        // Add suites within this gate
+                        Object.keys(packages[packageName].gates[gateName].suites).forEach(suiteName => {
+                            const suiteSection = document.createElement('div');
+                            suiteSection.className = 'suite-section';
+                            
+                            const suiteHeader = document.createElement('div');
+                            suiteHeader.className = 'suite-header';
+                            
+                            const suiteTests = packages[packageName].gates[gateName].suites[suiteName];
+                            const suiteStats = calculateStats(suiteTests);
+                            
+                            suiteHeader.innerHTML = `
+                                <span>${suiteName}</span>
+                                <span>${suiteStats.passed}/${suiteStats.total} passed</span>
+                            `;
+                            
+                            suiteSection.appendChild(suiteHeader);
+                            
+                            // Add tests in this suite
+                            suiteTests.forEach(test => {
+                                if (test.querySelector('.test-name').textContent.includes('/')) {
+                                    test.classList.add('subtest-item');
+                                }
+                                suiteSection.appendChild(test);
+                            });
+                            
+                            gateSection.appendChild(suiteSection);
+                        });
+                        
+                        // Add direct gate tests
+                        if (packages[packageName].gates[gateName].direct.length > 0) {
+                            const directSection = document.createElement('div');
+                            directSection.className = 'direct-tests';
+                            
+                            packages[packageName].gates[gateName].direct.forEach(test => {
+                                if (test.querySelector('.test-name').textContent.includes('/')) {
+                                    test.classList.add('subtest-item');
+                                }
+                                directSection.appendChild(test);
+                            });
+                            
+                            gateSection.appendChild(directSection);
+                        }
+                        
+                        packageSection.appendChild(gateSection);
+                    });
+                }
+                
+                hierarchy.appendChild(packageSection);
+            });
+        }
+        
+        function calculateStats(tests) {
+            const total = tests.length;
+            const passed = tests.filter(t => t.classList.contains('pass')).length;
+            const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+            
+            return { total, passed, passRate };
+        }
     </script>
 </body>
 </html> 
