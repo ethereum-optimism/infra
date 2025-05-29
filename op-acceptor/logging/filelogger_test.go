@@ -960,3 +960,95 @@ func TestDuplicationFix(t *testing.T) {
 
 	t.Logf("✅ Duplication fix verified! File: %s", files[0].Name())
 }
+
+// TestHTMLSink_TestsWithSubtestsAlwaysDisplayed verifies that tests with subtests are never filtered out
+func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+	runID := "test-subtests-display"
+	networkName := "test-network"
+	gateRun := "test-gate"
+
+	// Create a file logger
+	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
+	require.NoError(t, err)
+
+	// Simulate the fjord scenario: a test with subtests but minimal metadata
+	fjordTest := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:      "fjord-test",
+			Package: "github.com/ethereum-optimism/optimism/op-acceptance-tests/tests/fjord",
+			Gate:    "holocene",
+			Suite:   "",
+			// Note: FuncName is empty, simulating the issue
+		},
+		Status:   types.TestStatusSkip, // Main test skipped
+		Duration: 100 * time.Millisecond,
+		SubTests: map[string]*types.TestResult{
+			"TestFjordOne": {
+				Metadata: types.ValidatorMetadata{FuncName: "TestFjordOne"},
+				Status:   types.TestStatusSkip,
+				Duration: 50 * time.Millisecond,
+			},
+			"TestFjordTwo": {
+				Metadata: types.ValidatorMetadata{FuncName: "TestFjordTwo"},
+				Status:   types.TestStatusSkip,
+				Duration: 50 * time.Millisecond,
+			},
+		},
+	}
+
+	// Also add a package test in the same package to test filtering doesn't interfere
+	packageTest := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:      "all-fjord-tests",
+			Package: "github.com/ethereum-optimism/optimism/op-acceptance-tests/tests/fjord",
+			Gate:    "holocene",
+			Suite:   "",
+			RunAll:  true,
+		},
+		Status:   types.TestStatusSkip,
+		Duration: 200 * time.Millisecond,
+		SubTests: map[string]*types.TestResult{
+			"TestFjordThree": {
+				Metadata: types.ValidatorMetadata{FuncName: "TestFjordThree"},
+				Status:   types.TestStatusSkip,
+				Duration: 100 * time.Millisecond,
+			},
+		},
+	}
+
+	// Log both test results
+	require.NoError(t, logger.LogTestResult(fjordTest, runID))
+	require.NoError(t, logger.LogTestResult(packageTest, runID))
+
+	// Complete the logging process
+	require.NoError(t, logger.Complete(runID))
+
+	// Read the HTML file
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
+
+	content, err := os.ReadFile(htmlFile)
+	require.NoError(t, err)
+	htmlContent := string(content)
+
+	// Verify the fjord test with subtests is displayed (should not be filtered out)
+	assert.Contains(t, htmlContent, "fjord-test", "Test with subtests should be displayed even with empty FuncName")
+
+	// Verify the subtests are shown
+	assert.Contains(t, htmlContent, "TestFjordOne", "Subtest should be displayed")
+	assert.Contains(t, htmlContent, "TestFjordTwo", "Subtest should be displayed")
+
+	// Verify the package test is also shown
+	assert.Contains(t, htmlContent, "AllTests", "Package test should be displayed")
+	assert.Contains(t, htmlContent, "TestFjordThree", "Package test subtest should be displayed")
+
+	// Count total rows - should have: 1 fjord test + 2 fjord subtests + 1 package test + 1 package subtest = 5 rows
+	tableRowCount := strings.Count(htmlContent, "<tr class=")
+	assert.Equal(t, 5, tableRowCount, "Should have all tests and subtests displayed")
+
+	// Verify statistics are correct (5 total tests: 2 fjord subtests + 1 fjord main + 1 package + 1 package subtest)
+	assert.Contains(t, htmlContent, "5</div>", "Total count should include all tests and subtests")
+}
