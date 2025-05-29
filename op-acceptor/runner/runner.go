@@ -1496,9 +1496,15 @@ func (r *runner) parseTestOutputWithTimeout(output []byte, metadata types.Valida
 				subTest.Error = fmt.Errorf("%w (TIMED OUT)", subTest.Error)
 			}
 
-			// Try to calculate duration if we have start time
+			// Calculate duration based on when the timeout actually occurred, not current time
 			if startTime, hasStart := subTestStartTimes[testName]; hasStart {
-				subTest.Duration = time.Since(startTime)
+				// Use the timeout duration as the maximum time this subtest could have run
+				// This is more accurate than time.Since(startTime) which could be much later
+				actualTimeout := startTime.Add(timeoutDuration)
+				subTest.Duration = actualTimeout.Sub(startTime)
+			} else {
+				// If we don't have a start time, use a fraction of the timeout as estimate
+				subTest.Duration = timeoutDuration / 2
 			}
 		}
 	}

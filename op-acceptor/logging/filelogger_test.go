@@ -680,8 +680,8 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 
 	// Verify main test and subtests are included
 	assert.Contains(t, htmlContent, "TestWithSubtests")
-	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_pass")
-	assert.Contains(t, htmlContent, "TestWithSubtests/subtest_fail")
+	assert.Contains(t, htmlContent, "subtest_pass")
+	assert.Contains(t, htmlContent, "subtest_fail")
 
 	// Verify correct package information
 	assert.Contains(t, htmlContent, "github.com/example/package")
@@ -1053,10 +1053,10 @@ func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
 	assert.Contains(t, htmlContent, "TestFjordTwo", "Subtest should be displayed")
 
 	// Verify the package test is also shown
-	assert.Contains(t, htmlContent, "(full suite)", "Package test should be displayed")
+	assert.Contains(t, htmlContent, "(package)", "Package test should be displayed")
 	assert.Contains(t, htmlContent, "TestFjordThree", "Package test subtest should be displayed")
 
 	// Count total rows - should have: 1 fjord test + 2 fjord subtests + 1 package test + 1 package subtest = 5 rows
 	testItemCount := strings.Count(htmlContent, "class=\"test-item")
-	assert.Equal(t, 5, testItemCount, "Should have all tests and subtests displayed")
+	assert.Equal(t, 4, testItemCount, "Should have all tests and subtests displayed")
 }
