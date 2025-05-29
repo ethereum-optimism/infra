@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -295,11 +296,13 @@ func (n *nat) runTests(ctx context.Context) error {
 		// Continue execution despite file saving errors
 	}
 
-	reproBlurb := "\n\nTo reproduce this run, set the following environment variables:\n\n" + n.runner.ReproducibleEnv().String()
+	reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
 
 	n.config.Log.Info("Printing results table")
 	n.printResultsTable(result.RunID)
-	n.config.Log.Info(reproBlurb)
+	for _, line := range strings.Split(reproBlurb, "\n") {
+		n.config.Log.Info(line)
+	}
 
 	// Complete the file logging
 	if err := n.fileLogger.Complete(result.RunID); err != nil {

@@ -187,9 +187,6 @@ func (r *runner) RunAllTests(ctx context.Context) (*RunnerResult, error) {
 		r.runID = uuid.New().String()
 	}
 
-	defer func() {
-		r.runID = ""
-	}()
 	start := time.Now()
 	r.log.Debug("Running all tests", "run_id", r.runID)
 
@@ -1186,9 +1183,11 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 
 	// Always set the TEST_LOG_LEVEL environment variable
 	runEnv := append([]string{fmt.Sprintf("TEST_LOG_LEVEL=%s", r.testLogLevel)}, os.Environ()...)
+	runEnv = append(runEnv, r.ReproducibleEnv()...)
+	runEnv = telemetry.InstrumentEnvironment(ctx, runEnv)
 
 	if r.env == nil {
-		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
+		cmd.Env = runEnv
 		return cmd, func() {}
 	}
 
@@ -1206,13 +1205,13 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 		}
 
 		runEnv = append(
-			append(runEnv, r.ReproducibleEnv()...),
+			runEnv,
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
 			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
 		)
-		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
+		cmd.Env = runEnv
 	}
 	cleanup := func() {
 		if envFile != nil {
@@ -1227,7 +1226,7 @@ func (r *runner) ReproducibleEnv() Env {
 	return Env{
 		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 		fmt.Sprintf("%s=%s", env.ExpectPreconditionsMet, "true"),
-		// salt the funder abstraction with the runID
+		// salt the funder abstraction with DEVSTACK_KEYS_SALT=$runID
 		fmt.Sprintf("%s=%s", dsl.SaltEnvVar, r.runID),
 	}
 }
