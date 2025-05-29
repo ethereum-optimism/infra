@@ -91,6 +91,27 @@ func (s *RawJSONSink) StoreRawJSON(testID string, rawJSON []byte) {
 	s.rawJSONEvents[testID] = rawJSON
 }
 
+// GetRawJSON retrieves the raw JSON output for a test ID
+// Returns the raw JSON bytes and a boolean indicating if the test ID was found
+func (s *RawJSONSink) GetRawJSON(testID string) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rawJSONEvents == nil {
+		return nil, false
+	}
+
+	rawJSON, exists := s.rawJSONEvents[testID]
+	if !exists {
+		return nil, false
+	}
+
+	// Return a copy to avoid race conditions
+	result := make([]byte, len(rawJSON))
+	copy(result, rawJSON)
+	return result, true
+}
+
 // Complete creates the results directory
 func (s *RawJSONSink) Complete(runID string) error {
 	// Create the directory for results
