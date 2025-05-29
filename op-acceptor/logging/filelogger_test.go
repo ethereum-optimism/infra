@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -890,4 +891,72 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 	// Verify statistics are correct (main test + 2 subtests = 3 total)
 	assert.Contains(t, htmlContent, "<div class=\"stat-value\">3</div>")                                      // Total
 	assert.Contains(t, htmlContent, "Pass Rate</div>\n                <div class=\"stat-value\">33.3%</div>") // Pass rate (1 pass out of 3 total)
+}
+
+// TestDuplicationFix verifies that logging the same test multiple times doesn't create duplicate content
+func TestDuplicationFix(t *testing.T) {
+	// Create a temporary directory for logs
+	logDir := t.TempDir()
+	runID := "duplication-test"
+
+	// Create a file logger
+	logger, err := NewFileLogger(logDir, runID, "test-network", "test-gate")
+	require.NoError(t, err)
+
+	// Create a test result that would have caused duplication before
+	testResult := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:       "test1",
+			FuncName: "TestChainFork",
+			Package:  "github.com/ethereum-optimism/optimism/op-acceptance-tests/tests/base",
+			Gate:     "base",
+			Suite:    "",
+			Timeout:  1 * time.Second,
+		},
+		Status:   types.TestStatusFail,
+		Duration: 1203 * time.Millisecond,
+		Error:    fmt.Errorf("TIMEOUT: Test timed out after 1s (actual duration: 1.203660834s)"),
+		Stdout:   "",   // Empty stdout simulates timeout with no output
+		TimedOut: true, // Mark as timed out for our new timeout handling
+	}
+
+	// Log the same test result multiple times (which would cause duplication before)
+	for i := 0; i < 3; i++ {
+		err = logger.LogTestResult(testResult, runID)
+		require.NoError(t, err)
+	}
+
+	// Complete the logging
+	err = logger.Complete(runID)
+	require.NoError(t, err)
+
+	// Check that only one log file was created
+	failedDir := filepath.Join(logDir, "testrun-"+runID, "failed")
+	files, err := os.ReadDir(failedDir)
+	require.NoError(t, err)
+	require.Len(t, files, 1, "Expected exactly one log file in failed directory")
+
+	// Read the file content
+	logFilePath := filepath.Join(failedDir, files[0].Name())
+	content, err := os.ReadFile(logFilePath)
+	require.NoError(t, err)
+
+	contentStr := string(content)
+
+	// Count occurrences of key sections - should only appear once each
+	plaintextCount := strings.Count(contentStr, "PLAINTEXT OUTPUT:")
+	jsonCount := strings.Count(contentStr, "JSON OUTPUT:")
+	timeoutSummaryCount := strings.Count(contentStr, "TIMEOUT ERROR SUMMARY:")
+
+	// Assert that each section appears exactly once (no duplication)
+	assert.Equal(t, 1, plaintextCount, "PLAINTEXT OUTPUT section should appear exactly once")
+	assert.Equal(t, 1, jsonCount, "JSON OUTPUT section should appear exactly once")
+	assert.Equal(t, 1, timeoutSummaryCount, "TIMEOUT ERROR SUMMARY section should appear exactly once")
+
+	// Verify timeout information is present
+	assert.Contains(t, contentStr, "*** TIMEOUT ERROR ***")
+	assert.Contains(t, contentStr, "This test failed due to timeout!")
+	assert.Contains(t, contentStr, "TIMEOUT: Test timed out after 1s")
+
+	t.Logf("✅ Duplication fix verified! File: %s", files[0].Name())
 }

@@ -23,6 +23,7 @@ type TestResult struct {
 	Duration time.Duration          // Track test execution time
 	SubTests map[string]*TestResult // Store individual test results when running a package
 	Stdout   string                 // Capture stdout for failing tests
+	TimedOut bool                   // Track if this test timed out
 }
 
 // TestConfig represents a test configuration
