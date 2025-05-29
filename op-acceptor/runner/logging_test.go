@@ -161,7 +161,15 @@ func (l *testLogger) Crit(msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
+func (l *testLogger) CritContext(_ context.Context, msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
 func (l *testLogger) Error(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) ErrorContext(_ context.Context, msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
@@ -169,7 +177,15 @@ func (l *testLogger) Warn(msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
+func (l *testLogger) WarnContext(_ context.Context, msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
 func (l *testLogger) Info(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) InfoContext(_ context.Context, msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
@@ -177,7 +193,15 @@ func (l *testLogger) Debug(msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
+func (l *testLogger) DebugContext(_ context.Context, msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
 func (l *testLogger) Trace(msg string, ctx ...interface{}) {
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
+func (l *testLogger) TraceContext(_ context.Context, msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
@@ -201,8 +225,24 @@ func (l *testLogger) Log(level slog.Level, msg string, ctx ...interface{}) {
 	l.logFn(l.formatMessage(msg, ctx...))
 }
 
+func (l *testLogger) LogAttrs(_ context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	ctx := make([]interface{}, 0, len(attrs))
+	for _, attr := range attrs {
+		ctx = append(ctx, attr.Key, attr.Value.String())
+	}
+	l.logFn(l.formatMessage(msg, ctx...))
+}
+
 func (l *testLogger) Write(level slog.Level, msg string, attrs ...any) {
 	l.logFn(l.formatMessage(msg, attrs...))
+}
+
+func (l *testLogger) WriteCtx(_ context.Context, level slog.Level, msg string, attrs ...any) {
+	l.logFn(l.formatMessage(msg, attrs...))
+}
+
+func (l *testLogger) SetContext(_ context.Context) {
+	// No-op
 }
 
 // TestOutputRealtimeLogs verifies that test logs are output in real-time when outputRealtimeLogs is enabled
