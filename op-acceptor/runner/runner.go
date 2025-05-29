@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
+	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -1227,7 +1228,7 @@ func (r *runner) ReproducibleEnv() Env {
 		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 		fmt.Sprintf("%s=%s", env.ExpectPreconditionsMet, "true"),
 		// salt the funder abstraction with the runID
-		fmt.Sprintf("%s=%s", "DEVSTACK_KEYS_SALT", r.runID),
+		fmt.Sprintf("%s=%s", dsl.SaltEnvVar, r.runID),
 	}
 }
 
