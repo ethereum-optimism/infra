@@ -202,7 +202,6 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 	var tests []types.ValidatorMetadata
 
 	for _, cfg := range configs {
-
 		var timeout time.Duration
 		if cfg.Timeout != nil {
 			timeout = *cfg.Timeout

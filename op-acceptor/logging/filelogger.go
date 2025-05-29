@@ -153,11 +153,13 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 	}
 
 	// Add sinks - order matters
-	logger.sinks = append(logger.sinks, &IndividualTestFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
 	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
 	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
-	logger.sinks = append(logger.sinks, &PerTestFileSink{logger: logger})
+	logger.sinks = append(logger.sinks, &PerTestFileSink{
+		logger:         logger,
+		processedTests: make(map[string]bool),
+	})
 	logger.sinks = append(logger.sinks, NewHTMLSummarySink(logger, networkName, gateRun))
 
 	return logger, nil
@@ -169,7 +171,7 @@ func (l *FileLogger) getAsyncWriter(path string) (*AsyncFile, error) {
 	defer l.mu.Unlock()
 
 	// Check if we already have a writer for this path
-	if writer, ok := l.asyncWriters[path]; ok {
+	if writer, exists := l.asyncWriters[path]; exists {
 		return writer, nil
 	}
 
@@ -430,15 +432,17 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 		prefix = metadata.Suite
 	}
 
-	// Build the final filename with appropriate components
+	// Build the final filename with appropriate components, avoiding duplication
 	var nameBuilder strings.Builder
 
-	if prefix != "" {
+	// Add prefix if it exists and doesn't duplicate the package name
+	if prefix != "" && prefix != pkgName {
 		nameBuilder.WriteString(prefix)
 		nameBuilder.WriteString("_")
 	}
 
-	if pkgName != "" {
+	// Add package name if it exists and doesn't duplicate the prefix or function name
+	if pkgName != "" && pkgName != prefix && pkgName != fileName {
 		nameBuilder.WriteString(pkgName)
 		nameBuilder.WriteString("_")
 	}
@@ -450,114 +454,6 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 }
 
 // Sink implementations
-
-// IndividualTestFileSink writes each test result to its own file
-type IndividualTestFileSink struct {
-	logger *FileLogger
-}
-
-// Consume writes a test result to a dedicated file
-func (s *IndividualTestFileSink) Consume(result *types.TestResult, runID string) error {
-	// Use the specified runID directory
-	baseDir, err := s.logger.GetDirectoryForRunID(runID)
-	if err != nil {
-		return err
-	}
-	failedDir := filepath.Join(baseDir, "failed")
-
-	// Create directories if they don't exist
-	dirs := []string{
-		baseDir,
-		filepath.Join(baseDir, "tests"),
-		failedDir,
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	// Generate a safe filename based on the test metadata
-	filename := getReadableTestFilename(result.Metadata)
-
-	// Full path to the test log file
-	testFilePath := filepath.Join(baseDir, "tests", filename+".log")
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(testFilePath)
-	if err != nil {
-		return err
-	}
-
-	// Prepare the log content
-	var content strings.Builder
-	fmt.Fprintf(&content, "Test: %s\n", result.Metadata.FuncName)
-	fmt.Fprintf(&content, "Package: %s\n", result.Metadata.Package)
-	fmt.Fprintf(&content, "Status: %s\n", result.Status)
-	fmt.Fprintf(&content, "Duration: %s\n", result.Duration)
-	fmt.Fprintf(&content, "Gate: %s\n", result.Metadata.Gate)
-	fmt.Fprintf(&content, "Suite: %s\n", result.Metadata.Suite)
-	fmt.Fprintf(&content, "---------------------------------------------------\n\n")
-
-	// Write error if any
-	if result.Error != nil {
-		fmt.Fprintf(&content, "ERROR: %s\n\n", result.Error.Error())
-	}
-
-	// Write stdout/stderr output
-	if result.Stdout != "" {
-		fmt.Fprintf(&content, "STDOUT:\n%s\n", result.Stdout)
-	}
-
-	// Write the content to the file
-	if err := writer.Write([]byte(content.String())); err != nil {
-		return err
-	}
-
-	// If test failed, create a dedicated file in the failed directory with complete information
-	if result.Status == types.TestStatusFail {
-		failedFilePath := filepath.Join(failedDir, filename+".log")
-
-		// Create a more comprehensive log for failed tests
-		var failedContent strings.Builder
-
-		// Start with the same header information
-		fmt.Fprintf(&failedContent, "Test: %s\n", result.Metadata.FuncName)
-		fmt.Fprintf(&failedContent, "Package: %s\n", result.Metadata.Package)
-		fmt.Fprintf(&failedContent, "Status: %s\n", result.Status)
-		fmt.Fprintf(&failedContent, "Duration: %s\n", result.Duration)
-		fmt.Fprintf(&failedContent, "Gate: %s\n", result.Metadata.Gate)
-		fmt.Fprintf(&failedContent, "Suite: %s\n", result.Metadata.Suite)
-		fmt.Fprintf(&failedContent, "---------------------------------------------------\n\n")
-
-		// Add error information with emphasis
-		if result.Error != nil {
-			fmt.Fprintf(&failedContent, "ERROR DETAILS:\n")
-			fmt.Fprintf(&failedContent, "=============\n")
-			fmt.Fprintf(&failedContent, "%s\n\n", result.Error.Error())
-		}
-
-		// Include complete stdout
-		if result.Stdout != "" {
-			fmt.Fprintf(&failedContent, "COMPLETE OUTPUT:\n")
-			fmt.Fprintf(&failedContent, "================\n")
-			fmt.Fprintf(&failedContent, "%s\n", result.Stdout)
-		}
-
-		// Write to the failed test log file
-		if err := os.WriteFile(failedFilePath, []byte(failedContent.String()), 0644); err != nil {
-			return fmt.Errorf("failed to write failed test log: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// Complete is a no-op for IndividualTestFileSink
-func (s *IndividualTestFileSink) Complete(runID string) error {
-	return nil
-}
 
 // AllLogsFileSink writes all test results to a single "all.log" file
 type AllLogsFileSink struct {
@@ -645,19 +541,27 @@ func (s *AllLogsFileSink) Complete(runID string) error {
 
 // ConciseSummarySink creates a concise summary in summary.log
 type ConciseSummarySink struct {
-	logger      *FileLogger
-	passed      int
-	failed      int
-	skipped     int
-	errored     int
-	failedTests []string
-	testResults []*types.TestResult
+	logger       *FileLogger
+	passed       int
+	failed       int
+	skipped      int
+	errored      int
+	timeouts     int // Track timeout failures separately
+	failedTests  []string
+	timeoutTests []string // Track which tests timed out
+	testResults  []*types.TestResult
 }
 
 // Consume updates the summary statistics
 func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) error {
 	// Store the test result
 	s.testResults = append(s.testResults, result)
+
+	// Check if this is a timeout failure
+	isTimeout := result.TimedOut
+	if isTimeout {
+		s.timeouts++
+	}
 
 	// Update statistics based on test status
 	switch result.Status {
@@ -670,7 +574,13 @@ func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) err
 		if result.Metadata.Package != "" {
 			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
 		}
-		s.failedTests = append(s.failedTests, testName)
+
+		if isTimeout {
+			s.failedTests = append(s.failedTests, testName+" (TIMEOUT)")
+			s.timeoutTests = append(s.timeoutTests, testName)
+		} else {
+			s.failedTests = append(s.failedTests, testName)
+		}
 	case types.TestStatusSkip:
 		s.skipped++
 	case types.TestStatusError:
@@ -681,6 +591,32 @@ func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) err
 			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
 		}
 		s.failedTests = append(s.failedTests, testName+" (ERROR)")
+	}
+
+	// Also check subtests for timeouts
+	if len(result.SubTests) > 0 {
+		for subTestName, subTest := range result.SubTests {
+			if subTest.TimedOut {
+				s.timeouts++
+				fullSubTestName := fmt.Sprintf("%s/%s", result.Metadata.FuncName, subTestName)
+				if result.Metadata.Package != "" {
+					fullSubTestName = fmt.Sprintf("%s.%s", result.Metadata.Package, fullSubTestName)
+				}
+				s.timeoutTests = append(s.timeoutTests, fullSubTestName)
+
+				// Add to failed tests if not already there
+				found := false
+				for _, existing := range s.failedTests {
+					if strings.Contains(existing, fullSubTestName) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					s.failedTests = append(s.failedTests, fullSubTestName+" (SUBTEST TIMEOUT)")
+				}
+			}
+		}
 	}
 
 	return nil
@@ -717,12 +653,21 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 	fmt.Fprintf(&summary, "Time: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&summary, "Duration: %s\n\n", totalDuration)
 
+	// Add timeout warning if there were any timeouts
+	if s.timeouts > 0 {
+		fmt.Fprintf(&summary, "⚠️  WARNING: %d TEST(S) TIMED OUT! ⚠️\n\n", s.timeouts)
+	}
+
 	fmt.Fprintf(&summary, "Results:\n")
 	fmt.Fprintf(&summary, "  Total:   %d\n", total)
 	fmt.Fprintf(&summary, "  Passed:  %d\n", s.passed)
 	fmt.Fprintf(&summary, "  Failed:  %d\n", s.failed)
 	fmt.Fprintf(&summary, "  Skipped: %d\n", s.skipped)
-	fmt.Fprintf(&summary, "  Errors:  %d\n\n", s.errored)
+	fmt.Fprintf(&summary, "  Errors:  %d\n", s.errored)
+	if s.timeouts > 0 {
+		fmt.Fprintf(&summary, "  Timeouts: %d\n", s.timeouts)
+	}
+	fmt.Fprintf(&summary, "\n")
 
 	// Add pass rate percentage
 	passRate := 0.0
@@ -730,6 +675,16 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 		passRate = float64(s.passed) / float64(total) * 100
 	}
 	fmt.Fprintf(&summary, "Pass Rate: %.1f%%\n\n", passRate)
+
+	// Add timeout information prominently if there were timeouts
+	if len(s.timeoutTests) > 0 {
+		fmt.Fprintf(&summary, "TIMED OUT TESTS:\n")
+		fmt.Fprintf(&summary, "================\n")
+		for _, test := range s.timeoutTests {
+			fmt.Fprintf(&summary, "  ⏰ %s\n", test)
+		}
+		fmt.Fprintf(&summary, "\n")
+	}
 
 	// Include a list of failed tests if there are any
 	if len(s.failedTests) > 0 {
@@ -755,7 +710,9 @@ func (l *FileLogger) GetRunID() string {
 // PerTestFileSink creates dedicated log files for each test in passed/failed directories
 // containing the complete go test output that would be shown by `go test`
 type PerTestFileSink struct {
-	logger *FileLogger
+	logger         *FileLogger
+	processedTests map[string]bool // Track which test files we've already written
+	mu             sync.Mutex      // Protect the processedTests map
 }
 
 // Consume writes a complete test result to a dedicated file in the passed or failed directory
@@ -783,7 +740,7 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 	}
 
 	// Create log file for the main test
-	err = s.createTestLogFile(result, passedDir, failedDir, runID)
+	err = s.createTestLogFileOnce(result, passedDir, failedDir, runID)
 	if err != nil {
 		return fmt.Errorf("failed to create main test log file: %w", err)
 	}
@@ -806,13 +763,42 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 			Stdout:   subTest.Stdout,
 		}
 
-		err = s.createTestLogFile(subTestResult, passedDir, failedDir, runID)
+		err = s.createTestLogFileOnce(subTestResult, passedDir, failedDir, runID)
 		if err != nil {
 			return fmt.Errorf("failed to create subtest log file for %s: %w", subTestName, err)
 		}
 	}
 
 	return nil
+}
+
+// createTestLogFileOnce creates a log file for a single test result, but only once per unique file path
+func (s *PerTestFileSink) createTestLogFileOnce(result *types.TestResult, passedDir, failedDir string, runID string) error {
+	// Generate a safe filename based on the test metadata
+	filename := getReadableTestFilename(result.Metadata)
+
+	// Determine which directory to use based on test status
+	var targetDir string
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		targetDir = failedDir
+	} else {
+		targetDir = passedDir
+	}
+
+	// Full path to the test log file
+	testFilePath := filepath.Join(targetDir, filename+".log")
+
+	// Check if we've already processed this test file
+	s.mu.Lock()
+	if s.processedTests[testFilePath] {
+		s.mu.Unlock()
+		return nil // Already processed, skip
+	}
+	s.processedTests[testFilePath] = true
+	s.mu.Unlock()
+
+	// Now create the test log file
+	return s.createTestLogFile(result, passedDir, failedDir, runID)
 }
 
 // createTestLogFile creates a log file for a single test result
@@ -837,8 +823,26 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		return err
 	}
 
-	// Prepare the log content
+	// Check if this is a timeout failure for special handling
+	isTimeout := result.TimedOut
+
+	// Build error summary header
 	var content strings.Builder
+
+	// Check if this is a timeout failure
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+		if isTimeout {
+			fmt.Fprintf(&content, "TIMEOUT ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "======================\n\n")
+			fmt.Fprintf(&content, "This test failed due to timeout!\n")
+			fmt.Fprintf(&content, "Timeout Duration: %v\n", result.Metadata.Timeout)
+			fmt.Fprintf(&content, "Error: %s\n\n", result.Error.Error())
+		} else {
+			fmt.Fprintf(&content, "ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "=============\n\n")
+		}
+	}
 
 	// Extract the plaintext output first from all JSON Output fields
 	var plaintext strings.Builder
@@ -849,10 +853,31 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		})
 	}
 
-	// 1. Write the plaintext output first
+	// 1. Write the plaintext output first, with timeout information if applicable
 	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
 	fmt.Fprintf(&content, "================\n\n")
-	fmt.Fprintf(&content, "%s\n", plaintext.String())
+
+	// For timeout cases, prominently display the timeout error at the beginning of plaintext output
+	if isTimeout {
+		fmt.Fprintf(&content, "*** TIMEOUT ERROR ***\n")
+		fmt.Fprintf(&content, "%s\n", result.Error.Error())
+		fmt.Fprintf(&content, "*** END TIMEOUT ERROR ***\n\n")
+
+		if plaintext.Len() > 0 {
+			fmt.Fprintf(&content, "PARTIAL OUTPUT BEFORE TIMEOUT:\n")
+			fmt.Fprintf(&content, "------------------------------\n")
+			fmt.Fprintf(&content, "%s\n", plaintext.String())
+		} else {
+			fmt.Fprintf(&content, "No output captured before timeout occurred.\n")
+		}
+	} else {
+		// For non-timeout cases, show regular output
+		if plaintext.Len() > 0 {
+			fmt.Fprintf(&content, "%s\n", plaintext.String())
+		} else {
+			fmt.Fprintf(&content, "No output captured.\n")
+		}
+	}
 
 	// 2. Add a clear separator between plaintext and JSON
 	fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
@@ -861,37 +886,48 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 
 	// 3. Include the raw JSON output for full debug information
 	if result.Stdout != "" {
+		if isTimeout {
+			fmt.Fprintf(&content, "PARTIAL JSON OUTPUT (BEFORE TIMEOUT):\n")
+			fmt.Fprintf(&content, "-------------------------------------\n")
+		}
 		fmt.Fprintf(&content, "%s\n", result.Stdout)
+	} else if isTimeout {
+		fmt.Fprintf(&content, "No JSON output captured before timeout.\n")
+		// Include our timeout marker if we stored one
+		fmt.Fprintf(&content, "\nTimeout marker that would be stored:\n")
+		fmt.Fprintf(&content, `{"Time":"%s","Action":"timeout","Package":"%s","Test":"%s","Output":"TEST TIMED OUT - no JSON output captured\n"}`,
+			time.Now().Format(time.RFC3339), result.Metadata.Package, result.Metadata.FuncName)
+		fmt.Fprintf(&content, "\n")
+	} else {
+		fmt.Fprintf(&content, "No JSON output available.\n")
 	}
 
 	// 4. Add a separator before the error summary section
 	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
-		fmt.Fprintf(&content, "ERROR SUMMARY:\n")
-		fmt.Fprintf(&content, "=============\n\n")
+		// Extract critical error information from non-timeout errors
+		if !isTimeout {
+			errorInfo := extractErrorData(result.Stdout)
 
-		// Extract critical error information
-		errorInfo := extractErrorData(result.Stdout)
+			if errorInfo.TestName != "" {
+				fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
+			}
 
-		if errorInfo.TestName != "" {
-			fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
-		}
+			if errorInfo.ErrorMessage != "" {
+				fmt.Fprintf(&content, "Error:      %s\n", errorInfo.ErrorMessage)
+			}
 
-		if errorInfo.ErrorMessage != "" {
-			fmt.Fprintf(&content, "Error:      %s\n", errorInfo.ErrorMessage)
-		}
+			if errorInfo.Expected != "" && errorInfo.Actual != "" {
+				fmt.Fprintf(&content, "Expected:   %s\n", errorInfo.Expected)
+				fmt.Fprintf(&content, "Actual:     %s\n", errorInfo.Actual)
+			}
 
-		if errorInfo.Expected != "" && errorInfo.Actual != "" {
-			fmt.Fprintf(&content, "Expected:   %s\n", errorInfo.Expected)
-			fmt.Fprintf(&content, "Actual:     %s\n", errorInfo.Actual)
-		}
+			if errorInfo.Messages != "" {
+				fmt.Fprintf(&content, "Message:    %s\n", errorInfo.Messages)
+			}
 
-		if errorInfo.Messages != "" {
-			fmt.Fprintf(&content, "Message:    %s\n", errorInfo.Messages)
-		}
-
-		if errorInfo.ErrorTrace != "" {
-			fmt.Fprintf(&content, "\nError Trace:\n%s\n", errorInfo.ErrorTrace)
+			if errorInfo.ErrorTrace != "" {
+				fmt.Fprintf(&content, "\nError Trace:\n%s\n", errorInfo.ErrorTrace)
+			}
 		}
 	} else {
 		// For passed tests, a simpler summary at the end

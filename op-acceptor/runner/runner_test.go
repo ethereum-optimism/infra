@@ -1480,7 +1480,10 @@ func TestDirectToGate(t *testing.T) {
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
 	assert.Equal(t, ".", result.Metadata.Package)
 	assert.False(t, result.Metadata.RunAll)
-	assert.Equal(t, "test timed out after 1s", result.Error.Error())
+
+	// Check that the error message contains the expected timeout information
+	assert.Contains(t, result.Error.Error(), "TIMEOUT: Test timed out after 1s")
+	assert.Contains(t, result.Error.Error(), "actual duration:")
 }
 
 func TestRunTestTimeout_SingleTest_DoesNotExceedTimeout(t *testing.T) {
@@ -1618,4 +1621,133 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 			assert.Contains(t, result.Error.Error(), tc.expectErrMsg)
 		})
 	}
+}
+
+func TestPackageTimeoutErrorMessage(t *testing.T) {
+	// Create a temporary directory for test execution
+	tempDir := t.TempDir()
+
+	// Create a test file with fast and slow tests
+	testFile := filepath.Join(tempDir, "timeout_test.go")
+	testContent := `
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+func TestFast(t *testing.T) {
+	// This test passes quickly
+}
+
+func TestSlowTimeout(t *testing.T) {
+	// This test will timeout
+	time.Sleep(5 * time.Second)
+}
+
+func TestAnotherSlowTimeout(t *testing.T) {
+	// This test will also timeout
+	time.Sleep(5 * time.Second)
+}
+
+func TestAnotherFast(t *testing.T) {
+	// This test passes quickly
+}
+`
+	err := os.WriteFile(testFile, []byte(testContent), 0644)
+	require.NoError(t, err)
+
+	// Initialize go module in test directory
+	initGoModule(t, tempDir, "testmodule")
+
+	// Create a YAML configuration for the registry
+	configContent := []byte(`
+gates:
+  - id: test-gate
+    description: "Test gate with timeout tests"
+    tests:
+      - name: TestFast
+        package: "."
+        timeout: 2s
+      - name: TestSlowTimeout  
+        package: "."
+        timeout: 1s
+      - name: TestAnotherSlowTimeout
+        package: "."
+        timeout: 1s
+      - name: TestAnotherFast
+        package: "."
+        timeout: 2s
+`)
+
+	// Write the validator config to a file
+	validatorConfigPath := filepath.Join(tempDir, "validators.yaml")
+	err = os.WriteFile(validatorConfigPath, configContent, 0644)
+	require.NoError(t, err)
+
+	// Create registry with correct configuration
+	registry, err := registry.NewRegistry(registry.Config{
+		ValidatorConfigFile: validatorConfigPath,
+		Log:                 log.New(),
+		DefaultTimeout:      10 * time.Second,
+	})
+	require.NoError(t, err)
+
+	// Create test runner
+	cfg := Config{
+		Registry:           registry,
+		TargetGate:         "test-gate",
+		WorkDir:            tempDir,
+		Log:                log.New(),
+		GoBinary:           "go",
+		AllowSkips:         false,
+		OutputRealtimeLogs: false,
+		TestLogLevel:       "INFO",
+	}
+
+	testRunner, err := NewTestRunner(cfg)
+	require.NoError(t, err)
+
+	// Directly test the runTestList method with multiple tests to trigger timeout scenario
+	testNames := []string{"TestFast", "TestSlowTimeout", "TestAnotherSlowTimeout", "TestAnotherFast"}
+
+	packageMetadata := types.ValidatorMetadata{
+		ID:      "package-timeout-test",
+		Gate:    "test-gate",
+		Type:    types.ValidatorTypeTest,
+		Package: ".",
+		RunAll:  true,
+		Timeout: 1 * time.Second, // Short timeout to force timeouts on slow tests
+	}
+
+	// Run the test list - this should timeout on some tests
+	ctx := context.Background()
+
+	// Use the internal runTestList method to test package-level error handling
+	runnerInternal := testRunner.(*runner)
+	result, err := runnerInternal.runTestList(ctx, packageMetadata, testNames)
+
+	// The test should succeed (no error returned) but the result should indicate failures
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// The package should fail due to timeouts
+	require.Equal(t, types.TestStatusFail, result.Status)
+
+	// Check that the error message is concise and contains the timeout test names
+	require.NotNil(t, result.Error)
+	errorMsg := result.Error.Error()
+
+	// The error message should contain "Package test failures include timeouts:" followed by test names
+	require.Contains(t, errorMsg, "Package test failures include timeouts:")
+
+	// The error message should contain the names of the timed out tests
+	require.Contains(t, errorMsg, "TestSlowTimeout")
+	require.Contains(t, errorMsg, "TestAnotherSlowTimeout")
+
+	// Verify the format - it should look like: "Package test failures include timeouts: [TestSlowTimeout TestAnotherSlowTimeout]"
+	require.Regexp(t, `Package test failures include timeouts: \[.*TestSlowTimeout.*TestAnotherSlowTimeout.*\]`, errorMsg)
+
+	t.Logf("Package timeout error message: %s", errorMsg)
 }

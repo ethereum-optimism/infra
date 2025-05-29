@@ -133,12 +133,14 @@ go run cmd/main.go \
 
 For each test run, the following outputs are generated in the logs directory:
 
-0. HTML summary of the test run in `logs/results.html`
-1. Individual test log files in `logs/testrun-{run-id}/tests/`
-2. Summary of the test run in `logs/testrun-{run-id}/summary.log`
-3. Combined log of all tests in `logs/testrun-{run-id}/all.log`
-4. Failed test logs in `logs/testrun-{run-id}/failed/`
-5. Raw Go test events in `logs/testrun-{run-id}/raw_go_events.log` (in the format of `go test -json`)
+1. **HTML summary** of the test run in `logs/testrun-{run-id}/results.html`
+2. **Individual test logs** in `logs/testrun-{run-id}/passed/` and `logs/testrun-{run-id}/failed/`
+   - Each test gets a comprehensive log file with both plaintext and JSON output
+   - Failed tests include clear timeout indicators when applicable
+3. **Summary** of the test run in `logs/testrun-{run-id}/summary.log`
+   - Includes timeout warnings and counts when tests time out
+4. **Combined log** of all tests in `logs/testrun-{run-id}/all.log`
+5. **Raw Go test events** in `logs/testrun-{run-id}/raw_go_events.log` (in the format of `go test -json`)
 
 #### Raw JSON Events Logging
 
