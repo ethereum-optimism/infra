@@ -575,10 +575,10 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 		Stdout:   failedStdout,
 	}
 
-	// Force logging of package result if there were timeouts
-	if timeoutCount > 0 && r.fileLogger != nil {
+	// Log the package result
+	if r.fileLogger != nil {
 		if logErr := r.fileLogger.LogTestResult(packageResult, r.runID); logErr != nil {
-			r.log.Error("Failed to log package result with timeouts", "error", logErr, "package", metadata.Package)
+			r.log.Error("Failed to log package result", "error", logErr, "package", metadata.Package)
 		}
 	}
 
@@ -745,6 +745,13 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			parsedResult.Error = fmt.Errorf("%w\nstderr: %s", parsedResult.Error, stderr.String())
 		} else {
 			parsedResult.Error = fmt.Errorf("stderr: %s", stderr.String())
+		}
+	}
+
+	// Log the individual test result
+	if r.fileLogger != nil {
+		if logErr := r.fileLogger.LogTestResult(parsedResult, r.runID); logErr != nil {
+			r.log.Error("Failed to log individual test result", "error", logErr, "test", metadata.FuncName)
 		}
 	}
 

@@ -669,13 +669,6 @@ func (s *ConciseSummarySink) Complete(runID string) error {
 	}
 	fmt.Fprintf(&summary, "\n")
 
-	// Add pass rate percentage
-	passRate := 0.0
-	if total > 0 {
-		passRate = float64(s.passed) / float64(total) * 100
-	}
-	fmt.Fprintf(&summary, "Pass Rate: %.1f%%\n\n", passRate)
-
 	// Add timeout information prominently if there were timeouts
 	if len(s.timeoutTests) > 0 {
 		fmt.Fprintf(&summary, "TIMED OUT TESTS:\n")
@@ -1222,16 +1215,6 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		return err
 	}
 
-	// Create the HTML report filepath
-	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(htmlFile)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
-
 	// Calculate totals and duration
 	total := s.passed + s.failed + s.skipped + s.errored
 
@@ -1252,9 +1235,89 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 	}
 
 	// Prepare the test result rows (including subtests)
-	tests := make([]TestResultRow, 0)
+	// First, identify package tests and their subtests
+	packageTestsWithSubtests := make(map[string]map[string]bool) // package -> subtest names from package tests
+	packageTests := make([]*types.TestResult, 0)
+	individualTests := make([]*types.TestResult, 0)
+
 	for _, result := range s.testResults {
-		// Add the main test row
+		if result.Metadata.RunAll && len(result.SubTests) > 0 {
+			// This is a package test with subtests
+			packageTests = append(packageTests, result)
+			packageName := result.Metadata.Package
+			if packageTestsWithSubtests[packageName] == nil {
+				packageTestsWithSubtests[packageName] = make(map[string]bool)
+			}
+			for subTestName := range result.SubTests {
+				packageTestsWithSubtests[packageName][subTestName] = true
+			}
+		} else {
+			// This is an individual test (including regular tests with subtests)
+			individualTests = append(individualTests, result)
+		}
+	}
+
+	// Filter out individual tests that are duplicated as subtests in package tests in the same package
+	// BUT never filter out tests that have their own subtests
+	filteredIndividualTests := make([]*types.TestResult, 0)
+	for _, result := range individualTests {
+		// Never filter out tests that have their own subtests - they should always be displayed
+		if len(result.SubTests) > 0 {
+			filteredIndividualTests = append(filteredIndividualTests, result)
+			continue
+		}
+
+		// For tests without subtests, check if they're duplicated as subtests in package tests
+		testName := result.Metadata.FuncName
+		if testName == "" {
+			testName = result.Metadata.ID
+		}
+		packageName := result.Metadata.Package
+
+		// Only filter out if this test name exists as a subtest in a package test in the same package
+		// AND this test doesn't have its own subtests
+		if testName != "" && packageName != "" {
+			if subtestsInSamePackage, exists := packageTestsWithSubtests[packageName]; exists && subtestsInSamePackage[testName] {
+				// This individual test is duplicated as a subtest in a package test - filter it out
+				continue
+			}
+		}
+
+		// Keep this individual test
+		filteredIndividualTests = append(filteredIndividualTests, result)
+	}
+
+	tests := make([]TestResultRow, 0)
+
+	// Add filtered individual tests (including their subtests if any)
+	for _, result := range filteredIndividualTests {
+		mainTestRow := s.createTestResultRow(result, false, "")
+		tests = append(tests, mainTestRow)
+
+		// Add subtests for individual tests
+		for subTestName, subTest := range result.SubTests {
+			subTestResult := &types.TestResult{
+				Metadata: types.ValidatorMetadata{
+					ID:       subTest.Metadata.ID,
+					Gate:     result.Metadata.Gate,
+					Suite:    result.Metadata.Suite,
+					FuncName: subTestName,
+					Package:  result.Metadata.Package,
+					RunAll:   false,
+				},
+				Status:   subTest.Status,
+				Error:    subTest.Error,
+				Duration: subTest.Duration,
+				Stdout:   subTest.Stdout,
+			}
+			subTestRow := s.createTestResultRow(subTestResult, true, result.Metadata.FuncName)
+			tests = append(tests, subTestRow)
+		}
+	}
+
+	// Add package tests and their subtests
+	for _, result := range packageTests {
+		// Add the main package test row
 		mainTestRow := s.createTestResultRow(result, false, "")
 		tests = append(tests, mainTestRow)
 
@@ -1311,6 +1374,16 @@ func (s *HTMLSummarySink) Complete(runID string) error {
 		return fmt.Errorf("failed to execute HTML template: %w", err)
 	}
 
+	// Create the HTML report filepath
+	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
+
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(htmlFile)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
 	// Write the HTML content
 	return writer.Write(buf.Bytes())
 }
@@ -1350,6 +1423,21 @@ func (s *HTMLSummarySink) createTestResultRow(result *types.TestResult, isSubTes
 			testName = "AllTests"
 		} else {
 			testName = result.Metadata.ID
+		}
+	}
+
+	// If still empty, use package name as fallback for better visibility
+	if testName == "" {
+		if result.Metadata.Package != "" {
+			// Extract package basename for display
+			parts := strings.Split(result.Metadata.Package, "/")
+			if len(parts) > 0 {
+				testName = parts[len(parts)-1] + " (package)"
+			} else {
+				testName = result.Metadata.Package + " (package)"
+			}
+		} else {
+			testName = "Unknown Test"
 		}
 	}
 

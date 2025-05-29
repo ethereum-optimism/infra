@@ -295,13 +295,6 @@ func (n *nat) runTests(ctx context.Context) error {
 			"expected", runID, "actual", result.RunID)
 	}
 
-	// Save the test results to files
-	err = n.saveTestResults(result)
-	if err != nil {
-		n.config.Log.Error("Error saving test results to files", "error", err)
-		// Continue execution despite file saving errors
-	}
-
 	reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
 
 	n.config.Log.Info("Printing results table")
@@ -424,29 +417,6 @@ func (n *nat) runTests(ctx context.Context) error {
 		"log_dir", logDir,
 		"results_html", filepath.Join(logDir, logging.HTMLResultsFilename),
 	)
-	return nil
-}
-
-// saveTestResults saves the test results to files
-func (n *nat) saveTestResults(result *runner.RunnerResult) error {
-	// Process each gate
-	for _, gate := range result.Gates {
-		// Process direct tests for each gate
-		for _, test := range gate.Tests {
-			if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
-				return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
-			}
-		}
-
-		// Process suite tests for each gate
-		for _, suite := range gate.Suites {
-			for _, test := range suite.Tests {
-				if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
-					return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
-				}
-			}
-		}
-	}
 	return nil
 }
 
