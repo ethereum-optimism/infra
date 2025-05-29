@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -92,30 +94,34 @@ type TestRunnerWithFileLogger interface {
 
 // runner struct implements TestRunner interface
 type runner struct {
-	registry    *registry.Registry
-	validators  []types.ValidatorMetadata
-	workDir     string // Directory for running tests
-	log         log.Logger
-	runID       string
-	goBinary    string              // Path to the Go binary
-	allowSkips  bool                // Whether to allow skipping tests when preconditions are not met
-	fileLogger  *logging.FileLogger // Logger for storing test results
-	networkName string              // Name of the network being tested
-	env         *env.DevnetEnv
-	tracer      trace.Tracer
+	registry           *registry.Registry
+	validators         []types.ValidatorMetadata
+	workDir            string // Directory for running tests
+	log                log.Logger
+	runID              string
+	goBinary           string              // Path to the Go binary
+	allowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	outputRealtimeLogs bool                // If enabled, test logs will be outputted in realtime
+	testLogLevel       string              // Log level to be used for the tests
+	fileLogger         *logging.FileLogger // Logger for storing test results
+	networkName        string              // Name of the network being tested
+	env                *env.DevnetEnv
+	tracer             trace.Tracer
 }
 
 // Config holds configuration for creating a new runner
 type Config struct {
-	Registry    *registry.Registry
-	TargetGate  string
-	WorkDir     string
-	Log         log.Logger
-	GoBinary    string              // path to the Go binary
-	AllowSkips  bool                // Whether to allow skipping tests when preconditions are not met
-	FileLogger  *logging.FileLogger // Logger for storing test results
-	NetworkName string              // Name of the network being tested
-	DevnetEnv   *env.DevnetEnv
+	Registry           *registry.Registry
+	TargetGate         string
+	WorkDir            string
+	Log                log.Logger
+	GoBinary           string              // path to the Go binary
+	AllowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	OutputRealtimeLogs bool                // Whether to output test logs to the console
+	TestLogLevel       string              // Log level to be used for the tests
+	FileLogger         *logging.FileLogger // Logger for storing test results
+	NetworkName        string              // Name of the network being tested
+	DevnetEnv          *env.DevnetEnv
 }
 
 // NewTestRunner creates a new test runner instance
@@ -155,16 +161,18 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName)
 
 	return &runner{
-		registry:    cfg.Registry,
-		validators:  validators,
-		workDir:     cfg.WorkDir,
-		log:         cfg.Log,
-		goBinary:    cfg.GoBinary,
-		allowSkips:  cfg.AllowSkips,
-		fileLogger:  cfg.FileLogger,
-		networkName: networkName,
-		env:         cfg.DevnetEnv,
-		tracer:      otel.Tracer("test runner"),
+		registry:           cfg.Registry,
+		validators:         validators,
+		workDir:            cfg.WorkDir,
+		log:                cfg.Log,
+		goBinary:           cfg.GoBinary,
+		allowSkips:         cfg.AllowSkips,
+		outputRealtimeLogs: cfg.OutputRealtimeLogs,
+		testLogLevel:       cfg.TestLogLevel,
+		fileLogger:         cfg.FileLogger,
+		networkName:        networkName,
+		env:                cfg.DevnetEnv,
+		tracer:             otel.Tracer("test runner"),
 	}, nil
 }
 
@@ -351,6 +359,10 @@ func (r *runner) getTestKey(validator types.ValidatorMetadata) string {
 	return validator.FuncName
 }
 
+func isLocalPath(pkg string) bool {
+	return strings.HasPrefix(pkg, "./") || strings.HasPrefix(pkg, "/") || strings.HasPrefix(pkg, "../")
+}
+
 // RunTest implements the TestRunner interface
 func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	// Use defer and recover to catch panics and convert them to errors
@@ -379,7 +391,21 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 		}
 	}()
 
+	// Check if the path is available locally
+	if isLocalPath(metadata.Package) {
+		fullPath := filepath.Join(r.workDir, metadata.Package)
+		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
+			r.log.Error("Local package path does not exist, failing test", "validator", metadata.ID, "package", metadata.Package, "fullPath", fullPath)
+			return &types.TestResult{
+				Metadata: metadata,
+				Status:   types.TestStatusFail,
+				Error:    fmt.Errorf("local package path does not exist: %s", fullPath),
+			}, nil
+		}
+	}
+
 	r.log.Info("Running validator", "validator", metadata.ID)
+
 	start := time.Now()
 	if metadata.RunAll {
 		result, err = r.runAllTestsInPackage(ctx, metadata)
@@ -516,8 +542,20 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if r.outputRealtimeLogs {
+		stdoutLogger := &logWriter{logFn: func(msg string) {
+			r.log.Info("Test output", "test", metadata.FuncName, "output", msg)
+		}}
+		stderrLogger := &logWriter{logFn: func(msg string) {
+			r.log.Error("Test error output", "test", metadata.FuncName, "error", msg)
+		}}
+
+		cmd.Stdout = io.MultiWriter(&stdout, stdoutLogger)
+		cmd.Stderr = io.MultiWriter(&stderr, stderrLogger)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	r.log.Info("Running test", "test", metadata.FuncName)
 	r.log.Debug("Running test command",
@@ -563,10 +601,12 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 
 	// If we couldn't parse the output for some reason, create a minimal failing result
 	if parsedResult == nil {
+		r.log.Error("test exited with non-zero exit code", "exitCode", cmd.ProcessState.ExitCode())
 		parsedResult = &types.TestResult{
 			Metadata: metadata,
 			Status:   types.TestStatusFail,
 			Error:    fmt.Errorf("failed to parse test output"),
+			Stdout:   stdout.String(),
 		}
 	}
 
@@ -652,7 +692,9 @@ func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata
 		"status", result.Status,
 		"subtests", len(result.SubTests),
 		"hasAnyValidEvent", hasAnyValidEvent,
-		"hasError", result.Error != nil)
+		"hasError", result.Error != nil,
+		"error", result.Error,
+	)
 
 	return result
 }
@@ -1144,7 +1186,11 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 	cmd := exec.CommandContext(ctx, name, arg...)
 	cmd.Dir = r.workDir
 
+	// Always set the TEST_LOG_LEVEL environment variable
+	runEnv := append([]string{fmt.Sprintf("TEST_LOG_LEVEL=%s", r.testLogLevel)}, os.Environ()...)
+
 	if r.env == nil {
+		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
 		return cmd, func() {}
 	}
 
@@ -1161,8 +1207,7 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			r.log.Error("Failed to write env to temp file", "error", err)
 		}
 
-		env := append(
-			os.Environ(),
+		runEnv = append(runEnv,
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
@@ -1170,7 +1215,7 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 			"DEVNET_EXPECT_PRECONDITIONS_MET=true",
 		)
-		cmd.Env = telemetry.InstrumentEnvironment(ctx, env)
+		cmd.Env = telemetry.InstrumentEnvironment(ctx, runEnv)
 	}
 	cleanup := func() {
 		if envFile != nil {
@@ -1184,3 +1229,31 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 // Make sure the runner type implements both interfaces
 var _ TestRunner = &runner{}
 var _ TestRunnerWithFileLogger = &runner{}
+
+type logWriter struct {
+	logFn func(msg string)
+	buf   []byte
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	w.buf = append(w.buf, p...)
+	for {
+		idx := bytes.IndexByte(w.buf, '\n')
+		if idx == -1 {
+			break
+		}
+		line := w.buf[:idx]
+		w.buf = w.buf[idx+1:]
+
+		// Try to parse as a test event
+		event, err := parseTestEvent(line)
+		if err == nil && event.Action == ActionOutput {
+			// If it's a valid test event with output action, use the Output field
+			w.logFn(event.Output)
+		} else {
+			// If not a valid test event or not an output action, use the raw line
+			w.logFn(string(line))
+		}
+	}
+	return len(p), nil
+}
