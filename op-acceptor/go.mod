@@ -5,7 +5,7 @@ go 1.23.5
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101511.1-0.20250523133920-e3f85bf38455
 
 require (
-	github.com/ethereum-optimism/optimism v1.13.4-0.20250529103255-0a6bb1c16fc2
+	github.com/ethereum-optimism/optimism v1.13.4-0.20250529183319-4b049d03b411
 	github.com/ethereum/go-ethereum v1.15.11
 	github.com/google/uuid v1.6.0
 	github.com/honeycombio/otel-config-go v1.17.0
@@ -91,7 +91,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kurtosis-tech/kurtosis-portal/api/golang v0.0.0-20230818182330-1a86869414d2 // indirect
-	github.com/kurtosis-tech/kurtosis/api/golang v1.6.0 // indirect
+	github.com/kurtosis-tech/kurtosis/api/golang v1.8.1 // indirect
 	github.com/kurtosis-tech/kurtosis/contexts-config-store v0.0.0-20230818184218-f4e3e773463b // indirect
 	github.com/kurtosis-tech/kurtosis/grpc-file-transfer/golang v0.0.0-20230803130419-099ee7a4e3dc // indirect
 	github.com/kurtosis-tech/kurtosis/path-compression v0.0.0-20250108161014-0819b8ca912f // indirect
