@@ -18,6 +18,7 @@ import (
 const (
 	HTMLResultsTemplate = "results.tmpl.html"
 	HTMLResultsFilename = "results.html"
+	RunDirectoryPrefix  = "testrun-" // Standardized prefix for run directories
 )
 
 // ResultSink is an interface for different ways of consuming test results
@@ -124,7 +125,8 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 		return nil, fmt.Errorf("baseDir cannot be empty")
 	}
 
-	logDir := filepath.Join(baseDir, runID)
+	// Use the standardized prefix for the run directory
+	logDir := filepath.Join(baseDir, RunDirectoryPrefix+runID)
 	failedDir := filepath.Join(logDir, "failed")
 	summaryFile := filepath.Join(logDir, "summary.log")
 	allLogsFile := filepath.Join(logDir, "all.log")
@@ -232,9 +234,8 @@ func (l *FileLogger) GetDirectoryForRunID(runID string) (string, error) {
 	if runID == l.runID {
 		return l.logDir, nil
 	}
-	// Otherwise, construct the path for the different runID
-	dirName := fmt.Sprintf("testrun-%s", runID)
-	return filepath.Join(l.baseDir, dirName), nil
+	// Always use the standardized prefix for run directories
+	return filepath.Join(l.baseDir, RunDirectoryPrefix+runID), nil
 }
 
 // LogTestResult processes a test result through all registered sinks
