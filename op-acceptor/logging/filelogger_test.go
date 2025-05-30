@@ -25,8 +25,11 @@ func TestFileLogger(t *testing.T) {
 	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
+	// Get the directory with the testrun- prefix
+	baseDir, err := logger.GetDirectoryForRunID(runID)
+	require.NoError(t, err)
+
 	// Verify the directory structure
-	baseDir := logger.GetBaseDir()
 	assert.DirExists(t, baseDir)
 	assert.DirExists(t, filepath.Join(baseDir, "passed"))
 	assert.DirExists(t, filepath.Join(baseDir, "failed"))

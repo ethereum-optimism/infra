@@ -74,16 +74,7 @@ func (s *ReportingHTMLSink) Complete(runID string) error {
 	// Build the report data
 	reportData := s.builder.BuildFromTestResults(results, runID, s.networkName, s.gateName)
 
-	// Determine the output directory for this runID
-	// This matches the logic in FileLogger.GetDirectoryForRunID
-	var outputDir string
-	if runID == s.loggerRunID {
-		// If the runID matches the logger's current runID, use baseDir as logDir
-		outputDir = filepath.Join(s.baseDir, s.loggerRunID)
-	} else {
-		// Otherwise, construct the path for the different runID
-		outputDir = filepath.Join(s.baseDir, "testrun-"+runID)
-	}
+	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 
 	// Create the output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -148,16 +139,7 @@ func (s *ReportingTextSummarySink) Complete(runID string) error {
 	// Build the report data
 	reportData := s.builder.BuildFromTestResults(results, runID, s.networkName, s.gateName)
 
-	// Determine the output directory for this runID
-	// This matches the logic in FileLogger.GetDirectoryForRunID
-	var outputDir string
-	if runID == s.loggerRunID {
-		// If the runID matches the logger's current runID, use baseDir as logDir
-		outputDir = filepath.Join(s.baseDir, s.loggerRunID)
-	} else {
-		// Otherwise, construct the path for the different runID
-		outputDir = filepath.Join(s.baseDir, "testrun-"+runID)
-	}
+	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 
 	// Create the output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, 0755); err != nil {

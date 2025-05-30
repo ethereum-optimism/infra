@@ -121,7 +121,7 @@ just start-monitoring  # Launches Prometheus and Grafana alongside op-acceptor
 
 By default, test output from all tests is saved to log files, while only test results summaries are shown in the terminal. This makes the output much more manageable, especially when running many tests.
 
-Test logs are saved under the log directory path, in a directory named based on the run ID. The default log directory is `logs`, but you can specify a custom location:
+Test logs are saved under the log directory path, in a directory named with a standardized prefix `testrun-` followed by the run ID. The default log directory is `logs`, but you can specify a custom location:
 
 ```bash
 go run cmd/main.go \
@@ -131,21 +131,74 @@ go run cmd/main.go \
   --logdir /path/to/logs          # Custom log directory
 ```
 
-For each test run, the following outputs are generated in the logs directory:
+#### Log Directory Structure
 
-1. **HTML summary** of the test run in `logs/testrun-{run-id}/results.html`
-2. **Individual test logs** in `logs/testrun-{run-id}/passed/` and `logs/testrun-{run-id}/failed/`
-   - Each test gets a comprehensive log file with both plaintext and JSON output
-   - Failed tests include clear timeout indicators when applicable
-3. **Summary** of the test run in `logs/testrun-{run-id}/summary.log`
-   - Includes timeout warnings and counts when tests time out
-4. **Combined log** of all tests in `logs/testrun-{run-id}/all.log`
-5. **Raw Go test events** in `logs/testrun-{run-id}/raw_go_events.log` (in the format of `go test -json`)
+For each test run, a new directory is created with the following structure:
+```
+logs/
+  testrun-{run-id}/              # Each run gets a unique directory with 'testrun-' prefix
+    passed/                      # Successful test logs
+      {test-name}.log
+    failed/                      # Failed test logs
+      {test-name}.log
+    results.html                 # HTML summary of the test run
+    summary.log                  # Text summary with timeout warnings and counts
+    all.log                     # Combined log of all tests
+    raw_go_events.log           # Raw Go test events in -json format
+```
+
+#### Log File Types
+
+1. **HTML Summary** (`results.html`)
+   - Interactive summary of all test results
+   - Includes test status, duration, and error details
+   - Provides filtering and search capabilities
+
+2. **Individual Test Logs** (`passed/` and `failed/` directories)
+   - Each test gets its own log file with a standardized name
+   - Contains both plaintext and JSON output
+   - Failed tests include:
+     - Clear error summaries
+     - Timeout indicators when applicable
+     - Expected vs actual results for assertions
+     - Stack traces for debugging
+
+3. **Summary Log** (`summary.log`)
+   - Overall test run summary
+   - Test counts by status (passed/failed/skipped)
+   - Timeout warnings and counts
+   - Total run duration
+
+4. **Combined Log** (`all.log`)
+   - Chronological log of all test output
+   - Includes clear separators between tests
+   - Structured format for easy reading
+   - Contains metadata for each test (package, gate, suite, etc.)
+
+5. **Raw Events Log** (`raw_go_events.log`)
+   - Complete raw JSON output from all tests
+   - Compatible with `go test -json` format
+   - Useful for integration with Go test analysis tools
+   - Can be processed by tools like `gotestsum`
+
+#### Test Log Naming
+
+Test log files follow a standardized naming pattern that includes:
+- Gate name (if specified)
+- Suite name (if specified)
+- Package name (shortened for readability)
+- Test function name
+
+For example:
+```
+isthmus-acceptance_package_TestWithSubtests.log
+```
 
 #### Raw JSON Events Logging
 
 The `raw_go_events.log` file contains the complete raw JSON output from all tests. This file is compatible with tools like `gotestsum` and other Go test analysis tools that expect the standard `go test -json` format.
 
+Log directories are preserved between runs, with each run getting its own unique directory.
 
 
 ### Create a release
