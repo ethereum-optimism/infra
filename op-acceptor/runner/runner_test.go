@@ -1654,6 +1654,11 @@ func TestAnotherSlowTimeout(t *testing.T) {
 func TestAnotherFast(t *testing.T) {
 	// This test passes quickly
 }
+
+func TestSkipped(t *testing.T) {
+	// This test is skipped
+	t.Skip("This test is intentionally skipped")
+}
 `
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	require.NoError(t, err)
@@ -1677,6 +1682,9 @@ gates:
         package: "."
         timeout: 1s
       - name: TestAnotherFast
+        package: "."
+        timeout: 2s
+      - name: TestSkipped
         package: "."
         timeout: 2s
 `)
@@ -1710,7 +1718,7 @@ gates:
 	require.NoError(t, err)
 
 	// Directly test the runTestList method with multiple tests to trigger timeout scenario
-	testNames := []string{"TestFast", "TestSlowTimeout", "TestAnotherSlowTimeout", "TestAnotherFast"}
+	testNames := []string{"TestFast", "TestSlowTimeout", "TestAnotherSlowTimeout", "TestAnotherFast", "TestSkipped"}
 
 	packageMetadata := types.ValidatorMetadata{
 		ID:      "package-timeout-test",
@@ -1748,6 +1756,12 @@ gates:
 
 	// Verify the format - it should look like: "Package test failures include timeouts: [TestSlowTimeout TestAnotherSlowTimeout]"
 	require.Regexp(t, `Package test failures include timeouts: \[.*TestSlowTimeout.*TestAnotherSlowTimeout.*\]`, errorMsg)
+
+	// Verify that the skipped test is marked as skipped
+	require.Contains(t, result.SubTests, "TestSkipped", "Skipped test should be present in results")
+	skippedTest := result.SubTests["TestSkipped"]
+	require.Equal(t, types.TestStatusSkip, skippedTest.Status, "TestSkipped should have skip status")
+	require.Contains(t, skippedTest.Error.Error(), "This test is intentionally skipped", "Skip message should be preserved")
 
 	t.Logf("Package timeout error message: %s", errorMsg)
 }

@@ -144,20 +144,17 @@ func (rb *ReportBuilder) BuildFromRunnerResult(result interface{}, runID, networ
 
 // BuildFromTestResults creates a ReportData from a collection of TestResults
 func (rb *ReportBuilder) BuildFromTestResults(testResults []*types.TestResult, runID, networkName, gateName string) *ReportData {
-	// Pre-allocate slices with estimated capacity for better memory efficiency
-	estimatedTests := len(testResults) * 2 // Estimate that each test might have 1 subtest on average
-
 	report := &ReportData{
 		RunID:            runID,
 		NetworkName:      networkName,
 		GateName:         gateName,
 		Timestamp:        time.Now(),
-		Gates:            make([]ReportGate, 0, 4), // Typically few gates
-		AllTests:         make([]ReportTestItem, 0, estimatedTests),
-		FailedTests:      make([]ReportTestItem, 0, estimatedTests/10), // Assume ~10% failure rate
-		TimeoutTests:     make([]ReportTestItem, 0, estimatedTests/20), // Assume ~5% timeout rate
-		FailedTestNames:  make([]string, 0, estimatedTests/10),
-		TimeoutTestNames: make([]string, 0, estimatedTests/20),
+		Gates:            make([]ReportGate, 0),
+		AllTests:         make([]ReportTestItem, 0),
+		FailedTests:      make([]ReportTestItem, 0),
+		TimeoutTests:     make([]ReportTestItem, 0),
+		FailedTestNames:  make([]string, 0),
+		TimeoutTestNames: make([]string, 0),
 	}
 
 	// Group tests by gate and suite

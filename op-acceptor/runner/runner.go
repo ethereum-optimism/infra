@@ -461,9 +461,9 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	var totalDuration time.Duration
 	testResults := make(map[string]*types.TestResult)
 	var failedTestsStdout strings.Builder
-	var aggregatedRawJSON []byte // Store aggregated raw JSON for the test list
-	var timeoutCount int         // Track how many tests timed out
-	var timedOutTests []string   // Track which tests timed out
+	var aggregatedRawJSON []byte          // Store aggregated raw JSON for the test list
+	var timeoutCount int                  // Track how many tests timed out
+	var timedOutTests = make([]string, 0) // Track which tests timed out
 
 	r.log.Info("Running test package", "package", metadata.Package, "testCount", len(testNames))
 
@@ -556,7 +556,6 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 			failed++
 		}
 	}
-
 	r.log.Info("Package test completed",
 		"package", metadata.Package,
 		"total", len(testNames),
@@ -581,6 +580,12 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 			r.log.Error("Failed to log package result", "error", logErr, "package", metadata.Package)
 		}
 	}
+	r.log.Info("Package test result",
+		"package", metadata.Package,
+		"status", packageResult.Status,
+		"duration", packageResult.Duration,
+		"subtests", len(packageResult.SubTests),
+		"error", packageResult.Error)
 
 	return packageResult, nil
 }
@@ -715,6 +720,12 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 				r.log.Error("Failed to log timeout result", "error", logErr, "test", metadata.FuncName)
 			}
 		}
+		r.log.Info("Timeout result",
+			"test", metadata.FuncName,
+			"status", result.Status,
+			"duration", result.Duration,
+			"subtests", len(result.SubTests),
+			"error", result.Error)
 
 		return result, nil
 	}
