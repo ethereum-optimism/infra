@@ -28,18 +28,10 @@ const (
 	BoxTeeRight    = "├"
 	BoxTeeLeft     = "┤"
 
-	// Composite patterns for common use cases
-	TreeSubTestBranch     = "│       ├──"         // For subtests under tests
-	TreeSubTestLastBranch = "│       └──"         // For last subtest under tests
-	TreeSubTestError      = "│       │       └──" // For errors under subtests
-
 	// Suite-specific patterns (with additional indentation)
-	SuiteBranch        = "    ├── "                // Branch under suite
-	SuiteLastBranch    = "    └── "                // Last branch under suite
-	SuiteContinue      = "    │   "                // Continue line under suite
-	SuiteSubTestBranch = "    │       ├──"         // Subtest under suite test
-	SuiteSubTestLast   = "    │       └──"         // Last subtest under suite test
-	SuiteSubTestError  = "    │       │       └──" // Error under suite subtest
+	SuiteBranch     = "    ├── " // Branch under suite
+	SuiteLastBranch = "    └── " // Last branch under suite
+	SuiteContinue   = "    │   " // Continue line under suite
 )
 
 // TreePrefixBuilder helps build consistent tree prefixes based on hierarchy depth and position

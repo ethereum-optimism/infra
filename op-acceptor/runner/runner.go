@@ -1082,25 +1082,11 @@ func (r *RunnerResult) String() string {
 			b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.TreeBranch,
 				displayName, formatDuration(test.Duration), test.Status))
 			if test.Error != nil {
-				b.WriteString(fmt.Sprintf("%sError: %s\n", ui.TreeSubTestError, test.Error.Error()))
+				b.WriteString(fmt.Sprintf("%sError: %s\n", ui.BuildTreePrefix(2, true, []bool{false}), test.Error.Error()))
 			}
 
-			// Print subtests if present
-			if len(test.SubTests) > 0 {
-				i := 0
-				for subTestName, subTest := range test.SubTests {
-					prefix := ui.TreeSubTestBranch
-					if i == len(test.SubTests)-1 {
-						prefix = ui.TreeSubTestLastBranch
-					}
-					b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
-						prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
-					if subTest.Error != nil {
-						b.WriteString(fmt.Sprintf("%sError: %s\n", ui.TreeSubTestError, subTest.Error.Error()))
-					}
-					i++
-				}
-			}
+			// Print subtests recursively
+			r.printSubTests(&b, test.SubTests, 2, []bool{false})
 		}
 
 		// Print suites
@@ -1118,29 +1104,65 @@ func (r *RunnerResult) String() string {
 				b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.SuiteBranch,
 					displayName, formatDuration(test.Duration), test.Status))
 				if test.Error != nil {
-					b.WriteString(fmt.Sprintf("%sError: %s\n", ui.SuiteSubTestError, test.Error.Error()))
+					b.WriteString(fmt.Sprintf("%sError: %s\n", ui.BuildTreePrefix(3, true, []bool{true, false}), test.Error.Error()))
 				}
 
-				// Print subtests if present
-				if len(test.SubTests) > 0 {
-					i := 0
-					for subTestName, subTest := range test.SubTests {
-						prefix := ui.SuiteSubTestBranch
-						if i == len(test.SubTests)-1 {
-							prefix = ui.SuiteSubTestLast
-						}
-						b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
-							prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
-						if subTest.Error != nil {
-							b.WriteString(fmt.Sprintf("%sError: %s\n", ui.SuiteSubTestError, subTest.Error.Error()))
-						}
-						i++
-					}
-				}
+				// Print subtests recursively with suite indentation
+				r.printSubTests(&b, test.SubTests, 3, []bool{true, false})
 			}
 		}
 	}
 	return b.String()
+}
+
+// printSubTests recursively prints subtests at any depth using dynamic tree prefixes
+func (r *RunnerResult) printSubTests(b *strings.Builder, subTests map[string]*types.TestResult, baseDepth int, parentIsLast []bool) {
+	if len(subTests) == 0 {
+		return
+	}
+
+	// Convert map to slice and sort for consistent output
+	subTestNames := make([]string, 0, len(subTests))
+	for name := range subTests {
+		subTestNames = append(subTestNames, name)
+	}
+
+	// Sort to ensure consistent output order
+	for i := 0; i < len(subTestNames); i++ {
+		for j := i + 1; j < len(subTestNames); j++ {
+			if subTestNames[i] > subTestNames[j] {
+				subTestNames[i], subTestNames[j] = subTestNames[j], subTestNames[i]
+			}
+		}
+	}
+
+	for i, subTestName := range subTestNames {
+		subTest := subTests[subTestName]
+		isLast := i == len(subTestNames)-1
+
+		// Build the prefix for this depth level
+		prefix := ui.BuildTreePrefix(baseDepth, isLast, parentIsLast)
+
+		b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
+			prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+
+		if subTest.Error != nil {
+			// Create error prefix (one level deeper, always last)
+			errorParentIsLast := make([]bool, len(parentIsLast)+1)
+			copy(errorParentIsLast, parentIsLast)
+			errorParentIsLast[len(parentIsLast)] = isLast
+			errorPrefix := ui.BuildTreePrefix(baseDepth+1, true, errorParentIsLast)
+			b.WriteString(fmt.Sprintf("%sError: %s\n", errorPrefix, subTest.Error.Error()))
+		}
+
+		// Recursively print nested subtests
+		if len(subTest.SubTests) > 0 {
+			nestedParentIsLast := make([]bool, len(parentIsLast)+1)
+			copy(nestedParentIsLast, parentIsLast)
+			nestedParentIsLast[len(parentIsLast)] = isLast
+			r.printSubTests(b, subTest.SubTests, baseDepth+1, nestedParentIsLast)
+		}
+	}
 }
 
 // updateStats updates statistics at all levels

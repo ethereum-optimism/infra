@@ -6,47 +6,6 @@ import (
 	"unicode/utf8"
 )
 
-func TestTreeConstants(t *testing.T) {
-	tests := []struct {
-		name     string
-		constant string
-		expected string
-	}{
-		{"TreeBranch", TreeBranch, "├── "},
-		{"TreeLastBranch", TreeLastBranch, "└── "},
-		{"TreeVertical", TreeVertical, "│"},
-		{"TreeContinue", TreeContinue, "│   "},
-		{"TreeIndent", TreeIndent, "    "},
-		{"TreeDeepIndent", TreeDeepIndent, "│       "},
-		{"TreeMultiLevel", TreeMultiLevel, "│   │   "},
-		{"BoxTopLeft", BoxTopLeft, "┌"},
-		{"BoxTopRight", BoxTopRight, "┐"},
-		{"BoxBottomLeft", BoxBottomLeft, "└"},
-		{"BoxBottomRight", BoxBottomRight, "┘"},
-		{"BoxVertical", BoxVertical, "│"},
-		{"BoxHorizontal", BoxHorizontal, "─"},
-		{"BoxTeeRight", BoxTeeRight, "├"},
-		{"BoxTeeLeft", BoxTeeLeft, "┤"},
-		{"TreeSubTestBranch", TreeSubTestBranch, "│       ├──"},
-		{"TreeSubTestLastBranch", TreeSubTestLastBranch, "│       └──"},
-		{"TreeSubTestError", TreeSubTestError, "│       │       └──"},
-		{"SuiteBranch", SuiteBranch, "    ├── "},
-		{"SuiteLastBranch", SuiteLastBranch, "    └── "},
-		{"SuiteContinue", SuiteContinue, "    │   "},
-		{"SuiteSubTestBranch", SuiteSubTestBranch, "    │       ├──"},
-		{"SuiteSubTestLast", SuiteSubTestLast, "    │       └──"},
-		{"SuiteSubTestError", SuiteSubTestError, "    │       │       └──"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.constant != tt.expected {
-				t.Errorf("Constant %s = %q, want %q", tt.name, tt.constant, tt.expected)
-			}
-		})
-	}
-}
-
 func TestTreePrefixBuilder_BuildPrefix(t *testing.T) {
 	builder := TreePrefixBuilder{}
 
