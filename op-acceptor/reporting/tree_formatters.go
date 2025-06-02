@@ -14,6 +14,56 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 )
 
+// JSON response structures for tree formatting
+
+// TreeJSONResponse represents the complete JSON response for a test tree
+type TreeJSONResponse struct {
+	RunID       string              `json:"runId"`
+	NetworkName string              `json:"networkName,omitempty"`
+	Timestamp   time.Time           `json:"timestamp"`
+	Duration    time.Duration       `json:"duration"`
+	Stats       types.TestTreeStats `json:"stats"`
+	Hierarchy   *TreeNodeJSON       `json:"hierarchy,omitempty"`
+	Tests       []TestNodeJSON      `json:"tests"`
+	FailedTests []string            `json:"failedTests"`
+}
+
+// TreeNodeJSON represents a tree node in JSON format
+type TreeNodeJSON struct {
+	ID             string                 `json:"id"`
+	Name           string                 `json:"name"`
+	Type           types.TestTreeNodeType `json:"type"`
+	Status         types.TestStatus       `json:"status"`
+	Duration       time.Duration          `json:"duration"`
+	Depth          int                    `json:"depth"`
+	Package        string                 `json:"package,omitempty"`
+	Gate           string                 `json:"gate,omitempty"`
+	Suite          string                 `json:"suite,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	LogPath        string                 `json:"logPath,omitempty"`
+	ExecutionOrder int                    `json:"executionOrder,omitempty"`
+	Children       []TreeNodeJSON         `json:"children,omitempty"`
+	Stats          *types.TestTreeStats   `json:"stats,omitempty"`
+}
+
+// TestNodeJSON represents a flat test node in JSON format
+type TestNodeJSON struct {
+	ID             string                 `json:"id"`
+	Name           string                 `json:"name"`
+	Type           types.TestTreeNodeType `json:"type"`
+	Status         types.TestStatus       `json:"status"`
+	Duration       time.Duration          `json:"duration"`
+	ExecutionOrder int                    `json:"executionOrder"`
+	Package        string                 `json:"package,omitempty"`
+	Gate           string                 `json:"gate,omitempty"`
+	Suite          string                 `json:"suite,omitempty"`
+	Depth          int                    `json:"depth"`
+	Path           string                 `json:"path"`
+	Error          string                 `json:"error,omitempty"`
+	LogPath        string                 `json:"logPath,omitempty"`
+	TestResult     interface{}            `json:"testResult,omitempty"`
+}
+
 // formatDuration formats a duration for display
 func formatDuration(d time.Duration) string {
 	if d < time.Second {
@@ -464,63 +514,61 @@ func NewTreeJSONFormatter(includeTestResults, includeHierarchy bool) *TreeJSONFo
 
 // Format formats a test tree as JSON
 func (f *TreeJSONFormatter) Format(tree *types.TestTree) (string, error) {
-	data := make(map[string]interface{})
-
-	// Basic tree information
-	data["runId"] = tree.RunID
-	data["networkName"] = tree.NetworkName
-	data["timestamp"] = tree.Timestamp
-	data["duration"] = tree.Duration
-	data["stats"] = tree.Stats
+	response := TreeJSONResponse{
+		RunID:       tree.RunID,
+		NetworkName: tree.NetworkName,
+		Timestamp:   tree.Timestamp,
+		Duration:    tree.Duration,
+		Stats:       tree.Stats,
+	}
 
 	// Include hierarchy if requested
 	if f.includeHierarchy {
-		data["hierarchy"] = f.nodeToJSON(tree.Root)
+		hierarchy := f.nodeToJSONStruct(tree.Root)
+		response.Hierarchy = &hierarchy
 	}
 
 	// Include flat test list
-	var tests []map[string]interface{}
+	response.Tests = make([]TestNodeJSON, 0, len(tree.TestNodes))
 	for _, node := range tree.TestNodes {
-		testData := map[string]interface{}{
-			"id":             node.ID,
-			"name":           node.Name,
-			"type":           node.Type,
-			"status":         node.Status,
-			"duration":       node.Duration,
-			"executionOrder": node.ExecutionOrder,
-			"package":        node.Package,
-			"gate":           node.Gate,
-			"suite":          node.Suite,
-			"depth":          node.Depth,
-			"path":           node.GetPath(),
+		testData := TestNodeJSON{
+			ID:             node.ID,
+			Name:           node.Name,
+			Type:           node.Type,
+			Status:         node.Status,
+			Duration:       node.Duration,
+			ExecutionOrder: node.ExecutionOrder,
+			Package:        node.Package,
+			Gate:           node.Gate,
+			Suite:          node.Suite,
+			Depth:          node.Depth,
+			Path:           node.GetPath(),
 		}
 
 		if node.Error != nil {
-			testData["error"] = node.Error.Error()
+			testData.Error = node.Error.Error()
 		}
 
 		if node.LogPath != "" {
-			testData["logPath"] = node.LogPath
+			testData.LogPath = node.LogPath
 		}
 
 		// Include original test result if requested
 		if f.includeTestResults && node.TestResult != nil {
-			testData["testResult"] = node.TestResult
+			testData.TestResult = node.TestResult
 		}
 
-		tests = append(tests, testData)
+		response.Tests = append(response.Tests, testData)
 	}
-	data["tests"] = tests
 
 	// Include failed tests summary
-	var failed []string
+	response.FailedTests = make([]string, 0, len(tree.FailedNodes))
 	for _, node := range tree.FailedNodes {
-		failed = append(failed, node.GetPath())
+		response.FailedTests = append(response.FailedTests, node.GetPath())
 	}
-	data["failedTests"] = failed
 
 	// Convert to JSON
-	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	jsonBytes, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON: %w", err)
 	}
@@ -528,48 +576,42 @@ func (f *TreeJSONFormatter) Format(tree *types.TestTree) (string, error) {
 	return string(jsonBytes), nil
 }
 
-// nodeToJSON converts a tree node to JSON representation
-func (f *TreeJSONFormatter) nodeToJSON(node *types.TestTreeNode) map[string]interface{} {
-	nodeData := map[string]interface{}{
-		"id":       node.ID,
-		"name":     node.Name,
-		"type":     node.Type,
-		"status":   node.Status,
-		"duration": node.Duration,
-		"depth":    node.Depth,
+// nodeToJSONStruct converts a tree node to TreeNodeJSON struct
+func (f *TreeJSONFormatter) nodeToJSONStruct(node *types.TestTreeNode) TreeNodeJSON {
+	nodeData := TreeNodeJSON{
+		ID:       node.ID,
+		Name:     node.Name,
+		Type:     node.Type,
+		Status:   node.Status,
+		Duration: node.Duration,
+		Depth:    node.Depth,
+		Package:  node.Package,
+		Gate:     node.Gate,
+		Suite:    node.Suite,
 	}
 
-	if node.Package != "" {
-		nodeData["package"] = node.Package
-	}
-	if node.Gate != "" {
-		nodeData["gate"] = node.Gate
-	}
-	if node.Suite != "" {
-		nodeData["suite"] = node.Suite
-	}
 	if node.Error != nil {
-		nodeData["error"] = node.Error.Error()
+		nodeData.Error = node.Error.Error()
 	}
 	if node.LogPath != "" {
-		nodeData["logPath"] = node.LogPath
+		nodeData.LogPath = node.LogPath
 	}
 	if node.Type == types.NodeTypeTest || node.Type == types.NodeTypeSubtest {
-		nodeData["executionOrder"] = node.ExecutionOrder
+		nodeData.ExecutionOrder = node.ExecutionOrder
 	}
 
 	// Add children if any
 	if len(node.Children) > 0 {
-		var children []map[string]interface{}
+		nodeData.Children = make([]TreeNodeJSON, 0, len(node.Children))
 		for _, child := range node.Children {
-			children = append(children, f.nodeToJSON(child))
+			nodeData.Children = append(nodeData.Children, f.nodeToJSONStruct(child))
 		}
-		nodeData["children"] = children
 	}
 
 	// Add statistics for containers
 	if node.Type != types.NodeTypeTest && node.Type != types.NodeTypeSubtest {
-		nodeData["stats"] = node.GetTestStats()
+		stats := node.GetTestStats()
+		nodeData.Stats = &stats
 	}
 
 	return nodeData
