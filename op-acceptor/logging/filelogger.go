@@ -421,7 +421,7 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 	if metadata.FuncName != "" {
 		fileName = metadata.FuncName
 	} else if metadata.RunAll {
-		// For package tests that run all tests, use package basename instead of "AllTests"
+		// For package tests that run all tests, use package basename
 		if metadata.Package != "" {
 			packageParts := strings.Split(metadata.Package, "/")
 			// Find the last non-empty part
@@ -485,7 +485,7 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 		prefix = metadata.Suite
 	}
 
-	// Build the final filename with appropriate components, avoiding duplication
+	// Build the final filename with appropriate components
 	var nameBuilder strings.Builder
 
 	// Add prefix if it exists and doesn't duplicate the package name
@@ -527,10 +527,8 @@ func (s *AllLogsFileSink) Consume(result *types.TestResult, runID string) error 
 		return err
 	}
 
-	// Use a cleaner, more structured format that's easier to read for large outputs
 	var content strings.Builder
 
-	// Create a clear header with visual distinction using ui package functions
 	content.WriteString("\n")
 	content.WriteString(ui.BuildBoxHeader(fmt.Sprintf("TEST: %s", truncateString(result.Metadata.FuncName, 60)), 72))
 
