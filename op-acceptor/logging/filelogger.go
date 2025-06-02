@@ -2,7 +2,6 @@ package logging
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,12 +11,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 )
 
 const (
 	HTMLResultsTemplate = "results.tmpl.html"
 	HTMLResultsFilename = "results.html"
+	RunDirectoryPrefix  = "testrun-" // Standardized prefix for run directories
 )
 
 // ResultSink is an interface for different ways of consuming test results
@@ -114,23 +116,28 @@ func (af *AsyncFile) Close() error {
 	return af.file.Close()
 }
 
-// NewFileLogger creates a new file logger with the specified base directory and runID
+// NewFileLogger creates a new FileLogger with given configuration
 func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*FileLogger, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("runID cannot be empty")
 	}
 
-	// Create subdirectory for this specific run
-	runDir := filepath.Join(baseDir, fmt.Sprintf("testrun-%s", runID))
-	failedDir := filepath.Join(runDir, "failed")
-	passedDir := filepath.Join(runDir, "passed")
+	if baseDir == "" {
+		return nil, fmt.Errorf("baseDir cannot be empty")
+	}
+
+	// Use the standardized prefix for the run directory
+	logDir := filepath.Join(baseDir, RunDirectoryPrefix+runID)
+	failedDir := filepath.Join(logDir, "failed")
+	summaryFile := filepath.Join(logDir, "summary.log")
+	allLogsFile := filepath.Join(logDir, "all.log")
 
 	// Create directories if they don't exist
 	dirs := []string{
 		baseDir,
-		runDir,
+		logDir,
 		failedDir,
-		passedDir,
+		filepath.Join(logDir, "passed"),
 	}
 
 	for _, dir := range dirs {
@@ -139,26 +146,55 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 		}
 	}
 
-	summaryFile := filepath.Join(runDir, "summary.log")
-	allLogsFile := filepath.Join(runDir, "all.log")
-
+	// Initialize all sinks
 	logger := &FileLogger{
-		baseDir:      runDir,
-		logDir:       baseDir,
+		baseDir:      baseDir,
+		logDir:       logDir,
 		failedDir:    failedDir,
 		summaryFile:  summaryFile,
 		allLogsFile:  allLogsFile,
+		sinks:        make([]ResultSink, 0),
 		asyncWriters: make(map[string]*AsyncFile),
 		runID:        runID,
 	}
 
-	// Add sinks - order matters
-	logger.sinks = append(logger.sinks, &IndividualTestFileSink{logger: logger})
-	logger.sinks = append(logger.sinks, &AllLogsFileSink{logger: logger})
-	logger.sinks = append(logger.sinks, &ConciseSummarySink{logger: logger})
-	logger.sinks = append(logger.sinks, &RawJSONSink{logger: logger})
-	logger.sinks = append(logger.sinks, &PerTestFileSink{logger: logger})
-	logger.sinks = append(logger.sinks, NewHTMLSummarySink(logger, networkName, gateRun))
+	// Initialize the AllLogsFileSink
+	allLogsSink := &AllLogsFileSink{logger: logger}
+	logger.sinks = append(logger.sinks, allLogsSink)
+
+	// Initialize the PerTestFileSink
+	perTestSink := &PerTestFileSink{
+		logger:         logger,
+		processedTests: make(map[string]bool),
+	}
+	logger.sinks = append(logger.sinks, perTestSink)
+
+	// Initialize the RawJSONSink
+	rawJSONSink := &RawJSONSink{logger: logger}
+	logger.sinks = append(logger.sinks, rawJSONSink)
+
+	// Load HTML template
+	templateContent, err := templateFS.ReadFile("templates/" + HTMLResultsTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read HTML template: %w", err)
+	}
+
+	// Load JavaScript content
+	jsContent, err := GetStaticFile("results.js")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JavaScript file: %w", err)
+	}
+
+	// Initialize the new ReportingHTMLSink
+	htmlSink, err := reporting.NewReportingHTMLSink(baseDir, runID, networkName, gateRun, string(templateContent), jsContent, getReadableTestFilename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTML sink: %w", err)
+	}
+	logger.sinks = append(logger.sinks, htmlSink)
+
+	// Initialize the new ReportingTextSummarySink
+	textSummarySink := reporting.NewReportingTextSummarySink(baseDir, runID, networkName, gateRun, false)
+	logger.sinks = append(logger.sinks, textSummarySink)
 
 	return logger, nil
 }
@@ -169,7 +205,7 @@ func (l *FileLogger) getAsyncWriter(path string) (*AsyncFile, error) {
 	defer l.mu.Unlock()
 
 	// Check if we already have a writer for this path
-	if writer, ok := l.asyncWriters[path]; ok {
+	if writer, exists := l.asyncWriters[path]; exists {
 		return writer, nil
 	}
 
@@ -201,8 +237,12 @@ func (l *FileLogger) GetDirectoryForRunID(runID string) (string, error) {
 	if runID == "" {
 		return "", fmt.Errorf("runID cannot be empty")
 	}
-	dirName := fmt.Sprintf("testrun-%s", runID)
-	return filepath.Join(l.logDir, dirName), nil
+	// If the runID matches the logger's current runID, return logDir
+	if runID == l.runID {
+		return l.logDir, nil
+	}
+	// Always use the standardized prefix for run directories
+	return filepath.Join(l.baseDir, RunDirectoryPrefix+runID), nil
 }
 
 // LogTestResult processes a test result through all registered sinks
@@ -265,7 +305,7 @@ func (l *FileLogger) Complete(runID string) error {
 
 // GetBaseDir returns the base directory for this test run
 func (l *FileLogger) GetBaseDir() string {
-	return l.baseDir
+	return l.logDir
 }
 
 // GetFailedDir returns the directory containing logs for failed tests
@@ -381,8 +421,23 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 	if metadata.FuncName != "" {
 		fileName = metadata.FuncName
 	} else if metadata.RunAll {
-		// For package tests that run all tests
-		fileName = "AllTests"
+		// For package tests that run all tests, use package basename
+		if metadata.Package != "" {
+			packageParts := strings.Split(metadata.Package, "/")
+			// Find the last non-empty part
+			for i := len(packageParts) - 1; i >= 0; i-- {
+				if packageParts[i] != "" {
+					fileName = packageParts[i]
+					break
+				}
+			}
+			// If we didn't find a package name, use a fallback
+			if fileName == "" {
+				fileName = "PackageSuite"
+			}
+		} else {
+			fileName = "PackageSuite"
+		}
 	} else {
 		fileName = metadata.ID // Fallback to ID if no function name
 	}
@@ -433,12 +488,14 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 	// Build the final filename with appropriate components
 	var nameBuilder strings.Builder
 
-	if prefix != "" {
+	// Add prefix if it exists and doesn't duplicate the package name
+	if prefix != "" && prefix != pkgName {
 		nameBuilder.WriteString(prefix)
 		nameBuilder.WriteString("_")
 	}
 
-	if pkgName != "" {
+	// Add package name if it exists and doesn't duplicate the prefix or function name
+	if pkgName != "" && pkgName != prefix && pkgName != fileName {
 		nameBuilder.WriteString(pkgName)
 		nameBuilder.WriteString("_")
 	}
@@ -450,114 +507,6 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 }
 
 // Sink implementations
-
-// IndividualTestFileSink writes each test result to its own file
-type IndividualTestFileSink struct {
-	logger *FileLogger
-}
-
-// Consume writes a test result to a dedicated file
-func (s *IndividualTestFileSink) Consume(result *types.TestResult, runID string) error {
-	// Use the specified runID directory
-	baseDir, err := s.logger.GetDirectoryForRunID(runID)
-	if err != nil {
-		return err
-	}
-	failedDir := filepath.Join(baseDir, "failed")
-
-	// Create directories if they don't exist
-	dirs := []string{
-		baseDir,
-		filepath.Join(baseDir, "tests"),
-		failedDir,
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	// Generate a safe filename based on the test metadata
-	filename := getReadableTestFilename(result.Metadata)
-
-	// Full path to the test log file
-	testFilePath := filepath.Join(baseDir, "tests", filename+".log")
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(testFilePath)
-	if err != nil {
-		return err
-	}
-
-	// Prepare the log content
-	var content strings.Builder
-	fmt.Fprintf(&content, "Test: %s\n", result.Metadata.FuncName)
-	fmt.Fprintf(&content, "Package: %s\n", result.Metadata.Package)
-	fmt.Fprintf(&content, "Status: %s\n", result.Status)
-	fmt.Fprintf(&content, "Duration: %s\n", result.Duration)
-	fmt.Fprintf(&content, "Gate: %s\n", result.Metadata.Gate)
-	fmt.Fprintf(&content, "Suite: %s\n", result.Metadata.Suite)
-	fmt.Fprintf(&content, "---------------------------------------------------\n\n")
-
-	// Write error if any
-	if result.Error != nil {
-		fmt.Fprintf(&content, "ERROR: %s\n\n", result.Error.Error())
-	}
-
-	// Write stdout/stderr output
-	if result.Stdout != "" {
-		fmt.Fprintf(&content, "STDOUT:\n%s\n", result.Stdout)
-	}
-
-	// Write the content to the file
-	if err := writer.Write([]byte(content.String())); err != nil {
-		return err
-	}
-
-	// If test failed, create a dedicated file in the failed directory with complete information
-	if result.Status == types.TestStatusFail {
-		failedFilePath := filepath.Join(failedDir, filename+".log")
-
-		// Create a more comprehensive log for failed tests
-		var failedContent strings.Builder
-
-		// Start with the same header information
-		fmt.Fprintf(&failedContent, "Test: %s\n", result.Metadata.FuncName)
-		fmt.Fprintf(&failedContent, "Package: %s\n", result.Metadata.Package)
-		fmt.Fprintf(&failedContent, "Status: %s\n", result.Status)
-		fmt.Fprintf(&failedContent, "Duration: %s\n", result.Duration)
-		fmt.Fprintf(&failedContent, "Gate: %s\n", result.Metadata.Gate)
-		fmt.Fprintf(&failedContent, "Suite: %s\n", result.Metadata.Suite)
-		fmt.Fprintf(&failedContent, "---------------------------------------------------\n\n")
-
-		// Add error information with emphasis
-		if result.Error != nil {
-			fmt.Fprintf(&failedContent, "ERROR DETAILS:\n")
-			fmt.Fprintf(&failedContent, "=============\n")
-			fmt.Fprintf(&failedContent, "%s\n\n", result.Error.Error())
-		}
-
-		// Include complete stdout
-		if result.Stdout != "" {
-			fmt.Fprintf(&failedContent, "COMPLETE OUTPUT:\n")
-			fmt.Fprintf(&failedContent, "================\n")
-			fmt.Fprintf(&failedContent, "%s\n", result.Stdout)
-		}
-
-		// Write to the failed test log file
-		if err := os.WriteFile(failedFilePath, []byte(failedContent.String()), 0644); err != nil {
-			return fmt.Errorf("failed to write failed test log: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// Complete is a no-op for IndividualTestFileSink
-func (s *IndividualTestFileSink) Complete(runID string) error {
-	return nil
-}
 
 // AllLogsFileSink writes all test results to a single "all.log" file
 type AllLogsFileSink struct {
@@ -578,41 +527,38 @@ func (s *AllLogsFileSink) Consume(result *types.TestResult, runID string) error 
 		return err
 	}
 
-	// Use a cleaner, more structured format that's easier to read for large outputs
 	var content strings.Builder
 
-	// Create a clear header with visual distinction
-	fmt.Fprintf(&content, "\n")
-	fmt.Fprintf(&content, "┌─────────────────────────────────────────────────────────────────────┐\n")
-	fmt.Fprintf(&content, "│ TEST: %-64s │\n", truncateString(result.Metadata.FuncName, 64))
-	fmt.Fprintf(&content, "├─────────────────────────────────────────────────────────────────────┤\n")
+	content.WriteString("\n")
+	content.WriteString(ui.BuildBoxHeader(fmt.Sprintf("TEST: %s", truncateString(result.Metadata.FuncName, 60)), 72))
 
 	// Add test metadata in a structured format
-	fmt.Fprintf(&content, "│ Status:   %-62s │\n", result.Status)
-	fmt.Fprintf(&content, "│ Package:  %-62s │\n", truncateString(result.Metadata.Package, 62))
-	fmt.Fprintf(&content, "│ Gate:     %-62s │\n", truncateString(result.Metadata.Gate, 62))
-	fmt.Fprintf(&content, "│ Suite:    %-62s │\n", truncateString(result.Metadata.Suite, 62))
-	fmt.Fprintf(&content, "│ Duration: %-62s │\n", result.Duration)
-	fmt.Fprintf(&content, "│ Time:     %-62s │\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&content, "└─────────────────────────────────────────────────────────────────────┘\n\n")
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Status:   %s", result.Status), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Package:  %s", truncateString(result.Metadata.Package, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Gate:     %s", truncateString(result.Metadata.Gate, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Suite:    %s", truncateString(result.Metadata.Suite, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Duration: %s", result.Duration), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Time:     %s", time.Now().Format(time.RFC3339)), 72))
+	content.WriteString(ui.BuildBoxFooter(72))
+	content.WriteString("\n")
 
 	// Add error and stdout in clearly marked sections
 	if result.Error != nil {
-		fmt.Fprintf(&content, "ERROR:\n")
-		fmt.Fprintf(&content, "~~~~~~\n")
-		fmt.Fprintf(&content, "%s\n\n", result.Error.Error())
+		content.WriteString("ERROR:\n")
+		content.WriteString("~~~~~~\n")
+		content.WriteString(fmt.Sprintf("%s\n\n", result.Error.Error()))
 	}
 
 	if result.Stdout != "" {
-		fmt.Fprintf(&content, "STDOUT:\n")
-		fmt.Fprintf(&content, "~~~~~~~\n")
+		content.WriteString("STDOUT:\n")
+		content.WriteString("~~~~~~~\n")
 		// Indent the stdout for better readability
 		indentedOutput := indentText(result.Stdout, "  ")
-		fmt.Fprintf(&content, "%s\n", indentedOutput)
+		content.WriteString(fmt.Sprintf("%s\n", indentedOutput))
 	}
 
 	// Add a clear separator at the end
-	fmt.Fprintf(&content, "\n")
+	content.WriteString("\n")
 
 	// Write the content to the file
 	return writer.Write([]byte(content.String()))
@@ -643,110 +589,6 @@ func (s *AllLogsFileSink) Complete(runID string) error {
 	return nil
 }
 
-// ConciseSummarySink creates a concise summary in summary.log
-type ConciseSummarySink struct {
-	logger      *FileLogger
-	passed      int
-	failed      int
-	skipped     int
-	errored     int
-	failedTests []string
-	testResults []*types.TestResult
-}
-
-// Consume updates the summary statistics
-func (s *ConciseSummarySink) Consume(result *types.TestResult, runID string) error {
-	// Store the test result
-	s.testResults = append(s.testResults, result)
-
-	// Update statistics based on test status
-	switch result.Status {
-	case types.TestStatusPass:
-		s.passed++
-	case types.TestStatusFail:
-		s.failed++
-		// Keep track of failed tests for the summary
-		testName := result.Metadata.FuncName
-		if result.Metadata.Package != "" {
-			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
-		}
-		s.failedTests = append(s.failedTests, testName)
-	case types.TestStatusSkip:
-		s.skipped++
-	case types.TestStatusError:
-		s.errored++
-		// Keep track of errored tests too
-		testName := result.Metadata.FuncName
-		if result.Metadata.Package != "" {
-			testName = fmt.Sprintf("%s.%s", result.Metadata.Package, testName)
-		}
-		s.failedTests = append(s.failedTests, testName+" (ERROR)")
-	}
-
-	return nil
-}
-
-// Complete generates and writes the final summary
-func (s *ConciseSummarySink) Complete(runID string) error {
-	// Get the summary file path for this runID
-	summaryFile, err := s.logger.GetSummaryFileForRunID(runID)
-	if err != nil {
-		return err
-	}
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(summaryFile)
-	if err != nil {
-		return err
-	}
-
-	// Calculate totals and duration
-	total := s.passed + s.failed + s.skipped + s.errored
-
-	// Calculate total duration from sum of all test durations
-	var totalDuration time.Duration
-	for _, result := range s.testResults {
-		totalDuration += result.Duration
-	}
-
-	// Build the concise summary
-	var summary strings.Builder
-	fmt.Fprintf(&summary, "TEST SUMMARY\n")
-	fmt.Fprintf(&summary, "============\n")
-	fmt.Fprintf(&summary, "Run ID: %s\n", runID)
-	fmt.Fprintf(&summary, "Time: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&summary, "Duration: %s\n\n", totalDuration)
-
-	fmt.Fprintf(&summary, "Results:\n")
-	fmt.Fprintf(&summary, "  Total:   %d\n", total)
-	fmt.Fprintf(&summary, "  Passed:  %d\n", s.passed)
-	fmt.Fprintf(&summary, "  Failed:  %d\n", s.failed)
-	fmt.Fprintf(&summary, "  Skipped: %d\n", s.skipped)
-	fmt.Fprintf(&summary, "  Errors:  %d\n\n", s.errored)
-
-	// Add pass rate percentage
-	passRate := 0.0
-	if total > 0 {
-		passRate = float64(s.passed) / float64(total) * 100
-	}
-	fmt.Fprintf(&summary, "Pass Rate: %.1f%%\n\n", passRate)
-
-	// Include a list of failed tests if there are any
-	if len(s.failedTests) > 0 {
-		fmt.Fprintf(&summary, "Failed tests:\n")
-		for _, test := range s.failedTests {
-			fmt.Fprintf(&summary, "  - %s\n", test)
-		}
-		fmt.Fprintf(&summary, "\n")
-	}
-
-	// Add location of the detailed logs
-	fmt.Fprintf(&summary, "Full details: see %s\n", s.logger.GetAllLogsFile())
-
-	// Write the summary
-	return writer.Write([]byte(summary.String()))
-}
-
 // GetRunID returns the current runID
 func (l *FileLogger) GetRunID() string {
 	return l.runID
@@ -755,7 +597,9 @@ func (l *FileLogger) GetRunID() string {
 // PerTestFileSink creates dedicated log files for each test in passed/failed directories
 // containing the complete go test output that would be shown by `go test`
 type PerTestFileSink struct {
-	logger *FileLogger
+	logger         *FileLogger
+	processedTests map[string]bool // Track which test files we've already written
+	mu             sync.Mutex      // Protect the processedTests map
 }
 
 // Consume writes a complete test result to a dedicated file in the passed or failed directory
@@ -783,7 +627,7 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 	}
 
 	// Create log file for the main test
-	err = s.createTestLogFile(result, passedDir, failedDir, runID)
+	err = s.createTestLogFileOnce(result, passedDir, failedDir, runID)
 	if err != nil {
 		return fmt.Errorf("failed to create main test log file: %w", err)
 	}
@@ -806,13 +650,42 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 			Stdout:   subTest.Stdout,
 		}
 
-		err = s.createTestLogFile(subTestResult, passedDir, failedDir, runID)
+		err = s.createTestLogFileOnce(subTestResult, passedDir, failedDir, runID)
 		if err != nil {
 			return fmt.Errorf("failed to create subtest log file for %s: %w", subTestName, err)
 		}
 	}
 
 	return nil
+}
+
+// createTestLogFileOnce creates a log file for a single test result, but only once per unique file path
+func (s *PerTestFileSink) createTestLogFileOnce(result *types.TestResult, passedDir, failedDir string, runID string) error {
+	// Generate a safe filename based on the test metadata
+	filename := getReadableTestFilename(result.Metadata)
+
+	// Determine which directory to use based on test status
+	var targetDir string
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		targetDir = failedDir
+	} else {
+		targetDir = passedDir
+	}
+
+	// Full path to the test log file
+	testFilePath := filepath.Join(targetDir, filename+".log")
+
+	// Check if we've already processed this test file
+	s.mu.Lock()
+	if s.processedTests[testFilePath] {
+		s.mu.Unlock()
+		return nil // Already processed, skip
+	}
+	s.processedTests[testFilePath] = true
+	s.mu.Unlock()
+
+	// Now create the test log file
+	return s.createTestLogFile(result, passedDir, failedDir, runID)
 }
 
 // createTestLogFile creates a log file for a single test result
@@ -837,8 +710,26 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		return err
 	}
 
-	// Prepare the log content
+	// Check if this is a timeout failure for special handling
+	isTimeout := result.TimedOut
+
+	// Build error summary header
 	var content strings.Builder
+
+	// Check if this is a timeout failure
+	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
+		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+		if isTimeout {
+			fmt.Fprintf(&content, "TIMEOUT ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "======================\n\n")
+			fmt.Fprintf(&content, "This test failed due to timeout!\n")
+			fmt.Fprintf(&content, "Timeout Duration: %v\n", result.Metadata.Timeout)
+			fmt.Fprintf(&content, "Error: %s\n\n", result.Error.Error())
+		} else {
+			fmt.Fprintf(&content, "ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "=============\n\n")
+		}
+	}
 
 	// Extract the plaintext output first from all JSON Output fields
 	var plaintext strings.Builder
@@ -849,10 +740,31 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		})
 	}
 
-	// 1. Write the plaintext output first
+	// 1. Write the plaintext output first, with timeout information if applicable
 	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
 	fmt.Fprintf(&content, "================\n\n")
-	fmt.Fprintf(&content, "%s\n", plaintext.String())
+
+	// For timeout cases, prominently display the timeout error at the beginning of plaintext output
+	if isTimeout {
+		fmt.Fprintf(&content, "*** TIMEOUT ERROR ***\n")
+		fmt.Fprintf(&content, "%s\n", result.Error.Error())
+		fmt.Fprintf(&content, "*** END TIMEOUT ERROR ***\n\n")
+
+		if plaintext.Len() > 0 {
+			fmt.Fprintf(&content, "PARTIAL OUTPUT BEFORE TIMEOUT:\n")
+			fmt.Fprintf(&content, "------------------------------\n")
+			fmt.Fprintf(&content, "%s\n", plaintext.String())
+		} else {
+			fmt.Fprintf(&content, "No output captured before timeout occurred.\n")
+		}
+	} else {
+		// For non-timeout cases, show regular output
+		if plaintext.Len() > 0 {
+			fmt.Fprintf(&content, "%s\n", plaintext.String())
+		} else {
+			fmt.Fprintf(&content, "No output captured.\n")
+		}
+	}
 
 	// 2. Add a clear separator between plaintext and JSON
 	fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
@@ -861,37 +773,48 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 
 	// 3. Include the raw JSON output for full debug information
 	if result.Stdout != "" {
+		if isTimeout {
+			fmt.Fprintf(&content, "PARTIAL JSON OUTPUT (BEFORE TIMEOUT):\n")
+			fmt.Fprintf(&content, "-------------------------------------\n")
+		}
 		fmt.Fprintf(&content, "%s\n", result.Stdout)
+	} else if isTimeout {
+		fmt.Fprintf(&content, "No JSON output captured before timeout.\n")
+		// Include our timeout marker if we stored one
+		fmt.Fprintf(&content, "\nTimeout marker that would be stored:\n")
+		fmt.Fprintf(&content, `{"Time":"%s","Action":"timeout","Package":"%s","Test":"%s","Output":"TEST TIMED OUT - no JSON output captured\n"}`,
+			time.Now().Format(time.RFC3339), result.Metadata.Package, result.Metadata.FuncName)
+		fmt.Fprintf(&content, "\n")
+	} else {
+		fmt.Fprintf(&content, "No JSON output available.\n")
 	}
 
 	// 4. Add a separator before the error summary section
 	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
-		fmt.Fprintf(&content, "ERROR SUMMARY:\n")
-		fmt.Fprintf(&content, "=============\n\n")
+		// Extract critical error information from non-timeout errors
+		if !isTimeout {
+			errorInfo := extractErrorData(result.Stdout)
 
-		// Extract critical error information
-		errorInfo := extractErrorData(result.Stdout)
+			if errorInfo.TestName != "" {
+				fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
+			}
 
-		if errorInfo.TestName != "" {
-			fmt.Fprintf(&content, "Test:       %s\n", errorInfo.TestName)
-		}
+			if errorInfo.ErrorMessage != "" {
+				fmt.Fprintf(&content, "Error:      %s\n", errorInfo.ErrorMessage)
+			}
 
-		if errorInfo.ErrorMessage != "" {
-			fmt.Fprintf(&content, "Error:      %s\n", errorInfo.ErrorMessage)
-		}
+			if errorInfo.Expected != "" && errorInfo.Actual != "" {
+				fmt.Fprintf(&content, "Expected:   %s\n", errorInfo.Expected)
+				fmt.Fprintf(&content, "Actual:     %s\n", errorInfo.Actual)
+			}
 
-		if errorInfo.Expected != "" && errorInfo.Actual != "" {
-			fmt.Fprintf(&content, "Expected:   %s\n", errorInfo.Expected)
-			fmt.Fprintf(&content, "Actual:     %s\n", errorInfo.Actual)
-		}
+			if errorInfo.Messages != "" {
+				fmt.Fprintf(&content, "Message:    %s\n", errorInfo.Messages)
+			}
 
-		if errorInfo.Messages != "" {
-			fmt.Fprintf(&content, "Message:    %s\n", errorInfo.Messages)
-		}
-
-		if errorInfo.ErrorTrace != "" {
-			fmt.Fprintf(&content, "\nError Trace:\n%s\n", errorInfo.ErrorTrace)
+			if errorInfo.ErrorTrace != "" {
+				fmt.Fprintf(&content, "\nError Trace:\n%s\n", errorInfo.ErrorTrace)
+			}
 		}
 	} else {
 		// For passed tests, a simpler summary at the end
@@ -1091,251 +1014,10 @@ func (s *PerTestFileSink) Complete(runID string) error {
 	return nil
 }
 
-// TestResultRow represents a row in the HTML test results table
-type TestResultRow struct {
-	StatusClass       string
-	StatusText        string
-	TestName          string
-	Package           string
-	Gate              string
-	Suite             string
-	DurationFormatted string
-	LogPath           string
-	IsSubTest         bool   // Whether this is a subtest
-	ParentTest        string // Name of the parent test for subtests
-}
-
-// HTMLSummaryData contains all the data needed for the HTML template
-type HTMLSummaryData struct {
-	RunID             string
-	Time              string
-	TotalDuration     string
-	Total             int
-	Passed            int
-	Failed            int
-	Skipped           int
-	Errored           int
-	PassRateFormatted string
-	HasFailures       bool
-	Tests             []TestResultRow
-	DevnetName        string // Name of the devnet being tested
-	GateRun           string // Name of the gate being run
-}
-
-// HTMLSummarySink creates an HTML report for better visualization of test results
-type HTMLSummarySink struct {
-	logger      *FileLogger
-	passed      int
-	failed      int
-	skipped     int
-	errored     int
-	testResults []*types.TestResult
-	networkName string // Name of the network being tested
-	gateRun     string // Name of the gate being run
-}
-
-// NewHTMLSummarySink creates a new HTMLSummarySink with network and gate information
-func NewHTMLSummarySink(logger *FileLogger, networkName, gateRun string) *HTMLSummarySink {
-	return &HTMLSummarySink{
-		logger:      logger,
-		testResults: make([]*types.TestResult, 0),
-		networkName: networkName,
-		gateRun:     gateRun,
-	}
-}
-
-// Consume collects test results for later HTML generation
-func (s *HTMLSummarySink) Consume(result *types.TestResult, runID string) error {
-	// Store the test result for later processing
-	s.testResults = append(s.testResults, result)
-
-	// Update statistics based on test status
-	switch result.Status {
-	case types.TestStatusPass:
-		s.passed++
-	case types.TestStatusFail:
-		s.failed++
-	case types.TestStatusSkip:
-		s.skipped++
-	case types.TestStatusError:
-		s.errored++
-	}
-
-	// Update statistics for subtests
-	for _, subTest := range result.SubTests {
-		switch subTest.Status {
-		case types.TestStatusPass:
-			s.passed++
-		case types.TestStatusFail:
-			s.failed++
-		case types.TestStatusSkip:
-			s.skipped++
-		case types.TestStatusError:
-			s.errored++
-		}
-	}
-
-	return nil
-}
-
-// Complete generates the HTML summary file
-func (s *HTMLSummarySink) Complete(runID string) error {
-	// Get the base directory for this runID
-	baseDir, err := s.logger.GetDirectoryForRunID(runID)
-	if err != nil {
-		return err
-	}
-
-	// Create the HTML report filepath
-	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(htmlFile)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
-
-	// Calculate totals and duration
-	total := s.passed + s.failed + s.skipped + s.errored
-
-	// Calculate total duration from sum of all test durations
-	var totalDuration time.Duration
-	for _, result := range s.testResults {
-		totalDuration += result.Duration
-		// Add subtest durations
-		for _, subTest := range result.SubTests {
-			totalDuration += subTest.Duration
-		}
-	}
-
-	// Calculate pass rate
-	passRate := 0.0
-	if total > 0 {
-		passRate = float64(s.passed) / float64(total) * 100
-	}
-
-	// Prepare the test result rows (including subtests)
-	tests := make([]TestResultRow, 0)
-	for _, result := range s.testResults {
-		// Add the main test row
-		mainTestRow := s.createTestResultRow(result, false, "")
-		tests = append(tests, mainTestRow)
-
-		// Add subtest rows
-		for subTestName, subTest := range result.SubTests {
-			// Create a subtest result with proper metadata for filename generation
-			subTestResult := &types.TestResult{
-				Metadata: types.ValidatorMetadata{
-					ID:       subTest.Metadata.ID,
-					Gate:     result.Metadata.Gate,    // Use parent's gate
-					Suite:    result.Metadata.Suite,   // Use parent's suite
-					FuncName: subTestName,             // Use the subtest name
-					Package:  result.Metadata.Package, // Use parent's package
-					RunAll:   false,
-				},
-				Status:   subTest.Status,
-				Error:    subTest.Error,
-				Duration: subTest.Duration,
-				Stdout:   subTest.Stdout,
-			}
-
-			subTestRow := s.createTestResultRow(subTestResult, true, result.Metadata.FuncName)
-			// The test name is already set correctly from the metadata
-			tests = append(tests, subTestRow)
-		}
-	}
-
-	// Prepare the template data
-	data := HTMLSummaryData{
-		RunID:             runID,
-		Time:              time.Now().Format(time.RFC3339),
-		TotalDuration:     formatDuration(totalDuration),
-		Total:             total,
-		Passed:            s.passed,
-		Failed:            s.failed,
-		Skipped:           s.skipped,
-		Errored:           s.errored,
-		PassRateFormatted: fmt.Sprintf("%.1f", passRate),
-		HasFailures:       s.failed+s.errored > 0,
-		Tests:             tests,
-		DevnetName:        s.networkName,
-		GateRun:           s.gateRun,
-	}
-
-	// Parse the template
-	tmpl, err := GetHTMLTemplate(HTMLResultsTemplate)
-	if err != nil {
-		return fmt.Errorf("failed to parse HTML template: %w", err)
-	}
-
-	// Execute the template
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Errorf("failed to execute HTML template: %w", err)
-	}
-
-	// Write the HTML content
-	return writer.Write(buf.Bytes())
-}
-
-// createTestResultRow creates a TestResultRow from a TestResult
-func (s *HTMLSummarySink) createTestResultRow(result *types.TestResult, isSubTest bool, parentTest string) TestResultRow {
-	// Determine status class
-	statusClass := ""
-	statusText := ""
-	switch result.Status {
-	case types.TestStatusPass:
-		statusClass = "pass"
-		statusText = "PASS"
-	case types.TestStatusFail:
-		statusClass = "fail"
-		statusText = "FAIL"
-	case types.TestStatusSkip:
-		statusClass = "skip"
-		statusText = "SKIP"
-	case types.TestStatusError:
-		statusClass = "error"
-		statusText = "ERROR"
-	}
-
-	// Generate filename using the test metadata
-	filename := getReadableTestFilename(result.Metadata) + ".log"
-	logPath := ""
-	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		logPath = "failed/" + filename
-	} else {
-		logPath = "passed/" + filename
-	}
-
-	testName := result.Metadata.FuncName
-	if testName == "" {
-		if result.Metadata.RunAll {
-			testName = "AllTests"
-		} else {
-			testName = result.Metadata.ID
-		}
-	}
-
-	return TestResultRow{
-		StatusClass:       statusClass,
-		StatusText:        statusText,
-		TestName:          testName,
-		Package:           result.Metadata.Package,
-		Gate:              result.Metadata.Gate,
-		Suite:             result.Metadata.Suite,
-		DurationFormatted: formatDuration(result.Duration),
-		LogPath:           logPath,
-		IsSubTest:         isSubTest,
-		ParentTest:        parentTest,
-	}
-}
-
-// formatDuration formats a time.Duration to a human-readable string
-// Extracted from the existing formatDuration function
+// formatDuration formats a duration for display
 func formatDuration(d time.Duration) string {
 	if d < time.Second {
-		return fmt.Sprintf("%.2fms", float64(d.Milliseconds()))
+		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
-	return fmt.Sprintf("%.2fs", d.Seconds())
+	return d.Truncate(time.Millisecond).String()
 }

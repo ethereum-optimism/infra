@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -24,6 +22,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
+	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
@@ -295,13 +294,6 @@ func (n *nat) runTests(ctx context.Context) error {
 			"expected", runID, "actual", result.RunID)
 	}
 
-	// Save the test results to files
-	err = n.saveTestResults(result)
-	if err != nil {
-		n.config.Log.Error("Error saving test results to files", "error", err)
-		// Continue execution despite file saving errors
-	}
-
 	reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
 
 	n.config.Log.Info("Printing results table")
@@ -427,29 +419,6 @@ func (n *nat) runTests(ctx context.Context) error {
 	return nil
 }
 
-// saveTestResults saves the test results to files
-func (n *nat) saveTestResults(result *runner.RunnerResult) error {
-	// Process each gate
-	for _, gate := range result.Gates {
-		// Process direct tests for each gate
-		for _, test := range gate.Tests {
-			if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
-				return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
-			}
-		}
-
-		// Process suite tests for each gate
-		for _, suite := range gate.Suites {
-			for _, test := range suite.Tests {
-				if err := n.fileLogger.LogTestResult(test, result.RunID); err != nil {
-					return fmt.Errorf("failed to save test result for %s: %w", test.Metadata.FuncName, err)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 // Stop stops the op-acceptor service.
 // Stop implements the cliapp.Lifecycle interface.
 func (n *nat) Stop(ctx context.Context) error {
@@ -487,206 +456,34 @@ func (n *nat) Stopped() bool {
 // printResultsTable prints the results of the acceptance tests to the console.
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
-	t := table.NewWriter()
-	t.SetOutputMirror(os.Stdout)
-	t.SetTitle(fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName))
 
-	// Configure columns
-	t.AppendHeader(table.Row{
-		"Type", "ID", "Duration", "Tests", "Passed", "Failed", "Skipped", "Status",
-	})
+	// Extract test results from the runner result
+	testResults := n.extractTestResultsFromRunnerResult(n.result)
 
-	// Set column configurations for better readability
-	t.SetColumnConfigs([]table.ColumnConfig{
-		{Name: "Type", AutoMerge: true},
-		{Name: "ID", WidthMax: 200, WidthMaxEnforcer: text.WrapSoft},
-		{Name: "Duration", Align: text.AlignRight},
-		{Name: "Tests", Align: text.AlignRight},
-		{Name: "Passed", Align: text.AlignRight},
-		{Name: "Failed", Align: text.AlignRight},
-		{Name: "Skipped", Align: text.AlignRight},
-	})
+	title := fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName)
+	reporter := reporting.NewTableReporter(title, true)
+	err := reporter.PrintTableFromTestResults(testResults, runID, n.networkName, n.config.TargetGate)
+	if err != nil {
+		n.config.Log.Error("Failed to print results table", "error", err)
+	}
+}
 
-	// Add flag to show individual tests for packages
-	showIndividualTests := true
-
-	// Print gates and their results
-	for _, gate := range n.result.Gates {
-		// Gate row - show test counts but no "1" in Tests column
-		t.AppendRow(table.Row{
-			"Gate",
-			gate.ID,
-			formatDuration(gate.Duration),
-			"-", // Don't count gate as a test
-			gate.Stats.Passed,
-			gate.Stats.Failed,
-			gate.Stats.Skipped,
-			getResultString(gate.Status),
-			"", // No stdout for gates
-		})
-
-		// Print suites in this gate
-		for suiteName, suite := range gate.Suites {
-			t.AppendRow(table.Row{
-				"Suite",
-				fmt.Sprintf("├── %s", suiteName),
-				formatDuration(suite.Duration),
-				"-", // Don't count suite as a test
-				suite.Stats.Passed,
-				suite.Stats.Failed,
-				suite.Stats.Skipped,
-				getResultString(suite.Status),
-				"", // No stdout for suites
-			})
-
-			// Print tests in this suite
-			i := 0
-			for testName, test := range suite.Tests {
-				prefix := "│   ├──"
-				if i == len(suite.Tests)-1 {
-					prefix = "│   └──"
-				}
-
-				// Get a display name for the test
-				displayName := types.GetTestDisplayName(testName, test.Metadata)
-
-				// Display the test result
-				t.AppendRow(table.Row{
-					"Test",
-					fmt.Sprintf("%s %s", prefix, displayName),
-					formatDuration(test.Duration),
-					"1", // Count actual test
-					boolToInt(test.Status == types.TestStatusPass),
-					boolToInt(test.Status == types.TestStatusFail),
-					boolToInt(test.Status == types.TestStatusSkip),
-					getResultString(test.Status),
-				})
-
-				// Display individual sub-tests if present (for package tests)
-				if len(test.SubTests) > 0 && showIndividualTests {
-					j := 0
-					for subTestName, subTest := range test.SubTests {
-						subPrefix := "│   │   ├──"
-						if j == len(test.SubTests)-1 {
-							subPrefix = "│   │   └──"
-						}
-
-						t.AppendRow(table.Row{
-							"",
-							fmt.Sprintf("%s %s", subPrefix, subTestName),
-							formatDuration(subTest.Duration),
-							"1", // Count actual test
-							boolToInt(subTest.Status == types.TestStatusPass),
-							boolToInt(subTest.Status == types.TestStatusFail),
-							boolToInt(subTest.Status == types.TestStatusSkip),
-							getResultString(subTest.Status),
-						})
-						j++
-					}
-				}
-
-				i++
+// extractTestResultsFromRunnerResult extracts a flat list of test results from the hierarchical runner result
+func (n *nat) extractTestResultsFromRunnerResult(result *runner.RunnerResult) []*types.TestResult {
+	testResults := make([]*types.TestResult, 0)
+	for _, gate := range result.Gates {
+		// Add direct gate tests
+		for _, test := range gate.Tests {
+			testResults = append(testResults, test)
+		}
+		// Add suite tests
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				testResults = append(testResults, test)
 			}
 		}
-
-		// Print direct gate tests
-		i := 0
-		for testName, test := range gate.Tests {
-			prefix := "├──"
-			if i == len(gate.Tests)-1 && len(gate.Suites) == 0 {
-				prefix = "└──"
-			}
-
-			// Get a display name for the test
-			displayName := types.GetTestDisplayName(testName, test.Metadata)
-
-			// Display the test result
-			t.AppendRow(table.Row{
-				"Test",
-				fmt.Sprintf("%s %s", prefix, displayName),
-				formatDuration(test.Duration),
-				"1", // Count actual test
-				boolToInt(test.Status == types.TestStatusPass),
-				boolToInt(test.Status == types.TestStatusFail),
-				boolToInt(test.Status == types.TestStatusSkip),
-				getResultString(test.Status),
-			})
-
-			// Display individual sub-tests if present (for package tests)
-			if len(test.SubTests) > 0 && showIndividualTests {
-				j := 0
-				for subTestName, subTest := range test.SubTests {
-					subPrefix := "    ├──"
-					if j == len(test.SubTests)-1 {
-						subPrefix = "    └──"
-					}
-
-					t.AppendRow(table.Row{
-						"",
-						fmt.Sprintf("%s %s", subPrefix, subTestName),
-						formatDuration(subTest.Duration),
-						"1", // Count actual test
-						boolToInt(subTest.Status == types.TestStatusPass),
-						boolToInt(subTest.Status == types.TestStatusFail),
-						boolToInt(subTest.Status == types.TestStatusSkip),
-						getResultString(subTest.Status),
-					})
-					j++
-				}
-			}
-			i++
-		}
-
-		t.AppendSeparator()
 	}
-
-	// Update the table style setting based on result status
-	if n.result.Status == types.TestStatusPass {
-		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
-	} else if n.result.Status == types.TestStatusSkip {
-		t.SetStyle(table.StyleColoredBlackOnYellowWhite)
-	} else {
-		t.SetStyle(table.StyleColoredBlackOnRedWhite)
-	}
-
-	// Add summary footer
-	t.AppendFooter(table.Row{
-		"TOTAL",
-		"",
-		formatDuration(n.result.Duration),
-		n.result.Stats.Total, // Show total number of actual tests
-		n.result.Stats.Passed,
-		n.result.Stats.Failed,
-		n.result.Stats.Skipped,
-		getResultString(n.result.Status),
-	})
-
-	t.Render()
-}
-
-// Helper function to convert bool to int
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// getResultString returns a human-readable string for a test status
-func getResultString(status types.TestStatus) string {
-	switch status {
-	case types.TestStatusPass:
-		return "✓ pass"
-	case types.TestStatusSkip:
-		return "- skip"
-	default:
-		return "✗ fail"
-	}
-}
-
-// formatDuration formats a duration in a readable format
-func formatDuration(d time.Duration) string {
-	return d.Round(time.Second).String()
+	return testResults
 }
 
 // WaitForShutdown waits for all goroutines to finish
