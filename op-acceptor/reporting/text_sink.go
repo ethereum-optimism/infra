@@ -8,24 +8,26 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
-// ReportingTextSummarySink is a modern text summary sink that uses the unified reporting structure
+// ReportingTextSummarySink uses the TestTree intermediate representation
 type ReportingTextSummarySink struct {
-	builder     *ReportBuilder
-	formatter   *TextSummaryFormatter
+	formatter   *TreeTextFormatter
 	baseDir     string
-	loggerRunID string // The runID the logger was initialized with
+	loggerRunID string
 	networkName string
 	gateName    string
-	testResults map[string][]*types.TestResult // Map runID to test results
+	testResults map[string][]*types.TestResult
 }
 
-// NewReportingTextSummarySink creates a new text summary sink using the unified reporting structure
+// NewReportingTextSummarySink creates a new text summary sink using TestTree
 func NewReportingTextSummarySink(baseDir, loggerRunID, networkName, gateName string, includeDetails bool) *ReportingTextSummarySink {
-	builder := NewReportBuilder()
-	formatter := NewTextSummaryFormatter(includeDetails)
+	formatter := NewTreeTextFormatter(
+		false, // includeContainers - cleaner summary without container noise
+		true,  // includeStats
+		includeDetails,
+		false, // showExecutionOrder - not needed for summary
+	)
 
 	return &ReportingTextSummarySink{
-		builder:     builder,
 		formatter:   formatter,
 		baseDir:     baseDir,
 		loggerRunID: loggerRunID,
@@ -44,7 +46,7 @@ func (s *ReportingTextSummarySink) Consume(result *types.TestResult, runID strin
 	return nil
 }
 
-// Complete generates the text summary file using the unified reporting structure
+// Complete generates the text summary file using TestTree
 func (s *ReportingTextSummarySink) Complete(runID string) error {
 	// Get test results for this specific runID
 	results, exists := s.testResults[runID]
@@ -52,8 +54,9 @@ func (s *ReportingTextSummarySink) Complete(runID string) error {
 		results = make([]*types.TestResult, 0)
 	}
 
-	// Build the report data
-	reportData := s.builder.BuildFromTestResults(results, runID, s.networkName, s.gateName)
+	// Build the TestTree
+	builder := types.NewTestTreeBuilder().WithSubtests(true)
+	tree := builder.BuildFromTestResults(results, runID, s.networkName)
 
 	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 
@@ -62,50 +65,56 @@ func (s *ReportingTextSummarySink) Complete(runID string) error {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 
-	// Create the summary report file path
+	// Generate the text summary
+	content, err := s.formatter.Format(tree)
+	if err != nil {
+		return fmt.Errorf("failed to format text summary: %w", err)
+	}
+
+	// Write to file
 	summaryFile := filepath.Join(outputDir, "summary.log")
+	if err := os.WriteFile(summaryFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write summary file: %w", err)
+	}
 
-	// Create file writer and report generator
-	writer := NewFileWriter(summaryFile)
-	generator := NewReportGenerator(s.builder, s.formatter, writer)
-
-	// Generate the report
-	return generator.GenerateReport(reportData)
+	return nil
 }
 
-// TableReporter provides functionality to generate table output using the unified reporting structure
+// TableReporter provides functionality to generate table output using TestTree
 type TableReporter struct {
-	builder   *ReportBuilder
-	formatter *TableFormatter
+	formatter *TreeTableFormatter
 }
 
-// NewTableReporter creates a new table reporter
+// NewTableReporter creates a new table reporter using TestTree
 func NewTableReporter(title string, showIndividualTests bool) *TableReporter {
-	builder := NewReportBuilder()
-	formatter := NewTableFormatter(title, showIndividualTests)
+	formatter := NewTreeTableFormatter(
+		title,
+		showIndividualTests, // showContainers
+		false,               // showExecutionOrder - can be enabled if needed
+	)
 
 	return &TableReporter{
-		builder:   builder,
 		formatter: formatter,
 	}
 }
 
-// GenerateTableFromTestResults generates a table report and returns the content as a string
+// GenerateTableFromTestResults generates a table report using TestTree and returns the content as a string
 func (tr *TableReporter) GenerateTableFromTestResults(testResults []*types.TestResult, runID, networkName, gateName string) (string, error) {
-	// Build the report data
-	reportData := tr.builder.BuildFromTestResults(testResults, runID, networkName, gateName)
+	// Build the TestTree
+	builder := types.NewTestTreeBuilder().WithSubtests(true)
+	tree := builder.BuildFromTestResults(testResults, runID, networkName)
 
 	// Format and return the table
-	return tr.formatter.Format(reportData)
+	return tr.formatter.Format(tree)
 }
 
-// PrintTableFromTestResults generates and prints a table report to stdout
+// PrintTableFromTestResults generates and prints a table report to stdout using TestTree
 func (tr *TableReporter) PrintTableFromTestResults(testResults []*types.TestResult, runID, networkName, gateName string) error {
 	content, err := tr.GenerateTableFromTestResults(testResults, runID, networkName, gateName)
 	if err != nil {
 		return err
 	}
 
-	writer := NewStdoutWriter()
-	return writer.Write(content)
+	_, err = fmt.Print(content)
+	return err
 }

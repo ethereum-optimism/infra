@@ -1061,5 +1061,5 @@ func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
 
 	// Count total rows - should have: 1 fjord test + 2 fjord subtests + 1 package test + 1 package subtest = 5 rows
 	testItemCount := strings.Count(htmlContent, "class=\"test-item")
-	assert.Equal(t, 4, testItemCount, "Should have all tests and subtests displayed")
+	assert.Equal(t, 5, testItemCount, "Should have all tests and subtests displayed")
 }

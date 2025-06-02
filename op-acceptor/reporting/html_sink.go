@@ -8,43 +8,26 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
-// ReportingHTMLSink is an HTML sink
+// ReportingHTMLSink generates HTML reports using the TestTree intermediate representation
 type ReportingHTMLSink struct {
-	builder                 *ReportBuilder
-	formatter               *HTMLFormatter
+	formatter               *TreeHTMLFormatter
 	baseDir                 string
-	loggerRunID             string // The runID the logger was initialized with
+	loggerRunID             string
 	networkName             string
 	gateName                string
-	testResults             map[string][]*types.TestResult // Map runID to test results
+	testResults             map[string][]*types.TestResult
 	getReadableTestFilename func(metadata types.ValidatorMetadata) string
-	jsContent               []byte // JavaScript content for static asset
+	jsContent               []byte
 }
 
-// NewReportingHTMLSink creates a new HTML sink using the unified reporting structure
+// NewReportingHTMLSink creates a new HTML sink using TestTree
 func NewReportingHTMLSink(baseDir, loggerRunID, networkName, gateName, templateContent string, jsContent []byte, getReadableTestFilename func(types.ValidatorMetadata) string) (*ReportingHTMLSink, error) {
-	formatter, err := NewHTMLFormatter(templateContent)
+	formatter, err := NewTreeHTMLFormatter(templateContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTML formatter: %w", err)
 	}
 
-	builder := NewReportBuilder().WithLogPathGenerator(func(test *types.TestResult, isSubTest bool, parentName string) string {
-		// Generate filename using the test metadata
-		filename := getReadableTestFilename(test.Metadata) + ".log"
-
-		// Determine the subdirectory based on test status
-		var subdir string
-		if test.Status == types.TestStatusFail || test.Status == types.TestStatusError {
-			subdir = "failed"
-		} else {
-			subdir = "passed"
-		}
-
-		return filepath.Join(subdir, filename)
-	})
-
 	return &ReportingHTMLSink{
-		builder:                 builder,
 		formatter:               formatter,
 		baseDir:                 baseDir,
 		loggerRunID:             loggerRunID,
@@ -65,7 +48,7 @@ func (s *ReportingHTMLSink) Consume(result *types.TestResult, runID string) erro
 	return nil
 }
 
-// Complete generates the HTML summary file using the unified reporting structure
+// Complete generates the HTML summary file using TestTree
 func (s *ReportingHTMLSink) Complete(runID string) error {
 	// Get test results for this specific runID
 	results, exists := s.testResults[runID]
@@ -73,35 +56,51 @@ func (s *ReportingHTMLSink) Complete(runID string) error {
 		results = make([]*types.TestResult, 0)
 	}
 
-	// Build the report data
-	reportData := s.builder.BuildFromTestResults(results, runID, s.networkName, s.gateName)
+	// Build the TestTree
+	builder := types.NewTestTreeBuilder().
+		WithSubtests(true).
+		WithLogPathGenerator(func(test *types.TestResult, isSubtest bool, parentName string) string {
+			filename := s.getReadableTestFilename(test.Metadata) + ".log"
+			var subdir string
+			if test.Status == types.TestStatusFail || test.Status == types.TestStatusError {
+				subdir = "failed"
+			} else {
+				subdir = "passed"
+			}
+			return filepath.Join(subdir, filename)
+		})
+
+	tree := builder.BuildFromTestResults(results, runID, s.networkName)
 
 	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 
-	// Create the output directory if it doesn't exist
+	// Create directories
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 
-	// Create the static directory for assets
 	staticDir := filepath.Join(outputDir, "static")
 	if err := os.MkdirAll(staticDir, 0755); err != nil {
 		return fmt.Errorf("failed to create static directory %s: %w", staticDir, err)
 	}
 
-	// Copy the JavaScript file to the static directory
+	// Copy JavaScript file
 	jsFile := filepath.Join(staticDir, "results.js")
 	if err := os.WriteFile(jsFile, s.jsContent, 0644); err != nil {
 		return fmt.Errorf("failed to write JavaScript file: %w", err)
 	}
 
-	// Create the HTML report file path
+	// Generate HTML output using TestTree
+	htmlOutput, err := s.formatter.Format(tree)
+	if err != nil {
+		return fmt.Errorf("failed to format HTML: %w", err)
+	}
+
+	// Write HTML file
 	htmlFile := filepath.Join(outputDir, "results.html")
+	if err := os.WriteFile(htmlFile, []byte(htmlOutput), 0644); err != nil {
+		return fmt.Errorf("failed to write HTML file: %w", err)
+	}
 
-	// Create file writer and report generator
-	writer := NewFileWriter(htmlFile)
-	generator := NewReportGenerator(s.builder, s.formatter, writer)
-
-	// Generate the report
-	return generator.GenerateReport(reportData)
+	return nil
 }

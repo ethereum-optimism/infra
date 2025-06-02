@@ -1,6 +1,7 @@
 function filterTests() {
     const query = document.getElementById('searchInput').value.toLowerCase();
     const testItems = document.querySelectorAll('.test-item');
+    const packageSections = document.querySelectorAll('.package-section');
     
     testItems.forEach(item => {
         const text = item.textContent.toLowerCase();
@@ -10,17 +11,39 @@ function filterTests() {
             item.classList.add('hidden');
         }
     });
+    
+    // Show/hide package sections based on whether they have visible tests
+    packageSections.forEach(section => {
+        const visibleTests = section.querySelectorAll('.test-item:not(.hidden)');
+        if (visibleTests.length > 0) {
+            section.classList.remove('hidden');
+        } else {
+            section.classList.add('hidden');
+        }
+    });
 }
 
 function showOnlyFailed() {
     document.getElementById('searchInput').value = '';
     const testItems = document.querySelectorAll('.test-item');
+    const packageSections = document.querySelectorAll('.package-section');
     
     testItems.forEach(item => {
-        if (item.classList.contains('fail') || item.classList.contains('error')) {
+        const status = item.dataset.status;
+        if (status === 'fail' || status === 'error') {
             item.classList.remove('hidden');
         } else {
             item.classList.add('hidden');
+        }
+    });
+    
+    // Show/hide package sections based on whether they have visible failed tests
+    packageSections.forEach(section => {
+        const visibleTests = section.querySelectorAll('.test-item:not(.hidden)');
+        if (visibleTests.length > 0) {
+            section.classList.remove('hidden');
+        } else {
+            section.classList.add('hidden');
         }
     });
     
@@ -32,9 +55,14 @@ function showOnlyFailed() {
 function showAll() {
     document.getElementById('searchInput').value = '';
     const testItems = document.querySelectorAll('.test-item');
+    const packageSections = document.querySelectorAll('.package-section');
     
     testItems.forEach(item => {
         item.classList.remove('hidden');
+    });
+    
+    packageSections.forEach(section => {
+        section.classList.remove('hidden');
     });
     
     // Update button states

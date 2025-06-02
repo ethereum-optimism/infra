@@ -63,7 +63,56 @@
         .skip { border-left: 4px solid #ffc107; }
         .error { border-left: 4px solid #fd7e14; }
         
-        /* Hierarchical layout */
+        /* Package section styles */
+        .package-section {
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            background: white;
+        }
+        
+        .package-header {
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .package-header.fail {
+            background: linear-gradient(135deg, #dc3545 0%, #e55353 100%);
+            color: white;
+        }
+        
+        .package-header.skip {
+            background: linear-gradient(135deg, #ffc107 0%, #ffca2c 100%);
+            color: #212529;
+        }
+        
+        .package-header .package-name {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+        }
+        
+        .package-header .package-stats {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .package-header.fail .log-link {
+            color: rgba(255,255,255,0.9);
+            border-color: rgba(255,255,255,0.3);
+        }
+        
+        .package-header.skip .log-link {
+            color: #212529;
+            border-color: rgba(33,37,41,0.3);
+        }
+        
+        /* Test hierarchy styles */
         .test-hierarchy {
             background: white;
             border-radius: 8px;
@@ -72,90 +121,12 @@
             overflow: hidden;
         }
         
-        .package-section {
-            border-left: 5px solid #28a745;
-            margin-bottom: 25px;
-        }
-        
-        .package-section.fail {
-            border-left: 5px solid #dc3545;
-        }
-        
-        .package-section.skip {
-            border-left: 5px solid #ffc107;
-        }
-        
-        .package-header {
-            background: linear-gradient(135deg, #28a745, #1e7e34);
-            color: white;
-            padding: 18px 25px;
-            font-size: 16px;
-            font-weight: 600;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .package-header.fail {
-            background: linear-gradient(135deg, #dc3545, #c82333);
-        }
-        
-        .package-header.skip {
-            background: linear-gradient(135deg, #ffc107, #e0a800);
-            color: #856404;
-        }
-        
-        .package-name {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 14px;
-        }
-        
-        .package-stats {
-            font-size: 13px;
-            opacity: 0.9;
-        }
-        
-        .gate-section {
-            border-left: 4px solid #007acc;
-            margin: 15px 0 15px 25px;
-            background: #f8f9fa;
-        }
-        
-        .gate-header {
-            background: linear-gradient(135deg, #007acc, #0056b3);
-            color: white;
-            padding: 15px 20px;
-            font-size: 16px;
-            font-weight: 500;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .gate-stats {
-            font-size: 13px;
-            opacity: 0.9;
-        }
-        
-        .suite-section {
-            border-left: 3px solid #6c757d;
-            margin: 15px 0 15px 20px;
-            background: #ffffff;
-        }
-        
-        .suite-header {
-            background: #e9ecef;
-            padding: 12px 15px;
-            font-size: 14px;
-            font-weight: 500;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        .direct-tests {
-            margin-left: 20px;
+        /* When inside package section, remove redundant styles */
+        .package-section .test-hierarchy {
+            background: transparent;
+            border-radius: 0;
+            box-shadow: none;
+            margin-bottom: 0;
         }
         
         .test-item {
@@ -174,37 +145,11 @@
             border-bottom: none;
         }
         
-        .subtest-item {
-            margin-left: 40px;
-            background-color: #f8f9fa;
-            border-left: 3px solid #dee2e6;
-            position: relative;
-        }
-        
-        .subtest-item::before {
-            content: "";
-            position: absolute;
-            left: -3px;
-            top: 0;
-            bottom: 0;
-            width: 3px;
-            background: #6c757d;
-        }
-        
-        /* Virtual parent test headers for orphaned subtests */
-        .virtual-parent {
-            background-color: #f1f3f4;
-            border-left: 4px solid #007acc;
-            font-weight: 600;
-        }
-        
-        .virtual-parent .test-name {
-            font-style: italic;
-        }
-        
-        .virtual-parent + .subtest-item {
-            margin-top: 0;
-        }
+        /* Indentation for hierarchy */
+        .indent-1 { padding-left: 40px; background-color: #f8f9fa; }
+        .indent-2 { padding-left: 60px; background-color: #f0f8ff; }
+        .indent-3 { padding-left: 80px; background-color: #f5f5f5; }
+        .indent-4 { padding-left: 100px; background-color: #fafafa; }
         
         .status-badge {
             min-width: 60px;
@@ -251,7 +196,7 @@
             align-items: center;
         }
         
-        .test-details .package-name {
+        .package-name {
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             background: #e8f5e8;
             color: #1e7e34;
@@ -374,63 +319,40 @@
                 width: 100%;
             }
         }
-        
-        /* Loading animation */
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-        }
-        
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #007acc;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
-<body{{if .PackageLogPath}} data-package-log-path="{{.PackageLogPath}}"{{end}}>
-    <h1>&#x1F9EA; Test Results</h1>
+<body>
+    <h1>🧪 Test Results</h1>
     
     <div class="summary">
-        {{if .DevnetName}}<p><strong>🌐 Network:</strong> {{.DevnetName}}</p>{{end}}
-        {{if .GateRun}}<p><strong>🚪 Gate:</strong> {{.GateRun}}</p>{{end}}
+        {{if .NetworkName}}<p><strong>🌐 Network:</strong> {{.NetworkName}}</p>{{end}}
         <p><strong>🆔 Run ID:</strong> <code>{{.RunID}}</code></p>
-        <p><strong>⏱️ Total Duration:</strong> {{.TotalDuration}}</p>
-        <p><strong>📅 Started:</strong> {{.Time}}</p>
+        <p><strong>⏱️ Total Duration:</strong> {{formatDuration .Duration}}</p>
+        <p><strong>📅 Started:</strong> {{.Timestamp.Format "2006-01-02 15:04:05 UTC"}}</p>
         
         <div class="stats">
             <div class="stat-box">
-                <div class="stat-value">{{.Total}}</div>
+                <div class="stat-value">{{.Stats.Total}}</div>
                 <div class="stat-label">Total Tests</div>
             </div>
             <div class="stat-box pass">
-                <div class="stat-value">{{.Passed}}</div>
+                <div class="stat-value">{{.Stats.Passed}}</div>
                 <div class="stat-label">Passed</div>
             </div>
             <div class="stat-box fail">
-                <div class="stat-value">{{.Failed}}</div>
+                <div class="stat-value">{{.Stats.Failed}}</div>
                 <div class="stat-label">Failed</div>
             </div>
             <div class="stat-box skip">
-                <div class="stat-value">{{.Skipped}}</div>
+                <div class="stat-value">{{.Stats.Skipped}}</div>
                 <div class="stat-label">Skipped</div>
             </div>
             <div class="stat-box error">
-                <div class="stat-value">{{.Errored}}</div>
+                <div class="stat-value">{{.Stats.Errored}}</div>
                 <div class="stat-label">Errors</div>
             </div>
             <div class="stat-box">
-                <div class="stat-value">{{.PassRateFormatted}}%</div>
+                <div class="stat-value">{{printf "%.1f" .Stats.PassRate}}%</div>
                 <div class="stat-label">Pass Rate</div>
             </div>
         </div>
@@ -443,20 +365,32 @@
     </div>
     
     <div class="test-hierarchy" id="testHierarchy">
-        <!-- Tests will be organized by gate and rendered in execution order -->
-        {{range .Tests}}
-        <div class="test-item {{.StatusClass}}" data-gate="{{.Gate}}" data-suite="{{.Suite}}" data-package="{{.Package}}" data-name="{{.TestName}}" data-is-subtest="{{.IsSubTest}}" data-parent-test="{{.ParentTest}}" data-execution-order="{{.ExecutionOrder}}">
-            <span class="status-badge {{.StatusClass}}">{{.StatusText}}</span>
-            <div class="test-name">{{.TestName}}</div>
-            <div class="test-details">
-                {{if .Package}}<span class="package-name">{{.Package}}</span>{{end}}
-                {{if .Gate}}<span>Gate: {{.Gate}}</span>{{end}}
-                {{if .Suite}}<span>Suite: {{.Suite}}</span>{{end}}
-                <span class="duration">{{.DurationFormatted}}</span>
-                {{if .LogPath}}<a href="{{.LogPath}}" target="_blank" class="log-link">View Log</a>{{end}}
-            </div>
-        </div>
+        {{define "renderNode"}}
+            {{if ne .Type "root"}}
+                {{if or (eq .Type "test") (eq .Type "subtest")}}
+                    <div class="test-item {{getStatusClass .Status}} {{getIndentClass .Depth}}" 
+                         data-name="{{.Name}}" 
+                         data-status="{{.Status}}"
+                         data-package="{{.Package}}"
+                         data-gate="{{.Gate}}"
+                         data-suite="{{.Suite}}">
+                        <span class="status-badge {{getStatusClass .Status}}">{{getStatusText .Status}}</span>
+                        <div class="test-name">{{.Name}}</div>
+                        <div class="test-details">
+                            {{if .Package}}<span class="package-name">{{.Package}}</span>{{end}}
+                            {{if .Gate}}<span>Gate: {{.Gate}}</span>{{end}}
+                            {{if .Suite}}<span>Suite: {{.Suite}}</span>{{end}}
+                            <span class="duration">{{formatDuration .Duration}}</span>
+                            {{if .ExecutionOrder}}<span class="execution-order">#{{.ExecutionOrder}}</span>{{end}}
+                            {{if .LogPath}}<a href="{{.LogPath}}" target="_blank" class="log-link">View Log</a>{{end}}
+                        </div>
+                    </div>
+                {{end}}
+            {{end}}
+            {{range .Children}}{{template "renderNode" .}}{{end}}
         {{end}}
+        
+        {{template "renderNode" .Root}}
     </div>
 
     <script src="static/results.js"></script>

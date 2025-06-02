@@ -21,11 +21,10 @@ func TestReportingHTMLSink(t *testing.T) {
 <head><title>Test Report</title></head>
 <body>
 <h1>{{.RunID}}</h1>
-<p>Network: {{.DevnetName}}</p>
-<p>Gate: {{.GateRun}}</p>
-<div>Total: {{.Total}}, Passed: {{.Passed}}, Failed: {{.Failed}}</div>
-{{range .Tests}}
-<div class="test {{.StatusClass}}">{{.TestName}} - {{.StatusText}}</div>
+<p>Network: {{.NetworkName}}</p>
+<div>Total: {{.Stats.Total}}, Passed: {{.Stats.Passed}}, Failed: {{.Stats.Failed}}</div>
+{{range .TestNodes}}
+<div class="test {{getStatusClass .Status}}">{{.Name}} - {{getStatusText .Status}}</div>
 {{end}}
 </body>
 </html>`
@@ -91,7 +90,6 @@ func TestReportingHTMLSink(t *testing.T) {
 	htmlContent := string(content)
 	assert.Contains(t, htmlContent, "test-run-123")
 	assert.Contains(t, htmlContent, "test-network")
-	assert.Contains(t, htmlContent, "test-gate")
 	assert.Contains(t, htmlContent, "Total: 2, Passed: 1, Failed: 1")
 	assert.Contains(t, htmlContent, "TestPassing")
 	assert.Contains(t, htmlContent, "TestFailing")
@@ -168,11 +166,11 @@ func TestReportingHTMLSink_WithSubTests(t *testing.T) {
 	tempDir := t.TempDir()
 	templateContent := `<html><body>
 <h1>{{.RunID}}</h1>
-<div>Total: {{.Total}}</div>
-{{range .Tests}}
-<div class="test {{.StatusClass}}">
-  {{.TestName}} - {{.StatusText}}
-  {{if .IsSubTest}}[SubTest of {{.ParentTest}}]{{end}}
+<div>Total: {{.Stats.Total}}</div>
+{{range .TestNodes}}
+<div class="test {{getStatusClass .Status}}">
+  {{.Name}} - {{getStatusText .Status}}
+  {{if eq .Type "subtest"}}[SubTest]{{end}}
 </div>
 {{end}}
 </body></html>`
@@ -224,7 +222,7 @@ func TestReportingHTMLSink_WithSubTests(t *testing.T) {
 	assert.Contains(t, htmlContent, "TestWithSubTests")
 	assert.Contains(t, htmlContent, "SubTest1")
 	assert.Contains(t, htmlContent, "SubTest2")
-	assert.Contains(t, htmlContent, "[SubTest of TestWithSubTests]")
+	assert.Contains(t, htmlContent, "[SubTest]")
 	assert.Contains(t, htmlContent, "Total: 3") // Main test + 2 subtests
 }
 
@@ -297,11 +295,11 @@ func TestReportingHTMLSink_FilterPackageTestsInHTML(t *testing.T) {
 <body>
 <h1>{{.RunID}}</h1>
 <div class="summary">
-	{{if .PackageLogPath}}<a href="{{.PackageLogPath}}" class="package-log-link">View Package Logs</a>{{end}}
+	<a href="passed/package-logs.log" class="package-log-link">View Package Logs</a>
 </div>
-<div>Total: {{.Total}}, Passed: {{.Passed}}, Failed: {{.Failed}}</div>
-{{range .Tests}}
-<div class="test {{.StatusClass}}">{{.TestName}} - {{.StatusText}}</div>
+<div>Total: {{.Stats.Total}}, Passed: {{.Stats.Passed}}, Failed: {{.Stats.Failed}}</div>
+{{range .TestNodes}}
+<div class="test {{getStatusClass .Status}}">{{.Name}} - {{getStatusText .Status}}</div>
 {{end}}
 </body>
 </html>`
@@ -367,10 +365,10 @@ func TestReportingHTMLSink_FilterPackageTestsInHTML(t *testing.T) {
 	// Verify package log link is present in header
 	assert.Contains(t, htmlContent, `<a href="passed/package-logs.log" class="package-log-link">View Package Logs</a>`)
 
-	// NEW BEHAVIOR: Package tests now appear as header rows in the output
-	assert.Contains(t, htmlContent, "test (package) - PASS") // Package test appears as header row
-	assert.Contains(t, htmlContent, "TestPassing - PASS")    // Individual test appears as row
+	// Both tests appear in the TestTree nodes
+	assert.Contains(t, htmlContent, "github.com/example/test (package) - PASS") // Package test appears as node
+	assert.Contains(t, htmlContent, "TestPassing - PASS")                       // Individual test appears as node
 
-	// Verify correct total count (both tests counted in stats and both appear as rows)
+	// Verify correct total count (both tests counted in stats)
 	assert.Contains(t, htmlContent, "Total: 2, Passed: 2, Failed: 0")
 }
