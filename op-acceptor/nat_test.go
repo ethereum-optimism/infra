@@ -2,6 +2,7 @@ package nat
 
 import (
 	"context"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -343,4 +344,212 @@ func TestNAT_RunOnceMode(t *testing.T) {
 		"Expected exactly one test execution")
 	assert.True(t, shutdownCalled,
 		"Expected shutdown to be called in run-once mode")
+}
+
+// TestNAT_New_FastFailOnDevnetEnvErrors tests that New fails fast when devnet environment cannot be loaded
+func TestNAT_New_FastFailOnDevnetEnvErrors(t *testing.T) {
+	// Save and restore original environment variable
+	originalEnv := os.Getenv("DEVNET_ENV_URL")
+	defer func() {
+		if originalEnv != "" {
+			os.Setenv("DEVNET_ENV_URL", originalEnv)
+		} else {
+			os.Unsetenv("DEVNET_ENV_URL")
+		}
+	}()
+
+	// Helper function to create a valid validator config file
+	createValidatorConfig := func(t *testing.T) string {
+		validatorConfigDir := t.TempDir()
+		validatorConfigFile := validatorConfigDir + "/validators.yaml"
+		validatorConfig := `
+gates:
+  - id: test-gate
+    description: "Test gate"
+    tests:
+      - name: TestExample
+        package: "./example"
+`
+		err := os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
+		require.NoError(t, err)
+		return validatorConfigFile
+	}
+
+	// Helper function to create config
+	createConfig := func(t *testing.T, validatorConfigFile string) *Config {
+		logger := log.New()
+		return &Config{
+			Log:             logger,
+			ValidatorConfig: validatorConfigFile,
+			TestDir:         t.TempDir(),
+			TargetGate:      "test-gate",
+		}
+	}
+
+	t.Run("missing environment variable", func(t *testing.T) {
+		// Unset the environment variable
+		os.Unsetenv("DEVNET_ENV_URL")
+
+		validatorConfigFile := createValidatorConfig(t)
+		config := createConfig(t, validatorConfigFile)
+		ctx := context.Background()
+
+		// This should fail with a specific error about missing environment variable
+		_, err := New(ctx, config, "test-version", func(error) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "devnet environment URL not provided")
+		assert.Contains(t, err.Error(), "environment variable is required")
+	})
+
+	t.Run("non-existent file (absolute path)", func(t *testing.T) {
+		// Set environment variable to a non-existent file path
+		nonExistentFile := "/path/to/non/existent/file.json"
+		os.Setenv("DEVNET_ENV_URL", nonExistentFile)
+
+		validatorConfigFile := createValidatorConfig(t)
+		config := createConfig(t, validatorConfigFile)
+		ctx := context.Background()
+
+		// This should fail with a specific error about failing to load devnet environment
+		_, err := New(ctx, config, "test-version", func(error) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		assert.Contains(t, err.Error(), nonExistentFile)
+	})
+
+	t.Run("non-existent file (relative path)", func(t *testing.T) {
+		// Set environment variable to a relative path that doesn't exist
+		nonExistentRelativeFile := "./does/not/exist.json"
+		os.Setenv("DEVNET_ENV_URL", nonExistentRelativeFile)
+
+		validatorConfigFile := createValidatorConfig(t)
+		config := createConfig(t, validatorConfigFile)
+		ctx := context.Background()
+
+		// This should fail with a specific error about failing to load devnet environment
+		_, err := New(ctx, config, "test-version", func(error) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		assert.Contains(t, err.Error(), nonExistentRelativeFile)
+	})
+}
+
+// TestNAT_New_FastFailOnInvalidDevnetFile tests that New fails when devnet file is invalid
+func TestNAT_New_FastFailOnInvalidDevnetFile(t *testing.T) {
+	// Save and restore original environment variable
+	originalEnv := os.Getenv("DEVNET_ENV_URL")
+	defer func() {
+		if originalEnv != "" {
+			os.Setenv("DEVNET_ENV_URL", originalEnv)
+		} else {
+			os.Unsetenv("DEVNET_ENV_URL")
+		}
+	}()
+
+	// Create a temporary invalid devnet file
+	tempDir := t.TempDir()
+	invalidFile := tempDir + "/invalid-devnet.json"
+	err := os.WriteFile(invalidFile, []byte("invalid json content"), 0644)
+	require.NoError(t, err)
+
+	// Set environment variable to the invalid file
+	os.Setenv("DEVNET_ENV_URL", invalidFile)
+
+	// Create a valid validator config file
+	validatorConfigDir := t.TempDir()
+	validatorConfigFile := validatorConfigDir + "/validators.yaml"
+	validatorConfig := `
+gates:
+  - id: test-gate
+    description: "Test gate"
+    tests:
+      - name: TestExample
+        package: "./example"
+`
+	err = os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	logger := log.New()
+
+	config := &Config{
+		Log:             logger,
+		ValidatorConfig: validatorConfigFile,
+		TestDir:         t.TempDir(),
+		TargetGate:      "test-gate",
+	}
+
+	// This should fail with a specific error about failing to load devnet environment
+	_, err = New(ctx, config, "test-version", func(error) {})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load devnet environment from")
+	assert.Contains(t, err.Error(), invalidFile)
+}
+
+// TestNAT_New_SucceedsWithValidDevnetFile tests that New succeeds when devnet file is valid
+func TestNAT_New_SucceedsWithValidDevnetFile(t *testing.T) {
+	// Save and restore original environment variable
+	originalEnv := os.Getenv("DEVNET_ENV_URL")
+	defer func() {
+		if originalEnv != "" {
+			os.Setenv("DEVNET_ENV_URL", originalEnv)
+		} else {
+			os.Unsetenv("DEVNET_ENV_URL")
+		}
+	}()
+
+	// Create a temporary valid devnet file
+	tempDir := t.TempDir()
+	validFile := tempDir + "/valid-devnet.json"
+	validContent := `{
+		"name": "test-network",
+		"l1": {
+			"name": "test-l1",
+			"id": "1",
+			"nodes": [],
+			"addresses": {},
+			"wallets": {}
+		},
+		"l2": []
+	}`
+	err := os.WriteFile(validFile, []byte(validContent), 0644)
+	require.NoError(t, err)
+
+	// Set environment variable to the valid file
+	os.Setenv("DEVNET_ENV_URL", validFile)
+
+	// Create a valid validator config file
+	validatorConfigDir := t.TempDir()
+	validatorConfigFile := validatorConfigDir + "/validators.yaml"
+	validatorConfig := `
+gates:
+  - id: test-gate
+    description: "Test gate"
+    tests:
+      - name: TestExample
+        package: "./example"
+`
+	err = os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	logger := log.New()
+
+	config := &Config{
+		Log:             logger,
+		ValidatorConfig: validatorConfigFile,
+		TestDir:         t.TempDir(),
+		TargetGate:      "test-gate",
+	}
+
+	// This should succeed
+	nat, err := New(ctx, config, "test-version", func(error) {})
+	require.NoError(t, err)
+	require.NotNil(t, nat)
+
+	// Check the network name
+	assert.Equal(t, "test-network", nat.networkName)
+
+	// Clean up
+	_ = nat.Stop(ctx)
 }
