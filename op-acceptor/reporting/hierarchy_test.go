@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,7 +124,7 @@ func TestDepthBasedHierarchy(t *testing.T) {
 	assert.Equal(t, "TestParent", subTest2.ParentTest, "SubTest2 should have correct parent")
 }
 
-// TestTreePrefixGeneration tests the new tree prefix generation
+// TestTreePrefixGeneration tests the prefix generation
 func TestTreePrefixGeneration(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -144,42 +145,42 @@ func TestTreePrefixGeneration(t *testing.T) {
 			depth:          1,
 			isLast:         false,
 			parentIsLast:   []bool{},
-			expectedPrefix: "├── ",
+			expectedPrefix: ui.TreeBranch,
 		},
 		{
 			name:           "first subtest, last",
 			depth:          1,
 			isLast:         true,
 			parentIsLast:   []bool{},
-			expectedPrefix: "└── ",
+			expectedPrefix: ui.TreeLastBranch,
 		},
 		{
 			name:           "second level, parent not last",
 			depth:          2,
 			isLast:         false,
 			parentIsLast:   []bool{false},
-			expectedPrefix: "│   ├── ",
+			expectedPrefix: ui.TreeContinue + ui.TreeBranch,
 		},
 		{
 			name:           "second level, parent last",
 			depth:          2,
 			isLast:         false,
 			parentIsLast:   []bool{true},
-			expectedPrefix: "    ├── ",
+			expectedPrefix: ui.TreeIndent + ui.TreeBranch,
 		},
 		{
 			name:           "third level, complex",
 			depth:          3,
 			isLast:         true,
 			parentIsLast:   []bool{false, true},
-			expectedPrefix: "│       └── ",
+			expectedPrefix: ui.TreeContinue + ui.TreeIndent + ui.TreeLastBranch,
 		},
 		{
 			name:           "deep nesting",
 			depth:          5,
 			isLast:         false,
 			parentIsLast:   []bool{false, true, false, false},
-			expectedPrefix: "│       │   │   ├── ",
+			expectedPrefix: ui.TreeContinue + ui.TreeIndent + ui.TreeContinue + ui.TreeContinue + ui.TreeBranch,
 		},
 	}
 

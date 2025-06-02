@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -13,13 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
-
-	"github.com/ethereum-optimism/infra/op-acceptor/logging"
-	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
-	"github.com/ethereum-optimism/infra/op-acceptor/registry"
-	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
-	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
@@ -27,6 +21,13 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
+	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
+	"github.com/ethereum-optimism/infra/op-acceptor/registry"
+	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 )
 
 // Go test2json (TestEvent)action constants for JSON test output
@@ -1069,8 +1070,8 @@ func (r *RunnerResult) String() string {
 
 	for gateName, gate := range r.Gates {
 		b.WriteString(fmt.Sprintf("\nGate: %s (%s)\n", gateName, formatDuration(gate.Duration)))
-		b.WriteString(fmt.Sprintf("├── Status: %s\n", gate.Status))
-		b.WriteString(fmt.Sprintf("├── Tests: %d passed, %d failed, %d skipped\n",
+		b.WriteString(fmt.Sprintf("%sStatus: %s\n", ui.TreeBranch, gate.Status))
+		b.WriteString(fmt.Sprintf("%sTests: %d passed, %d failed, %d skipped\n", ui.TreeBranch,
 			gate.Stats.Passed, gate.Stats.Failed, gate.Stats.Skipped))
 
 		// Print direct gate tests
@@ -1078,24 +1079,24 @@ func (r *RunnerResult) String() string {
 			// Get a display name for the test
 			displayName := types.GetTestDisplayName(testName, test.Metadata)
 
-			b.WriteString(fmt.Sprintf("├── Test: %s (%s) [status=%s]\n",
+			b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.TreeBranch,
 				displayName, formatDuration(test.Duration), test.Status))
 			if test.Error != nil {
-				b.WriteString(fmt.Sprintf("│       └── Error: %s\n", test.Error.Error()))
+				b.WriteString(fmt.Sprintf("%sError: %s\n", ui.TreeSubTestError, test.Error.Error()))
 			}
 
 			// Print subtests if present
 			if len(test.SubTests) > 0 {
 				i := 0
 				for subTestName, subTest := range test.SubTests {
-					prefix := "│       ├──"
+					prefix := ui.TreeSubTestBranch
 					if i == len(test.SubTests)-1 {
-						prefix = "│       └──"
+						prefix = ui.TreeSubTestLastBranch
 					}
-					b.WriteString(fmt.Sprintf("│       %s Test: %s (%s) [status=%s]\n",
+					b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
 						prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
 					if subTest.Error != nil {
-						b.WriteString(fmt.Sprintf("│       │       └── Error: %s\n", subTest.Error.Error()))
+						b.WriteString(fmt.Sprintf("%sError: %s\n", ui.TreeSubTestError, subTest.Error.Error()))
 					}
 					i++
 				}
@@ -1104,9 +1105,9 @@ func (r *RunnerResult) String() string {
 
 		// Print suites
 		for suiteName, suite := range gate.Suites {
-			b.WriteString(fmt.Sprintf("└── Suite: %s (%s)\n", suiteName, formatDuration(suite.Duration)))
-			b.WriteString(fmt.Sprintf("    ├── Status: %s\n", suite.Status))
-			b.WriteString(fmt.Sprintf("    ├── Tests: %d passed, %d failed, %d skipped\n",
+			b.WriteString(fmt.Sprintf("%sSuite: %s (%s)\n", ui.TreeLastBranch, suiteName, formatDuration(suite.Duration)))
+			b.WriteString(fmt.Sprintf("%sStatus: %s\n", ui.SuiteBranch, suite.Status))
+			b.WriteString(fmt.Sprintf("%sTests: %d passed, %d failed, %d skipped\n", ui.SuiteBranch,
 				suite.Stats.Passed, suite.Stats.Failed, suite.Stats.Skipped))
 
 			// Print suite tests
@@ -1114,24 +1115,24 @@ func (r *RunnerResult) String() string {
 				// Get a display name for the test
 				displayName := types.GetTestDisplayName(testName, test.Metadata)
 
-				b.WriteString(fmt.Sprintf("    ├── Test: %s (%s) [status=%s]\n",
+				b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.SuiteBranch,
 					displayName, formatDuration(test.Duration), test.Status))
 				if test.Error != nil {
-					b.WriteString(fmt.Sprintf("    │       └── Error: %s\n", test.Error.Error()))
+					b.WriteString(fmt.Sprintf("%sError: %s\n", ui.SuiteSubTestError, test.Error.Error()))
 				}
 
 				// Print subtests if present
 				if len(test.SubTests) > 0 {
 					i := 0
 					for subTestName, subTest := range test.SubTests {
-						prefix := "│       ├──"
+						prefix := ui.SuiteSubTestBranch
 						if i == len(test.SubTests)-1 {
-							prefix = "│       └──"
+							prefix = ui.SuiteSubTestLast
 						}
-						b.WriteString(fmt.Sprintf("    │       %s Test: %s (%s) [status=%s]\n",
+						b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
 							prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
 						if subTest.Error != nil {
-							b.WriteString(fmt.Sprintf("    │       │       └── Error: %s\n", subTest.Error.Error()))
+							b.WriteString(fmt.Sprintf("%sError: %s\n", ui.SuiteSubTestError, subTest.Error.Error()))
 						}
 						i++
 					}

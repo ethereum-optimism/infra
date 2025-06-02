@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 )
@@ -45,29 +46,7 @@ func formatDuration(d time.Duration) string {
 
 // generateTreePrefixByDepth creates tree-style prefixes based on test depth and position
 func generateTreePrefixByDepth(depth int, isLast bool, parentIsLast []bool) string {
-	if depth == 0 {
-		return ""
-	}
-
-	var prefix strings.Builder
-
-	// Build prefix based on parent positions
-	for i := 0; i < depth-1; i++ {
-		if i < len(parentIsLast) && parentIsLast[i] {
-			prefix.WriteString("    ") // No vertical line if parent was last
-		} else {
-			prefix.WriteString("│   ") // Vertical line if parent has siblings below
-		}
-	}
-
-	// Add the current level connector
-	if isLast {
-		prefix.WriteString("└── ")
-	} else {
-		prefix.WriteString("├── ")
-	}
-
-	return prefix.String()
+	return ui.BuildTreePrefix(depth, isLast, parentIsLast)
 }
 
 // calculateTestPositions determines which tests are last at each level
@@ -328,7 +307,7 @@ func (tf *TableFormatter) Format(data *ReportData) (string, error) {
 		for _, suite := range gate.Suites {
 			t.AppendRow(table.Row{
 				"Suite",
-				fmt.Sprintf("├── %s", suite.Name),
+				fmt.Sprintf("%s%s", ui.TreeBranch, suite.Name),
 				formatDuration(suite.Duration),
 				"-", // Don't count suite as a test
 				suite.Stats.Passed,
@@ -447,15 +426,15 @@ func (tf *TableFormatter) addTestsWithSubtests(t table.Writer, tests []ReportTes
 
 			if isInSuite {
 				if isLastPackageEntry {
-					orgPrefix = "│   └── "
+					orgPrefix = ui.SuiteSubTestLast + " "
 				} else {
-					orgPrefix = "│   ├── "
+					orgPrefix = ui.SuiteSubTestBranch + " "
 				}
 			} else {
 				if isLastPackageEntry {
-					orgPrefix = "└── "
+					orgPrefix = ui.TreeLastBranch
 				} else {
-					orgPrefix = "├── "
+					orgPrefix = ui.TreeBranch
 				}
 			}
 
@@ -525,29 +504,29 @@ func (tf *TableFormatter) addIndividualTestsWithHierarchy(t table.Writer, tests 
 		if isInSuite {
 			if hasPackageHeader {
 				if isLastPackage && isLastTest {
-					orgPrefix = "│       "
+					orgPrefix = ui.SuiteContinue + ui.TreeIndent
 				} else {
-					orgPrefix = "│   │   "
+					orgPrefix = ui.SuiteContinue + ui.TreeContinue
 				}
 			} else {
 				if isLastPackage && isLastTest {
-					orgPrefix = "│       "
+					orgPrefix = ui.SuiteContinue + ui.TreeIndent
 				} else {
-					orgPrefix = "│   │   "
+					orgPrefix = ui.SuiteContinue + ui.TreeContinue
 				}
 			}
 		} else {
 			if hasPackageHeader {
 				if isLastPackage && isLastTest {
-					orgPrefix = "    "
+					orgPrefix = ui.TreeIndent
 				} else {
-					orgPrefix = "│   "
+					orgPrefix = ui.TreeContinue
 				}
 			} else {
 				if isLastPackage && isLastTest {
-					orgPrefix = "    "
+					orgPrefix = ui.TreeIndent
 				} else {
-					orgPrefix = "│   "
+					orgPrefix = ui.TreeContinue
 				}
 			}
 		}
@@ -622,19 +601,19 @@ func (tf *TableFormatter) addIndividualTestsWithHierarchy(t table.Writer, tests 
 		// Calculate organizational prefix consistently
 		var orgPrefix string
 		if hasPackageHeader {
-			orgPrefix = "│   "
+			orgPrefix = ui.TreeContinue
 		} else {
 			if isInSuite {
-				orgPrefix = "│   "
+				orgPrefix = ui.TreeContinue
 			} else {
 				orgPrefix = ""
 			}
 		}
 
 		// Calculate test hierarchy prefix
-		testPrefix := "├── "
+		testPrefix := ui.TreeBranch
 		if isLastOrphanedTest {
-			testPrefix = "└── "
+			testPrefix = ui.TreeLastBranch
 		}
 
 		t.AppendRow(table.Row{
@@ -681,19 +660,19 @@ func (tf *TableFormatter) addTestsSimpleUnderPackage(t table.Writer, tests []Rep
 		// Calculate organizational prefix (package indentation)
 		var orgPrefix string
 		if hasPackageHeader {
-			orgPrefix = "│   "
+			orgPrefix = ui.TreeContinue
 		} else {
 			if isInSuite {
-				orgPrefix = "│   "
+				orgPrefix = ui.TreeContinue
 			} else {
 				orgPrefix = ""
 			}
 		}
 
 		// Calculate test hierarchy prefix
-		testPrefix := "├── "
+		testPrefix := ui.TreeBranch
 		if isLastTestGroup && len(subtests) == 0 {
-			testPrefix = "└── "
+			testPrefix = ui.TreeLastBranch
 		}
 
 		// Add main test row
@@ -715,9 +694,9 @@ func (tf *TableFormatter) addTestsSimpleUnderPackage(t table.Writer, tests []Rep
 
 			var subtestPrefix string
 			if isLastTestGroup && isLastSubtest {
-				subtestPrefix = "    └── "
+				subtestPrefix = ui.TreeIndent + ui.TreeLastBranch
 			} else {
-				subtestPrefix = "│   ├── "
+				subtestPrefix = ui.TreeContinue + ui.TreeBranch
 			}
 
 			// Add subtest row

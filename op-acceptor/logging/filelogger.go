@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 )
 
 const (
@@ -529,38 +530,37 @@ func (s *AllLogsFileSink) Consume(result *types.TestResult, runID string) error 
 	// Use a cleaner, more structured format that's easier to read for large outputs
 	var content strings.Builder
 
-	// Create a clear header with visual distinction
-	fmt.Fprintf(&content, "\n")
-	fmt.Fprintf(&content, "┌─────────────────────────────────────────────────────────────────────┐\n")
-	fmt.Fprintf(&content, "│ TEST: %-64s │\n", truncateString(result.Metadata.FuncName, 64))
-	fmt.Fprintf(&content, "├─────────────────────────────────────────────────────────────────────┤\n")
+	// Create a clear header with visual distinction using ui package functions
+	content.WriteString("\n")
+	content.WriteString(ui.BuildBoxHeader(fmt.Sprintf("TEST: %s", truncateString(result.Metadata.FuncName, 60)), 72))
 
 	// Add test metadata in a structured format
-	fmt.Fprintf(&content, "│ Status:   %-62s │\n", result.Status)
-	fmt.Fprintf(&content, "│ Package:  %-62s │\n", truncateString(result.Metadata.Package, 62))
-	fmt.Fprintf(&content, "│ Gate:     %-62s │\n", truncateString(result.Metadata.Gate, 62))
-	fmt.Fprintf(&content, "│ Suite:    %-62s │\n", truncateString(result.Metadata.Suite, 62))
-	fmt.Fprintf(&content, "│ Duration: %-62s │\n", result.Duration)
-	fmt.Fprintf(&content, "│ Time:     %-62s │\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&content, "└─────────────────────────────────────────────────────────────────────┘\n\n")
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Status:   %s", result.Status), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Package:  %s", truncateString(result.Metadata.Package, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Gate:     %s", truncateString(result.Metadata.Gate, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Suite:    %s", truncateString(result.Metadata.Suite, 62)), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Duration: %s", result.Duration), 72))
+	content.WriteString(ui.BuildBoxLine(fmt.Sprintf("Time:     %s", time.Now().Format(time.RFC3339)), 72))
+	content.WriteString(ui.BuildBoxFooter(72))
+	content.WriteString("\n")
 
 	// Add error and stdout in clearly marked sections
 	if result.Error != nil {
-		fmt.Fprintf(&content, "ERROR:\n")
-		fmt.Fprintf(&content, "~~~~~~\n")
-		fmt.Fprintf(&content, "%s\n\n", result.Error.Error())
+		content.WriteString("ERROR:\n")
+		content.WriteString("~~~~~~\n")
+		content.WriteString(fmt.Sprintf("%s\n\n", result.Error.Error()))
 	}
 
 	if result.Stdout != "" {
-		fmt.Fprintf(&content, "STDOUT:\n")
-		fmt.Fprintf(&content, "~~~~~~~\n")
+		content.WriteString("STDOUT:\n")
+		content.WriteString("~~~~~~~\n")
 		// Indent the stdout for better readability
 		indentedOutput := indentText(result.Stdout, "  ")
-		fmt.Fprintf(&content, "%s\n", indentedOutput)
+		content.WriteString(fmt.Sprintf("%s\n", indentedOutput))
 	}
 
 	// Add a clear separator at the end
-	fmt.Fprintf(&content, "\n")
+	content.WriteString("\n")
 
 	// Write the content to the file
 	return writer.Write([]byte(content.String()))

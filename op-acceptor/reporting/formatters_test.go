@@ -472,7 +472,6 @@ func TestTableFormatterOrganizationalHierarchy(t *testing.T) {
 		if strings.Contains(line, "│   ") && strings.Contains(line, "TestTransfer") {
 			foundTestTransfer = true
 		}
-
 	}
 
 	assert.True(t, foundGate, "Should show Gate level")
