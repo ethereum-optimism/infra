@@ -22,6 +22,22 @@ func formatDuration(d time.Duration) string {
 	return d.Truncate(time.Millisecond).String()
 }
 
+// getStatusString returns a consistent lowercase status string
+func getStatusString(status types.TestStatus) string {
+	switch status {
+	case types.TestStatusPass:
+		return "pass"
+	case types.TestStatusFail:
+		return "fail"
+	case types.TestStatusSkip:
+		return "skip"
+	case types.TestStatusError:
+		return "error"
+	default:
+		return "unknown"
+	}
+}
+
 // TreeHTMLFormatter formats test trees as HTML using the tree structure
 type TreeHTMLFormatter struct {
 	template *template.Template
@@ -37,49 +53,13 @@ func NewTreeHTMLFormatter(templateContent string) (*TreeHTMLFormatter, error) {
 			return d.Truncate(time.Millisecond).String()
 		},
 		"getStatusClass": func(status types.TestStatus) string {
-			switch status {
-			case types.TestStatusPass:
-				return "pass"
-			case types.TestStatusFail:
-				return "fail"
-			case types.TestStatusSkip:
-				return "skip"
-			case types.TestStatusError:
-				return "error"
-			default:
-				return "unknown"
-			}
+			return getStatusString(status)
 		},
 		"getStatusText": func(status types.TestStatus) string {
-			switch status {
-			case types.TestStatusPass:
-				return "PASS"
-			case types.TestStatusFail:
-				return "FAIL"
-			case types.TestStatusSkip:
-				return "SKIP"
-			case types.TestStatusError:
-				return "ERROR"
-			default:
-				return "UNKNOWN"
-			}
-		},
-		"isTestNode": func(nodeType types.TestTreeNodeType) bool {
-			return nodeType == types.NodeTypeTest || nodeType == types.NodeTypeSubtest
+			return getStatusString(status)
 		},
 		"getIndentClass": func(depth int) string {
-			switch depth {
-			case 0:
-				return "indent-0"
-			case 1:
-				return "indent-1"
-			case 2:
-				return "indent-2"
-			case 3:
-				return "indent-3"
-			default:
-				return fmt.Sprintf("indent-%d", depth)
-			}
+			return fmt.Sprintf("indent-%d", depth)
 		},
 		"multiply": func(a, b int) int {
 			return a * b
@@ -222,7 +202,7 @@ func (f *TreeTableFormatter) addNodeRow(t table.Writer, node *types.TestTreeNode
 		stats.Passed,
 		stats.Failed,
 		stats.Skipped,
-		f.getStatusString(node.Status),
+		strings.ToUpper(f.GetStatusString(node.Status)), // uppercase for table display
 	}
 
 	// Add execution order if showing it
@@ -290,20 +270,9 @@ func (f *TreeTableFormatter) getNodeTypeString(node *types.TestTreeNode) string 
 	}
 }
 
-// getStatusString returns a display string for the status
-func (f *TreeTableFormatter) getStatusString(status types.TestStatus) string {
-	switch status {
-	case types.TestStatusPass:
-		return "PASS"
-	case types.TestStatusFail:
-		return "FAIL"
-	case types.TestStatusSkip:
-		return "SKIP"
-	case types.TestStatusError:
-		return "ERROR"
-	default:
-		return "UNKNOWN"
-	}
+// GetStatusString returns a consistent lowercase status string
+func (f *TreeTableFormatter) GetStatusString(status types.TestStatus) string {
+	return getStatusString(status)
 }
 
 // TreeTextFormatter formats test trees as plain text using the tree structure

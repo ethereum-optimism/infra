@@ -366,8 +366,8 @@ func TestReportingHTMLSink_FilterPackageTestsInHTML(t *testing.T) {
 	assert.Contains(t, htmlContent, `<a href="passed/package-logs.log" class="package-log-link">View Package Logs</a>`)
 
 	// Both tests appear in the TestTree nodes
-	assert.Contains(t, htmlContent, "github.com/example/test (package) - PASS") // Package test appears as node
-	assert.Contains(t, htmlContent, "TestPassing - PASS")                       // Individual test appears as node
+	assert.Contains(t, htmlContent, "github.com/example/test (package) - pass") // Package test appears as node
+	assert.Contains(t, htmlContent, "TestPassing - pass")                       // Individual test appears as node
 
 	// Verify correct total count (both tests counted in stats)
 	assert.Contains(t, htmlContent, "Total: 2, Passed: 2, Failed: 0")
