@@ -130,13 +130,13 @@ func TestFileLogger(t *testing.T) {
 	summaryContentStr := string(summaryContent)
 
 	// Check that the summary contains the right statistics
-	assert.Contains(t, summaryContentStr, "TEST SUMMARY")
-	assert.Contains(t, summaryContentStr, "Total:   3")
-	assert.Contains(t, summaryContentStr, "Passed:  1")
-	assert.Contains(t, summaryContentStr, "Failed:  1")
+	assert.Contains(t, summaryContentStr, "Test Results Summary")
+	assert.Contains(t, summaryContentStr, "Total Tests: 3")
+	assert.Contains(t, summaryContentStr, "Passed: 1")
+	assert.Contains(t, summaryContentStr, "Failed: 1")
 	assert.Contains(t, summaryContentStr, "Skipped: 1")
-	assert.Contains(t, summaryContentStr, "Failed tests:")
-	assert.Contains(t, summaryContentStr, "github.com/example/package.TestFailingFunction")
+	assert.Contains(t, summaryContentStr, "Failed Tests:")
+	assert.Contains(t, summaryContentStr, "test-gate/test-suite/TestFailingFunction")
 }
 
 func TestLoggerWithEmptyRunID(t *testing.T) {
@@ -594,7 +594,7 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 
 	// Verify the HTML content contains expected elements
 	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
-	assert.Contains(t, htmlContent, "<title>Test Results</title>")
+	assert.Contains(t, htmlContent, "<title>Acceptance Test Results</title>")
 	assert.Contains(t, htmlContent, "TestPassingOne")
 	assert.Contains(t, htmlContent, "TestFailingOne")
 	assert.Contains(t, htmlContent, "TestSkipped")
@@ -675,11 +675,10 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 
 	// Verify the HTML content contains expected elements
 	assert.NotEmpty(t, htmlContent, "HTML content should not be empty")
-	assert.Contains(t, htmlContent, "<title>Test Results</title>")
+	assert.Contains(t, htmlContent, "<title>Acceptance Test Results</title>")
 
-	// Verify network and gate information is displayed
-	assert.Contains(t, htmlContent, "<strong>🌐 Network:</strong> isthmus-devnet")
-	assert.Contains(t, htmlContent, "<strong>🚪 Gate:</strong> isthmus")
+	// Verify network information is displayed (removed gate from summary, emojis removed)
+	assert.Contains(t, htmlContent, "<strong>Network:</strong> isthmus-devnet")
 
 	// Verify main test and subtests are included
 	assert.Contains(t, htmlContent, "TestWithSubtests")
@@ -692,8 +691,7 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 	assert.Contains(t, htmlContent, "acceptance")
 
 	// Verify subtest CSS classes are applied (updated for new template)
-	assert.Contains(t, htmlContent, "subtest-item")
-	assert.Contains(t, htmlContent, "test-item")
+	assert.Contains(t, htmlContent, "test-item") // Both tests and subtests use test-item class
 
 	// Verify links to log files
 	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")

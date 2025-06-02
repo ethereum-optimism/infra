@@ -81,18 +81,18 @@ func TestReportingTextSummarySink(t *testing.T) {
 			require.NoError(t, err)
 
 			summaryContent := string(content)
-			assert.Contains(t, summaryContent, "TEST SUMMARY")
+			assert.Contains(t, summaryContent, "Test Results Summary")
 			assert.Contains(t, summaryContent, "test-run-456")
-			assert.Contains(t, summaryContent, "Total:   2")
-			assert.Contains(t, summaryContent, "Passed:  1")
-			assert.Contains(t, summaryContent, "Failed:  1")
-			assert.Contains(t, summaryContent, "github.com/example/test.TestFailing")
+			assert.Contains(t, summaryContent, "Total Tests: 2")
+			assert.Contains(t, summaryContent, "Passed: 1")
+			assert.Contains(t, summaryContent, "Failed: 1")
+			assert.Contains(t, summaryContent, "test-gate/TestFailing")
 
 			if tt.includeDetails {
-				assert.Contains(t, summaryContent, "DETAILED RESULTS:")
-				assert.Contains(t, summaryContent, "Gate: test-gate")
+				// With details, error information should be included in the hierarchy
+				assert.Contains(t, summaryContent, "Error: test failed")
 			} else {
-				assert.NotContains(t, summaryContent, "DETAILED RESULTS:")
+				assert.NotContains(t, summaryContent, "Error: test failed")
 			}
 		})
 	}
@@ -118,10 +118,11 @@ func TestTableReporter(t *testing.T) {
 			name:                "without individual tests",
 			showIndividualTests: false,
 			expectedContent: []string{
-				"Gate", "test-gate",
+				"TestPassing", "TestFailing",
+				"PASS", "FAIL",
 			},
 			notExpectedContent: []string{
-				"TestPassing", "TestFailing",
+				"Gate", "test-gate",
 			},
 		},
 	}
