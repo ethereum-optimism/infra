@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1480,7 +1482,10 @@ func TestDirectToGate(t *testing.T) {
 	assert.Equal(t, "test-gate", result.Metadata.Gate)
 	assert.Equal(t, ".", result.Metadata.Package)
 	assert.False(t, result.Metadata.RunAll)
-	assert.Equal(t, "test timed out after 1s", result.Error.Error())
+
+	// Check that the error message contains the expected timeout information
+	assert.Contains(t, result.Error.Error(), "TIMEOUT: Test timed out after 1s")
+	assert.Contains(t, result.Error.Error(), "actual duration:")
 }
 
 func TestRunTestTimeout_SingleTest_DoesNotExceedTimeout(t *testing.T) {
@@ -1618,4 +1623,305 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 			assert.Contains(t, result.Error.Error(), tc.expectErrMsg)
 		})
 	}
+}
+
+func TestPackageTimeoutErrorMessage(t *testing.T) {
+	// Create a temporary directory for test execution
+	tempDir := t.TempDir()
+
+	// Create a test file with fast and slow tests
+	testFile := filepath.Join(tempDir, "timeout_test.go")
+	testContent := `
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+func TestFast(t *testing.T) {
+	// This test passes quickly
+}
+
+func TestSlowTimeout(t *testing.T) {
+	// This test will timeout
+	time.Sleep(5 * time.Second)
+}
+
+func TestAnotherSlowTimeout(t *testing.T) {
+	// This test will also timeout
+	time.Sleep(5 * time.Second)
+}
+
+func TestAnotherFast(t *testing.T) {
+	// This test passes quickly
+}
+
+func TestSkipped(t *testing.T) {
+	// This test is skipped
+	t.Skip("This test is intentionally skipped")
+}
+`
+	err := os.WriteFile(testFile, []byte(testContent), 0644)
+	require.NoError(t, err)
+
+	// Initialize go module in test directory
+	initGoModule(t, tempDir, "testmodule")
+
+	// Create a YAML configuration for the registry
+	configContent := []byte(`
+gates:
+  - id: test-gate
+    description: "Test gate with timeout tests"
+    tests:
+      - name: TestFast
+        package: "."
+        timeout: 2s
+      - name: TestSlowTimeout  
+        package: "."
+        timeout: 1s
+      - name: TestAnotherSlowTimeout
+        package: "."
+        timeout: 1s
+      - name: TestAnotherFast
+        package: "."
+        timeout: 2s
+      - name: TestSkipped
+        package: "."
+        timeout: 2s
+`)
+
+	// Write the validator config to a file
+	validatorConfigPath := filepath.Join(tempDir, "validators.yaml")
+	err = os.WriteFile(validatorConfigPath, configContent, 0644)
+	require.NoError(t, err)
+
+	// Create registry with correct configuration
+	registry, err := registry.NewRegistry(registry.Config{
+		ValidatorConfigFile: validatorConfigPath,
+		Log:                 log.New(),
+		DefaultTimeout:      10 * time.Second,
+	})
+	require.NoError(t, err)
+
+	// Create test runner
+	cfg := Config{
+		Registry:           registry,
+		TargetGate:         "test-gate",
+		WorkDir:            tempDir,
+		Log:                log.New(),
+		GoBinary:           "go",
+		AllowSkips:         false,
+		OutputRealtimeLogs: false,
+		TestLogLevel:       "INFO",
+	}
+
+	testRunner, err := NewTestRunner(cfg)
+	require.NoError(t, err)
+
+	// Directly test the runTestList method with multiple tests to trigger timeout scenario
+	testNames := []string{"TestFast", "TestSlowTimeout", "TestAnotherSlowTimeout", "TestAnotherFast", "TestSkipped"}
+
+	packageMetadata := types.ValidatorMetadata{
+		ID:      "package-timeout-test",
+		Gate:    "test-gate",
+		Type:    types.ValidatorTypeTest,
+		Package: ".",
+		RunAll:  true,
+		Timeout: 1 * time.Second, // Short timeout to force timeouts on slow tests
+	}
+
+	// Run the test list - this should timeout on some tests
+	ctx := context.Background()
+
+	// Use the internal runTestList method to test package-level error handling
+	runnerInternal := testRunner.(*runner)
+	result, err := runnerInternal.runTestList(ctx, packageMetadata, testNames)
+
+	// The test should succeed (no error returned) but the result should indicate failures
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// The package should fail due to timeouts
+	require.Equal(t, types.TestStatusFail, result.Status)
+
+	// Check that the error message is concise and contains the timeout test names
+	require.NotNil(t, result.Error)
+	errorMsg := result.Error.Error()
+
+	// The error message should contain "Package test failures include timeouts:" followed by test names
+	require.Contains(t, errorMsg, "Package test failures include timeouts:")
+
+	// The error message should contain the names of the timed out tests
+	require.Contains(t, errorMsg, "TestSlowTimeout")
+	require.Contains(t, errorMsg, "TestAnotherSlowTimeout")
+
+	// Verify the format - it should look like: "Package test failures include timeouts: [TestSlowTimeout TestAnotherSlowTimeout]"
+	require.Regexp(t, `Package test failures include timeouts: \[.*TestSlowTimeout.*TestAnotherSlowTimeout.*\]`, errorMsg)
+
+	// Verify that the skipped test is marked as skipped
+	require.Contains(t, result.SubTests, "TestSkipped", "Skipped test should be present in results")
+	skippedTest := result.SubTests["TestSkipped"]
+	require.Equal(t, types.TestStatusSkip, skippedTest.Status, "TestSkipped should have skip status")
+	require.Contains(t, skippedTest.Error.Error(), "This test is intentionally skipped", "Skip message should be preserved")
+
+	t.Logf("Package timeout error message: %s", errorMsg)
+}
+
+func TestArbitraryDepthSubtests(t *testing.T) {
+	// Create a test result with arbitrarily deep nesting (5 levels)
+	result := &RunnerResult{
+		Gates: map[string]*GateResult{
+			"test-gate": {
+				ID:          "test-gate",
+				Description: "Test gate with deeply nested subtests",
+				Tests: map[string]*types.TestResult{
+					"TestDeepNesting": {
+						Metadata: types.ValidatorMetadata{
+							FuncName: "TestDeepNesting",
+							Package:  "example.com/deep",
+						},
+						Status:   types.TestStatusPass,
+						Duration: time.Second,
+						SubTests: map[string]*types.TestResult{
+							"Level1Subtest": {
+								Metadata: types.ValidatorMetadata{
+									FuncName: "Level1Subtest",
+									Package:  "example.com/deep",
+								},
+								Status:   types.TestStatusPass,
+								Duration: 500 * time.Millisecond,
+								SubTests: map[string]*types.TestResult{
+									"Level2Subtest": {
+										Metadata: types.ValidatorMetadata{
+											FuncName: "Level2Subtest",
+											Package:  "example.com/deep",
+										},
+										Status:   types.TestStatusFail,
+										Duration: 200 * time.Millisecond,
+										Error:    fmt.Errorf("level 2 error"),
+										SubTests: map[string]*types.TestResult{
+											"Level3Subtest": {
+												Metadata: types.ValidatorMetadata{
+													FuncName: "Level3Subtest",
+													Package:  "example.com/deep",
+												},
+												Status:   types.TestStatusPass,
+												Duration: 100 * time.Millisecond,
+												SubTests: map[string]*types.TestResult{
+													"Level4Subtest": {
+														Metadata: types.ValidatorMetadata{
+															FuncName: "Level4Subtest",
+															Package:  "example.com/deep",
+														},
+														Status:   types.TestStatusSkip,
+														Duration: 50 * time.Millisecond,
+														SubTests: map[string]*types.TestResult{
+															"Level5Subtest": {
+																Metadata: types.ValidatorMetadata{
+																	FuncName: "Level5Subtest",
+																	Package:  "example.com/deep",
+																},
+																Status:   types.TestStatusPass,
+																Duration: 25 * time.Millisecond,
+																Error:    nil,
+																SubTests: nil, // Deepest level
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				Status:   types.TestStatusFail,
+				Duration: time.Second,
+				Stats: ResultStats{
+					Total:   6, // Main test + 5 subtests
+					Passed:  4,
+					Failed:  1,
+					Skipped: 1,
+				},
+			},
+		},
+		Status:   types.TestStatusFail,
+		Duration: time.Second,
+		Stats: ResultStats{
+			Total:   6,
+			Passed:  4,
+			Failed:  1,
+			Skipped: 1,
+		},
+		RunID: "deep-nesting-test",
+	}
+
+	output := result.String()
+
+	// Verify that all levels are present in the output
+	assert.Contains(t, output, "TestDeepNesting")
+	assert.Contains(t, output, "Level1Subtest")
+	assert.Contains(t, output, "Level2Subtest")
+	assert.Contains(t, output, "Level3Subtest")
+	assert.Contains(t, output, "Level4Subtest")
+	assert.Contains(t, output, "Level5Subtest")
+
+	// Verify proper tree structure symbols are present
+	assert.Contains(t, output, ui.TreeBranch)     // Branch connectors
+	assert.Contains(t, output, ui.TreeLastBranch) // Last branch connectors
+	assert.Contains(t, output, ui.TreeVertical)   // Vertical lines
+
+	// Verify error is properly indented
+	assert.Contains(t, output, "level 2 error")
+
+	// Print the output for visual inspection
+	t.Logf("Deep nesting output:\n%s", output)
+
+	// Verify that each level has proper indentation by checking for proper nesting
+	// using the actual BuildTreePrefix function to generate expected patterns
+	lines := strings.Split(output, "\n")
+
+	// Track which levels we've found in the output
+	foundLevel1 := false
+	foundLevel2 := false
+	foundLevel3 := false
+	foundLevel4 := false
+	foundLevel5 := false
+
+	// Define expected patterns using the actual tree building logic
+	testCases := []struct {
+		name         string
+		depth        int
+		parentIsLast []bool
+		foundFlag    *bool
+	}{
+		{"Level1Subtest", 2, []bool{false}, &foundLevel1},
+		{"Level2Subtest", 3, []bool{false, true}, &foundLevel2},
+		{"Level3Subtest", 4, []bool{false, true, true}, &foundLevel3},
+		{"Level4Subtest", 5, []bool{false, true, true, true}, &foundLevel4},
+		{"Level5Subtest", 6, []bool{false, true, true, true, true}, &foundLevel5},
+	}
+
+	for _, line := range lines {
+		for _, tc := range testCases {
+			if strings.Contains(line, tc.name) {
+				*tc.foundFlag = true
+				// Generate expected pattern using the actual tree prefix builder
+				expectedPrefix := ui.BuildTreePrefix(tc.depth, true, tc.parentIsLast)
+				assert.True(t, strings.Contains(line, expectedPrefix),
+					"%s should have proper depth %d indentation with prefix '%s', got line: %s",
+					tc.name, tc.depth, expectedPrefix, line)
+				break
+			}
+		}
+	}
+
+	assert.True(t, foundLevel1, "Level 1 subtest should be in output")
+	assert.True(t, foundLevel2, "Level 2 subtest should be in output")
+	assert.True(t, foundLevel3, "Level 3 subtest should be in output")
+	assert.True(t, foundLevel4, "Level 4 subtest should be in output")
+	assert.True(t, foundLevel5, "Level 5 subtest should be in output")
 }

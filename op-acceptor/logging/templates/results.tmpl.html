@@ -3,233 +3,436 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Results</title>
+    <title>Acceptance Test Results</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
+            color: #1a1a1a;
+            max-width: 90%;
             margin: 0 auto;
-            padding: 20px;
+            padding: 24px;
+            background-color: #ffffff;
         }
-        h1, h2, h3 {
-            margin-top: 20px;
-            margin-bottom: 10px;
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0 0 32px 0;
+            color: #1a1a1a;
+            letter-spacing: -0.02em;
         }
+        
+        h2, h3 {
+            margin-top: 24px;
+            margin-bottom: 12px;
+            color: #1a1a1a;
+        }
+        
         .summary {
-            background-color: #f8f8f8;
-            border-radius: 5px;
-            padding: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background-color: #f8f9fa;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 40px;
+            border: 1px solid #e9ecef;
         }
+        
+        .summary p {
+            margin: 8px 0;
+            color: #495057;
+        }
+        
+        .summary strong {
+            color: #1a1a1a;
+        }
+        
         .stats {
             display: flex;
             flex-wrap: wrap;
-            gap: 15px;
-            margin: 15px 0;
+            gap: 12px;
+            margin: 20px 0 0 0;
+            opacity: 0.8;
         }
+        
         .stat-box {
-            padding: 10px 15px;
-            border-radius: 4px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            padding: 12px 16px;
+            border-radius: 8px;
             min-width: 80px;
             text-align: center;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
         }
+        
         .stat-value {
-            font-size: 24px;
-            font-weight: bold;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #1a1a1a;
         }
-        .pass { background-color: #dff0d8; color: #3c763d; }
-        .fail { background-color: #f2dede; color: #a94442; }
-        .skip { background-color: #fcf8e3; color: #8a6d3b; }
-        .error { background-color: #f2dede; color: #a94442; }
-        .test-list {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
+        
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6c757d;
+            font-weight: 500;
         }
-        .test-list th, .test-list td {
-            border: 1px solid #ddd;
-            padding: 8px 12px;
-            text-align: left;
+        
+        .pass { border-left: 3px solid #10b981; }
+        .fail { border-left: 3px solid #FF0420; }
+        .skip { border-left: 3px solid #f59e0b; }
+        .error { border-left: 3px solid #ef4444; }
+        
+        /* Package section styles */
+        .package-section {
+            margin-bottom: 24px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e9ecef;
+            background: white;
         }
-        .test-list th {
-            background-color: #f2f2f2;
-            position: sticky;
-            top: 0;
-        }
-        .test-list tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .test-list tr:hover {
-            background-color: #f1f1f1;
-        }
-        .status-cell {
-            text-align: center;
-        }
-        .actions {
+        
+        .package-header {
+            padding: 16px 24px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
             display: flex;
-            gap: 10px;
-            margin: 20px 0;
+            justify-content: space-between;
+            align-items: center;
         }
-        button {
-            padding: 8px 12px;
+        
+        .package-header.fail {
+            background: linear-gradient(135deg, #FF0420 0%, #ff1a3d 100%);
+            color: white;
+        }
+        
+        .package-header.skip {
+            background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+            color: #1a1a1a;
+        }
+        
+        .package-header .package-name {
+            font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+            font-size: 14px;
+        }
+        
+        .package-header .package-stats {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .package-header.fail .log-link {
+            color: rgba(255,255,255,0.9);
+            border-color: rgba(255,255,255,0.3);
+        }
+        
+        .package-header.skip .log-link {
+            color: #1a1a1a;
+            border-color: rgba(26,26,26,0.3);
+        }
+        
+        /* Test hierarchy styles */
+        .test-hierarchy {
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        
+        /* When inside package section, remove redundant styles */
+        .package-section .test-hierarchy {
+            background: transparent;
+            border-radius: 0;
             border: none;
-            border-radius: 4px;
-            background-color: #f0f0f0;
-            cursor: pointer;
+            margin-bottom: 0;
         }
-        button:hover {
-            background-color: #e0e0e0;
+        
+        .test-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 24px;
+            border-bottom: 1px solid #f1f3f4;
+            transition: background-color 0.2s ease;
         }
-        .search {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 250px;
+        
+        .test-item:hover {
+            background-color: #f8f9fa;
         }
-        .hidden {
-            display: none;
+        
+        .test-item:last-child {
+            border-bottom: none;
         }
-        a {
-            color: #337ab7;
-            text-decoration: none;
+        
+        /* Indentation for hierarchy */
+        .indent-1 { padding-left: 48px; background-color: #f8f9fa; }
+        .indent-2 { padding-left: 72px; background-color: #f1f3f4; }
+        .indent-3 { padding-left: 96px; background-color: #e9ecef; }
+        .indent-4 { padding-left: 120px; background-color: #dee2e6; }
+        
+        .status-badge {
+            min-width: 64px;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 600;
+            text-align: center;
+            text-transform: uppercase;
+            margin-right: 16px;
+            letter-spacing: 0.5px;
         }
-        a:hover {
-            text-decoration: underline;
+        
+        .status-badge.pass {
+            background: #d1fae5;
+            color: #047857;
         }
+        
+        .status-badge.fail {
+            background: #ffe4e6;
+            color: #be123c;
+        }
+        
+        .status-badge.skip {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-badge.error {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+        
+        .test-name {
+            flex: 1;
+            font-weight: 500;
+            margin-right: 16px;
+            color: #1a1a1a;
+        }
+        
+        .test-details {
+            display: flex;
+            gap: 16px;
+            font-size: 14px;
+            color: #6c757d;
+            align-items: center;
+        }
+        
+        .package-name {
+            font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+            background: #f0f9ff;
+            color: #0369a1;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
         .duration {
-            text-align: right;
+            font-weight: 500;
+            color: #374151;
         }
-        .subtest {
-            padding-left: 20px;
-            position: relative;
+        
+        .execution-order {
+            background: #f0f9ff;
+            color: #0369a1;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
         }
-        .subtest::before {
-            content: "└─ ";
-            color: #999;
-            margin-right: 5px;
+        
+        .log-link {
+            color: #FF0420;
+            text-decoration: none;
+            font-size: 13px;
+            padding: 6px 12px;
+            border: 1px solid #FF0420;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            font-weight: 500;
         }
-        .subtest-row {
-            background-color: #fafafa;
+        
+        .log-link:hover {
+            background: #FF0420;
+            color: white;
+            text-decoration: none;
+            transform: translateY(-1px);
+        }
+        
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 16px;
+            margin: 32px 0;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .search-input {
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            width: 320px;
+            transition: all 0.2s ease;
+            background: white;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #FF0420;
+            box-shadow: 0 0 0 3px rgba(255, 4, 32, 0.1);
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #f8f9fa;
+            color: #374151;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: 1px solid #d1d5db;
+        }
+        
+        .btn:hover {
+            background: #e5e7eb;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .btn-primary {
+            background: #FF0420;
+            color: white;
+            border-color: #FF0420;
+        }
+        
+        .btn-primary:hover {
+            background: #e6041d;
+        }
+        
+        .btn.active {
+            background: #FF0420;
+            color: white;
+            border-color: #FF0420;
+            box-shadow: 0 2px 8px rgba(255, 4, 32, 0.3);
+        }
+        
+        .btn.active:hover {
+            background: #e6041d;
+            transform: none;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 16px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .test-details {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-input {
+                width: 100%;
+            }
+            
+            .stats {
+                justify-content: center;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Test Results</h1>
+    <h1>Acceptance Test Results</h1>
+    
     <div class="summary">
-        {{if .DevnetName}}<p><strong>Devnet:</strong> {{.DevnetName}}</p>{{end}}
-        {{if .GateRun}}<p><strong>Gate:</strong> {{.GateRun}}</p>{{end}}
-        <p><strong>Run ID:</strong> {{.RunID}}</p>
-        <p><strong>Duration:</strong> {{.TotalDuration}}</p>
-        <p><strong>Time:</strong> {{.Time}}</p>
+        {{if .NetworkName}}<p><strong>Network:</strong> {{.NetworkName}}</p>{{end}}
+        <p><strong>Run ID:</strong> <code>{{.RunID}}</code></p>
+        <p><strong>Total Duration:</strong> {{formatDuration .Duration}}</p>
+        <p><strong>Started:</strong> {{.Timestamp.Format "2006-01-02 15:04:05 UTC"}}</p>
         
         <div class="stats">
             <div class="stat-box">
-                <div>Total</div>
-                <div class="stat-value">{{.Total}}</div>
+                <div class="stat-value">{{.Stats.Total}}</div>
+                <div class="stat-label">Total Tests</div>
             </div>
             <div class="stat-box pass">
-                <div>Passed</div>
-                <div class="stat-value">{{.Passed}}</div>
+                <div class="stat-value">{{.Stats.Passed}}</div>
+                <div class="stat-label">Passed</div>
             </div>
             <div class="stat-box fail">
-                <div>Failed</div>
-                <div class="stat-value">{{.Failed}}</div>
+                <div class="stat-value">{{.Stats.Failed}}</div>
+                <div class="stat-label">Failed</div>
             </div>
             <div class="stat-box skip">
-                <div>Skipped</div>
-                <div class="stat-value">{{.Skipped}}</div>
+                <div class="stat-value">{{.Stats.Skipped}}</div>
+                <div class="stat-label">Skipped</div>
             </div>
             <div class="stat-box error">
-                <div>Errors</div>
-                <div class="stat-value">{{.Errored}}</div>
+                <div class="stat-value">{{.Stats.Errored}}</div>
+                <div class="stat-label">Errors</div>
             </div>
-            <div class="stat-box" style="min-width: 120px;">
-                <div>Pass Rate</div>
-                <div class="stat-value">{{.PassRateFormatted}}%</div>
+            <div class="stat-box">
+                <div class="stat-value">{{printf "%.1f" .Stats.PassRate}}%</div>
+                <div class="stat-label">Pass Rate</div>
             </div>
         </div>
     </div>
     
-    <div class="actions">
-        <input type="text" id="searchInput" class="search" placeholder="Search tests, packages, gates..." oninput="filterTests()">
-        <button onclick="showOnlyFailed()">Show Failed Only</button>
-        <button onclick="showAll()">Show All</button>
+    <div class="controls">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search tests, packages, gates..." oninput="filterTests()">
+        <button id="showAllBtn" class="btn active" onclick="showAll()">Show All</button>
+        <button id="showFailedBtn" class="btn" onclick="showOnlyFailed()">Show Failed Only</button>
     </div>
     
-    <table class="test-list" id="testTable">
-        <thead>
-            <tr>
-                <th>Status</th>
-                <th>Test</th>
-                <th>Package</th>
-                <th>Gate</th>
-                <th>Suite</th>
-                <th>Duration</th>
-                <th>Log</th>
-            </tr>
-        </thead>
-        <tbody>
-            {{range .Tests}}
-            <tr class="{{.StatusClass}}{{if .IsSubTest}} subtest-row{{end}}">
-                <td class="status-cell {{.StatusClass}}">{{.StatusText}}</td>
-                <td{{if .IsSubTest}} class="subtest"{{end}}>{{.TestName}}</td>
-                <td>{{.Package}}</td>
-                <td>{{.Gate}}</td>
-                <td>{{.Suite}}</td>
-                <td class="duration">{{.DurationFormatted}}</td>
-                <td><a href="{{.LogPath}}" target="_blank">View Log</a></td>
-            </tr>
+    <div class="test-hierarchy" id="testHierarchy">
+        {{define "renderNode"}}
+            {{if ne .Type "root"}}
+                {{if or (eq .Type "test") (eq .Type "subtest")}}
+                    <div class="test-item {{getStatusClass .Status}} {{getIndentClass .Depth}}" 
+                         data-name="{{.Name}}" 
+                         data-status="{{.Status}}"
+                         data-package="{{.Package}}"
+                         data-gate="{{.Gate}}"
+                         data-suite="{{.Suite}}">
+                        <span class="status-badge {{getStatusClass .Status}}">{{getStatusText .Status}}</span>
+                        <div class="test-name">{{.Name}}</div>
+                        <div class="test-details">
+                            {{if .Package}}<span class="package-name">{{.Package}}</span>{{end}}
+                            {{if .Gate}}<span>Gate: {{.Gate}}</span>{{end}}
+                            {{if .Suite}}<span>Suite: {{.Suite}}</span>{{end}}
+                            <span class="duration">{{formatDuration .Duration}}</span>
+                            {{if .ExecutionOrder}}<span class="execution-order">#{{.ExecutionOrder}}</span>{{end}}
+                            {{if .LogPath}}<a href="{{.LogPath}}" target="_blank" class="log-link">View Log</a>{{end}}
+                        </div>
+                    </div>
+                {{end}}
             {{end}}
-        </tbody>
-    </table>
+            {{range .Children}}{{template "renderNode" .}}{{end}}
+        {{end}}
+        
+        {{template "renderNode" .Root}}
+    </div>
 
-    <script>
-        function filterTests() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                const text = row.textContent.toLowerCase();
-                if (text.includes(query)) {
-                    row.classList.remove('hidden');
-                } else {
-                    row.classList.add('hidden');
-                }
-            }
-        }
-        
-        function showOnlyFailed() {
-            document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                if (row.classList.contains('fail') || row.classList.contains('error')) {
-                    row.classList.remove('hidden');
-                } else {
-                    row.classList.add('hidden');
-                }
-            }
-        }
-        
-        function showAll() {
-            document.getElementById('searchInput').value = '';
-            const rows = document.querySelectorAll('#testTable tbody tr');
-            
-            for (const row of rows) {
-                row.classList.remove('hidden');
-            }
-        }
-        
-        // If there are failures, show only failed tests by default
-        // window.onload = function() {
-        //     if ({{.HasFailures}}) {
-        //         showOnlyFailed();
-        //     }
-        // };
-    </script>
+    <script src="static/results.js"></script>
 </body>
 </html> 
