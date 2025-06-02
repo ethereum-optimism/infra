@@ -329,29 +329,6 @@ func TestReportItem_StatusDisplay(t *testing.T) {
 	}
 }
 
-func TestReportBuilder_TreePrefix(t *testing.T) {
-	tests := []struct {
-		level     int
-		isSubTest bool
-		expected  string
-	}{
-		{0, false, ""},
-		{1, false, "├── "},
-		{2, false, "│   ├── "},
-		{2, true, "│   │   ├── "},
-		{3, false, "│   │   ├── "},
-		{3, true, "│   │   ├── "},
-		{4, false, "│   │   │   ├── "},
-	}
-
-	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
-			prefix := generateTreePrefix(tt.level, tt.isSubTest)
-			assert.Equal(t, tt.expected, prefix)
-		})
-	}
-}
-
 func TestReportBuilder_FailedTestNames(t *testing.T) {
 	testResults := []*types.TestResult{
 		{
@@ -515,7 +492,7 @@ func TestReportBuilder_TestNameFallbacks(t *testing.T) {
 	builder := NewReportBuilder()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			item := builder.createTestItem(tt.testResult, false, "", 2, 1)
+			item := builder.createTestItem(tt.testResult, false, "", 1)
 			assert.Equal(t, tt.expectedName, item.Name)
 		})
 	}

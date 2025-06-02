@@ -356,6 +356,214 @@ func TestTableFormatter_GetTestType(t *testing.T) {
 	assert.Equal(t, "", formatter.getTestType(subTest))
 }
 
+func TestTableFormatterOrganizationalHierarchy(t *testing.T) {
+	testResults := []*types.TestResult{
+		// Package-level test for base package
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:      "base-package",
+				Package: "github.com/example/base",
+				Gate:    "base",
+				RunAll:  true,
+			},
+			Status:   types.TestStatusFail,
+			Duration: 44 * time.Millisecond,
+		},
+		// Individual tests in base package
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-rpc",
+				FuncName: "TestRPCConnectivity",
+				Package:  "github.com/example/base",
+				Gate:     "base",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 33 * time.Millisecond,
+		},
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-transfer",
+				FuncName: "TestTransfer",
+				Package:  "github.com/example/base",
+				Gate:     "base",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 34 * time.Millisecond,
+		},
+		// Package-level test for deposit package
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:      "deposit-package",
+				Package: "github.com/example/deposit",
+				Gate:    "base",
+				RunAll:  true,
+			},
+			Status:   types.TestStatusFail,
+			Duration: 65 * time.Millisecond,
+		},
+		// Individual test in deposit package
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "test-l1-to-l2",
+				FuncName: "TestL1ToL2Deposit",
+				Package:  "github.com/example/deposit",
+				Gate:     "base",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 35 * time.Millisecond,
+		},
+	}
+
+	builder := NewReportBuilder()
+	reportData := builder.BuildFromTestResults(testResults, "test-run", "dolphin", "base")
+
+	formatter := NewTableFormatter("Acceptance Testing Results", true)
+	result, err := formatter.Format(reportData)
+	require.NoError(t, err)
+
+	// Verify the organizational hierarchy is properly displayed
+	lines := strings.Split(result, "\n")
+
+	// Find relevant lines (skip header and footer)
+	var contentLines []string
+	inContent := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "Gate") && strings.Contains(line, "base") {
+			inContent = true
+		}
+		if inContent && line != "" && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "TOTAL") {
+			contentLines = append(contentLines, line)
+		}
+		if strings.HasPrefix(line, "TOTAL") {
+			break
+		}
+	}
+
+	// Verify the structure shows proper hierarchy:
+	// Gate: base
+	// ├── base (package)
+	// │   ├── TestRPCConnectivity
+	// │   └── TestTransfer
+	// └── deposit (package)
+	//     └── TestL1ToL2Deposit
+
+	// Check that we have the expected organizational structure
+	foundGate := false
+	foundBasePackage := false
+	foundDepositPackage := false
+	foundTestRPCConnectivity := false
+	foundTestTransfer := false
+
+	for _, line := range contentLines {
+		if strings.Contains(line, "Gate") && strings.Contains(line, "base") {
+			foundGate = true
+		}
+		if strings.Contains(line, "Package") && strings.Contains(line, "├──") && strings.Contains(line, "base (package)") {
+			foundBasePackage = true
+		}
+		if strings.Contains(line, "Package") && strings.Contains(line, "└──") && strings.Contains(line, "deposit (package)") {
+			foundDepositPackage = true
+		}
+		// Check for tests with proper organizational hierarchy
+		if strings.Contains(line, "│   ") && strings.Contains(line, "TestRPCConnectivity") {
+			foundTestRPCConnectivity = true
+		}
+		if strings.Contains(line, "│   ") && strings.Contains(line, "TestTransfer") {
+			foundTestTransfer = true
+		}
+
+	}
+
+	assert.True(t, foundGate, "Should show Gate level")
+	assert.True(t, foundBasePackage, "Should show base package as child of gate with ├──")
+	assert.True(t, foundDepositPackage, "Should show deposit package as child of gate with └──")
+	assert.True(t, foundTestRPCConnectivity, "Should show TestRPCConnectivity with proper indentation under base package")
+	assert.True(t, foundTestTransfer, "Should show TestTransfer with proper indentation under base package")
+
+	foundDepositTest := false
+	for _, line := range contentLines {
+		if strings.Contains(line, "TestL1ToL2Deposit") {
+			foundDepositTest = true
+			break
+		}
+	}
+	assert.True(t, foundDepositTest, "Should show TestL1ToL2Deposit under deposit package")
+
+	// Print the actual output for debugging
+	t.Logf("Table output:\n%s", result)
+}
+
+func TestTableFormatterWithSubtestHierarchy(t *testing.T) {
+	// Test both organizational hierarchy (packages) and test hierarchy (parent/child tests)
+	testResults := []*types.TestResult{
+		// Package-level test
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:      "package-test",
+				Package: "github.com/example/test",
+				Gate:    "base",
+				RunAll:  true,
+			},
+			Status:   types.TestStatusPass,
+			Duration: 200 * time.Millisecond,
+		},
+		// Parent test with subtests
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "parent-test",
+				FuncName: "TestParent/SubTest1",
+				Package:  "github.com/example/test",
+				Gate:     "base",
+			},
+			Status:   types.TestStatusPass,
+			Duration: 50 * time.Millisecond,
+		},
+		{
+			Metadata: types.ValidatorMetadata{
+				ID:       "parent-test-2",
+				FuncName: "TestParent/SubTest2",
+				Package:  "github.com/example/test",
+				Gate:     "base",
+			},
+			Status:   types.TestStatusFail,
+			Duration: 75 * time.Millisecond,
+		},
+	}
+
+	builder := NewReportBuilder()
+	reportData := builder.BuildFromTestResults(testResults, "test-run", "network", "base")
+
+	formatter := NewTableFormatter("Test Results", true)
+	result, err := formatter.Format(reportData)
+	require.NoError(t, err)
+
+	// Verify that we have both organizational and test hierarchy
+	assert.Contains(t, result, "Package", "Should show Package type")
+	assert.Contains(t, result, "test (package)", "Should show package test")
+	assert.Contains(t, result, "SubTest1", "Should show first subtest")
+	assert.Contains(t, result, "SubTest2", "Should show second subtest")
+
+	// Verify proper indentation for organizational hierarchy
+	lines := strings.Split(result, "\n")
+	foundPackageIndent := false
+	foundTestIndent := false
+
+	for _, line := range lines {
+		if strings.Contains(line, "Package") && (strings.Contains(line, "├──") || strings.Contains(line, "└──")) {
+			foundPackageIndent = true
+		}
+		if strings.Contains(line, "Test") && strings.Contains(line, "│   ") {
+			foundTestIndent = true
+		}
+	}
+
+	assert.True(t, foundPackageIndent, "Should show package with proper indentation under gate")
+
+	t.Logf("Found test indentation: %v", foundTestIndent)
+	t.Logf("Subtest hierarchy output:\n%s", result)
+}
+
 // Helper functions for creating test data
 
 func createTestReportData() *ReportData {

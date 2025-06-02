@@ -43,23 +43,89 @@ func formatDuration(d time.Duration) string {
 	return d.Truncate(time.Millisecond).String()
 }
 
-// generateTreePrefix creates tree-style prefixes for hierarchical display
-func generateTreePrefix(level int, isSubTest bool) string {
-	switch level {
-	case 0: // Gate level
+// generateTreePrefixByDepth creates tree-style prefixes based on test depth and position
+func generateTreePrefixByDepth(depth int, isLast bool, parentIsLast []bool) string {
+	if depth == 0 {
 		return ""
-	case 1: // Suite level
-		return "├── "
-	case 2: // Test level
-		if isSubTest {
-			return "│   │   ├── "
-		}
-		return "│   ├── "
-	case 3: // Subtest level
-		return "│   │   ├── "
-	default:
-		return strings.Repeat("│   ", level-1) + "├── "
 	}
+
+	var prefix strings.Builder
+
+	// Build prefix based on parent positions
+	for i := 0; i < depth-1; i++ {
+		if i < len(parentIsLast) && parentIsLast[i] {
+			prefix.WriteString("    ") // No vertical line if parent was last
+		} else {
+			prefix.WriteString("│   ") // Vertical line if parent has siblings below
+		}
+	}
+
+	// Add the current level connector
+	if isLast {
+		prefix.WriteString("└── ")
+	} else {
+		prefix.WriteString("├── ")
+	}
+
+	return prefix.String()
+}
+
+// calculateTestPositions determines which tests are last at each level
+func calculateTestPositions(tests []ReportTestItem) map[string]PositionInfo {
+	positions := make(map[string]PositionInfo)
+
+	// Group tests by their parent path
+	groupsByParent := make(map[string][]ReportTestItem)
+	for _, test := range tests {
+		var parentPath string
+		if len(test.HierarchyPath) <= 1 {
+			parentPath = "ROOT"
+		} else {
+			parentPath = strings.Join(test.HierarchyPath[:len(test.HierarchyPath)-1], "/")
+		}
+		groupsByParent[parentPath] = append(groupsByParent[parentPath], test)
+	}
+
+	// Determine positions for each group
+	for _, group := range groupsByParent {
+		for i, test := range group {
+			isLast := i == len(group)-1
+
+			// Build parent last positions
+			var parentIsLast []bool
+			if len(test.HierarchyPath) > 1 {
+				currentPath := test.HierarchyPath[:len(test.HierarchyPath)-1]
+				for j := 1; j < len(currentPath); j++ {
+					testPath := strings.Join(currentPath[:j+1], "/")
+					if pos, exists := positions[testPath]; exists {
+						parentIsLast = append(parentIsLast, pos.IsLast)
+					}
+				}
+			}
+
+			positions[test.GetFullTestPath()] = PositionInfo{
+				IsLast:       isLast,
+				ParentIsLast: parentIsLast,
+			}
+		}
+	}
+
+	return positions
+}
+
+// PositionInfo tracks position information for tree rendering
+type PositionInfo struct {
+	IsLast       bool   // Whether this test is the last in its group
+	ParentIsLast []bool // Whether each parent level was the last in its group
+}
+
+// GetFullTestPath returns the full hierarchical path for a ReportTestItem
+func (item *ReportTestItem) GetFullTestPath() string {
+	if len(item.HierarchyPath) == 0 {
+		// Fallback to test name if no hierarchy path is set
+		return item.Name
+	}
+	return strings.Join(item.HierarchyPath, "/")
 }
 
 // ReportFormatter defines the interface for different report output formats
@@ -312,8 +378,280 @@ func (tf *TableFormatter) Format(data *ReportData) (string, error) {
 	return buf.String(), nil
 }
 
-// addTestsWithSubtests adds tests to the table, properly grouping subtests under their parent tests
+// addTestsWithSubtests adds tests to the table, properly showing organizational and test hierarchy
 func (tf *TableFormatter) addTestsWithSubtests(t table.Writer, tests []ReportTestItem, isInSuite bool) {
+	if len(tests) == 0 {
+		return
+	}
+
+	// Group tests by package to show organizational hierarchy
+	packageGroups := make(map[string][]ReportTestItem)
+	for _, test := range tests {
+		packageKey := test.Package
+		if packageKey == "" {
+			packageKey = "__no_package__"
+		}
+		packageGroups[packageKey] = append(packageGroups[packageKey], test)
+	}
+
+	// We sort by the package name alphabetically to ensure consistent ordering
+	var packageNames []string
+	for pkg := range packageGroups {
+		packageNames = append(packageNames, pkg)
+	}
+	sortPackages := func() {
+		for i := 0; i < len(packageNames); i++ {
+			for j := i + 1; j < len(packageNames); j++ {
+				if packageNames[i] > packageNames[j] {
+					packageNames[i], packageNames[j] = packageNames[j], packageNames[i]
+				}
+			}
+		}
+	}
+	sortPackages()
+
+	// Helper function to check if there are more packages with content after this one
+	hasMoreContent := func(currentIndex int) bool {
+		for i := currentIndex + 1; i < len(packageNames); i++ {
+			nextPackageTests := packageGroups[packageNames[i]]
+			if len(nextPackageTests) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	packageIndex := 0
+	for _, packageName := range packageNames {
+		packageTests := packageGroups[packageName]
+		hasMorePackagesAfter := hasMoreContent(packageIndex)
+
+		// Separate package-level tests from individual tests
+		var packageLevelTests []ReportTestItem
+		var individualTests []ReportTestItem
+
+		for _, test := range packageTests {
+			if strings.Contains(test.Name, "(package)") {
+				packageLevelTests = append(packageLevelTests, test)
+			} else {
+				individualTests = append(individualTests, test)
+			}
+		}
+
+		// Add package-level test (acts as package header)
+		for i, packageTest := range packageLevelTests {
+			var orgPrefix string
+			// Determine if this is the last package that will be displayed
+			// A package is last if there are no more packages after this one
+			isLastPackageEntry := !hasMorePackagesAfter && i == len(packageLevelTests)-1
+
+			if isInSuite {
+				if isLastPackageEntry {
+					orgPrefix = "│   └── "
+				} else {
+					orgPrefix = "│   ├── "
+				}
+			} else {
+				if isLastPackageEntry {
+					orgPrefix = "└── "
+				} else {
+					orgPrefix = "├── "
+				}
+			}
+
+			t.AppendRow(table.Row{
+				"Package",
+				fmt.Sprintf("%s%s", orgPrefix, packageTest.Name),
+				formatDuration(packageTest.Duration),
+				"1",
+				tf.boolToInt(packageTest.Status == types.TestStatusPass),
+				tf.boolToInt(packageTest.Status == types.TestStatusFail || packageTest.Status == types.TestStatusError),
+				tf.boolToInt(packageTest.Status == types.TestStatusSkip),
+				tf.getResultString(packageTest.Status),
+			})
+		}
+
+		// Add individual tests under the package
+		if len(individualTests) > 0 {
+			tf.addIndividualTestsWithHierarchy(t, individualTests, isInSuite, !hasMorePackagesAfter, len(packageLevelTests) > 0)
+		}
+
+		packageIndex++
+	}
+}
+
+// addIndividualTestsWithHierarchy adds individual tests with proper test hierarchy under a package
+func (tf *TableFormatter) addIndividualTestsWithHierarchy(t table.Writer, tests []ReportTestItem, isInSuite, isLastPackage, hasPackageHeader bool) {
+	// Check if tests have hierarchy information
+	hasHierarchyInfo := false
+	for _, test := range tests {
+		if len(test.HierarchyPath) > 0 || test.Depth > 0 {
+			hasHierarchyInfo = true
+			break
+		}
+	}
+
+	// If tests don't have hierarchy info, fall back to simple display
+	if !hasHierarchyInfo {
+		tf.addTestsSimpleUnderPackage(t, tests, isInSuite, isLastPackage, hasPackageHeader)
+		return
+	}
+
+	// Calculate position information for proper tree rendering
+	positions := calculateTestPositions(tests)
+
+	// Sort tests by execution order to maintain proper ordering
+	sortedTests := make([]ReportTestItem, len(tests))
+	copy(sortedTests, tests)
+
+	// Display tests with hierarchy
+	processed := make(map[string]bool)
+
+	var addTestRecursively func(testItem ReportTestItem, testIndex, totalTests int)
+	addTestRecursively = func(testItem ReportTestItem, testIndex, totalTests int) {
+		fullPath := testItem.GetFullTestPath()
+		if processed[fullPath] {
+			return
+		}
+		processed[fullPath] = true
+
+		// Get position info for this test
+		posInfo, hasPosition := positions[fullPath]
+
+		// Calculate organizational prefix (package level)
+		var orgPrefix string
+		isLastTest := testIndex == totalTests-1
+
+		if isInSuite {
+			if hasPackageHeader {
+				if isLastPackage && isLastTest {
+					orgPrefix = "│       "
+				} else {
+					orgPrefix = "│   │   "
+				}
+			} else {
+				if isLastPackage && isLastTest {
+					orgPrefix = "│       "
+				} else {
+					orgPrefix = "│   │   "
+				}
+			}
+		} else {
+			if hasPackageHeader {
+				if isLastPackage && isLastTest {
+					orgPrefix = "    "
+				} else {
+					orgPrefix = "│   "
+				}
+			} else {
+				if isLastPackage && isLastTest {
+					orgPrefix = "    "
+				} else {
+					orgPrefix = "│   "
+				}
+			}
+		}
+
+		// Calculate test hierarchy prefix
+		var testPrefix string
+		if hasPosition {
+			testPrefix = generateTreePrefixByDepth(testItem.Depth, posInfo.IsLast, posInfo.ParentIsLast)
+		} else {
+			testPrefix = generateTreePrefixByDepth(testItem.Depth, isLastTest, nil)
+		}
+
+		// Combine organizational and test hierarchy prefixes
+		fullPrefix := orgPrefix + testPrefix
+
+		// Add the test row
+		t.AppendRow(table.Row{
+			tf.getTestType(testItem),
+			fmt.Sprintf("%s%s", fullPrefix, testItem.Name),
+			formatDuration(testItem.Duration),
+			"1",
+			tf.boolToInt(testItem.Status == types.TestStatusPass),
+			tf.boolToInt(testItem.Status == types.TestStatusFail || testItem.Status == types.TestStatusError),
+			tf.boolToInt(testItem.Status == types.TestStatusSkip),
+			tf.getResultString(testItem.Status),
+		})
+
+		// Find and add child tests
+		childCount := 0
+		for _, childTest := range sortedTests {
+			if len(childTest.HierarchyPath) == len(testItem.HierarchyPath)+1 {
+				// Check if this is a direct child
+				isDirectChild := true
+				for i, pathElement := range testItem.HierarchyPath {
+					if i >= len(childTest.HierarchyPath) || childTest.HierarchyPath[i] != pathElement {
+						isDirectChild = false
+						break
+					}
+				}
+				if isDirectChild {
+					addTestRecursively(childTest, childCount, totalTests)
+					childCount++
+				}
+			}
+		}
+	}
+
+	// Group tests by depth to process top-level tests first
+	testsByDepth := make(map[int][]ReportTestItem)
+	for _, test := range sortedTests {
+		testsByDepth[test.Depth] = append(testsByDepth[test.Depth], test)
+	}
+
+	// Start with top-level tests (depth 0)
+	topLevelTests := testsByDepth[0]
+	for i, test := range topLevelTests {
+		addTestRecursively(test, i, len(topLevelTests))
+	}
+
+	// Add any orphaned tests that weren't processed (fallback)
+	orphanedTests := make([]ReportTestItem, 0)
+	for _, test := range sortedTests {
+		if !processed[test.GetFullTestPath()] {
+			orphanedTests = append(orphanedTests, test)
+		}
+	}
+
+	// Process orphaned tests with consistent organizational prefix
+	for i, test := range orphanedTests {
+		isLastOrphanedTest := i == len(orphanedTests)-1
+
+		// Calculate organizational prefix consistently
+		var orgPrefix string
+		if hasPackageHeader {
+			orgPrefix = "│   "
+		} else {
+			if isInSuite {
+				orgPrefix = "│   "
+			} else {
+				orgPrefix = ""
+			}
+		}
+
+		// Calculate test hierarchy prefix
+		testPrefix := "├── "
+		if isLastOrphanedTest {
+			testPrefix = "└── "
+		}
+
+		t.AppendRow(table.Row{
+			tf.getTestType(test),
+			fmt.Sprintf("%s%s%s", orgPrefix, testPrefix, test.Name),
+			formatDuration(test.Duration),
+			"1",
+			tf.boolToInt(test.Status == types.TestStatusPass),
+			tf.boolToInt(test.Status == types.TestStatusFail || test.Status == types.TestStatusError),
+			tf.boolToInt(test.Status == types.TestStatusSkip),
+			tf.getResultString(test.Status),
+		})
+	}
+}
+
+// addTestsSimpleUnderPackage adds tests using simple approach under a package
+func (tf *TableFormatter) addTestsSimpleUnderPackage(t table.Writer, tests []ReportTestItem, isInSuite, isLastPackage, hasPackageHeader bool) {
 	// Group tests by parent-child relationships
 	parentTests := make([]ReportTestItem, 0)
 	subtestsByParent := make(map[string][]ReportTestItem)
@@ -327,26 +665,41 @@ func (tf *TableFormatter) addTestsWithSubtests(t table.Writer, tests []ReportTes
 		}
 	}
 
+	// Calculate the total number of items that will be displayed
+	totalItems := len(parentTests)
+	for _, subtests := range subtestsByParent {
+		totalItems += len(subtests)
+	}
+
+	itemIndex := 0
+
 	// Display parent tests followed by their subtests
 	for i, test := range parentTests {
-		// Determine prefix for main test
-		var prefix string
-		if isInSuite {
-			prefix = "│   ├──"
-			if i == len(parentTests)-1 && len(subtestsByParent[test.Name]) == 0 {
-				prefix = "│   └──"
-			}
+		subtests := subtestsByParent[test.Name]
+		isLastTestGroup := i == len(parentTests)-1
+
+		// Calculate organizational prefix (package indentation)
+		var orgPrefix string
+		if hasPackageHeader {
+			orgPrefix = "│   "
 		} else {
-			prefix = "├──"
-			if i == len(parentTests)-1 && len(subtestsByParent[test.Name]) == 0 {
-				prefix = "└──"
+			if isInSuite {
+				orgPrefix = "│   "
+			} else {
+				orgPrefix = ""
 			}
+		}
+
+		// Calculate test hierarchy prefix
+		testPrefix := "├── "
+		if isLastTestGroup && len(subtests) == 0 {
+			testPrefix = "└── "
 		}
 
 		// Add main test row
 		t.AppendRow(table.Row{
 			tf.getTestType(test),
-			fmt.Sprintf("%s %s", prefix, test.Name),
+			fmt.Sprintf("%s%s%s", orgPrefix, testPrefix, test.Name),
 			formatDuration(test.Duration),
 			"1",
 			tf.boolToInt(test.Status == types.TestStatusPass),
@@ -354,38 +707,31 @@ func (tf *TableFormatter) addTestsWithSubtests(t table.Writer, tests []ReportTes
 			tf.boolToInt(test.Status == types.TestStatusSkip),
 			tf.getResultString(test.Status),
 		})
+		itemIndex++
 
 		// Add subtests for this parent test
-		if subtests, hasSubtests := subtestsByParent[test.Name]; hasSubtests {
-			for j, subtest := range subtests {
-				// Determine prefix for subtest
-				var subtestPrefix string
-				if isInSuite {
-					if i == len(parentTests)-1 && j == len(subtests)-1 {
-						subtestPrefix = "│       └──"
-					} else {
-						subtestPrefix = "│   │   ├──"
-					}
-				} else {
-					if i == len(parentTests)-1 && j == len(subtests)-1 {
-						subtestPrefix = "    └──"
-					} else {
-						subtestPrefix = "│   ├──"
-					}
-				}
+		for j, subtest := range subtests {
+			isLastSubtest := j == len(subtests)-1
 
-				// Add subtest row
-				t.AppendRow(table.Row{
-					"", // Empty type for subtests
-					fmt.Sprintf("%s %s", subtestPrefix, subtest.Name),
-					formatDuration(subtest.Duration),
-					"1",
-					tf.boolToInt(subtest.Status == types.TestStatusPass),
-					tf.boolToInt(subtest.Status == types.TestStatusFail || subtest.Status == types.TestStatusError),
-					tf.boolToInt(subtest.Status == types.TestStatusSkip),
-					tf.getResultString(subtest.Status),
-				})
+			var subtestPrefix string
+			if isLastTestGroup && isLastSubtest {
+				subtestPrefix = "    └── "
+			} else {
+				subtestPrefix = "│   ├── "
 			}
+
+			// Add subtest row
+			t.AppendRow(table.Row{
+				"", // Empty type for subtests
+				fmt.Sprintf("%s%s%s", orgPrefix, subtestPrefix, subtest.Name),
+				formatDuration(subtest.Duration),
+				"1",
+				tf.boolToInt(subtest.Status == types.TestStatusPass),
+				tf.boolToInt(subtest.Status == types.TestStatusFail || subtest.Status == types.TestStatusError),
+				tf.boolToInt(subtest.Status == types.TestStatusSkip),
+				tf.getResultString(subtest.Status),
+			})
+			itemIndex++
 		}
 	}
 }
@@ -394,6 +740,10 @@ func (tf *TableFormatter) addTestsWithSubtests(t table.Writer, tests []ReportTes
 func (tf *TableFormatter) getTestType(test ReportTestItem) string {
 	if test.IsSubTest {
 		return ""
+	}
+	// Package tests are handled separately and labeled as "Package"
+	if strings.Contains(test.Name, "(package)") {
+		return "Package"
 	}
 	return "Test"
 }

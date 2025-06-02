@@ -44,8 +44,9 @@ type ReportTestItem struct {
 	LogPath    string // Path to log file
 	HasLogFile bool   // Whether a log file exists
 
-	// Hierarchy
-	Level int // Nesting level (0=gate, 1=suite, 2=test, 3=subtest)
+	// Hierarchy (improved)
+	Depth         int      // Actual nesting depth (0=top-level test, 1=first subtest, etc.)
+	HierarchyPath []string // Full path from root to this test
 }
 
 // ReportSuite represents a suite of tests in the report
@@ -237,7 +238,7 @@ func (rb *ReportBuilder) BuildFromTestResults(testResults []*types.TestResult, r
 		}
 
 		// Process main test
-		testItem := rb.createTestItem(testResult, isNamedSubtest, parentTestName, 0, executionOrder)
+		testItem := rb.createTestItem(testResult, isNamedSubtest, parentTestName, executionOrder)
 
 		// Check if this is a package-level test and capture its log path for the header
 		if testResult.Metadata.RunAll && report.PackageLogPath == "" {
@@ -318,7 +319,7 @@ func (rb *ReportBuilder) BuildFromTestResults(testResults []*types.TestResult, r
 					subtest.Metadata.Package = testResult.Metadata.Package
 				}
 				// Use the display name of the parent test, not the function name
-				subtestItem := rb.createTestItem(subtest, true, testItem.Name, 1, executionOrder)
+				subtestItem := rb.createTestItem(subtest, true, testItem.Name, executionOrder)
 
 				// Always add subtests to AllTests since they're not package-level tests
 				report.AllTests = append(report.AllTests, subtestItem)
@@ -485,15 +486,29 @@ func (rb *ReportBuilder) extractStartTimeFromJSON(stdout string) (time.Time, boo
 }
 
 // createTestItem creates a ReportTestItem from a TestResult
-func (rb *ReportBuilder) createTestItem(testResult *types.TestResult, isSubTest bool, parentTest string, level int, executionOrder int) ReportTestItem {
+func (rb *ReportBuilder) createTestItem(testResult *types.TestResult, isSubTest bool, parentTest string, executionOrder int) ReportTestItem {
 	name := testResult.Metadata.FuncName
 
-	// Handle named subtests (e.g., "TestChainFork/Chain_0" -> "Chain_0")
-	if isSubTest && strings.Contains(name, "/") {
-		parts := strings.SplitN(name, "/", 2)
-		if len(parts) > 1 {
-			name = parts[1] // Use the part after the "/"
+	// Extract hierarchy information from test name
+	var depth int
+	var hierarchyPath []string
+
+	if testResult.Depth > 0 || len(testResult.HierarchyPath) > 0 {
+		// Use existing hierarchy info if available
+		depth = testResult.Depth
+		hierarchyPath = testResult.HierarchyPath
+	} else {
+		// Parse hierarchy from function name
+		depth, hierarchyPath = types.ParseTestNameHierarchy(testResult.Metadata.FuncName)
+		if len(hierarchyPath) == 0 && testResult.Metadata.FuncName != "" {
+			hierarchyPath = []string{testResult.Metadata.FuncName}
 		}
+	}
+
+	// Handle named subtests (e.g., "TestChainFork/Chain_0" -> "Chain_0")
+	if isSubTest && strings.Contains(name, "/") && len(hierarchyPath) > 0 {
+		// Use the last part of the hierarchy path as the display name
+		name = hierarchyPath[len(hierarchyPath)-1]
 	}
 
 	if name == "" {
@@ -564,6 +579,17 @@ func (rb *ReportBuilder) createTestItem(testResult *types.TestResult, isSubTest 
 	// Generate log path
 	logPath := rb.logPathGenerator(testResult, isSubTest, parentTest)
 
+	// Determine actual parent test name from hierarchy
+	actualParentTest := parentTest
+	if len(hierarchyPath) > 1 {
+		actualParentTest = hierarchyPath[len(hierarchyPath)-2]
+	}
+
+	// Ensure hierarchy path is properly set for display name if empty
+	if len(hierarchyPath) == 0 && name != "" {
+		hierarchyPath = []string{name}
+	}
+
 	return ReportTestItem{
 		// Identity
 		ID:         testResult.Metadata.ID,
@@ -571,8 +597,8 @@ func (rb *ReportBuilder) createTestItem(testResult *types.TestResult, isSubTest 
 		Package:    testResult.Metadata.Package,
 		Gate:       testResult.Metadata.Gate,
 		Suite:      testResult.Metadata.Suite,
-		IsSubTest:  isSubTest,
-		ParentTest: parentTest,
+		IsSubTest:  depth > 0 || isSubTest,
+		ParentTest: actualParentTest,
 
 		// Status and Results
 		Status:   testResult.Status,
@@ -583,12 +609,13 @@ func (rb *ReportBuilder) createTestItem(testResult *types.TestResult, isSubTest 
 		StartTime:      startTime,
 		ExecutionOrder: executionOrder,
 
-		// Hierarchy
-		Level: level,
-
-		// Paths
+		// Output and Logs
 		LogPath:    logPath,
 		HasLogFile: logPath != "",
+
+		// Hierarchy (improved)
+		Depth:         depth,
+		HierarchyPath: hierarchyPath,
 	}
 }
 
