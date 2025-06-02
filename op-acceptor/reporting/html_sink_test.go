@@ -37,7 +37,10 @@ func TestReportingHTMLSink(t *testing.T) {
 		return metadata.ID
 	}
 
-	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "test-network", "test-gate", templateContent, getReadableTestFilename)
+	// Mock JavaScript content for testing
+	jsContent := []byte(`console.log("test js");`)
+
+	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "test-network", "test-gate", templateContent, jsContent, getReadableTestFilename)
 	require.NoError(t, err)
 
 	// Test consuming results
@@ -102,7 +105,8 @@ func TestReportingHTMLSink_InvalidTemplate(t *testing.T) {
 		return metadata.ID
 	}
 
-	_, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", invalidTemplate, getReadableTestFilename)
+	jsContent := []byte(`console.log("test js");`)
+	_, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", invalidTemplate, jsContent, getReadableTestFilename)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create HTML formatter")
 }
@@ -118,7 +122,8 @@ func TestReportingHTMLSink_LogPathGeneration(t *testing.T) {
 		return metadata.ID
 	}
 
-	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, getReadableTestFilename)
+	jsContent := []byte(`console.log("test js");`)
+	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, jsContent, getReadableTestFilename)
 	require.NoError(t, err)
 
 	// Test with passing test (should go to passed folder)
@@ -176,7 +181,8 @@ func TestReportingHTMLSink_WithSubTests(t *testing.T) {
 		return metadata.FuncName
 	}
 
-	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, getReadableTestFilename)
+	jsContent := []byte(`console.log("test js");`)
+	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, jsContent, getReadableTestFilename)
 	require.NoError(t, err)
 
 	testResult := &types.TestResult{
@@ -259,7 +265,8 @@ func TestReportingHTMLSink_ReadableTestFilename(t *testing.T) {
 				return metadata.ID
 			}
 
-			sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, getReadableTestFilename)
+			jsContent := []byte(`console.log("test js");`)
+			sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "network", "gate", templateContent, jsContent, getReadableTestFilename)
 			require.NoError(t, err)
 
 			// Test that the function is called correctly
@@ -309,7 +316,8 @@ func TestReportingHTMLSink_FilterPackageTestsInHTML(t *testing.T) {
 		return metadata.ID
 	}
 
-	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "test-network", "test-gate", templateContent, getReadableTestFilename)
+	jsContent := []byte(`console.log("test js");`)
+	sink, err := NewReportingHTMLSink(tempDir, "logger-run-id", "test-network", "test-gate", templateContent, jsContent, getReadableTestFilename)
 	require.NoError(t, err)
 
 	// Test consuming results with both package and individual tests

@@ -178,8 +178,14 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 		return nil, fmt.Errorf("failed to read HTML template: %w", err)
 	}
 
+	// Load JavaScript content
+	jsContent, err := GetStaticFile("results.js")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JavaScript file: %w", err)
+	}
+
 	// Initialize the new ReportingHTMLSink
-	htmlSink, err := reporting.NewReportingHTMLSink(baseDir, runID, networkName, gateRun, string(templateContent), getReadableTestFilename)
+	htmlSink, err := reporting.NewReportingHTMLSink(baseDir, runID, networkName, gateRun, string(templateContent), jsContent, getReadableTestFilename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTML sink: %w", err)
 	}

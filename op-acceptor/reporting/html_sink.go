@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
-// ReportingHTMLSink is a modern HTML sink that uses the unified reporting structure
+// ReportingHTMLSink is an HTML sink
 type ReportingHTMLSink struct {
 	builder                 *ReportBuilder
 	formatter               *HTMLFormatter
@@ -18,10 +18,11 @@ type ReportingHTMLSink struct {
 	gateName                string
 	testResults             map[string][]*types.TestResult // Map runID to test results
 	getReadableTestFilename func(metadata types.ValidatorMetadata) string
+	jsContent               []byte // JavaScript content for static asset
 }
 
 // NewReportingHTMLSink creates a new HTML sink using the unified reporting structure
-func NewReportingHTMLSink(baseDir, loggerRunID, networkName, gateName, templateContent string, getReadableTestFilename func(types.ValidatorMetadata) string) (*ReportingHTMLSink, error) {
+func NewReportingHTMLSink(baseDir, loggerRunID, networkName, gateName, templateContent string, jsContent []byte, getReadableTestFilename func(types.ValidatorMetadata) string) (*ReportingHTMLSink, error) {
 	formatter, err := NewHTMLFormatter(templateContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTML formatter: %w", err)
@@ -51,6 +52,7 @@ func NewReportingHTMLSink(baseDir, loggerRunID, networkName, gateName, templateC
 		gateName:                gateName,
 		testResults:             make(map[string][]*types.TestResult),
 		getReadableTestFilename: getReadableTestFilename,
+		jsContent:               jsContent,
 	}, nil
 }
 
@@ -79,6 +81,18 @@ func (s *ReportingHTMLSink) Complete(runID string) error {
 	// Create the output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
+	}
+
+	// Create the static directory for assets
+	staticDir := filepath.Join(outputDir, "static")
+	if err := os.MkdirAll(staticDir, 0755); err != nil {
+		return fmt.Errorf("failed to create static directory %s: %w", staticDir, err)
+	}
+
+	// Copy the JavaScript file to the static directory
+	jsFile := filepath.Join(staticDir, "results.js")
+	if err := os.WriteFile(jsFile, s.jsContent, 0644); err != nil {
+		return fmt.Errorf("failed to write JavaScript file: %w", err)
 	}
 
 	// Create the HTML report file path
