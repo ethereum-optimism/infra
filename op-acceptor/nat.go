@@ -69,10 +69,17 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("failed to create registry: %w", err)
 	}
 
-	env, err := env.LoadDevnetFromURL(os.Getenv(env.EnvURLVar))
-	loadAddons := err == nil
+	envURL := os.Getenv(env.EnvURLVar)
+	if envURL == "" {
+		return nil, fmt.Errorf("devnet environment URL not provided: %s environment variable is required", env.EnvURLVar)
+	}
 
-	networkName := extractNetworkName(env)
+	devnetEnv, err := env.LoadDevnetFromURL(envURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load devnet environment from %s: %w", envURL, err)
+	}
+
+	networkName := extractNetworkName(devnetEnv)
 	config.Log.Info("Using network name for metrics", "network", networkName)
 
 	// Create runner with registry
@@ -86,7 +93,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		OutputRealtimeLogs: config.OutputRealtimeLogs,
 		TestLogLevel:       config.TestLogLevel,
 		NetworkName:        networkName,
-		DevnetEnv:          env,
+		DevnetEnv:          devnetEnv,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -119,19 +126,18 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		tracer:           otel.Tracer("op-acceptor"),
 	}
 
-	if loadAddons {
-		addonsOpts := []addons.Option{}
-		features := env.Env.Features
-		if !slices.Contains(features, "faucet") {
-			addonsOpts = append(addonsOpts, addons.WithFaucet())
-		}
-
-		addonsManager, err := addons.NewAddonsManager(ctx, env, addonsOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create addons manager: %w", err)
-		}
-		res.addonsManager = addonsManager
+	// Create addons manager
+	addonsOpts := []addons.Option{}
+	features := devnetEnv.Env.Features
+	if !slices.Contains(features, "faucet") {
+		addonsOpts = append(addonsOpts, addons.WithFaucet())
 	}
+
+	addonsManager, err := addons.NewAddonsManager(ctx, devnetEnv, addonsOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create addons manager: %w", err)
+	}
+	res.addonsManager = addonsManager
 	return res, nil
 }
 

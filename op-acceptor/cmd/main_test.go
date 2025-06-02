@@ -374,6 +374,9 @@ gates:
 func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defaultTimeout time.Duration) int {
 	t.Logf("Running op-acceptor with testdir=%s, gate=%s, validators=%s", testdir, gate, validators)
 
+	// Create a temporary devnet manifest file for testing
+	devnetFile := createMockDevnetFile(t)
+
 	// Create a command with timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -389,8 +392,8 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defau
 	// This forces Go to run tests in the current directory, regardless of module settings
 	execCmd.Env = append(os.Environ(),
 		"GO111MODULE=off",
-		"GOPATH=/tmp/go",              // Use a temporary GOPATH to avoid conflicts
-		"GOROOT="+os.Getenv("GOROOT")) // Preserve the GOROOT
+		"GOPATH=/tmp/go",             // Use a temporary GOPATH to avoid conflicts
+		"DEVNET_ENV_URL="+devnetFile) // Mock devnet file for testing
 
 	// Capture output for debugging
 	var stdout, stderr bytes.Buffer
@@ -435,6 +438,36 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defau
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// createMockDevnetFile creates a temporary devnet manifest file for testing
+func createMockDevnetFile(t *testing.T) string {
+	t.Helper()
+
+	// Create a temporary file for the devnet manifest
+	tempFile, err := os.CreateTemp("", "test-devnet-*.json")
+	require.NoError(t, err)
+	defer tempFile.Close()
+
+	// Create a valid devnet manifest structure
+	validContent := `{
+		"name": "test-network",
+		"l1": {
+			"name": "test-l1",
+			"id": "1",
+			"nodes": [],
+			"addresses": {},
+			"wallets": {}
+		},
+		"l2": []
+	}`
+
+	// Write the content to the file
+	_, err = tempFile.WriteString(validContent)
+	require.NoError(t, err)
+
+	// Return the file path
+	return tempFile.Name()
 }
 
 // createMockPanicTest creates a test file that deliberately panics
