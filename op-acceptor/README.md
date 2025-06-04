@@ -12,6 +12,8 @@ op-acceptor discovers tests. You simply need to provide a path to a directory co
 2. **Suite** - A logical grouping of related tests
 3. **Gate** - A high-level collection of suites and/or tests that represent a complete validation scenario
 
+### Addons
+See [ADDONS.md](./ADDONS.md)
 
 ## Contributing
 
