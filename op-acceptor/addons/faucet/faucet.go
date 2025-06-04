@@ -95,38 +95,67 @@ func (s *Service) Stop(ctx context.Context) error {
 	return s.svc.Stop(ctx)
 }
 
+func chainFaucet(chain *descriptors.Chain, wallet *descriptors.Wallet) *fconf.FaucetEntry {
+	chainID, err := eth.ParseDecimalChainID(chain.ID)
+	if err != nil {
+		return nil
+	}
+	elRPC, err := getELRPC(chain)
+	if err != nil {
+		return nil
+	}
+	return &fconf.FaucetEntry{
+		ChainID: chainID,
+		ELRPC: endpoint.MustRPC{
+			Value: endpoint.URL(elRPC),
+		},
+		TxCfg: fconf.TxManagerConfig{
+			PrivateKey: wallet.PrivateKey,
+		},
+	}
+}
+
+// This tries to generate a faucet config for each chain, based on the known wallets.
+// The conventions, inherited from op-deployer are:
+// For L1:
+// - if we have a wallet named l1Faucet, we use it
+// - otherwise, if we have a wallet named user-key-20 (by convention that's the devkey we use for the faucet in local environments), we use it
+// - otherwise, if any of the L2s has a wallet named l1Faucet, we use it
+// For L2:
+// - if we have a wallet named l2Faucet, we use it
 func (s *Service) faucetsConfig(env *env.DevnetEnv) *fconf.Config {
 	cfg := &fconf.Config{
 		Faucets:  make(map[types.FaucetID]*fconf.FaucetEntry),
 		Defaults: make(map[eth.ChainID]types.FaucetID),
 	}
 
+	l1Wallet := env.Env.L1.Wallets["l1Faucet"]
+	if l1Wallet == nil {
+		l1Wallet = env.Env.L1.Wallets["user-key-20"]
+	}
+
 	for _, l2 := range env.Env.L2 {
+		// TODO: this is awful, but normally op-deployer registers the same l1Faucet for all L2s.
+		if w, ok := l2.L1Wallets["l1Faucet"]; ok && l1Wallet == nil {
+			l1Wallet = w
+		}
+
 		// TODO: we might need something else for persistent devnets, but that's what can be expected from a kurtosis one.
 		wallet, ok := l2.L1Wallets["l2Faucet"]
 		if !ok {
 			continue
 		}
-		chainID, err := eth.ParseDecimalChainID(l2.ID)
-		if err != nil {
-			continue
-		}
 		faucetID := types.FaucetID(fmt.Sprintf("%s-faucet", l2.ID))
-		elRPC, err := getELRPC(l2.Chain)
-		if err != nil {
-			continue
-		}
-		faucetEntry := &fconf.FaucetEntry{
-			ChainID: chainID,
-			ELRPC: endpoint.MustRPC{
-				Value: endpoint.URL(elRPC),
-			},
-			TxCfg: fconf.TxManagerConfig{
-				PrivateKey: wallet.PrivateKey,
-			},
-		}
+		faucetEntry := chainFaucet(l2.Chain, wallet)
 		cfg.Faucets[faucetID] = faucetEntry
-		cfg.Defaults[chainID] = faucetID
+		cfg.Defaults[faucetEntry.ChainID] = faucetID
+	}
+
+	if l1Wallet != nil {
+		l1 := env.Env.L1
+		faucetEntry := chainFaucet(l1, l1Wallet)
+		cfg.Faucets[types.FaucetID("l1-faucet")] = faucetEntry
+		cfg.Defaults[faucetEntry.ChainID] = types.FaucetID("l1-faucet")
 	}
 
 	return cfg
