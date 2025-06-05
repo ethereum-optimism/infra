@@ -3,6 +3,7 @@ package faucet
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -96,10 +97,7 @@ func (s *Service) Stop(ctx context.Context) error {
 }
 
 func chainFaucet(chain *descriptors.Chain, wallet *descriptors.Wallet) *fconf.FaucetEntry {
-	chainID, err := eth.ParseDecimalChainID(chain.ID)
-	if err != nil {
-		return nil
-	}
+	chainID := eth.ChainIDFromBig(chain.Config.ChainID)
 	elRPC, err := getELRPC(chain)
 	if err != nil {
 		return nil
@@ -147,6 +145,10 @@ func (s *Service) faucetsConfig(env *env.DevnetEnv) *fconf.Config {
 		}
 		faucetID := types.FaucetID(fmt.Sprintf("%s-faucet", l2.ID))
 		faucetEntry := chainFaucet(l2.Chain, wallet)
+		if faucetEntry == nil {
+			log.Println("failed to create faucet entry", "chainID", l2.ID)
+			continue
+		}
 		cfg.Faucets[faucetID] = faucetEntry
 		cfg.Defaults[faucetEntry.ChainID] = faucetID
 	}
