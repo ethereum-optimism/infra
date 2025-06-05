@@ -171,7 +171,11 @@ func getELRPC(c *descriptors.Chain) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("rpc endpoint not found")
 			}
-			return fmt.Sprintf("%s://%s:%d", ep.Scheme, ep.Host, ep.Port), nil
+			scheme := ep.Scheme
+			if scheme == "" {
+				scheme = "http"
+			}
+			return fmt.Sprintf("%s://%s:%d", scheme, ep.Host, ep.Port), nil
 		}
 	}
 
@@ -184,5 +188,9 @@ func getELRPC(c *descriptors.Chain) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("rpc endpoint not found")
 	}
-	return fmt.Sprintf("%s://%s:%d", ep.Scheme, ep.Host, ep.Port), nil
+	scheme := ep.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, ep.Host, ep.Port), nil
 }
