@@ -156,8 +156,9 @@ func (s *Service) faucetsConfig(env *env.DevnetEnv) *fconf.Config {
 	if l1Wallet != nil {
 		l1 := env.Env.L1
 		faucetEntry := chainFaucet(l1, l1Wallet)
-		cfg.Faucets[types.FaucetID("l1-faucet")] = faucetEntry
-		cfg.Defaults[faucetEntry.ChainID] = types.FaucetID("l1-faucet")
+		faucetID := types.FaucetID(fmt.Sprintf("%s-faucet", l1.ID))
+		cfg.Faucets[faucetID] = faucetEntry
+		cfg.Defaults[faucetEntry.ChainID] = faucetID
 	}
 
 	return cfg
@@ -170,7 +171,7 @@ func getELRPC(c *descriptors.Chain) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("rpc endpoint not found")
 			}
-			return fmt.Sprintf("http://%s:%d", ep.Host, ep.Port), nil
+			return fmt.Sprintf("%s://%s:%d", ep.Scheme, ep.Host, ep.Port), nil
 		}
 	}
 
@@ -183,5 +184,5 @@ func getELRPC(c *descriptors.Chain) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("rpc endpoint not found")
 	}
-	return fmt.Sprintf("http://%s:%d", ep.Host, ep.Port), nil
+	return fmt.Sprintf("%s://%s:%d", ep.Scheme, ep.Host, ep.Port), nil
 }
