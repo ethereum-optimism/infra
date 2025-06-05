@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -164,6 +165,7 @@ func (n *nat) Start(ctx context.Context) error {
 	defer func() {
 		if r := recover(); r != nil {
 			n.config.Log.Error("Runtime error occurred", "error", r)
+			debug.PrintStack()
 			os.Exit(exitcodes.RuntimeErr)
 		}
 	}()
