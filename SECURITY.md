@@ -35,7 +35,7 @@ Alongside this policy, we also reserve the right to do either of the following:
 - bypass this policy and publish details on a shorter timeline
 - to directly notify a subset of downstream users prior to making a public announcement
 
-This policy is based the Geth team’s [silent patch policy](https://geth.ethereum.org/docs/vulnerabilities/vulnerabilities#why-silent-patches).
+This policy is based the Geth team’s [silent patch policy](https://geth.ethereum.org/docs/developers/geth-developer/disclosures#why-silent-patches).
 
 ### Defensive measures during an incident
 
