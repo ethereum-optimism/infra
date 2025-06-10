@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"time"
@@ -112,10 +111,15 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
+	var rpcRequestSemaphore *semaphore.Weighted
 	if maxConcurrentRPCs == 0 {
-		maxConcurrentRPCs = math.MaxInt64
+		// synonymous with unlimited concurrent requests
+		rpcRequestSemaphore = nil
+		log.Info("Using unlimited RPC concurrency")
+	} else {
+		rpcRequestSemaphore = semaphore.NewWeighted(maxConcurrentRPCs)
+		log.Info("Using max concurrent RPCs of", "maxConcurrentRPCs", maxConcurrentRPCs)
 	}
-	rpcRequestSemaphore := semaphore.NewWeighted(maxConcurrentRPCs)
 
 	backendNames := make([]string, 0)
 	backendsByName := make(map[string]*Backend)
