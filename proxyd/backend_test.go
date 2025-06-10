@@ -61,9 +61,11 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		require.NoError(t, err)
 
 		resp, err := client.DoLimited(req)
+		if resp != nil {
+			defer resp.Body.Close()
+		}
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		resp.Body.Close()
 
 		// Exhaust semaphore
 		require.True(t, sem.TryAcquire(1))
@@ -74,6 +76,9 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		require.NoError(t, err)
 
 		resp, err = client.DoLimited(req)
+		if resp != nil {
+			defer resp.Body.Close()
+		}
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "context deadline exceeded")
 		require.Nil(t, resp)
