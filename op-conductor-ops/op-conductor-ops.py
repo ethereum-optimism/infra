@@ -656,8 +656,10 @@ def bootstrap_cluster(
 
     typer.echo("All sequencers are running. Bootstrapping cluster...")
 
-    # abort if all sequencer are already healthy
-    if network_obj.is_healthy():
+    # abort if all sequencer are already healthy and one sequencer is active
+    if network_obj.is_healthy() and any(
+        sequencer.sequencer_active for sequencer in network_obj.sequencers
+    ):
         typer.echo("All sequencers are already healthy. Skipping bootstrap.")
         raise typer.Exit(code=0)
 
