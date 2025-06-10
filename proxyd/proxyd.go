@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -112,11 +113,13 @@ func Start(config *Config) (*Server, func(), error) {
 
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
 	var rpcRequestSemaphore *semaphore.Weighted
-	// Legacy behavior of maxConcurrentRPCs == 0 is to allow unlimited concurrent RPC requests
-	if config.Server.EnableUnlimitedConcurrentRpcs || maxConcurrentRPCs == 0 {
+	if config.Server.DisableConcurrentRequestSemaphore {
 		rpcRequestSemaphore = nil
 		log.Info("Using unlimited RPC concurrency")
 	} else {
+		if maxConcurrentRPCs == 0 {
+			maxConcurrentRPCs = math.MaxInt64
+		}
 		rpcRequestSemaphore = semaphore.NewWeighted(maxConcurrentRPCs)
 		log.Info("Using max concurrent RPCs of", "maxConcurrentRPCs", maxConcurrentRPCs)
 	}
