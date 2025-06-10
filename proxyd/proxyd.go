@@ -112,8 +112,8 @@ func Start(config *Config) (*Server, func(), error) {
 
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
 	var rpcRequestSemaphore *semaphore.Weighted
-	if maxConcurrentRPCs == 0 {
-		// synonymous with unlimited concurrent requests
+	// Legacy behavior of maxConcurrentRPCs == 0 is to allow unlimited concurrent RPC requests
+	if config.Server.EnableUnlimitedConcurrentRpcs || maxConcurrentRPCs == 0 {
 		rpcRequestSemaphore = nil
 		log.Info("Using unlimited RPC concurrency")
 	} else {
