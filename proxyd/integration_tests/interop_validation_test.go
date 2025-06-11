@@ -627,7 +627,7 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 	// make a non-interop request to ensure that it succeeds despite the breaked rate limit depicting that the rate limit is not applied to non-interop requests
 	{
 		_, observedCode, err := client.SendRequest(nonInteropSendRawTransaction)
-	
+
 		// ensuring that this call succeeded despite the breached interop rate limit
 		require.NoError(t, err)
 		require.Equal(t, 200, observedCode)
