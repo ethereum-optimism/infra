@@ -17,9 +17,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -433,6 +435,26 @@ func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
 	return nil
 }
 
+func checkInteropAndReturnAccessList(ctx context.Context, rpcReq *RPCReq) ([]common.Hash, bool, error) {
+	tx, err := convertSendReqToSendTx(ctx, rpcReq)
+	if err != nil {
+		return nil, false, err
+	}
+
+	interopAccessList := interoptypes.TxToInteropAccessList(tx)
+	if len(interopAccessList) == 0 {
+		log.Debug(
+			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
+			"source", "rpc",
+			"req_id", GetReqID(ctx),
+			"method", "eth_sendRawTransaction",
+		)
+		return nil, false, nil
+	}
+
+	return interopAccessList, true, nil
+}
+
 func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
 	log.Info(
 		"validating interop access list",
@@ -442,11 +464,22 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		"strategy", s.interopValidatingConfig.Strategy,
 	)
 
+	interopAccessList, isInterop, err := checkInteropAndReturnAccessList(ctx, rpcReq)
+	if err != nil {
+		return err
+	}
+	if !isInterop {
+		return nil
+	}
+	// at this point, we know it's an interop transaction worthy of being validated
 	if err := s.rateLimitInteropSender(ctx, rpcReq); err != nil {
 		return err
 	}
+	if err := reqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqSizeLimit); err != nil {
+		return err
+	}
 
-	finalErr := s.interopStrategy.Validate(ctx, rpcReq)
+	finalErr := s.interopStrategy.ValidateAccessList(ctx, interopAccessList)
 
 	if finalErr == nil {
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "method", rpcReq.Method)
