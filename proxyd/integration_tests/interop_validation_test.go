@@ -213,6 +213,7 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 		expectedRpcCode        int
 		expectedErrSubStr      string
 		expectedCallsToBackend int
+		withInteropTxn         bool
 	}
 	cases := []testCase{
 		{
@@ -222,6 +223,7 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			expectedRpcCode:        -32021,
 			expectedErrSubStr:      "request body too large",
 			expectedCallsToBackend: 0,
+			withInteropTxn:         true,
 		},
 		{
 			name:                   "Req params size limit of 1000 bytes (2000 hex characters)",
@@ -229,12 +231,22 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
 			expectedCallsToBackend: 1,
+			withInteropTxn:         true,
 		},
 		{
 			name:                   "Req params size limit of 0 or not provided",
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
 			expectedCallsToBackend: 1,
+			withInteropTxn:         true,
+		},
+		{
+			name:                   "Req params size limit of 1 byte but the transaction is not an interop one so rate limit check is skipped",
+			reqSizeLimit:           1,
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 0,
+			withInteropTxn:         false,
 		},
 	}
 
@@ -242,6 +254,11 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
 
 	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+
+	fakeNonInteropReqParams, err := convertTxToReqParams(fakeTxBuilder(func(tx *types.AccessListTx) {
+		tx.AccessList = nil
+	}))
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -260,7 +277,12 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			defer shutdown()
 
 			client := NewProxydClient("http://127.0.0.1:8545")
-			sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+			var sendRawTransaction []byte
+			if c.withInteropTxn {
+				sendRawTransaction = makeSendRawTransaction(fakeInteropReqParams)
+			} else {
+				sendRawTransaction = makeSendRawTransaction(fakeNonInteropReqParams)
+			}
 			observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 			require.NoError(t, err)
 

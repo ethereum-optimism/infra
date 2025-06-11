@@ -78,10 +78,6 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 		return nil, false, err
 	}
 
-	if err := reqSizeLimitCheck(ctx, req, s.reqSizeLimit); err != nil {
-		return nil, false, err
-	}
-
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
 	if len(interopAccessList) == 0 {
 		log.Debug(
@@ -92,8 +88,12 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 		)
 		return nil, false, nil
 	}
-
 	// at this point, we know it's an interop transaction worthy of being validated
+
+	if err := reqSizeLimitCheck(ctx, req, s.reqSizeLimit); err != nil {
+		return nil, false, err
+	}
+
 	if len(s.urls) == 0 {
 		if s.skipOnNoSupervisorBackend {
 			log.Info(

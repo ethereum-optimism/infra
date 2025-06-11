@@ -407,8 +407,8 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	writeRPCRes(ctx, w, backendRes[0])
 }
 
-// reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_request_body_size_bytes" setting.
-// Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_request_body_size_bytes"
+// reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_body_size_bytes" setting.
+// Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_body_size_bytes"
 func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
 	if maxSize <= 0 {
 		return nil
