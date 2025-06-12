@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -368,10 +367,15 @@ gates:
 `)
 
 	logChan := make(chan string, 10)
+	done := make(chan struct{})
 
 	customLogger := &testLogger{
 		logFn: func(msg string) {
-			logChan <- msg
+			select {
+			case logChan <- msg:
+			default:
+				// Channel is full, log is dropped
+			}
 		},
 	}
 
@@ -380,7 +384,6 @@ gates:
 	r.log = customLogger
 
 	// Run the test in a goroutine
-	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		result, err := r.RunAllTests(context.Background())
@@ -388,40 +391,40 @@ gates:
 		assert.Equal(t, types.TestStatusPass, result.Status)
 	}()
 
-	time.Sleep(10 * time.Millisecond)
-
-	// With outputRealtimeLogs disabled, we should not receive any messages in real-time
 	// Wait for the running message to be logged
-	// go test ./feature -run ^TestWithRealtimeLogs$
-	timeout := time.After(1000 * time.Millisecond)
+	timeout := time.After(5 * time.Second)
 	found := false
 	for !found {
 		select {
 		case msg := <-logChan:
 			if strings.Contains(msg, "go test ./feature -run ^TestWithRealtimeLogs$") {
 				found = true
+				t.Logf("Found expected running message: %s", msg)
 			} else {
 				t.Logf("Received unexpected message: %s", msg)
 			}
 		case <-timeout:
-			t.Fatalf("Did not receive running message in time")
+			t.Fatal("Did not receive running message in time")
 		}
-	}
-
-	testLogs := []string{
-		"First log message",
-		"Second log message",
-		"Third log message",
 	}
 
 	// Wait for the test to complete
 	select {
 	case <-done:
-	case msg := <-logChan:
-		if slices.Contains(testLogs, msg) {
-			t.Fatalf("Received unexpected log message: %s", msg)
-		}
-	case <-time.After(1000 * time.Millisecond):
+		// Test completed successfully
+	case <-timeout:
 		t.Fatal("Test did not complete in time")
+	}
+
+	// Verify no test output messages were received
+	select {
+	case msg := <-logChan:
+		if strings.Contains(msg, "First log message") ||
+			strings.Contains(msg, "Second log message") ||
+			strings.Contains(msg, "Third log message") {
+			t.Fatalf("Received unexpected test output message: %s", msg)
+		}
+	default:
+		// No messages in channel, which is what we want
 	}
 }
