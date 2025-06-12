@@ -35,6 +35,29 @@
             padding: 24px;
             margin-bottom: 40px;
             border: 1px solid #e9ecef;
+            position: relative;
+        }
+        
+        .overall-status {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            padding: 24px 48px;
+            border-radius: 24px;
+            font-weight: 700;
+            font-size: 1.2rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .overall-status.pass {
+            background-color: #d1fae5;
+            color: #047857;
+        }
+        
+        .overall-status.fail {
+            background-color: #ffe4e6;
+            color: #be123c;
         }
         
         .summary p {
@@ -365,10 +388,15 @@
     <h1>Acceptance Test Results</h1>
     
     <div class="summary">
-        {{if .NetworkName}}<p><strong>Network:</strong> {{.NetworkName}}</p>{{end}}
-        <p><strong>Run ID:</strong> <code>{{.RunID}}</code></p>
+        <h1>Test Results</h1>
+        <p><strong>Network:</strong> {{.NetworkName}}</p>
+        <p><strong>Run ID:</strong> {{.RunID}}</p>
         <p><strong>Total Duration:</strong> {{formatDuration .Duration}}</p>
         <p><strong>Started:</strong> {{.Timestamp.Format "2006-01-02 15:04:05 UTC"}}</p>
+        
+        <div class="overall-status {{getStatusClass .Stats.Status}}">
+            {{getStatusText .Stats.Status}}
+        </div>
         
         <div class="stats">
             <div class="stat-box">
