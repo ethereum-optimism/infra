@@ -51,12 +51,13 @@ const (
 
 // TestTreeStats contains aggregated statistics for a tree node
 type TestTreeStats struct {
-	Total    int     // Total number of test nodes (excludes containers)
-	Passed   int     // Number of passed tests
-	Failed   int     // Number of failed tests
-	Skipped  int     // Number of skipped tests
-	Errored  int     // Number of errored tests
-	PassRate float64 // Pass rate percentage
+	Total    int        // Total number of test nodes (excludes containers)
+	Passed   int        // Number of passed tests
+	Failed   int        // Number of failed tests
+	Skipped  int        // Number of skipped tests
+	Errored  int        // Number of errored tests
+	PassRate float64    // Pass rate percentage
+	Status   TestStatus // Overall status (PASS/FAIL/SKIP/ERROR)
 }
 
 // TestTree represents the complete hierarchical test structure
@@ -189,6 +190,7 @@ func (b *TestTreeBuilder) BuildFromTestResults(results []*TestResult, runID, net
 			}
 			tree.AllNodes = append(tree.AllNodes, testNode)
 			tree.nodesByID[testNode.ID] = testNode
+			tree.nodesByPath[testNode.GetPath()] = testNode
 		}
 
 		// Process subtests if enabled
@@ -376,6 +378,10 @@ func (b *TestTreeBuilder) addNodeToTree(tree *TestTree, node *TestTreeNode) {
 
 	// Add to test nodes if it's actually a test
 	if node.Type == NodeTypeTest || node.Type == NodeTypeSubtest {
+		// Skip package test nodes that have subtests
+		if node.Type == NodeTypeTest && node.Parent != nil && node.Parent.Type == NodeTypePackage && len(node.Children) > 0 {
+			return
+		}
 		tree.TestNodes = append(tree.TestNodes, node)
 
 		// Add to failed nodes if failed
@@ -387,91 +393,66 @@ func (b *TestTreeBuilder) addNodeToTree(tree *TestTree, node *TestTreeNode) {
 
 // calculateTreeStats calculates statistics for all nodes in the tree
 func (b *TestTreeBuilder) calculateTreeStats(tree *TestTree) {
-	// Calculate stats bottom-up
-	b.calculateNodeStats(tree.Root)
-
-	// Set tree-level stats based on actual TestNodes
-	tree.Stats = TestTreeStats{
-		Total:   len(tree.TestNodes),
-		Passed:  0,
-		Failed:  0,
-		Skipped: 0,
-		Errored: 0,
-	}
-
-	// Count status for all test nodes
-	for _, node := range tree.TestNodes {
-		switch node.Status {
-		case TestStatusPass:
-			tree.Stats.Passed++
-		case TestStatusFail:
-			tree.Stats.Failed++
-		case TestStatusSkip:
-			tree.Stats.Skipped++
-		case TestStatusError:
-			tree.Stats.Errored++
-		}
-	}
-
-	if tree.Stats.Total > 0 {
-		tree.Stats.PassRate = float64(tree.Stats.Passed) / float64(tree.Stats.Total) * 100
-	}
+	// Calculate stats bottom-up and assign to tree.Stats
+	tree.Stats = b.calculateNodeStats(tree.Root)
 
 	// Calculate total duration
 	tree.Duration = tree.Root.Duration
 }
 
-// calculateNodeStats calculates statistics for a node and its children
-func (b *TestTreeBuilder) calculateNodeStats(node *TestTreeNode) {
-	var totalDuration time.Duration
+// calculateNodeStats calculates statistics for a single node and its children
+func (b *TestTreeBuilder) calculateNodeStats(node *TestTreeNode) TestTreeStats {
+	stats := TestTreeStats{}
 
-	// Process children first (bottom-up)
-	for _, child := range node.Children {
-		b.calculateNodeStats(child)
-		totalDuration += child.Duration
-	}
-
-	// For test nodes, use their own duration; for containers, use sum of children
-	if node.Type == NodeTypeTest || node.Type == NodeTypeSubtest {
-		// Keep the node's own duration
-	} else {
-		node.Duration = totalDuration
-	}
-
-	// Determine node status based on children (for container nodes)
-	if node.Type != NodeTypeTest && node.Type != NodeTypeSubtest {
-		node.Status = b.determineContainerStatus(node)
-	}
-}
-
-// determineContainerStatus determines the status of a container node based on its children
-func (b *TestTreeBuilder) determineContainerStatus(node *TestTreeNode) TestStatus {
-	if len(node.Children) == 0 {
-		return TestStatusPass
-	}
-
-	hasFailures := false
-	hasSkipped := false
-	hasPassed := false
-
-	for _, child := range node.Children {
-		switch child.Status {
-		case TestStatusFail, TestStatusError:
-			hasFailures = true
-		case TestStatusSkip:
-			hasSkipped = true
+	// If this is a test/subtest node, count it
+	// For package tests with subtests, we only count the subtests
+	if (node.Type == NodeTypeTest || node.Type == NodeTypeSubtest) &&
+		!(node.Type == NodeTypeTest && node.TestResult != nil && node.TestResult.Metadata.RunAll && len(node.Children) > 0) {
+		stats.Total = 1
+		switch node.Status {
 		case TestStatusPass:
-			hasPassed = true
+			stats.Passed = 1
+		case TestStatusFail:
+			stats.Failed = 1
+		case TestStatusSkip:
+			stats.Skipped = 1
+		case TestStatusError:
+			stats.Errored = 1
 		}
 	}
 
-	if hasFailures {
-		return TestStatusFail
+	// Add stats from all children
+	for _, child := range node.Children {
+		childStats := b.calculateNodeStats(child)
+		stats.Total += childStats.Total
+		stats.Passed += childStats.Passed
+		stats.Failed += childStats.Failed
+		stats.Skipped += childStats.Skipped
+		stats.Errored += childStats.Errored
 	}
-	if hasSkipped && !hasPassed {
-		return TestStatusSkip
+
+	// Calculate pass rate
+	if stats.Total > 0 {
+		stats.PassRate = float64(stats.Passed) / float64(stats.Total) * 100
 	}
-	return TestStatusPass
+
+	// Determine overall status
+	if stats.Failed > 0 {
+		stats.Status = TestStatusFail
+	} else if stats.Passed > 0 {
+		stats.Status = TestStatusPass
+	} else if stats.Skipped > 0 {
+		stats.Status = TestStatusSkip
+	} else {
+		stats.Status = TestStatusError
+	}
+
+	// Store stats in node
+	if node.isContainer() {
+		node.Status = stats.Status
+	}
+
+	return stats
 }
 
 // sortNodes sorts children of all nodes for consistent display
