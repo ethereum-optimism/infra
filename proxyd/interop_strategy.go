@@ -15,7 +15,7 @@ import (
 )
 
 type InteropStrategy interface {
-	Validate(ctx context.Context, req *RPCReq) error
+	ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error
 }
 
 type commonInteropStrategy struct {
@@ -72,28 +72,7 @@ var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonS
 	}
 }
 
-func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context, req *RPCReq) ([]common.Hash, bool, error) {
-	tx, err := convertSendReqToSendTx(ctx, req)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if err := reqSizeLimitCheck(ctx, req, s.reqSizeLimit); err != nil {
-		return nil, false, err
-	}
-
-	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	if len(interopAccessList) == 0 {
-		log.Debug(
-			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
-			"source", "rpc",
-			"req_id", GetReqID(ctx),
-			"method", "eth_sendRawTransaction",
-		)
-		return nil, false, nil
-	}
-
-	// at this point, we know it's an interop transaction worthy of being validated
+func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, bool, error) {
 	if len(s.urls) == 0 {
 		if s.skipOnNoSupervisorBackend {
 			log.Info(
@@ -110,7 +89,7 @@ func (s *commonInteropStrategy) preflightChecksToAccessList(ctx context.Context,
 		)
 		return nil, false, supervisorTypes.ErrNoRPCSource
 	}
-
+	var err error
 	if s.validateAndDeduplicateInteropAccessList {
 		interopAccessList, err = validateAndDeduplicateInteropAccessList(interopAccessList)
 		if err != nil {
@@ -144,8 +123,8 @@ func NewFirstSupervisorStrategy(urls []string, opts ...commonStrategyOpt) *first
 	}
 }
 
-func (s *firstSupervisorStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
-	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
+func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
 	}
@@ -171,8 +150,8 @@ func NewMulticallStrategy(urls []string, opts ...commonStrategyOpt) *multicallSt
 	}
 }
 
-func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
-	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
+func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
 	}
@@ -200,7 +179,7 @@ func (s *multicallStrategyImpl) Validate(ctx context.Context, req *RPCReq) error
 			"all interop validating backends have responded",
 			"source", "rpc",
 			"req_id", GetReqID(ctx),
-			"method", req.Method,
+			"method", "eth_sendRawTransaction",
 		)
 		for range resultChan {
 		} // drain the channel
@@ -234,10 +213,10 @@ func NewHealthAwareLoadBalancingStrategy(urls []string, unhealthinessTimeout tim
 	return s
 }
 
-func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req *RPCReq) error {
+func (s *healthAwareLoadBalancingStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
 	defer s.backends.NextBackend() // move to the next backend after the request is done
 
-	accessListToValidate, proceedFurther, err := s.preflightChecksToAccessList(ctx, req)
+	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
 	}
@@ -259,7 +238,7 @@ func (s *healthAwareLoadBalancingStrategyImpl) Validate(ctx context.Context, req
 			continue
 		}
 
-		httpCode, err := backend.Validate(ctx, accessListToValidate, req)
+		httpCode, err := backend.Validate(ctx, accessListToValidate)
 		if err == nil {
 			return nil
 		}
@@ -311,7 +290,7 @@ func (b *healthAwareBackend) MarkUnhealthy() {
 	b.lastUnhealthy = time.Now()
 }
 
-func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash, req *RPCReq) (int, error) {
+func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash) (int, error) {
 	httpCode, _, err := performCheckAccessListOp(ctx, accessList, b.url)
 	if err != nil {
 		return httpCode, ParseInteropError(err)

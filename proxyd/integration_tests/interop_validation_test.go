@@ -213,6 +213,7 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 		expectedRpcCode        int
 		expectedErrSubStr      string
 		expectedCallsToBackend int
+		withInteropTxn         bool
 	}
 	cases := []testCase{
 		{
@@ -222,6 +223,7 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			expectedRpcCode:        -32021,
 			expectedErrSubStr:      "request body too large",
 			expectedCallsToBackend: 0,
+			withInteropTxn:         true,
 		},
 		{
 			name:                   "Req params size limit of 1000 bytes (2000 hex characters)",
@@ -229,12 +231,22 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
 			expectedCallsToBackend: 1,
+			withInteropTxn:         true,
 		},
 		{
 			name:                   "Req params size limit of 0 or not provided",
 			expectedHTTPCode:       200,
 			expectedErrSubStr:      "",
 			expectedCallsToBackend: 1,
+			withInteropTxn:         true,
+		},
+		{
+			name:                   "Req params size limit of 1 byte but the transaction is not an interop one so rate limit check is skipped",
+			reqSizeLimit:           1,
+			expectedHTTPCode:       200,
+			expectedErrSubStr:      "",
+			expectedCallsToBackend: 0,
+			withInteropTxn:         false,
 		},
 	}
 
@@ -242,6 +254,11 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
 
 	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+
+	fakeNonInteropReqParams, err := convertTxToReqParams(fakeTxBuilder(func(tx *types.AccessListTx) {
+		tx.AccessList = nil
+	}))
 	require.NoError(t, err)
 
 	for _, c := range cases {
@@ -260,7 +277,12 @@ func TestInteropValidation_ReqSizeLimit(t *testing.T) {
 			defer shutdown()
 
 			client := NewProxydClient("http://127.0.0.1:8545")
-			sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+			var sendRawTransaction []byte
+			if c.withInteropTxn {
+				sendRawTransaction = makeSendRawTransaction(fakeInteropReqParams)
+			} else {
+				sendRawTransaction = makeSendRawTransaction(fakeNonInteropReqParams)
+			}
 			observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
 			require.NoError(t, err)
 
@@ -557,6 +579,7 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 
 	config.InteropValidationConfig.RateLimit.Enabled = true
 	config.InteropValidationConfig.RateLimit.Limit = 1
+	config.InteropValidationConfig.RateLimit.Interval = proxyd.TOMLDuration(2 * time.Second)
 
 	validatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer validatingBackend1.Close()
@@ -573,9 +596,18 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 	client := NewProxydClient("http://127.0.0.1:8545")
 	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
-	sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
-	_, observedCode1, err1 := client.SendRequest(sendRawTransaction)
-	observedResp2, observedCode2, err2 := client.SendRequest(sendRawTransaction)
+	interopSendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+
+	nonInteropReqParams, err := convertTxToReqParams(fakeTxBuilder(
+		func(tx *types.AccessListTx) {
+			tx.AccessList = nil
+		},
+	))
+	require.NoError(t, err)
+	nonInteropSendRawTransaction := makeSendRawTransaction(nonInteropReqParams)
+
+	_, observedCode1, err1 := client.SendRequest(interopSendRawTransaction)
+	observedResp2, observedCode2, err2 := client.SendRequest(interopSendRawTransaction)
 
 	// ensuring the first call succeeded
 	require.NoError(t, err1)
@@ -592,11 +624,27 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 	// ensuring that the second call didn't contribute to additional validating backend (supervisor) requests
 	require.Equal(t, len(validatingBackend1.requests), 1)
 
+	// make a non-interop request to ensure that it succeeds despite the breaked rate limit depicting that the rate limit is not applied to non-interop requests
+	{
+		_, observedCode, err := client.SendRequest(nonInteropSendRawTransaction)
+
+		// ensuring that this call succeeded despite the breached interop rate limit
+		require.NoError(t, err)
+		require.Equal(t, 200, observedCode)
+
+		// ensure that the rate limit is still breached by making an interop transaction
+		observedResp, observedCode, err := client.SendRequest(interopSendRawTransaction)
+		require.NoError(t, err)
+		require.Equal(t, 429, observedCode)
+		require.Contains(t, string(observedResp), "sender is over rate limit")
+		require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", -32017))
+	}
+
 	// waiting for the rate limit to reset
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(2100 * time.Millisecond)
 
 	// ensuring the third call succeeds
-	_, observedCode3, err3 := client.SendRequest(sendRawTransaction)
+	_, observedCode3, err3 := client.SendRequest(interopSendRawTransaction)
 	require.NoError(t, err3)
 	require.Equal(t, 200, observedCode3)
 
