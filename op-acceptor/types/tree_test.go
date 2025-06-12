@@ -511,3 +511,60 @@ func TestTestTreeBuilder_WithOptions(t *testing.T) {
 		t.Errorf("Log path = %v, want %v", tree.TestNodes[0].LogPath, "test-log-path")
 	}
 }
+
+func TestTestTreeStats_OverallStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		testResults []*TestResult
+		expect      TestStatus
+	}{
+		{
+			name: "all pass",
+			testResults: []*TestResult{
+				{Status: TestStatusPass, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestA"}},
+				{Status: TestStatusPass, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestB"}},
+			},
+			expect: TestStatusPass,
+		},
+		{
+			name: "one fail",
+			testResults: []*TestResult{
+				{Status: TestStatusPass, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestA"}},
+				{Status: TestStatusFail, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestB"}},
+			},
+			expect: TestStatusFail,
+		},
+		{
+			name: "all skip",
+			testResults: []*TestResult{
+				{Status: TestStatusSkip, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestA"}},
+				{Status: TestStatusSkip, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestB"}},
+			},
+			expect: TestStatusSkip,
+		},
+		{
+			name: "all error",
+			testResults: []*TestResult{
+				{Status: TestStatusError, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestA"}},
+			},
+			expect: TestStatusError,
+		},
+		{
+			name: "mixed skip and pass",
+			testResults: []*TestResult{
+				{Status: TestStatusSkip, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestA"}},
+				{Status: TestStatusPass, Metadata: ValidatorMetadata{Package: "pkg", FuncName: "TestB"}},
+			},
+			expect: TestStatusPass,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := NewTestTreeBuilder()
+			tree := builder.BuildFromTestResults(tt.testResults, "run", "net")
+			if tree.Stats.Status != tt.expect {
+				t.Errorf("expected status %v, got %v", tt.expect, tree.Stats.Status)
+			}
+		})
+	}
+}

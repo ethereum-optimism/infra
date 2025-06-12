@@ -114,6 +114,18 @@ func NewTreeHTMLFormatter(templateContent string) (*TreeHTMLFormatter, error) {
 		"multiply": func(a, b int) int {
 			return a * b
 		},
+		"getOverallStatus": func(stats types.TestTreeStats) types.TestStatus {
+			if stats.Failed > 0 {
+				return types.TestStatusFail
+			}
+			if stats.Passed > 0 {
+				return types.TestStatusPass
+			}
+			if stats.Skipped > 0 {
+				return types.TestStatusSkip
+			}
+			return types.TestStatusError
+		},
 	}).Parse(templateContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTML template: %w", err)
@@ -196,21 +208,19 @@ func (f *TreeTableFormatter) Format(tree *types.TestTree) (string, error) {
 	})
 
 	// Set table style based on overall result
-	if tree.Stats.Failed > 0 {
+	switch tree.Stats.Status {
+	case types.TestStatusFail:
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
-	} else if tree.Stats.Skipped > 0 {
+	case types.TestStatusSkip:
 		t.SetStyle(table.StyleColoredBlackOnYellowWhite)
-	} else {
+	case types.TestStatusPass:
 		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
+	default:
+		t.SetStyle(table.StyleDefault)
 	}
 
 	// Add summary footer
-	overallStatus := "PASS"
-	if tree.Stats.Failed > 0 {
-		overallStatus = "FAIL"
-	} else if tree.Stats.Skipped > 0 && tree.Stats.Passed == 0 {
-		overallStatus = "SKIP"
-	}
+	overallStatus := strings.ToUpper(getStatusString(tree.Stats.Status))
 
 	footerRow := []interface{}{
 		"TOTAL",
@@ -364,6 +374,7 @@ func (f *TreeTextFormatter) Format(tree *types.TestTree) (string, error) {
 		buf.WriteString(fmt.Sprintf("Skipped: %d\n", tree.Stats.Skipped))
 		buf.WriteString(fmt.Sprintf("Errored: %d\n", tree.Stats.Errored))
 		buf.WriteString(fmt.Sprintf("Pass Rate: %.1f%%\n", tree.Stats.PassRate))
+		buf.WriteString(fmt.Sprintf("Status: %s\n", strings.ToUpper(getStatusString(tree.Stats.Status))))
 		buf.WriteString("\n")
 	}
 
