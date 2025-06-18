@@ -119,6 +119,12 @@ var (
 		HTTPErrorCode: 413,
 	}
 
+	ErrContextCanceled = &RPCErr{
+		Code:          JSONRPCErrorInternal - 23,
+		Message:       "client disconnected",
+		HTTPErrorCode: 499,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
@@ -580,6 +586,9 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"req_id", GetReqID(ctx),
 				"err", err,
 			)
+		case ErrContextCanceled:
+			// return immediately on client cancellation
+			return nil, err
 		default:
 			lastError = err
 			log.Warn(
@@ -746,8 +755,13 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		if !(errors.Is(err, context.Canceled) || errors.Is(err, ErrTooManyRequests)) {
+			b.intermittentErrorsSlidingWindow.Incr()
+			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, ErrContextCanceled
+		}
 		return nil, wrapErr(err, "error in backend request")
 	}
 
@@ -1602,6 +1616,20 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
 					ServedBy: servedBy,
+					error:    err,
+				}
+			}
+			// context canceled happens when either the client cancels the request
+			// or proxyd cancels the request. Proxyd only cancels requests when
+			// the server is shutting down, so this must be the client cancelling
+			// the request.
+			//
+			// We catch this error here so that we don't mark this request as
+			// unserviceable
+			if errors.Is(err, ErrContextCanceled) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
 					error:    err,
 				}
 			}
