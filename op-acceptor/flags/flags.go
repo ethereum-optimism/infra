@@ -15,6 +15,44 @@ import (
 
 const EnvVarPrefix = "OP_ACCEPTOR"
 
+// OrchestratorType represents the type of devstack orchestrator
+type OrchestratorType string
+
+// Orchestrator type constants
+const (
+	OrchestratorSysgo  OrchestratorType = "sysgo"
+	OrchestratorSysext OrchestratorType = "sysext"
+)
+
+// String returns the string representation of the orchestrator type
+func (o OrchestratorType) String() string {
+	return string(o)
+}
+
+// ValidOrchestratorTypes returns a slice of all valid orchestrator types
+func ValidOrchestratorTypes() []OrchestratorType {
+	return []OrchestratorType{OrchestratorSysgo, OrchestratorSysext}
+}
+
+// IsValid checks if the orchestrator type is valid
+func (o OrchestratorType) IsValid() bool {
+	for _, valid := range ValidOrchestratorTypes() {
+		if o == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateOrchestrator validates that the orchestrator value is one of the allowed types
+func validateOrchestrator(value string) error {
+	orchestrator := OrchestratorType(value)
+	if !orchestrator.IsValid() {
+		return fmt.Errorf("orchestrator must be one of: %s, %s", OrchestratorSysgo, OrchestratorSysext)
+	}
+	return nil
+}
+
 var (
 	TestDir = &cli.StringFlag{
 		Name:    "testdir",
@@ -78,6 +116,21 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
 		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
 	}
+	Orchestrator = &cli.StringFlag{
+		Name:    "orchestrator",
+		Value:   OrchestratorSysext.String(),
+		EnvVars: []string{"DEVSTACK_ORCHESTRATOR"},
+		Usage:   "Devstack orchestrator type: 'sysext' (external provider) or 'sysgo' (in-memory Go). Defaults to 'sysext'.",
+		Action: func(ctx *cli.Context, value string) error {
+			return validateOrchestrator(value)
+		},
+	}
+	DevnetEnvURL = &cli.StringFlag{
+		Name:    "devnet-env-url",
+		Value:   "",
+		EnvVars: []string{"DEVNET_ENV_URL"},
+		Usage:   "URL or path to the devnet environment file. Required for sysext orchestrator.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -94,6 +147,8 @@ var optionalFlags = []cli.Flag{
 	LogDir,
 	TestLogLevel,
 	OutputRealtimeLogs,
+	Orchestrator,
+	DevnetEnvURL,
 }
 var Flags []cli.Flag
 

@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/infra/op-acceptor/ui"
+	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1924,4 +1926,100 @@ func TestArbitraryDepthSubtests(t *testing.T) {
 	assert.True(t, foundLevel3, "Level 3 subtest should be in output")
 	assert.True(t, foundLevel4, "Level 4 subtest should be in output")
 	assert.True(t, foundLevel5, "Level 5 subtest should be in output")
+}
+
+// TestDevstackOrchestratorEnvironment verifies that the DEVSTACK_ORCHESTRATOR environment variable is correctly set
+func TestDevstackOrchestratorEnvironment(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a simple test file in the work directory
+	testContent := []byte(`
+package main
+
+import (
+	"os"
+	"testing"
+)
+
+func TestOrchestratorEnvironment(t *testing.T) {
+    // Get orchestrator from environment
+    orchestrator := os.Getenv("DEVSTACK_ORCHESTRATOR")
+    if orchestrator == "" {
+		t.Log("DEVSTACK_ORCHESTRATOR not set")
+    } else {
+		t.Log("DEVSTACK_ORCHESTRATOR set to", orchestrator)
+	}
+}
+`)
+	configContent := []byte(`
+gates:
+  - id: orchestrator-gate
+    description: "Gate with a test that checks orchestrator environment"
+    tests:
+      - name: TestOrchestratorEnvironment
+        package: "./main"
+`)
+
+	t.Run("sysgo orchestrator (env is nil)", func(t *testing.T) {
+		r := setupTestRunner(t, testContent, configContent)
+		r.env = nil // Simulate sysgo orchestrator
+		err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+		require.NoError(t, err)
+
+		result, err := r.RunTest(ctx, types.ValidatorMetadata{
+			ID:       "test1",
+			Gate:     "orchestrator-gate",
+			FuncName: "TestOrchestratorEnvironment",
+			Package:  ".",
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, types.TestStatusPass, result.Status)
+		assert.Contains(t, result.Stdout, fmt.Sprintf("DEVSTACK_ORCHESTRATOR set to %s", flags.OrchestratorSysgo))
+	})
+
+	t.Run("sysext orchestrator (env is not nil)", func(t *testing.T) {
+		r := setupTestRunner(t, testContent, configContent)
+		// Set up a mock devnet environment to simulate sysext
+		r.env = &env.DevnetEnv{
+			URL: "file:///tmp/test.json",
+		}
+		err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+		require.NoError(t, err)
+
+		result, err := r.RunTest(ctx, types.ValidatorMetadata{
+			ID:       "test1",
+			Gate:     "orchestrator-gate",
+			FuncName: "TestOrchestratorEnvironment",
+			Package:  ".",
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, types.TestStatusPass, result.Status)
+		assert.Contains(t, result.Stdout, fmt.Sprintf("DEVSTACK_ORCHESTRATOR set to %s", flags.OrchestratorSysext))
+	})
+
+	t.Run("reproducible environment includes orchestrator", func(t *testing.T) {
+		// Test sysgo
+		r := setupTestRunner(t, testContent, configContent)
+		r.env = nil
+		r.runID = "test-run-id"
+
+		reproEnv := r.ReproducibleEnv()
+		envStr := reproEnv.String()
+		assert.Contains(t, envStr, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysgo))
+		assert.Contains(t, envStr, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
+		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
+
+		// Test sysext
+		r.env = &env.DevnetEnv{
+			URL: "file:///tmp/test.json",
+		}
+
+		reproEnv = r.ReproducibleEnv()
+		envStr = reproEnv.String()
+		assert.Contains(t, envStr, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysext))
+		assert.Contains(t, envStr, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
+		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
+	})
 }
