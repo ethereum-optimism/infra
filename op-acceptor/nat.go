@@ -20,6 +20,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/op-acceptor/addons"
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
@@ -69,17 +70,38 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("failed to create registry: %w", err)
 	}
 
-	envURL := os.Getenv(env.EnvURLVar)
-	if envURL == "" {
-		return nil, fmt.Errorf("devnet environment URL not provided: %s environment variable is required", env.EnvURLVar)
+	var devnetEnv *env.DevnetEnv
+	var networkName string
+
+	// Handle different orchestrator types
+	switch config.Orchestrator {
+	case flags.OrchestratorSysext:
+		// For sysext, we need DEVNET_ENV_URL
+		envURL := config.DevnetEnvURL
+		if envURL == "" {
+			return nil, fmt.Errorf("devnet environment URL not provided: use --devnet-env-url flag or set DEVNET_ENV_URL environment variable for sysext orchestrator")
+		}
+
+		var err error
+		devnetEnv, err = env.LoadDevnetFromURL(envURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load devnet environment from %s: %w", envURL, err)
+		}
+
+		networkName = extractNetworkName(devnetEnv)
+		config.Log.Info("Using sysext orchestrator with devnet environment", "network", networkName, "envURL", envURL)
+
+	case flags.OrchestratorSysgo:
+		// For sysgo, we don't need DEVNET_ENV_URL
+		devnetEnv = nil
+		networkName = "in-memory"
+		config.Log.Info("Using sysgo orchestrator (in-memory Go)", "network", networkName)
+
+	default:
+		// This should never happen due to CLI validation, but provide a clear error message
+		return nil, fmt.Errorf("invalid orchestrator: %s.", config.Orchestrator)
 	}
 
-	devnetEnv, err := env.LoadDevnetFromURL(envURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load devnet environment from %s: %w", envURL, err)
-	}
-
-	networkName := extractNetworkName(devnetEnv)
 	config.Log.Info("Using network name for metrics", "network", networkName)
 
 	// Create runner with registry
@@ -128,9 +150,15 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 
 	// Create addons manager
 	addonsOpts := []addons.Option{}
-	features := devnetEnv.Env.Features
-	if !slices.Contains(features, "faucet") {
-		addonsOpts = append(addonsOpts, addons.WithFaucet())
+	if devnetEnv != nil {
+		features := devnetEnv.Env.Features
+		if !slices.Contains(features, "faucet") {
+			addonsOpts = append(addonsOpts, addons.WithFaucet())
+		}
+	} else {
+		// For sysgo orchestrator, we don't have devnet environment features
+		// so we'll use default addons behavior (which may include faucet if needed)
+		config.Log.Debug("No devnet environment available (sysgo orchestrator), using default addons configuration")
 	}
 
 	addonsManager, err := addons.NewAddonsManager(ctx, devnetEnv, addonsOpts...)
@@ -141,7 +169,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	return res, nil
 }
 
-// extractNetworkName extracts the network name from the DEVNET_ENV_URL.
+// extractNetworkName extracts the network name from the devnet environment.
 func extractNetworkName(env *env.DevnetEnv) string {
 	fallbackName := "unknown"
 	if env == nil {

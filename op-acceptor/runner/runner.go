@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
@@ -1356,10 +1357,13 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 	runEnv = telemetry.InstrumentEnvironment(ctx, runEnv)
 
 	if r.env == nil {
+		// For sysgo orchestrator, just add the orchestrator type to the environment
+		runEnv = append(runEnv, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysgo))
 		cmd.Env = runEnv
 		return cmd, func() {}
 	}
 
+	// For sysext orchestrator, use the existing devnet environment logic
 	// at this point we've already parsed the URL once before to load the environment, so no need to check for errors
 	url, _ := url.Parse(r.env.URL)
 
@@ -1375,6 +1379,8 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 
 		runEnv = append(
 			runEnv,
+			// Add the orchestrator type
+			fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysext),
 			// override the env URL with the one from the temp file
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
@@ -1392,7 +1398,14 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 }
 
 func (r *runner) ReproducibleEnv() Env {
+	orchestrator := flags.OrchestratorSysgo
+	if r.env != nil {
+		orchestrator = flags.OrchestratorSysext
+	}
+
 	return Env{
+		// Set the orchestrator type
+		fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", orchestrator),
 		// Set DEVNET_EXPECT_PRECONDITIONS_MET=true to make tests fail instead of skip when preconditions are not met
 		fmt.Sprintf("%s=%s", env.ExpectPreconditionsMet, "true"),
 		// salt the funder abstraction with DEVSTACK_KEYS_SALT=$runID

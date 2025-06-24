@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/exitcodes"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -506,4 +507,364 @@ func TestExplicitPanic(t *testing.T) {
 
 	t.Logf("Writing test file to %s", testFilePath)
 	return packageDir
+}
+
+func TestDefaultOrchestratorBehavior(t *testing.T) {
+	// Setup binary paths
+	projectRoot, err := os.Getwd()
+	require.NoError(t, err, "Failed to get current directory")
+	projectRoot = filepath.Dir(projectRoot) // Go up one directory to project root
+	opAcceptorBin := filepath.Join(projectRoot, "bin", "op-acceptor")
+
+	// Ensure the binary exists
+	ensureBinaryExists(t, projectRoot, opAcceptorBin)
+
+	testCases := []struct {
+		name           string
+		setDevnetURL   bool
+		devnetContent  string
+		expectedExit   int
+		expectedOutput string
+	}{
+		{
+			name:           "Default sysext orchestrator fails without DEVNET_ENV_URL",
+			setDevnetURL:   false,
+			expectedExit:   exitcodes.RuntimeErr,
+			expectedOutput: "devnet environment URL not provided",
+		},
+		{
+			name:           "Default sysext orchestrator setup succeeds with valid DEVNET_ENV_URL",
+			setDevnetURL:   true,
+			devnetContent:  `{"name": "test-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`,
+			expectedExit:   exitcodes.TestFailure,
+			expectedOutput: "Using sysext orchestrator with devnet environment",
+		},
+		{
+			name:           "Default sysext orchestrator fails with invalid DEVNET_ENV_URL",
+			setDevnetURL:   true,
+			devnetContent:  "invalid json",
+			expectedExit:   exitcodes.RuntimeErr,
+			expectedOutput: "failed to load devnet environment",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temporary test directory
+			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-default-test-")
+			require.NoError(t, err, "Failed to create temporary directory")
+			defer os.RemoveAll(tempDir)
+
+			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
+			createMockTest(t, tempDir, false, 0) // failing test
+			validatorPath := createValidatorConfig(t, tempDir, "failing", "TestAlwaysFails", "test-gate", false, nil)
+
+			// Setup environment
+			originalEnv := os.Getenv("DEVNET_ENV_URL")
+			defer func() {
+				if originalEnv != "" {
+					os.Setenv("DEVNET_ENV_URL", originalEnv)
+				} else {
+					os.Unsetenv("DEVNET_ENV_URL")
+				}
+			}()
+
+			var devnetFile string
+			if tc.setDevnetURL {
+				// Create devnet file
+				devnetFile = filepath.Join(tempDir, "devnet.json")
+				err := os.WriteFile(devnetFile, []byte(tc.devnetContent), 0644)
+				require.NoError(t, err)
+				os.Setenv("DEVNET_ENV_URL", devnetFile)
+			} else {
+				os.Unsetenv("DEVNET_ENV_URL")
+			}
+
+			// Run command
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, opAcceptorBin,
+				"--run-interval=0",
+				"--gate=test-gate",
+				"--testdir="+tempDir,
+				"--validators="+validatorPath,
+				"--log.level=debug")
+
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err = cmd.Run()
+
+			// Check output contains expected message (if any)
+			if tc.expectedOutput != "" {
+				output := stdout.String() + stderr.String()
+				assert.Contains(t, output, tc.expectedOutput)
+			}
+
+			// Check exit code
+			if err == nil {
+				assert.Equal(t, exitcodes.Success, tc.expectedExit)
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+			} else {
+				t.Fatalf("Unexpected error type: %v", err)
+			}
+		})
+	}
+}
+
+func TestExplicitOrchestratorOverride(t *testing.T) {
+	// Setup binary paths
+	projectRoot, err := os.Getwd()
+	require.NoError(t, err, "Failed to get current directory")
+	projectRoot = filepath.Dir(projectRoot) // Go up one directory to project root
+	opAcceptorBin := filepath.Join(projectRoot, "bin", "op-acceptor")
+
+	// Ensure the binary exists
+	ensureBinaryExists(t, projectRoot, opAcceptorBin)
+
+	testCases := []struct {
+		name           string
+		orchestrator   string
+		setDevnetURL   bool
+		expectedExit   int
+		expectedOutput string
+	}{
+		{
+			name:           "Explicit sysgo works without DEVNET_ENV_URL",
+			orchestrator:   "sysgo",
+			setDevnetURL:   false,
+			expectedExit:   exitcodes.TestFailure, // Test will fail but should get past orchestrator setup
+			expectedOutput: "Using sysgo orchestrator (in-memory Go)",
+		},
+		{
+			name:           "Explicit sysext fails without DEVNET_ENV_URL",
+			orchestrator:   "sysext",
+			setDevnetURL:   false,
+			expectedExit:   exitcodes.RuntimeErr,
+			expectedOutput: "devnet environment URL not provided",
+		},
+		{
+			name:           "Invalid orchestrator fails with validation error",
+			orchestrator:   "invalid",
+			setDevnetURL:   false,
+			expectedExit:   exitcodes.TestFailure, // urfave/cli returns exit code 1 for validation errors
+			expectedOutput: "",                    // urfave/cli validation errors may not always appear in captured output
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temporary test directory
+			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-explicit-test-")
+			require.NoError(t, err, "Failed to create temporary directory")
+			defer os.RemoveAll(tempDir)
+
+			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
+			createMockTest(t, tempDir, false, 0) // failing test
+			validatorPath := createValidatorConfig(t, tempDir, "failing", "TestAlwaysFails", "test-gate", false, nil)
+
+			// Setup environment
+			originalEnv := os.Getenv("DEVNET_ENV_URL")
+			defer func() {
+				if originalEnv != "" {
+					os.Setenv("DEVNET_ENV_URL", originalEnv)
+				} else {
+					os.Unsetenv("DEVNET_ENV_URL")
+				}
+			}()
+
+			if tc.setDevnetURL {
+				// Create devnet file
+				devnetFile := filepath.Join(tempDir, "devnet.json")
+				devnetContent := `{"name": "test-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`
+				err := os.WriteFile(devnetFile, []byte(devnetContent), 0644)
+				require.NoError(t, err)
+				os.Setenv("DEVNET_ENV_URL", devnetFile)
+			} else {
+				os.Unsetenv("DEVNET_ENV_URL")
+			}
+
+			// Run command
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, opAcceptorBin,
+				"--run-interval=0",
+				"--gate=test-gate",
+				"--testdir="+tempDir,
+				"--validators="+validatorPath,
+				"--orchestrator="+tc.orchestrator,
+				"--log.level=debug")
+
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err = cmd.Run()
+
+			// Check output contains expected message (if any)
+			if tc.expectedOutput != "" {
+				output := stdout.String() + stderr.String()
+				assert.Contains(t, output, tc.expectedOutput)
+			}
+
+			// Check exit code
+			if err == nil {
+				assert.Equal(t, exitcodes.Success, tc.expectedExit)
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+			} else {
+				t.Fatalf("Unexpected error type: %v", err)
+			}
+		})
+	}
+}
+
+func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
+	// Setup binary paths
+	projectRoot, err := os.Getwd()
+	require.NoError(t, err, "Failed to get current directory")
+	projectRoot = filepath.Dir(projectRoot) // Go up one directory to project root
+	opAcceptorBin := filepath.Join(projectRoot, "bin", "op-acceptor")
+
+	// Ensure the binary exists
+	ensureBinaryExists(t, projectRoot, opAcceptorBin)
+
+	testCases := []struct {
+		name                     string
+		setEnvVar                bool
+		envVarContent            string
+		setCliFlag               bool
+		cliFlagContent           string
+		expectedExit             int
+		expectedOutput           string
+		expectCliTakesPrecedence bool
+	}{
+		{
+			name:                     "CLI flag takes precedence over env var",
+			setEnvVar:                true,
+			envVarContent:            `{"name": "env-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`,
+			setCliFlag:               true,
+			cliFlagContent:           `{"name": "cli-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`,
+			expectedExit:             exitcodes.TestFailure, // Test will fail but should get past orchestrator setup
+			expectedOutput:           "cli-net",             // Should use CLI flag value, not env var
+			expectCliTakesPrecedence: true,
+		},
+		{
+			name:                     "Env var used when CLI flag not provided",
+			setEnvVar:                true,
+			envVarContent:            `{"name": "env-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`,
+			setCliFlag:               false,
+			expectedExit:             exitcodes.TestFailure, // Test will fail but should get past orchestrator setup
+			expectedOutput:           "env-net",             // Should use env var value
+			expectCliTakesPrecedence: false,
+		},
+		{
+			name:                     "CLI flag used when env var not set",
+			setEnvVar:                false,
+			setCliFlag:               true,
+			cliFlagContent:           `{"name": "cli-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`,
+			expectedExit:             exitcodes.TestFailure, // Test will fail but should get past orchestrator setup
+			expectedOutput:           "cli-net",             // Should use CLI flag value
+			expectCliTakesPrecedence: true,
+		},
+		{
+			name:                     "Error when neither CLI flag nor env var provided",
+			setEnvVar:                false,
+			setCliFlag:               false,
+			expectedExit:             exitcodes.RuntimeErr,
+			expectedOutput:           "devnet environment URL not provided",
+			expectCliTakesPrecedence: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temporary test directory
+			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-precedence-test-")
+			require.NoError(t, err, "Failed to create temporary directory")
+			defer os.RemoveAll(tempDir)
+
+			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
+			createMockTest(t, tempDir, false, 0) // failing test
+			validatorPath := createValidatorConfig(t, tempDir, "failing", "TestAlwaysFails", "test-gate", false, nil)
+
+			// Setup environment
+			originalEnv := os.Getenv("DEVNET_ENV_URL")
+			defer func() {
+				if originalEnv != "" {
+					os.Setenv("DEVNET_ENV_URL", originalEnv)
+				} else {
+					os.Unsetenv("DEVNET_ENV_URL")
+				}
+			}()
+
+			var envFile, cliFile string
+
+			// Setup environment variable if needed
+			if tc.setEnvVar {
+				envFile = filepath.Join(tempDir, "env-devnet.json")
+				err := os.WriteFile(envFile, []byte(tc.envVarContent), 0644)
+				require.NoError(t, err)
+				os.Setenv("DEVNET_ENV_URL", envFile)
+			} else {
+				os.Unsetenv("DEVNET_ENV_URL")
+			}
+
+			// Setup CLI flag file if needed
+			var cmdArgs []string
+			cmdArgs = append(cmdArgs,
+				"--run-interval=0",
+				"--gate=test-gate",
+				"--testdir="+tempDir,
+				"--validators="+validatorPath,
+				"--orchestrator=sysext", // Use sysext to require devnet env URL
+				"--log.level=debug")
+
+			if tc.setCliFlag {
+				cliFile = filepath.Join(tempDir, "cli-devnet.json")
+				err := os.WriteFile(cliFile, []byte(tc.cliFlagContent), 0644)
+				require.NoError(t, err)
+				cmdArgs = append(cmdArgs, "--devnet-env-url="+cliFile)
+			}
+
+			// Run command
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, opAcceptorBin, cmdArgs...)
+
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err = cmd.Run()
+
+			// Check output contains expected message (if any)
+			if tc.expectedOutput != "" {
+				output := stdout.String() + stderr.String()
+				assert.Contains(t, output, tc.expectedOutput)
+			}
+
+			// Specific check for CLI precedence
+			if tc.expectCliTakesPrecedence && tc.setEnvVar && tc.setCliFlag {
+				output := stdout.String() + stderr.String()
+				// Should contain CLI flag network name, not env var network name
+				assert.Contains(t, output, "cli-net")
+				assert.NotContains(t, output, "env-net")
+			}
+
+			// Check exit code
+			if err == nil {
+				assert.Equal(t, exitcodes.Success, tc.expectedExit)
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+			} else {
+				t.Fatalf("Unexpected error type: %v", err)
+			}
+		})
+	}
 }
