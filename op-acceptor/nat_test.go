@@ -2,6 +2,7 @@ package nat
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
 )
 
@@ -346,8 +348,8 @@ func TestNAT_RunOnceMode(t *testing.T) {
 		"Expected shutdown to be called in run-once mode")
 }
 
-// TestNAT_New_FastFailOnDevnetEnvErrors tests that New fails fast when devnet environment cannot be loaded
-func TestNAT_New_FastFailOnDevnetEnvErrors(t *testing.T) {
+// TestNAT_New_OrchestratorBehavior consolidates all orchestrator-related tests
+func TestNAT_New_OrchestratorBehavior(t *testing.T) {
 	// Save and restore original environment variable
 	originalEnv := os.Getenv("DEVNET_ENV_URL")
 	defer func() {
@@ -375,181 +377,137 @@ gates:
 		return validatorConfigFile
 	}
 
+	// Helper function to create a devnet file with given name
+	createDevnetFile := func(t *testing.T, networkName string) string {
+		tempDir := t.TempDir()
+		devnetFile := tempDir + "/devnet.json"
+		devnetContent := fmt.Sprintf(`{
+			"name": "%s",
+			"l1": {
+				"name": "test-l1",
+				"id": "1", 
+				"nodes": [],
+				"addresses": {},
+				"wallets": {}
+			},
+			"l2": []
+		}`, networkName)
+		err := os.WriteFile(devnetFile, []byte(devnetContent), 0644)
+		require.NoError(t, err)
+		return devnetFile
+	}
+
 	// Helper function to create config
-	createConfig := func(t *testing.T, validatorConfigFile string) *Config {
+	createConfig := func(t *testing.T, validatorConfigFile string, orchestrator flags.OrchestratorType, devnetURL string) *Config {
 		logger := log.New()
 		return &Config{
 			Log:             logger,
 			ValidatorConfig: validatorConfigFile,
 			TestDir:         t.TempDir(),
 			TargetGate:      "test-gate",
+			Orchestrator:    orchestrator,
+			DevnetEnvURL:    devnetURL,
 		}
 	}
 
-	t.Run("missing environment variable", func(t *testing.T) {
-		// Unset the environment variable
-		os.Unsetenv("DEVNET_ENV_URL")
-
+	t.Run("sysgo orchestrator", func(t *testing.T) {
 		validatorConfigFile := createValidatorConfig(t)
-		config := createConfig(t, validatorConfigFile)
-		ctx := context.Background()
 
-		// This should fail with a specific error about missing environment variable
-		_, err := New(ctx, config, "test-version", func(error) {})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "devnet environment URL not provided")
-		assert.Contains(t, err.Error(), "environment variable is required")
+		t.Run("succeeds without DEVNET_ENV_URL", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysgo, "")
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "in-memory", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
+
+		t.Run("ignores DEVNET_ENV_URL when set", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysgo, "/some/path/that/doesnt/exist.json")
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "in-memory", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
 	})
 
-	t.Run("non-existent file (absolute path)", func(t *testing.T) {
-		// Set environment variable to a non-existent file path
-		nonExistentFile := "/path/to/non/existent/file.json"
-		os.Setenv("DEVNET_ENV_URL", nonExistentFile)
-
+	t.Run("sysext orchestrator", func(t *testing.T) {
 		validatorConfigFile := createValidatorConfig(t)
-		config := createConfig(t, validatorConfigFile)
-		ctx := context.Background()
 
-		// This should fail with a specific error about failing to load devnet environment
-		_, err := New(ctx, config, "test-version", func(error) {})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to load devnet environment from")
-		assert.Contains(t, err.Error(), nonExistentFile)
+		t.Run("fails without devnet URL", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, "")
+			ctx := context.Background()
+
+			_, err := New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "devnet environment URL not provided")
+		})
+
+		t.Run("fails with non-existent file", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, "/path/to/non/existent/file.json")
+			ctx := context.Background()
+
+			_, err := New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		})
+
+		t.Run("fails with invalid devnet file", func(t *testing.T) {
+			tempDir := t.TempDir()
+			invalidFile := tempDir + "/invalid-devnet.json"
+			err := os.WriteFile(invalidFile, []byte("invalid json content"), 0644)
+			require.NoError(t, err)
+
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, invalidFile)
+			ctx := context.Background()
+
+			_, err = New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		})
+
+		t.Run("succeeds with valid devnet file", func(t *testing.T) {
+			devnetFile := createDevnetFile(t, "test-network")
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, devnetFile)
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "test-network", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
+
+		t.Run("handles different network names correctly", func(t *testing.T) {
+			networkNames := []string{"env-network", "cli-network", "test-network"}
+			for _, networkName := range networkNames {
+				t.Run(networkName, func(t *testing.T) {
+					devnetFile := createDevnetFile(t, networkName)
+					config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, devnetFile)
+					ctx := context.Background()
+
+					nat, err := New(ctx, config, "test-version", func(error) {})
+					require.NoError(t, err)
+					require.NotNil(t, nat)
+					assert.Equal(t, networkName, nat.networkName)
+					_ = nat.Stop(ctx)
+				})
+			}
+		})
 	})
 
-	t.Run("non-existent file (relative path)", func(t *testing.T) {
-		// Set environment variable to a relative path that doesn't exist
-		nonExistentRelativeFile := "./does/not/exist.json"
-		os.Setenv("DEVNET_ENV_URL", nonExistentRelativeFile)
-
+	t.Run("invalid orchestrator type", func(t *testing.T) {
 		validatorConfigFile := createValidatorConfig(t)
-		config := createConfig(t, validatorConfigFile)
+		config := createConfig(t, validatorConfigFile, flags.OrchestratorType("invalid-orchestrator"), "")
 		ctx := context.Background()
 
-		// This should fail with a specific error about failing to load devnet environment
 		_, err := New(ctx, config, "test-version", func(error) {})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to load devnet environment from")
-		assert.Contains(t, err.Error(), nonExistentRelativeFile)
+		assert.Contains(t, err.Error(), "invalid orchestrator: invalid-orchestrator")
 	})
-}
-
-// TestNAT_New_FastFailOnInvalidDevnetFile tests that New fails when devnet file is invalid
-func TestNAT_New_FastFailOnInvalidDevnetFile(t *testing.T) {
-	// Save and restore original environment variable
-	originalEnv := os.Getenv("DEVNET_ENV_URL")
-	defer func() {
-		if originalEnv != "" {
-			os.Setenv("DEVNET_ENV_URL", originalEnv)
-		} else {
-			os.Unsetenv("DEVNET_ENV_URL")
-		}
-	}()
-
-	// Create a temporary invalid devnet file
-	tempDir := t.TempDir()
-	invalidFile := tempDir + "/invalid-devnet.json"
-	err := os.WriteFile(invalidFile, []byte("invalid json content"), 0644)
-	require.NoError(t, err)
-
-	// Set environment variable to the invalid file
-	os.Setenv("DEVNET_ENV_URL", invalidFile)
-
-	// Create a valid validator config file
-	validatorConfigDir := t.TempDir()
-	validatorConfigFile := validatorConfigDir + "/validators.yaml"
-	validatorConfig := `
-gates:
-  - id: test-gate
-    description: "Test gate"
-    tests:
-      - name: TestExample
-        package: "./example"
-`
-	err = os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	logger := log.New()
-
-	config := &Config{
-		Log:             logger,
-		ValidatorConfig: validatorConfigFile,
-		TestDir:         t.TempDir(),
-		TargetGate:      "test-gate",
-	}
-
-	// This should fail with a specific error about failing to load devnet environment
-	_, err = New(ctx, config, "test-version", func(error) {})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to load devnet environment from")
-	assert.Contains(t, err.Error(), invalidFile)
-}
-
-// TestNAT_New_SucceedsWithValidDevnetFile tests that New succeeds when devnet file is valid
-func TestNAT_New_SucceedsWithValidDevnetFile(t *testing.T) {
-	// Save and restore original environment variable
-	originalEnv := os.Getenv("DEVNET_ENV_URL")
-	defer func() {
-		if originalEnv != "" {
-			os.Setenv("DEVNET_ENV_URL", originalEnv)
-		} else {
-			os.Unsetenv("DEVNET_ENV_URL")
-		}
-	}()
-
-	// Create a temporary valid devnet file
-	tempDir := t.TempDir()
-	validFile := tempDir + "/valid-devnet.json"
-	validContent := `{
-		"name": "test-network",
-		"l1": {
-			"name": "test-l1",
-			"id": "1",
-			"nodes": [],
-			"addresses": {},
-			"wallets": {}
-		},
-		"l2": []
-	}`
-	err := os.WriteFile(validFile, []byte(validContent), 0644)
-	require.NoError(t, err)
-
-	// Set environment variable to the valid file
-	os.Setenv("DEVNET_ENV_URL", validFile)
-
-	// Create a valid validator config file
-	validatorConfigDir := t.TempDir()
-	validatorConfigFile := validatorConfigDir + "/validators.yaml"
-	validatorConfig := `
-gates:
-  - id: test-gate
-    description: "Test gate"
-    tests:
-      - name: TestExample
-        package: "./example"
-`
-	err = os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	logger := log.New()
-
-	config := &Config{
-		Log:             logger,
-		ValidatorConfig: validatorConfigFile,
-		TestDir:         t.TempDir(),
-		TargetGate:      "test-gate",
-	}
-
-	// This should succeed
-	nat, err := New(ctx, config, "test-version", func(error) {})
-	require.NoError(t, err)
-	require.NotNil(t, nat)
-
-	// Check the network name
-	assert.Equal(t, "test-network", nat.networkName)
-
-	// Clean up
-	_ = nat.Stop(ctx)
 }
