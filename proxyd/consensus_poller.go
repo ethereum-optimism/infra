@@ -738,7 +738,9 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 		return healthyPrimaries
 	}
 
-	return cp.FilterCandidates(cp.backendGroup.Fallbacks())
+	healthyFallbacks := cp.FilterCandidates(cp.backendGroup.Fallbacks())
+	RecordHealthyFallbackCandidates(cp.backendGroup, len(healthyFallbacks))
+	return healthyFallbacks
 }
 
 // filterCandidates find out what backends are the candidates to be in the consensus group
