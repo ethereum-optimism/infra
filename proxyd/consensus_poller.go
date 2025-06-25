@@ -732,14 +732,15 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, peerCount uint64, inSync
 func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 
 	healthyPrimaries := cp.FilterCandidates(cp.backendGroup.Primaries())
-
 	RecordHealthyCandidates(cp.backendGroup, len(healthyPrimaries))
+
+	healthyFallbacks := cp.FilterCandidates(cp.backendGroup.Fallbacks())
+	RecordHealthyFallbackCandidates(cp.backendGroup, len(healthyFallbacks))
+
 	if len(healthyPrimaries) > 0 {
 		return healthyPrimaries
 	}
 
-	healthyFallbacks := cp.FilterCandidates(cp.backendGroup.Fallbacks())
-	RecordHealthyFallbackCandidates(cp.backendGroup, len(healthyFallbacks))
 	return healthyFallbacks
 }
 
