@@ -168,3 +168,50 @@ func IsBatch(raw []byte) bool {
 	}
 	return false
 }
+
+// IsPendingRequest returns true if req requests information available at the latest flashblock.
+func IsPendingRequest(req *RPCReq) bool {
+	var params []any
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return false
+	}
+
+	switch req.Method {
+	case "eth_getTransactionReceipt":
+		// When flashblocks-aware routing is enabled, any transaction receipt retrieval could be for a pending block.
+		return true
+
+	case "eth_getBlockByNumber":
+		if len(params) != 2 {
+			break
+		}
+
+		blockNumber, ok := params[0].(string)
+		if !ok {
+			break
+		}
+
+		var detailFlag bool
+		switch flag := params[1].(type) {
+		case string:
+			detailFlag = flag == "true"
+		case bool:
+			detailFlag = flag
+		}
+		return blockNumber == "pending" && detailFlag
+
+	case "eth_getBalance", "eth_getTransactionCount":
+		if len(params) != 2 {
+			break
+		}
+
+		blockNumber, ok := params[1].(string)
+		if !ok {
+			break
+		}
+		return blockNumber == "pending"
+	}
+
+	// Either the method is not flashblocks-compatible or the method's parameters do not request information at the latest flashblock.
+	return false
+}
