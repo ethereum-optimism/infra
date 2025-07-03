@@ -1,0 +1,29 @@
+flashblocks_aware_backend_group = "flashblocks"
+
+[server]
+rpc_port = 8545
+enable_flashblocks_aware_routing = true
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+
+[backends.flashblocks_aware]
+rpc_url = "$FLASHBLOCKS_AWARE_BACKEND_RPC_URL"
+
+[backend_groups]
+[backend_groups.main]
+backends = ["good"]
+
+[backend_groups.flashblocks]
+backends = ["flashblocks_aware"]
+
+[rpc_method_mappings]
+eth_chainId = "main"
+eth_getTransactionCount = "main"
+eth_getTransactionReceipt = "main"
+eth_getBlockByNumber = "main"
+eth_getBalance = "main"

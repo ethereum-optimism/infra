@@ -58,34 +58,36 @@ const (
 var emptyArrayResponse = json.RawMessage("[]")
 
 type Server struct {
-	BackendGroups           map[string]*BackendGroup
-	wsBackendGroup          *BackendGroup
-	wsMethodWhitelist       *StringSet
-	rpcMethodMappings       map[string]string
-	maxBodySize             int64
-	enableRequestLog        bool
-	maxRequestBodyLogLen    int
-	authenticatedPaths      map[string]string
-	timeout                 time.Duration
-	maxUpstreamBatchSize    int
-	maxBatchSize            int
-	enableServedByHeader    bool
-	upgrader                *websocket.Upgrader
-	mainLim                 FrontendRateLimiter
-	overrideLims            map[string]FrontendRateLimiter
-	senderLim               FrontendRateLimiter
-	interopSenderLim        FrontendRateLimiter
-	allowedChainIds         []*big.Int
-	limExemptOrigins        []*regexp.Regexp
-	limExemptUserAgents     []*regexp.Regexp
-	globallyLimitedMethods  map[string]bool
-	rpcServer               *http.Server
-	wsServer                *http.Server
-	cache                   RPCCache
-	srvMu                   sync.Mutex
-	rateLimitHeader         string
-	interopValidatingConfig InteropValidationConfig
-	interopStrategy         InteropStrategy
+	BackendGroups                 map[string]*BackendGroup
+	wsBackendGroup                *BackendGroup
+	enableFlashblocksAwareRouting bool
+	flashblocksAwareBackendGroup  *BackendGroup
+	wsMethodWhitelist             *StringSet
+	rpcMethodMappings             map[string]string
+	maxBodySize                   int64
+	enableRequestLog              bool
+	maxRequestBodyLogLen          int
+	authenticatedPaths            map[string]string
+	timeout                       time.Duration
+	maxUpstreamBatchSize          int
+	maxBatchSize                  int
+	enableServedByHeader          bool
+	upgrader                      *websocket.Upgrader
+	mainLim                       FrontendRateLimiter
+	overrideLims                  map[string]FrontendRateLimiter
+	senderLim                     FrontendRateLimiter
+	interopSenderLim              FrontendRateLimiter
+	allowedChainIds               []*big.Int
+	limExemptOrigins              []*regexp.Regexp
+	limExemptUserAgents           []*regexp.Regexp
+	globallyLimitedMethods        map[string]bool
+	rpcServer                     *http.Server
+	wsServer                      *http.Server
+	cache                         RPCCache
+	srvMu                         sync.Mutex
+	rateLimitHeader               string
+	interopValidatingConfig       InteropValidationConfig
+	interopStrategy               InteropStrategy
 }
 
 type limiterFunc func(method string) bool
@@ -112,6 +114,8 @@ func NewServer(
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
+	enableFlashblocksAwareRouting bool,
+	flashblocksAwareBackendGroup *BackendGroup,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -201,17 +205,19 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                 mainLim,
-		overrideLims:            overrideLims,
-		globallyLimitedMethods:  globalMethodLims,
-		senderLim:               senderLim,
-		interopSenderLim:        interopSenderLim,
-		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:        limExemptOrigins,
-		limExemptUserAgents:     limExemptUserAgents,
-		rateLimitHeader:         rateLimitHeader,
-		interopValidatingConfig: interopValidatingConfig,
-		interopStrategy:         interopStrategy,
+		mainLim:                       mainLim,
+		overrideLims:                  overrideLims,
+		globallyLimitedMethods:        globalMethodLims,
+		senderLim:                     senderLim,
+		interopSenderLim:              interopSenderLim,
+		allowedChainIds:               senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:              limExemptOrigins,
+		limExemptUserAgents:           limExemptUserAgents,
+		rateLimitHeader:               rateLimitHeader,
+		interopValidatingConfig:       interopValidatingConfig,
+		interopStrategy:               interopStrategy,
+		enableFlashblocksAwareRouting: enableFlashblocksAwareRouting,
+		flashblocksAwareBackendGroup:  flashblocksAwareBackendGroup,
 	}, nil
 }
 
@@ -536,6 +542,10 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		}
 
 		group := s.rpcMethodMappings[parsedReq.Method]
+		if s.enableFlashblocksAwareRouting && IsPendingRequest(parsedReq) {
+			group = s.flashblocksAwareBackendGroup.Name
+		}
+
 		if group == "" {
 			// use unknown below to prevent DOS vector that fills up memory
 			// with arbitrary method names.

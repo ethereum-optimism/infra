@@ -311,6 +311,18 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("a ws port was defined, but no ws group was defined")
 	}
 
+	var flashblocksAwareBackendGroup *BackendGroup
+	if config.FlashblocksAwareBackendGroup != "" {
+		flashblocksAwareBackendGroup = backendGroups[config.FlashblocksAwareBackendGroup]
+		if flashblocksAwareBackendGroup == nil {
+			return nil, nil, fmt.Errorf("flashblocks-aware backend group %s does not exist", config.FlashblocksAwareBackendGroup)
+		}
+	}
+
+	if flashblocksAwareBackendGroup == nil && config.Server.EnableFlashblocksAwareRouting {
+		return nil, nil, errors.New("flashblocks-aware routing is enabled, but no flashblock-aware group was defined")
+	}
+
 	for _, bg := range config.RPCMethodMappings {
 		if backendGroups[bg] == nil {
 			return nil, nil, fmt.Errorf("undefined backend group %s", bg)
@@ -417,6 +429,8 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
+		config.Server.EnableFlashblocksAwareRouting,
+		flashblocksAwareBackendGroup,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
