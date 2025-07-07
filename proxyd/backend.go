@@ -125,6 +125,12 @@ var (
 		HTTPErrorCode: 499,
 	}
 
+	ErrTooManyRequests = &RPCErr{
+		Code:          JSONRPCErrorInternal - 24,
+		Message:       "too many requests",
+		HTTPErrorCode: 429,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
