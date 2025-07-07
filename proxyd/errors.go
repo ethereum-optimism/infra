@@ -8,5 +8,5 @@ import (
 var ErrTooManyRequests = errors.New("too many requests")
 
 func wrapErr(err error, msg string) error {
-	return fmt.Errorf("%s\n%w", msg, err)
+	return fmt.Errorf("%s %w", msg, err)
 }
