@@ -121,7 +121,7 @@ var (
 
 	ErrContextCanceled = &RPCErr{
 		Code:          JSONRPCErrorInternal - 23,
-		Message:       "client disconnected",
+		Message:       context.Canceled.Error(),
 		HTTPErrorCode: 499,
 	}
 
@@ -765,8 +765,8 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 			b.intermittentErrorsSlidingWindow.Incr()
 			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		}
-		if errors.Is(err, context.Canceled) {
-			return nil, ErrContextCanceled
+		if errors.Is(err, ErrContextCanceled) {
+			return nil, err
 		}
 		return nil, wrapErr(err, "error in backend request")
 	}
@@ -1514,8 +1514,11 @@ func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error)
 	}
 
 	if err := c.sem.Acquire(req.Context(), 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, ErrContextCanceled
+		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
-		return nil, wrapErr(err, "too many requests")
+		return nil, ErrTooManyRequests
 	}
 	defer c.sem.Release(1)
 	return c.Do(req)
@@ -1598,14 +1601,15 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			// mark this request as unserviceable (unserviceable requests
 			// indicate a problem with our backends, but there is nothing
 			// wrong with our backends for these errors)
-
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
 				// context canceled happens when either the client cancels the request
 				// or proxyd cancels the request. Proxyd only cancels requests when
 				// the server is shutting down, so this must be the client cancelling
 				// the request.
-				errors.Is(err, context.Canceled) {
+				// We catch this error here so that we don't mark this request as
+				// unserviceable
+				errors.Is(err, ErrContextCanceled) {
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
 					ServedBy: "",
@@ -1625,25 +1629,10 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 					error:    err,
 				}
 			}
-			// context canceled happens when either the client cancels the request
-			// or proxyd cancels the request. Proxyd only cancels requests when
-			// the server is shutting down, so this must be the client cancelling
-			// the request.
-			//
-			// We catch this error here so that we don't mark this request as
-			// unserviceable
-			if errors.Is(err, ErrContextCanceled) {
-				return &BackendGroupRPCResponse{
-					RPCRes:   nil,
-					ServedBy: "",
-					error:    err,
-				}
-			}
 
 			// below are errors that do indicate a problem with our backends
 			// and if these errors are encountered for all backends, we will
 			// mark this request as unserviceable
-
 			if errors.Is(err, ErrBackendOffline) {
 				log.Warn(
 					"skipping offline backend",

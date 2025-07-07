@@ -82,7 +82,7 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 			defer resp.Body.Close()
 		}
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "context deadline exceeded")
+		require.Contains(t, err.Error(), "too many requests")
 		require.Nil(t, resp)
 	})
 }
