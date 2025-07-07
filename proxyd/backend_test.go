@@ -97,7 +97,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 			return
 		case <-time.After(100 * time.Millisecond):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1","id":1}`))
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1","id":1}`))
 		}
 	}))
 	defer backendServer.Close()
