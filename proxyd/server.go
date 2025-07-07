@@ -411,12 +411,12 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 
 // reqSizeLimitCheck is a function which helps define, check and limit the size of the incoming request beyond the "max_body_size_bytes" setting.
 // Rest, if you would like this kind of check to happen at the inception of the request (before the request is parsed into RPCReq), it's better to use the "max_body_size_bytes"
-func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
+func reqSizeLimitCheck(ctx context.Context, tx *types.Transaction, maxSize int) error {
 	if maxSize <= 0 {
 		return nil
 	}
 
-	reqBytes, err := json.Marshal(rpcReq)
+	reqBytes, err := tx.MarshalJSON()
 	if err != nil {
 		log.Error("error marshalling RPC request", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal
@@ -435,19 +435,13 @@ func reqSizeLimitCheck(ctx context.Context, rpcReq *RPCReq, maxSize int) error {
 	return nil
 }
 
-func checkInteropAndReturnAccessList(ctx context.Context, rpcReq *RPCReq) ([]common.Hash, bool, error) {
-	tx, err := convertSendReqToSendTx(ctx, rpcReq)
-	if err != nil {
-		return nil, false, err
-	}
-
+func checkInteropAndReturnAccessList(ctx context.Context, tx *types.Transaction) ([]common.Hash, bool, error) {
 	interopAccessList := interoptypes.TxToInteropAccessList(tx)
 	if len(interopAccessList) == 0 {
 		log.Debug(
 			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
 			"source", "rpc",
 			"req_id", GetReqID(ctx),
-			"method", "eth_sendRawTransaction",
 		)
 		return nil, false, nil
 	}
@@ -455,16 +449,8 @@ func checkInteropAndReturnAccessList(ctx context.Context, rpcReq *RPCReq) ([]com
 	return interopAccessList, true, nil
 }
 
-func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCReq) error {
-	log.Info(
-		"validating interop access list",
-		"source", "rpc",
-		"req_id", GetReqID(ctx),
-		"method", rpcReq.Method,
-		"strategy", s.interopValidatingConfig.Strategy,
-	)
-
-	interopAccessList, isInterop, err := checkInteropAndReturnAccessList(ctx, rpcReq)
+func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Transaction) error {
+	interopAccessList, isInterop, err := checkInteropAndReturnAccessList(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -472,19 +458,26 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, rpcReq *RPCR
 		return nil
 	}
 	// at this point, we know it's an interop transaction worthy of being validated
-	if err := s.rateLimitInteropSender(ctx, rpcReq); err != nil {
+	log.Info(
+		"validating interop access list",
+		"source", "rpc",
+		"req_id", GetReqID(ctx),
+		"strategy", s.interopValidatingConfig.Strategy,
+		"tx_hash", tx.Hash(),
+	)
+	if err := s.rateLimitInteropSender(ctx, tx); err != nil {
 		return err
 	}
-	if err := reqSizeLimitCheck(ctx, rpcReq, s.interopValidatingConfig.ReqSizeLimit); err != nil {
+	if err := reqSizeLimitCheck(ctx, tx, s.interopValidatingConfig.ReqSizeLimit); err != nil {
 		return err
 	}
 
 	finalErr := s.interopStrategy.ValidateAccessList(ctx, interopAccessList)
 
 	if finalErr == nil {
-		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "method", rpcReq.Method)
+		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
 	} else {
-		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "method", rpcReq.Method, "error", finalErr)
+		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "tx_hash", tx.Hash(), "error", finalErr)
 	}
 	return finalErr
 }
@@ -579,13 +572,19 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
-		if parsedReq.Method == "eth_sendRawTransaction" {
-			if err := s.rateLimitSender(ctx, parsedReq); err != nil {
+		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" {
+			tx, err := convertSendReqToSendTx(ctx, parsedReq)
+			if err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-			if err := s.validateInteropSendRpcRequest(ctx, parsedReq); err != nil {
+			if err := s.rateLimitSender(ctx, tx); err != nil {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
+			}
+			if err := s.validateInteropSendRpcRequest(ctx, tx); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
@@ -784,25 +783,31 @@ func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
 }
 
+// convertSendReqToSendTx converts a sendRawTransaction or sendRawTransactionConditional rpc to a transaction.
 func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transaction, error) {
-	if req.Method != "eth_sendRawTransaction" {
-		return nil, ErrInvalidRequest("expected method eth_sendRawTransaction, got " + req.Method)
-	}
-
-	var params []string
+	var params []any
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
 		return nil, ErrParseErr
 	}
 
-	if len(params) != 1 {
+	if req.Method == "eth_sendRawTransaction" && len(params) != 1 {
 		log.Debug("raw transaction request has invalid number of params", "req_id", GetReqID(ctx))
 		// The error below is identical to the one Geth responds with.
 		return nil, ErrInvalidParams("missing value for required argument 0")
+	} else if req.Method == "eth_sendRawTransactionConditional" && len(params) != 2 {
+		log.Debug("raw transaction conditional request has invalid number of params", "req_id", GetReqID(ctx))
+		// The error below is identical to the one Geth responds with.
+		return nil, ErrInvalidParams("missing value for required argument 0 or 1")
+	}
+
+	address, ok := params[0].(string)
+	if !ok {
+		return nil, ErrParseErr
 	}
 
 	var data hexutil.Bytes
-	if err := data.UnmarshalText([]byte(params[0])); err != nil {
+	if err := data.UnmarshalText([]byte(address)); err != nil {
 		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
 		// Geth returns the raw error from UnmarshalText.
 		return nil, ErrInvalidParams(err.Error())
@@ -818,11 +823,7 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 	return tx, nil
 }
 
-func (s *Server) genericRateLimitSender(ctx context.Context, req *RPCReq, lim FrontendRateLimiter) error {
-	tx, err := convertSendReqToSendTx(ctx, req)
-	if err != nil {
-		return err
-	}
+func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transaction, lim FrontendRateLimiter) error {
 	// Check if the transaction is for the expected chain,
 	// otherwise reject before rate limiting to avoid replay attacks.
 	if !s.isAllowedChainId(tx.ChainId()) {
@@ -849,12 +850,12 @@ func (s *Server) genericRateLimitSender(ctx context.Context, req *RPCReq, lim Fr
 	return nil
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, req *RPCReq) error {
+func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction) error {
 	if s.senderLim == nil {
 		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
 		return nil
 	}
-	return s.genericRateLimitSender(ctx, req, s.senderLim)
+	return s.genericRateLimitSender(ctx, tx, s.senderLim)
 }
 
 func (s *Server) isAllowedChainId(chainId *big.Int) bool {
