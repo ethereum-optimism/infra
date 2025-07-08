@@ -594,6 +594,11 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 			)
 		case ErrContextCanceled:
 			// return immediately on client cancellation
+			log.Debug("context canceled while forwarding request",
+				"name", b.Name,
+				"req_id", GetReqID(ctx),
+				"err", err,
+			)
 			return nil, err
 		default:
 			lastError = err
@@ -1518,7 +1523,7 @@ func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error)
 			return nil, ErrContextCanceled
 		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
-		return nil, ErrTooManyRequests
+		return nil, wrapErr(err, ErrTooManyRequests.Message)
 	}
 	defer c.sem.Release(1)
 	return c.Do(req)
