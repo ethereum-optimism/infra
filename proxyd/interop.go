@@ -8,6 +8,7 @@ import (
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -55,10 +56,10 @@ func getInteropExecutingDescriptorTimestamp() uint64 {
 	return uint64(time.Now().Unix() + 1000)
 }
 
-func (s *Server) rateLimitInteropSender(ctx context.Context, req *RPCReq) error {
+func (s *Server) rateLimitInteropSender(ctx context.Context, tx *types.Transaction) error {
 	if s.interopSenderLim == nil {
 		log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
 		return nil
 	}
-	return s.genericRateLimitSender(ctx, req, s.interopSenderLim)
+	return s.genericRateLimitSender(ctx, tx, s.interopSenderLim)
 }
