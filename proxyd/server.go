@@ -457,6 +457,13 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 	if !isInterop {
 		return nil
 	}
+	if s.interopValidatingConfig.ForceDisableInteropValidation {
+		return &RPCErr{
+			Code:          JSONRPCErrorInvalidRequest,
+			Message:       "interop transactions are not allowed",
+			HTTPErrorCode: 403,
+		}
+	}
 	// at this point, we know it's an interop transaction worthy of being validated
 	log.Info(
 		"validating interop access list",
@@ -589,7 +596,6 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-
 		}
 
 		id := string(parsedReq.ID)
