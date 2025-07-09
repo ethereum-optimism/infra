@@ -21,8 +21,8 @@ eth_baz = "main"
 [rate_limit]
 base_rate = 2
 base_interval = "1s"
-exempt_origins = ["exempt_origin"]
-exempt_user_agents = ["exempt_agent"]
+exempt_origins = ["origin.example"]
+exempt_user_agents = ["exempt_.*"]
 error_message = "over rate limit with special message"
 
 [rate_limit.method_overrides.eth_foobar]
