@@ -23,7 +23,7 @@ services:
       retries: 10
 
   faucet:
-    image: opsigma/op-faucet:0.0.0 # TODO: is there a better docker image?
+    image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-faucet:366b8cfd7cf003b0f13e4ac77cf9515bf92e4a62
     ports:
       - "8546:8546"
     command: op-faucet --config config.yaml --rpc.addr 0.0.0.0 --rpc.port 8546
