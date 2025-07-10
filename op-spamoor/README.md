@@ -11,15 +11,4 @@ op-spamoor is a wrapper around [spamoor-daemon](https://github.com/ethpandaops/s
 
 All command line arguments are passed to the `spamoor-daemon`.
 
-Example (assumes the EL endpoint and faucet are available on the stated endpoints):
-
-```bash
-docker build -t op-spamoor .
-docker run \
-  -e "ETH_RPC_URL=http://host.docker.internal:8545" \
-  -e "FAUCET_URL=http://host.docker.internal:8546" \
-  -p 8080:8080 \
-  -p 8545:8545 \
-  -p 8546:8546 \
-  op-spamoor --rpchost http://host.docker.internal:8545
-```
+To try it out, run `docker compose up` and point your browser at [http://localhost:8080](http://localhost:8080).

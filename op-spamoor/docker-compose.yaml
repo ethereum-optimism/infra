@@ -1,0 +1,36 @@
+services:
+  op-spamoor:
+    build: .
+    environment:
+      ETH_RPC_URL: "http://anvil:8545"
+      FAUCET_URL: "http://faucet:8546/chain/31337"
+    ports:
+      - "8080:8080"
+    command: --rpchost "http://anvil:8545"
+    depends_on:
+      anvil:
+        condition: service_healthy
+      faucet:
+        condition: service_healthy
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:v1.2.3
+    entrypoint: anvil --host 0.0.0.0 --block-time 2
+    healthcheck:
+      test: ["CMD", "cast", "block-number"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+  faucet:
+    image: opsigma/op-faucet:0.0.0 # TODO: is there a better docker image?
+    ports:
+      - "8546:8546"
+    command: op-faucet --config config.yaml --rpc.addr 0.0.0.0 --rpc.port 8546
+    volumes:
+      - ./config.yaml:/config.yaml
+    depends_on:
+      anvil:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sleep", "3s"] # Not the best way to do this, but it works.

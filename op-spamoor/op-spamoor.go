@@ -22,7 +22,7 @@ var bigZero = new(big.Int)
 type Config struct {
 	EthRpcUrl     string
 	FaucetUrl     string
-	MinBalance    *big.Int
+	MinBalance    eth.ETH
 	DaemonBinPath string
 }
 
@@ -37,7 +37,7 @@ func loadConfig() (*Config, error) {
 	config := &Config{
 		EthRpcUrl:     "http://localhost:8545",
 		FaucetUrl:     "http://localhost:8546",
-		MinBalance:    eth.OneEther.ToBig(),
+		MinBalance:    eth.OneEther,
 		DaemonBinPath: "./spamoor-daemon",
 	}
 
@@ -57,7 +57,7 @@ func loadConfig() (*Config, error) {
 		if minBalance.Cmp(bigZero) == -1 {
 			return nil, fmt.Errorf("min balance must be positive: %s", minBalanceStr)
 		}
-		config.MinBalance = minBalance
+		config.MinBalance = eth.WeiBig(minBalance)
 	}
 
 	if daemonBinPath, exists := os.LookupEnv("DAEMON_BIN_PATH"); exists {
@@ -76,7 +76,9 @@ func run() error {
 		return err
 	}
 
-	key := devkeys.UserKey(0)
+	// Acceptance tests tend to use keys with small indices. To avoid spending from an account also
+	// used by a test, use a large index.
+	key := devkeys.UserKey(12345)
 	hd, err := devkeys.NewMnemonicDevKeys(devkeys.TestMnemonic)
 	if err != nil {
 		return fmt.Errorf("new mnemonic: %v", err)
@@ -94,19 +96,20 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("dial EL: %v", err)
 	}
-	balance, err := client.BalanceAt(ctx, address, nil)
+	balanceBig, err := client.BalanceAt(ctx, address, nil)
 	if err != nil {
 		return fmt.Errorf("get balance: %v", err)
 	}
+	balance := eth.WeiBig(balanceBig)
 
-	if balance.Cmp(config.MinBalance) < 0 {
+	if balance.Lt(config.MinBalance) {
 		// Request funds from faucet.
 		client, err := rpc.DialContext(ctx, config.FaucetUrl)
 		if err != nil {
 			return fmt.Errorf("dial faucet: %v", err)
 		}
-		amount := new(big.Int).Sub(config.MinBalance, balance)
-		if err := client.CallContext(ctx, nil, "faucet_requestETH", address, amount); err != nil {
+		missing := config.MinBalance.Sub(balance)
+		if err := client.CallContext(ctx, nil, "faucet_requestETH", address, missing); err != nil {
 			return fmt.Errorf("request ETH from faucet: %v", err)
 		}
 	}
