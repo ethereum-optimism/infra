@@ -6,7 +6,7 @@ COPY . .
 
 RUN go build -o /op-spamoor .
 
-FROM ethpandaops/spamoor:latest
+FROM joshklop0/spamoor:latest
 
 COPY --from=builder /op-spamoor .
 

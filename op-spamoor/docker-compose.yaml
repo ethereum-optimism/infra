@@ -15,7 +15,7 @@ services:
 
   anvil:
     image: ghcr.io/foundry-rs/foundry:v1.2.3
-    entrypoint: anvil --host 0.0.0.0 --block-time 2
+    entrypoint: anvil --optimism --host 0.0.0.0 --block-time 2
     healthcheck:
       test: ["CMD", "cast", "block-number"]
       interval: 1s
