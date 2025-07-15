@@ -635,8 +635,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		if authorization == "" || s.authenticatedPaths[authorization] == "" {
 			// If public access is enabled, allow unauthenticated requests
 			if s.publicAccess {
-				log.Debug("allowing unauthenticated request due to public_access enabled")
-				ctx = context.WithValue(ctx, ContextKeyAuth, "public") // nolint:staticcheck
+				log.Info("allowing unauthenticated request due to public_access enabled")
 			} else {
 				log.Info("blocked unauthorized request", "authorization", authorization)
 				httpResponseCodesTotal.WithLabelValues("401").Inc()
