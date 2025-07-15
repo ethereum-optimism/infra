@@ -632,16 +632,22 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	if len(s.authenticatedPaths) > 0 {
-		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			// If public access is enabled, allow unauthenticated requests
+		if authorization == "" {
+			// No API key provided - allow if public access is enabled
 			if s.publicAccess {
-				log.Info("allowing unauthenticated request due to public_access enabled")
+				log.Debug("allowing unauthenticated request due to public_access enabled")
 			} else {
 				log.Info("blocked unauthorized request", "authorization", authorization)
 				httpResponseCodesTotal.WithLabelValues("401").Inc()
 				w.WriteHeader(401)
 				return nil
 			}
+		} else if s.authenticatedPaths[authorization] == "" {
+			// Invalid API key provided - always reject regardless of public_access
+			log.Info("blocked request with invalid API key", "authorization", authorization)
+			httpResponseCodesTotal.WithLabelValues("401").Inc()
+			w.WriteHeader(401)
+			return nil
 		} else {
 			// Valid authentication provided
 			ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
