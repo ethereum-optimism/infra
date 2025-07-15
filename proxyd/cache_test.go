@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 
@@ -127,6 +128,16 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			cachedRes, err := cache.GetRPC(ctx, rpc.req)
 			require.NoError(t, err)
 			require.Equal(t, rpc.res, cachedRes)
+
+			ctxWithHeaders := context.WithValue(ctx, ContextKeyHeadersToForward, http.Header{"header": []string{"A"}}) // nolint:staticcheck
+
+			err = cache.PutRPC(ctxWithHeaders, rpc.req, rpc.res)
+			require.NoError(t, err)
+
+			cachedRes, err = cache.GetRPC(ctxWithHeaders, rpc.req)
+			require.NoError(t, err)
+			require.Equal(t, rpc.res, cachedRes)
+
 		})
 	}
 }

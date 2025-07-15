@@ -740,6 +740,13 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, wrapErr(err, "error creating backend request")
 	}
 
+	headersToForward := GetHeadersToForward(ctx)
+	if len(headersToForward) != 0 {
+		for k, v := range headersToForward {
+			httpReq.Header[k] = v
+		}
+	}
+
 	if b.authPassword != "" {
 		httpReq.SetBasicAuth(b.authUsername, b.authPassword)
 	}

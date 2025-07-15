@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -330,6 +331,13 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
+	var allowedHeadersToForward []string
+	// normilize headers
+	for _, h := range config.AllowedHeadersToForward {
+		allowedHeadersToForward = append(allowedHeadersToForward, strings.ToLower(h))
+	}
+	headersForwarder := NewHeadersForwarder(allowedHeadersToForward)
+
 	var (
 		cache    Cache
 		rpcCache RPCCache
@@ -417,6 +425,7 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
+		headersForwarder,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
