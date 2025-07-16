@@ -419,9 +419,14 @@ func (b *TestTreeBuilder) calculateNodeStats(node *TestTreeNode) TestTreeStats {
 		case TestStatusError:
 			stats.Errored = 1
 		}
+		// For test nodes, set the node duration directly from the test result
+		if node.TestResult != nil {
+			node.Duration = node.TestResult.Duration
+		}
 	}
 
 	// Add stats from all children
+	var maxChildDuration time.Duration
 	for _, child := range node.Children {
 		childStats := b.calculateNodeStats(child)
 		stats.Total += childStats.Total
@@ -429,6 +434,19 @@ func (b *TestTreeBuilder) calculateNodeStats(node *TestTreeNode) TestTreeStats {
 		stats.Failed += childStats.Failed
 		stats.Skipped += childStats.Skipped
 		stats.Errored += childStats.Errored
+
+		// For container nodes (gate, package, etc.), use the sum of child durations
+		if node.isContainer() {
+			node.Duration += child.Duration
+		} else if child.Duration > maxChildDuration {
+			// For test nodes with subtests, use the max duration of children
+			maxChildDuration = child.Duration
+		}
+	}
+
+	// For test nodes with subtests, ensure we use at least the max subtest duration
+	if !node.isContainer() && maxChildDuration > node.Duration {
+		node.Duration = maxChildDuration
 	}
 
 	// Calculate pass rate
