@@ -225,6 +225,7 @@ type Config struct {
 	BackendGroups           BackendGroupsConfig     `toml:"backend_groups"`
 	RPCMethodMappings       map[string]string       `toml:"rpc_method_mappings"`
 	WSMethodWhitelist       []string                `toml:"ws_method_whitelist"`
+	AllowedHeadersToForward []string                `toml:"allowed_headers_to_forward"`
 	WhitelistErrorMessage   string                  `toml:"whitelist_error_message"`
 	SenderRateLimit         SenderRateLimitConfig   `toml:"sender_rate_limit"`
 	InteropValidationConfig InteropValidationConfig `toml:"interop_validation"`
