@@ -856,8 +856,7 @@ func isMainTestEvent(event TestEvent, mainTestName string) bool {
 }
 
 // processMainTestEvent handles events for the main test
-func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time,
-	errorMsg *strings.Builder, hasSkip *bool) {
+func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time, errorMsg *strings.Builder, hasSkip *bool) {
 	switch event.Action {
 	case ActionStart:
 		*testStart = event.Time
@@ -867,14 +866,19 @@ func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, 
 	case ActionFail:
 		*testEnd = event.Time
 		result.Status = types.TestStatusFail
+		// If we have an elapsed time from the event, use it as a fallback
+		if event.Elapsed > 0 && result.Duration == 0 {
+			result.Duration = time.Duration(event.Elapsed * float64(time.Second))
+		}
 	case ActionSkip:
 		*testEnd = event.Time
 		result.Status = types.TestStatusSkip
 		*hasSkip = true
 	case ActionOutput:
-		if event.Output != "" {
-			errorMsg.WriteString(event.Output)
+		if errorMsg.Len() > 0 {
+			errorMsg.WriteString("\n")
 		}
+		errorMsg.WriteString(event.Output)
 	}
 }
 
@@ -929,6 +933,11 @@ func calculateSubTestDuration(subTest *types.TestResult, event TestEvent, subTes
 		subTest.Duration = event.Time.Sub(startTime)
 	} else if event.Elapsed > 0 {
 		// Fallback to elapsed if provided
+		subTest.Duration = time.Duration(event.Elapsed * float64(time.Second))
+	}
+
+	// If we still don't have a duration and this is a failed test, try to use the elapsed time
+	if subTest.Duration == 0 && subTest.Status == types.TestStatusFail && event.Elapsed > 0 {
 		subTest.Duration = time.Duration(event.Elapsed * float64(time.Second))
 	}
 }
