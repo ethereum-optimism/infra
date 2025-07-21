@@ -63,16 +63,16 @@ var (
 	ValidatorConfig = &cli.StringFlag{
 		Name:     "validators",
 		Value:    "",
-		Required: true,
+		Required: false,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATORS"),
-		Usage:    "Path to validator config file (eg. 'validators.yaml')",
+		Usage:    "Path to validator config file (eg. 'validators.yaml'). Optional - if not provided, gateless mode will auto-discover tests in the test directory.",
 	}
 	Gate = &cli.StringFlag{
 		Name:     "gate",
 		Value:    "",
-		Required: true,
+		Required: false,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
-		Usage:    "Gate to run (eg. 'alphanet')",
+		Usage:    "Gate to run (eg. 'alphanet'). Optional - if not provided, gateless mode will run all discovered tests.",
 	}
 	GoBinary = &cli.StringFlag{
 		Name:    "go-binary",
@@ -97,6 +97,11 @@ var (
 		Value:   5 * time.Minute,
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "DEFAULT_TIMEOUT"),
 		Usage:   "Default timeout of an individual test (e.g. '30s', '5m', etc.). This setting is superseded by test or suite level timeout configuration. Set to '0' to disable any default timeout. Defaults to '5m'.",
+	}
+	Timeout = &cli.DurationFlag{
+		Name:    "timeout",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TIMEOUT"),
+		Usage:   "Timeout for all tests in gateless mode (e.g. '30s', '5m', etc.). If not specified, falls back to --default-timeout. Only applies in gateless mode.",
 	}
 	LogDir = &cli.StringFlag{
 		Name:    "logdir",
@@ -135,15 +140,16 @@ var (
 
 var requiredFlags = []cli.Flag{
 	TestDir,
-	ValidatorConfig,
-	Gate,
 }
 
 var optionalFlags = []cli.Flag{
+	ValidatorConfig,
+	Gate,
 	GoBinary,
 	RunInterval,
 	AllowSkips,
 	DefaultTimeout,
+	Timeout,
 	LogDir,
 	TestLogLevel,
 	OutputRealtimeLogs,
