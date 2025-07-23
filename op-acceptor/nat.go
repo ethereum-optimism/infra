@@ -65,6 +65,9 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Log:                 config.Log,
 		ValidatorConfigFile: config.ValidatorConfig,
 		DefaultTimeout:      config.DefaultTimeout,
+		Timeout:             config.Timeout,
+		GatelessMode:        config.GatelessMode,
+		TestDir:             config.TestDir,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry: %w", err)
@@ -105,11 +108,31 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	config.Log.Info("Using network name for metrics", "network", networkName)
 
 	// Create runner with registry
+	targetGate := config.TargetGate
+	if config.GatelessMode {
+		targetGate = "gateless"
+	}
+
+	// Set working directory for the runner
+	workDir := config.TestDir
+	if config.GatelessMode {
+		// For gateless mode, use the current working directory since package paths
+		// are discovered relative to it and should not be adjusted
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current working directory: %w", err)
+		}
+	} else if strings.HasSuffix(workDir, "/...") {
+		// For traditional mode with "..." notation, clean the suffix
+		workDir = strings.TrimSuffix(workDir, "/...")
+	}
+
 	testRunner, err := runner.NewTestRunner(runner.Config{
 		Registry:           reg,
-		WorkDir:            config.TestDir,
+		WorkDir:            workDir,
 		Log:                config.Log,
-		TargetGate:         config.TargetGate,
+		TargetGate:         targetGate,
 		GoBinary:           config.GoBinary,
 		AllowSkips:         config.AllowSkips,
 		OutputRealtimeLogs: config.OutputRealtimeLogs,

@@ -17,11 +17,13 @@ type Config struct {
 	TestDir            string
 	ValidatorConfig    string
 	TargetGate         string
+	GatelessMode       bool // New field to indicate gateless mode
 	GoBinary           string
 	RunInterval        time.Duration          // Interval between test runs
 	RunOnce            bool                   // Indicates if the service should exit after one test run
 	AllowSkips         bool                   // Allow tests to be skipped instead of failing when preconditions are not met
 	DefaultTimeout     time.Duration          // Default timeout for individual tests, can be overridden by test config
+	Timeout            time.Duration          // Timeout for gateless mode tests (if specified)
 	LogDir             string                 // Directory to store test logs
 	OutputRealtimeLogs bool                   // If enabled, test logs will be outputted in realtime
 	TestLogLevel       string                 // Log level to be used for the tests
@@ -39,13 +41,27 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	if testDir == "" {
 		return nil, errors.New("test directory is required")
 	}
-	if validatorConfig == "" {
-		return nil, errors.New("validator configuration file is required")
+
+	// Determine if we're in gateless mode
+	gatelessMode := validatorConfig == "" && gate == ""
+
+	// In gateless mode, we don't require validator config or gate
+	if !gatelessMode {
+		if validatorConfig == "" {
+			return nil, errors.New("validator configuration file is required when not in gateless mode")
+		}
+		if gate == "" {
+			return nil, errors.New("gate is required when not in gateless mode")
+		}
 	}
 
-	absValidatorConfig, err := filepath.Abs(validatorConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve absolute path for validator config '%s': %w", validatorConfig, err)
+	var absValidatorConfig string
+	if validatorConfig != "" {
+		var err error
+		absValidatorConfig, err = filepath.Abs(validatorConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve absolute path for validator config '%s': %w", validatorConfig, err)
+		}
 	}
 
 	runInterval := ctx.Duration(flags.RunInterval.Name)
@@ -82,11 +98,13 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		TestDir:            absTestDir,
 		ValidatorConfig:    absValidatorConfig,
 		TargetGate:         gate,
+		GatelessMode:       gatelessMode,
 		GoBinary:           ctx.String(flags.GoBinary.Name),
 		RunInterval:        runInterval,
 		RunOnce:            runOnce,
 		AllowSkips:         ctx.Bool(flags.AllowSkips.Name),
 		DefaultTimeout:     ctx.Duration(flags.DefaultTimeout.Name),
+		Timeout:            ctx.Duration(flags.Timeout.Name),
 		OutputRealtimeLogs: ctx.Bool(flags.OutputRealtimeLogs.Name),
 		TestLogLevel:       ctx.String(flags.TestLogLevel.Name),
 		Orchestrator:       orchestrator,
