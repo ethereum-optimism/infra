@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -503,18 +502,6 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
-	// Find the HTML sink by checking type
-	var htmlSink *reporting.ReportingHTMLSink
-	found := false
-	for _, sink := range logger.sinks {
-		if s, ok := sink.(*reporting.ReportingHTMLSink); ok {
-			htmlSink = s
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "ReportingHTMLSink should be available")
-
 	// Create a mix of test results
 	testResults := []*types.TestResult{
 		{
@@ -568,28 +555,40 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 		},
 	}
 
-	// Process all test results
+	// Process all test results through the logger
 	for _, result := range testResults {
-		err := htmlSink.Consume(result, runID)
+		err := logger.LogTestResult(result, runID)
 		require.NoError(t, err)
 	}
 
-	// Complete the report generation
-	err = htmlSink.Complete(runID)
+	// Complete the report generation using the logger
+	err = logger.Complete(runID)
 	require.NoError(t, err)
 
-	// Check that the HTML file was created
+	// Get the expected HTML file path
 	baseDir, err := logger.GetDirectoryForRunID(runID)
 	require.NoError(t, err)
 	htmlFile := filepath.Join(baseDir, HTMLResultsFilename)
 
-	// Ensure the file exists
-	_, err = os.Stat(htmlFile)
-	require.NoError(t, err, "HTML report file should exist")
+	// Wait for file to be created and have content with a retry pattern
+	var content []byte
+	require.Eventually(t, func() bool {
+		// Check if file exists
+		if _, err := os.Stat(htmlFile); err != nil {
+			return false
+		}
 
-	// Read the file content
-	content, err := os.ReadFile(htmlFile)
-	require.NoError(t, err)
+		// Read the file content
+		var readErr error
+		content, readErr = os.ReadFile(htmlFile)
+		if readErr != nil {
+			return false
+		}
+
+		// Check if content is not empty and contains the expected title
+		return len(content) > 0 && strings.Contains(string(content), "<title>Acceptance Test Results</title>")
+	}, 2*time.Second, 10*time.Millisecond, "HTML file should be created with valid content")
+
 	htmlContent := string(content)
 
 	// Verify the HTML content contains expected elements
