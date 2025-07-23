@@ -1,19 +1,95 @@
 # Network Acceptance Tester (op-acceptor)
+
 op-acceptor is a tool to run checks against a network to determine if it is ready for production. It helps ensure your network meets all necessary requirements before deployment.
 The checks it runs are standard Go tests.
+
+## Usage Modes
+
+### Gateless Mode
+
+For quick testing without configuration, op-acceptor can auto-discover and run all tests in a directory:
+
+```bash
+# Run all tests in a directory
+op-acceptor --testdir ./my-acceptance-tests
+
+# Run all tests recursively (supports Go's ... notation)
+op-acceptor --testdir ./my-acceptance-tests/...
+
+# With additional options
+op-acceptor --testdir ./my-tests \
+    --orchestrator sysgo \
+    --run-interval 0 \
+    --log.level info
+```
+
+In gateless mode:
+- **No validators config required**: Tests are auto-discovered
+- **No gate specification needed**: Creates a synthetic "gateless" gate
+- **Supports Go's ... notation**: Recursively finds all test packages
+- **Simple workflow**: Perfect for CI/CD or quick test runs
+
+#### Timeout Configuration
+
+Control test timeouts in gateless mode:
+
+```bash
+# Set a specific timeout for all tests (recommended)
+op-acceptor --testdir ./tests --timeout 10m
+
+# Use the default timeout fallback (5 minutes)
+op-acceptor --testdir ./tests --default-timeout 2m
+
+# Disable timeouts entirely
+op-acceptor --testdir ./tests --timeout 0
+```
+
+The `--timeout` flag applies to all auto-discovered tests in gateless mode. If not specified, it falls back to `--default-timeout` (default: 5m).
+
+### Gate-based Mode
+
+For structured testing with gates, suites, and inheritance, use the traditional approach:
+
+```bash
+# Run specific gate with validators config
+DEVNET_ENV_URL=kt://isthmus-devnet op-acceptor \
+    --testdir ../../optimism/ \
+    --gate isthmus \
+    --validators ../../optimism/op-acceptance-tests/acceptance-tests.yaml \
+    --log.level INFO
+```
 
 ## Concepts
 
 ### Test Discovery
-op-acceptor discovers tests. You simply need to provide a path to a directory containing your tests. op-acceptor will discover all tests within that directory and also those within any subdirectories.
+op-acceptor discovers tests by scanning for `*_test.go` files. In gateless mode, it automatically finds all directories containing test files. In gate-based mode, you specify tests in a validators configuration file.
 
 ### Test Grouping
 1. **Test** - An individual check that validates a specific aspect of your network
-2. **Suite** - A logical grouping of related tests
+2. **Suite** - A logical grouping of related tests (gate-based mode only)
 3. **Gate** - A high-level collection of suites and/or tests that represent a complete validation scenario
 
 ### Addons
 See [ADDONS.md](./ADDONS.md)
+
+## Migration from `go test`
+
+If you're currently running `go test some-dir/...`, you can easily switch to op-acceptor:
+
+```bash
+# Instead of:
+go test ./acceptance-tests/...
+
+# Use:
+op-acceptor --testdir ./acceptance-tests/...
+```
+
+Benefits of using op-acceptor over plain `go test`:
+- Rich HTML reporting and structured output
+- Metrics and monitoring integration
+- Test result aggregation and history
+- Standardized test execution environment
+- Integration with devstack orchestrators
 
 ## Contributing
 
