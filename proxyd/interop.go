@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
@@ -62,4 +63,11 @@ func (s *Server) rateLimitInteropSender(ctx context.Context, tx *types.Transacti
 		return nil
 	}
 	return s.genericRateLimitSender(ctx, tx, s.interopSenderLim)
+}
+
+func IsAutoStop(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), supervisorTypes.ErrFailsafeEnabled.Error())
 }
