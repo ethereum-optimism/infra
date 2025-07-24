@@ -75,24 +75,33 @@ func TestExitCodeBehavior(t *testing.T) {
 			expectedStatus: exitcodes.TestFailure,
 			defaultTimeout: 5 * time.Second,
 		},
-		// {
-		// 	// TODO: This fails in CI, but not locally.
-		// 	// Investigate if this is a bug in the runtime error handling,
-		// 	// or if it's an OS-specific issue.
-		// 	// https://github.com/ethereum-optimism/infra/issues/244
-		// 	name: "Runtime error should exit with code 2",
-		// 	setupFunc: func(t *testing.T, testDir string) (string, string, string) {
-		// 		gateID := "test-gate-passes"
-		// 		nonExistentDir := filepath.Join(testDir, "non-existent-dir")
-		// 		testName := "TestDoesNotExist"
+		{
+			name: "Runtime error should exit with code 2",
+			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
+				gateID := "test-gate-passes"
 
-		// 		// Create validator config that points to a non-existent directory
-		// 		validatorPath := createValidatorConfig(t, testDir, "dummy", testName, gateID, true)
+				// Create an invalid (malformed) validator config file to trigger runtime error
+				invalidValidatorPath := filepath.Join(testDir, "invalid-validators.yaml")
+				invalidConfig := `# Invalid YAML configuration
+gates:
+  - id: test-gate-passes
+    description: "Test gate"
+    suites:
+      test-suite:
+        description: "Test suite"
+        tests:
+          - name: TestDoesNotExist
+            package: ./tests/dummy
+            invalid_field: [ unclosed array
+`
+				err := os.WriteFile(invalidValidatorPath, []byte(invalidConfig), 0644)
+				require.NoError(t, err)
 
-		// 		return gateID, validatorPath, nonExistentDir
-		// 	},
-		// 	expectedStatus: exitcodes.RuntimeErr,
-		// },
+				return gateID, invalidValidatorPath, testDir
+			},
+			expectedStatus: exitcodes.RuntimeErr,
+			defaultTimeout: 5 * time.Second,
+		},
 		{
 			name: "Test with panic should exit with code 1",
 			setupFunc: func(t *testing.T, testDir string) (string, string, string) {
