@@ -202,6 +202,12 @@ func Start(config *Config) (*Server, func(), error) {
 		if cfg.StripTrailingXFF {
 			opts = append(opts, WithStrippedTrailingXFF())
 		}
+		if cfg.ResponseTimeoutMilliseconds != 0 {
+			opts = append(opts, WithTimeout(millisecondsToDuration(cfg.ResponseTimeoutMilliseconds)))
+		}
+		if cfg.MaxRetries != nil {
+			opts = append(opts, WithMaxRetries(*cfg.MaxRetries))
+		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
 		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
 		opts = append(opts, WithSafeBlockDriftThreshold(cfg.SafeBlockDriftThreshold))
