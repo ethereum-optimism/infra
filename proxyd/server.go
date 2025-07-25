@@ -641,7 +641,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				log.Error(
 					"error forwarding RPC batch",
 					"batch_size", len(elems),
-					"backend_group", group,
+					"backend_group", group.backendGroup,
 					"req_id", GetReqID(ctx),
 					"err", err,
 				)
