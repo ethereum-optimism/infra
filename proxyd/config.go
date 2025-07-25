@@ -115,6 +115,8 @@ type BackendConfig struct {
 	Weight int `toml:"weight"`
 
 	SkipIsSyncingCheck bool `toml:"skip_is_syncing_check"`
+	ResponseTimeoutMilliseconds int `toml:"response_timeout_milliseconds"`
+	MaxRetries *int `toml:"max_retries"`
 
 	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
 	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
@@ -122,6 +124,7 @@ type BackendConfig struct {
 	ConsensusSkipPeerCountCheck bool   `toml:"consensus_skip_peer_count"`
 	ConsensusForcedCandidate    bool   `toml:"consensus_forced_candidate"`
 	ConsensusReceiptsTarget     string `toml:"consensus_receipts_target"`
+
 }
 
 type BackendsConfig map[string]*BackendConfig
