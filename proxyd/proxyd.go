@@ -141,7 +141,10 @@ func Start(config *Config) (*Server, func(), error) {
 			return nil, nil, fmt.Errorf("must define an RPC URL for backend %s", name)
 		}
 
-		if config.BackendOptions.ResponseTimeoutSeconds != 0 {
+		if config.BackendOptions.ResponseTimeoutMilliseconds != 0 {
+			timeout := millisecondsToDuration(config.BackendOptions.ResponseTimeoutMilliseconds)
+			opts = append(opts, WithTimeout(timeout))
+		} else if config.BackendOptions.ResponseTimeoutSeconds != 0 {
 			timeout := secondsToDuration(config.BackendOptions.ResponseTimeoutSeconds)
 			opts = append(opts, WithTimeout(timeout))
 		}
@@ -578,6 +581,10 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func millisecondsToDuration(ms int) time.Duration {
+	return time.Duration(ms) * time.Millisecond
 }
 
 func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
