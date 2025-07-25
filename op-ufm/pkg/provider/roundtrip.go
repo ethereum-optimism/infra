@@ -179,7 +179,9 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 				"hash", txHash.Hex(),
 				"nonce", nonce,
 				"err", err)
-			return
+			if !errors.Is(err, ethereum.NotFound) {
+				return
+			}
 		}
 		attempt++
 	}
