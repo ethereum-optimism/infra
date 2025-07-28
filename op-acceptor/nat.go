@@ -139,6 +139,8 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		TestLogLevel:       config.TestLogLevel,
 		NetworkName:        networkName,
 		DevnetEnv:          devnetEnv,
+		Serial:             config.Serial,
+		Concurrency:        config.Concurrency,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -356,7 +358,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	}
 
 	// Complete the file logging
-	if err := n.fileLogger.Complete(result.RunID); err != nil {
+	if err := n.fileLogger.CompleteWithTiming(result.RunID, n.result.WallClockTime); err != nil {
 		n.config.Log.Error("Error completing file logging", "error", err)
 	}
 
@@ -510,12 +512,21 @@ func (n *nat) Stopped() bool {
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 
+	// Log speedup information in debug mode
+	if n.result.IsParallel {
+		n.config.Log.Debug("Parallel execution completed",
+			"total_test_time", n.result.Duration,
+			"wall_clock_time", n.result.WallClockTime,
+			"speedup", fmt.Sprintf("%.1fx", n.result.GetSpeedup()),
+			"efficiency", n.result.GetEfficiencyDisplayString())
+	}
+
 	// Extract test results from the runner result
 	testResults := n.extractTestResultsFromRunnerResult(n.result)
 
 	title := fmt.Sprintf("Acceptance Testing Results (network: %s)", n.networkName)
 	reporter := reporting.NewTableReporter(title, true)
-	err := reporter.PrintTableFromTestResults(testResults, runID, n.networkName, n.config.TargetGate)
+	err := reporter.PrintTableFromTestResultsWithTiming(testResults, runID, n.networkName, n.config.TargetGate, n.result.WallClockTime)
 	if err != nil {
 		n.config.Log.Error("Failed to print results table", "error", err)
 	}

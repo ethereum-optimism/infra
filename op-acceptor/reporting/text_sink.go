@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
@@ -48,6 +49,11 @@ func (s *ReportingTextSummarySink) Consume(result *types.TestResult, runID strin
 
 // Complete generates the text summary file using TestTree
 func (s *ReportingTextSummarySink) Complete(runID string) error {
+	return s.CompleteWithTiming(runID, 0)
+}
+
+// CompleteWithTiming generates the text summary file using TestTree with enhanced timing
+func (s *ReportingTextSummarySink) CompleteWithTiming(runID string, wallClockTime time.Duration) error {
 	// Get test results for this specific runID
 	results, exists := s.testResults[runID]
 	if !exists {
@@ -57,6 +63,11 @@ func (s *ReportingTextSummarySink) Complete(runID string) error {
 	// Build the TestTree
 	builder := types.NewTestTreeBuilder().WithSubtests(true)
 	tree := builder.BuildFromTestResults(results, runID, s.networkName)
+
+	// Override tree duration with wall clock time if provided
+	if wallClockTime > 0 {
+		tree.Duration = wallClockTime
+	}
 
 	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 
@@ -117,4 +128,30 @@ func (tr *TableReporter) PrintTableFromTestResults(testResults []*types.TestResu
 
 	_, err = fmt.Print(content)
 	return err
+}
+
+// PrintTableFromTestResultsWithTiming generates and prints a table report to stdout with enhanced timing
+func (tr *TableReporter) PrintTableFromTestResultsWithTiming(testResults []*types.TestResult, runID, networkName, gateName string, wallClockTime time.Duration) error {
+	content, err := tr.GenerateTableFromTestResultsWithTiming(testResults, runID, networkName, gateName, wallClockTime)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Print(content)
+	return err
+}
+
+// GenerateTableFromTestResultsWithTiming generates a table report with enhanced timing information
+func (tr *TableReporter) GenerateTableFromTestResultsWithTiming(testResults []*types.TestResult, runID, networkName, gateName string, wallClockTime time.Duration) (string, error) {
+	// Build the TestTree
+	builder := types.NewTestTreeBuilder().WithSubtests(true)
+	tree := builder.BuildFromTestResults(testResults, runID, networkName)
+
+	// Override the tree duration with wall clock time for better user display
+	if wallClockTime > 0 {
+		tree.Duration = wallClockTime
+	}
+
+	// Format and return the table
+	return tr.formatter.Format(tree)
 }

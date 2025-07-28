@@ -136,6 +136,19 @@ var (
 		EnvVars: []string{"DEVNET_ENV_URL"},
 		Usage:   "URL or path to the devnet environment file. Required for sysext orchestrator.",
 	}
+	Serial = &cli.BoolFlag{
+		Name:    "serial",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SERIAL"),
+		Usage:   "Run tests serially instead of in parallel. By default, tests run in parallel across packages.",
+	}
+
+	Concurrency = &cli.IntFlag{
+		Name:    "concurrency",
+		Value:   0, // 0 means auto-determine
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "CONCURRENCY"),
+		Usage:   "Number of concurrent test workers. 0 (default) auto-determines based on system capabilities.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -155,6 +168,8 @@ var optionalFlags = []cli.Flag{
 	OutputRealtimeLogs,
 	Orchestrator,
 	DevnetEnvURL,
+	Serial,
+	Concurrency,
 }
 var Flags []cli.Flag
 

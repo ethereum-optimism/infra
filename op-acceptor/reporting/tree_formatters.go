@@ -222,10 +222,13 @@ func (f *TreeTableFormatter) Format(tree *types.TestTree) (string, error) {
 	// Add summary footer
 	overallStatus := strings.ToUpper(getStatusString(tree.Stats.Status))
 
+	// Use enhanced duration formatting that shows speedup for parallel runs
+	durationDisplay := formatDuration(tree.Duration)
+
 	footerRow := []interface{}{
 		"TOTAL",
 		"",
-		formatDuration(tree.Duration),
+		durationDisplay,
 		tree.Stats.Total,
 		tree.Stats.Passed,
 		tree.Stats.Failed,

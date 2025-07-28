@@ -969,7 +969,7 @@ func TestDuplicationFix(t *testing.T) {
 	assert.Contains(t, contentStr, "This test failed due to timeout!")
 	assert.Contains(t, contentStr, "TIMEOUT: Test timed out after 1s")
 
-	t.Logf("✅ Duplication fix verified! File: %s", files[0].Name())
+	t.Logf("Duplication fix verified! File: %s", files[0].Name())
 }
 
 // TestHTMLSink_TestsWithSubtestsAlwaysDisplayed verifies that tests with subtests are never filtered out
