@@ -22,6 +22,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"math"
+	"runtime"
+
 	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
@@ -43,33 +46,37 @@ const (
 
 // SuiteResult captures aggregated results for a test suite
 type SuiteResult struct {
-	ID          string
-	Description string
-	Tests       map[string]*types.TestResult
-	Status      types.TestStatus
-	Duration    time.Duration
-	Stats       ResultStats
+	ID            string
+	Description   string
+	Tests         map[string]*types.TestResult
+	Status        types.TestStatus
+	Duration      time.Duration // Total test time (sum of all test durations)
+	WallClockTime time.Duration // Actual elapsed time for this suite
+	Stats         ResultStats
 }
 
 // GateResult captures aggregated results for a gate
 type GateResult struct {
-	ID          string
-	Description string
-	Tests       map[string]*types.TestResult
-	Suites      map[string]*SuiteResult
-	Status      types.TestStatus
-	Duration    time.Duration
-	Stats       ResultStats
-	Inherited   []string
+	ID            string
+	Description   string
+	Tests         map[string]*types.TestResult
+	Suites        map[string]*SuiteResult
+	Status        types.TestStatus
+	Duration      time.Duration // Total test time (sum of all test durations)
+	WallClockTime time.Duration // Actual elapsed time for this gate
+	Stats         ResultStats
+	Inherited     []string
 }
 
 // RunnerResult captures the complete test run results
 type RunnerResult struct {
-	Gates    map[string]*GateResult
-	Status   types.TestStatus
-	Duration time.Duration
-	Stats    ResultStats
-	RunID    string
+	Gates         map[string]*GateResult
+	Status        types.TestStatus
+	Duration      time.Duration // Total test time (sum of all test durations)
+	WallClockTime time.Duration // Actual elapsed time for the entire run
+	Stats         ResultStats
+	RunID         string
+	IsParallel    bool // Indicates if this run used parallel execution
 }
 
 // ResultStats tracks test statistics at each level
@@ -111,6 +118,8 @@ type runner struct {
 	networkName        string              // Name of the network being tested
 	env                *env.DevnetEnv
 	tracer             trace.Tracer
+	serial             bool // Whether to run tests serially instead of in parallel
+	concurrency        int  // Number of concurrent test workers (0 = auto-determine)
 }
 
 // Config holds configuration for creating a new runner
@@ -126,6 +135,8 @@ type Config struct {
 	FileLogger         *logging.FileLogger // Logger for storing test results
 	NetworkName        string              // Name of the network being tested
 	DevnetEnv          *env.DevnetEnv
+	Serial             bool // Whether to run tests serially instead of in parallel
+	Concurrency        int  // Number of concurrent test workers (0 = auto-determine)
 }
 
 // NewTestRunner creates a new test runner instance
@@ -162,7 +173,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	}
 
 	cfg.Log.Debug("NewTestRunner()", "targetGate", cfg.TargetGate, "workDir", cfg.WorkDir,
-		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName)
+		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName, "serial", cfg.Serial)
 
 	return &runner{
 		registry:           cfg.Registry,
@@ -177,6 +188,8 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		networkName:        networkName,
 		env:                cfg.DevnetEnv,
 		tracer:             otel.Tracer("test runner"),
+		serial:             cfg.Serial,
+		concurrency:        cfg.Concurrency,
 	}, nil
 }
 
@@ -189,23 +202,85 @@ func (r *runner) RunAllTests(ctx context.Context) (*RunnerResult, error) {
 		r.runID = uuid.New().String()
 	}
 
-	start := time.Now()
-	r.log.Debug("Running all tests", "run_id", r.runID)
+	r.log.Debug("Running all tests", "run_id", r.runID, "parallel", !r.serial)
 
+	if r.serial {
+		return r.runAllTestsSerial(ctx)
+	} else {
+		return r.runAllTestsParallel(ctx)
+	}
+}
+
+// runAllTestsSerial runs all tests serially
+func (r *runner) runAllTestsSerial(ctx context.Context) (*RunnerResult, error) {
+	start := time.Now()
 	result := &RunnerResult{
-		Gates: make(map[string]*GateResult),
-		Stats: ResultStats{StartTime: start},
+		Gates:      make(map[string]*GateResult),
+		Stats:      ResultStats{StartTime: start},
+		IsParallel: false,
 	}
 
 	if err := r.processAllGates(ctx, result); err != nil {
 		return nil, err
 	}
 
-	result.Duration = time.Since(start)
+	wallClockTime := time.Since(start)
+	result.WallClockTime = wallClockTime
+	result.Duration = wallClockTime // In serial mode, these are the same
 	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
 	result.RunID = r.runID
 	return result, nil
+}
+
+// runAllTestsParallel implements the new parallel test execution logic
+func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error) {
+	start := time.Now()
+
+	// Collect all test work to be executed in parallel
+	workItems := r.collectTestWork()
+
+	if len(workItems) == 0 {
+		r.log.Warn("No test work items found")
+		resultMgr := NewResultHierarchyManager()
+		result := resultMgr.CreateEmptyResult(r.runID, start)
+		result.IsParallel = true
+		resultMgr.FinalizeResults(result, start)
+		result.WallClockTime = time.Since(start)
+		return result, nil
+	}
+
+	// Determine optimal concurrency based on system capabilities and workload
+	concurrency := r.determineConcurrency(len(workItems))
+
+	r.log.Info("Executing tests in parallel", "totalWorkItems", len(workItems), "runID", r.runID, "concurrency", concurrency)
+	r.log.Debug("Work items", "workItems", workItems)
+
+	// Create parallel executor with reasonable concurrency
+	executor := NewParallelExecutor(r, concurrency)
+
+	// Execute tests in parallel
+	result, err := executor.ExecuteTests(ctx, workItems)
+	if err != nil {
+		return nil, fmt.Errorf("parallel test execution failed: %w", err)
+	}
+
+	// Set parallel execution metadata
+	result.IsParallel = true
+	result.WallClockTime = time.Since(start)
+	// Note: result.Duration is already set by ParallelExecutor as sum of test durations
+
+	// Finalize gate and suite statuses
+	r.finalizeParallelResults(result)
+
+	return result, nil
+}
+
+// finalizeParallelResults updates the final status of gates and suites after parallel execution
+func (r *runner) finalizeParallelResults(result *RunnerResult) {
+	// Use the shared result manager for consistent finalization
+	resultMgr := NewResultHierarchyManager()
+	resultMgr.FinalizeResults(result, result.Stats.StartTime)
 }
 
 // processAllGates handles the execution of all gates
@@ -1576,4 +1651,102 @@ func (r *runner) parseTestOutputWithTimeout(output []byte, metadata types.Valida
 	)
 
 	return result
+}
+
+// GetSpeedup returns the speedup factor (total test time / wall clock time)
+func (r *RunnerResult) GetSpeedup() float64 {
+	if r.WallClockTime == 0 {
+		return 1.0
+	}
+	return float64(r.Duration) / float64(r.WallClockTime)
+}
+
+// GetEfficiencyDisplayString returns a formatted efficiency description
+func (r *RunnerResult) GetEfficiencyDisplayString() string {
+	if !r.IsParallel || r.WallClockTime == 0 {
+		return ""
+	}
+	speedup := r.GetSpeedup()
+	if speedup > 1.1 { // Only show if meaningful speedup
+		return fmt.Sprintf(" (%.1fx speedup)", speedup)
+	}
+	return ""
+}
+
+// Interface methods for enhanced timing display
+func (r *RunnerResult) GetDuration() time.Duration {
+	return r.Duration
+}
+
+func (r *RunnerResult) GetWallClockTime() time.Duration {
+	return r.WallClockTime
+}
+
+func (r *RunnerResult) IsParallelRun() bool {
+	return r.IsParallel
+}
+
+// determineConcurrency intelligently determines the optimal concurrency level
+// based on system capabilities, workload characteristics, and user preferences.
+// we assume that the tests are I/O-bound and that the system is capable
+// of handling more concurrent workers than CPU cores.
+func (r *runner) determineConcurrency(numWorkItems int) int {
+	// Handle edge case: no work items means no concurrency needed
+	if numWorkItems == 0 {
+		r.log.Debug("No work items, returning zero concurrency")
+		return 0
+	}
+
+	// If user explicitly set concurrency, use it (unless it's 0 which means auto)
+	if r.concurrency > 0 {
+		requestedConcurrency := r.concurrency
+		// Cap at number of work items - no point having more workers than work
+		effectiveConcurrency := int(math.Min(float64(requestedConcurrency), float64(numWorkItems)))
+		r.log.Info("Using user-specified concurrency",
+			"requested", requestedConcurrency,
+			"effective", effectiveConcurrency,
+			"workItems", numWorkItems)
+		return effectiveConcurrency
+	}
+
+	numCPU := runtime.NumCPU()
+	baseConcurrency := numCPU
+
+	var targetConcurrency int
+	if numCPU <= 2 {
+		// On low-core systems, be conservative
+		targetConcurrency = numCPU
+	} else if numCPU <= 4 {
+		// On mid-range systems, modest increase
+		targetConcurrency = int(math.Ceil(float64(numCPU) * 1.25))
+	} else {
+		// On high-core systems, more aggressive for I/O-bound workloads
+		targetConcurrency = int(math.Ceil(float64(numCPU) * 1.5))
+	}
+
+	// Apply constraints in correct order:
+	// 1. Ensure minimum of 1 worker for non-zero work
+	if targetConcurrency < 1 {
+		targetConcurrency = 1
+	}
+
+	// 2. Cap at reasonable upper bound to avoid resource exhaustion
+	maxReasonableConcurrency := 16 // Reasonable upper limit for most systems
+	if targetConcurrency > maxReasonableConcurrency {
+		targetConcurrency = maxReasonableConcurrency
+	}
+
+	// 3. Finally, never exceed number of work items (most important constraint)
+	if targetConcurrency > numWorkItems {
+		targetConcurrency = numWorkItems
+	}
+
+	r.log.Info("Auto-determined concurrency",
+		"cpuCores", numCPU,
+		"baseConcurrency", baseConcurrency,
+		"targetConcurrency", targetConcurrency,
+		"workItems", numWorkItems,
+		"reasoning", "I/O-bound acceptance tests with network and blockchain operations")
+
+	return targetConcurrency
 }

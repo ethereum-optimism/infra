@@ -287,19 +287,33 @@ func (l *FileLogger) LogSummary(summary string, runID string) error {
 
 // Complete finalizes all sinks and closes all file writers
 func (l *FileLogger) Complete(runID string) error {
+	return l.CompleteWithTiming(runID, 0)
+}
+
+// CompleteWithTiming finalizes all sinks with enhanced timing and closes all file writers
+func (l *FileLogger) CompleteWithTiming(runID string, wallClockTime time.Duration) error {
 	if runID == "" {
 		return fmt.Errorf("runID cannot be empty")
 	}
 
 	for _, sink := range l.sinks {
-		if err := sink.Complete(runID); err != nil {
-			return fmt.Errorf("error completing sink: %w", err)
+		// Try to use enhanced timing method if available
+		if enhancedSink, ok := sink.(interface {
+			CompleteWithTiming(string, time.Duration) error
+		}); ok {
+			if err := enhancedSink.CompleteWithTiming(runID, wallClockTime); err != nil {
+				return fmt.Errorf("error completing enhanced sink: %w", err)
+			}
+		} else {
+			// Fall back to regular Complete method
+			if err := sink.Complete(runID); err != nil {
+				return fmt.Errorf("error completing sink: %w", err)
+			}
 		}
 	}
 
 	// Close all writers after completion
 	l.closeAllWriters()
-
 	return nil
 }
 

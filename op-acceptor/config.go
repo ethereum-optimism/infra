@@ -29,6 +29,8 @@ type Config struct {
 	TestLogLevel       string                 // Log level to be used for the tests
 	Orchestrator       flags.OrchestratorType // Devstack orchestrator type
 	DevnetEnvURL       string                 // URL or path to the devnet environment file
+	Serial             bool                   // Whether to run tests serially instead of in parallel
+	Concurrency        int                    // Number of concurrent test workers (0 = auto-determine)
 	Log                log.Logger
 }
 
@@ -109,6 +111,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		TestLogLevel:       ctx.String(flags.TestLogLevel.Name),
 		Orchestrator:       orchestrator,
 		DevnetEnvURL:       devnetEnvURL,
+		Serial:             ctx.Bool(flags.Serial.Name),
+		Concurrency:        ctx.Int(flags.Concurrency.Name),
 		LogDir:             logDir,
 		Log:                log,
 	}, nil

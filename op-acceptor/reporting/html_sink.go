@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
@@ -50,6 +51,11 @@ func (s *ReportingHTMLSink) Consume(result *types.TestResult, runID string) erro
 
 // Complete generates the HTML summary file using TestTree
 func (s *ReportingHTMLSink) Complete(runID string) error {
+	return s.CompleteWithTiming(runID, 0)
+}
+
+// CompleteWithTiming generates the HTML summary file using TestTree with enhanced timing
+func (s *ReportingHTMLSink) CompleteWithTiming(runID string, wallClockTime time.Duration) error {
 	// Get test results for this specific runID
 	results, exists := s.testResults[runID]
 	if !exists {
@@ -71,6 +77,11 @@ func (s *ReportingHTMLSink) Complete(runID string) error {
 		})
 
 	tree := builder.BuildFromTestResults(results, runID, s.networkName)
+
+	// Override tree duration with wall clock time if provided
+	if wallClockTime > 0 {
+		tree.Duration = wallClockTime
+	}
 
 	outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
 

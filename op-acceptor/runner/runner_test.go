@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func initGoModule(t *testing.T, dir string, pkgPath string) {
+func initGoModule(t testing.TB, dir string, pkgPath string) {
 	t.Helper()
 	cmd := exec.Command("go", "mod", "init", pkgPath)
 	cmd.Dir = dir
