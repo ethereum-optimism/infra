@@ -1099,11 +1099,11 @@ gates:
 		allowSkips bool
 	}{
 		{
-			name:       "With allowSkips=false, environment variable should be set",
+			name:       "With allowSkips=false, environment variable should be set to true",
 			allowSkips: false,
 		},
 		{
-			name:       "With allowSkips=true, environment variable should not be set",
+			name:       "With allowSkips=true, environment variable should be set to false",
 			allowSkips: true,
 		},
 	}
@@ -1136,16 +1136,15 @@ gates:
 			cmd := exec.Command("go", args...)
 			cmd.Dir = testDir
 
-			// Set up a runner and manually apply the environment variables like the runner would
+			// Set up a runner and use ReproducibleEnv to get the correct environment variables
 			r := &runner{
 				allowSkips: tc.allowSkips,
+				runID:      "test-run-id",
 			}
 
-			// Simulate the environment variable setup from runSingleTest
+			// Use the actual ReproducibleEnv method to get environment variables
 			env := os.Environ()
-			if !r.allowSkips {
-				env = append(env, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
-			}
+			env = append(env, r.ReproducibleEnv()...)
 			cmd.Env = env
 
 			var stdout bytes.Buffer
@@ -1158,8 +1157,8 @@ gates:
 
 			// Verify the correct environment variable behavior based on allowSkips
 			if tc.allowSkips {
-				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET is not set",
-					"DEVNET_EXPECT_PRECONDITIONS_MET should not be set when allowSkips=true")
+				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET=false",
+					"DEVNET_EXPECT_PRECONDITIONS_MET should be set to 'false' when allowSkips=true")
 			} else {
 				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET=true",
 					"DEVNET_EXPECT_PRECONDITIONS_MET should be set to 'true' when allowSkips=false")
