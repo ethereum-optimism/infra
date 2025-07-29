@@ -78,10 +78,10 @@ func TestBackendSpecificTimeout(t *testing.T) {
 	t.Run("fast backend timeout + slow backend error => 503 Service Unavailable", func(t *testing.T) {
 		// Test that fast backend alone times out
 		fastBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// Take longer than the 400ms timeout
-		time.Sleep(500 * time.Millisecond)
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(backendTimeoutResponse))
+			// Take longer than the 400ms timeout
+			time.Sleep(500 * time.Millisecond)
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(backendTimeoutResponse))
 		}))
 
 		// Disable slow backend temporarily
