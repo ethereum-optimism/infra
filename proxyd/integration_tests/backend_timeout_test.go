@@ -62,6 +62,8 @@ func TestBackendSpecificTimeout(t *testing.T) {
 
 		// Should take at least 1.8 seconds (time to hit both backends minus a threshold)
 		require.GreaterOrEqual(t, elapsed, 1800*time.Millisecond)
+		// and less than 2.2 seconds (time to hit both backends plus a threshold)
+		require.Less(t, elapsed, 2200*time.Millisecond)
 
 		// Verify that both backends were called
 		// Fast backend should have been called first and timed out
@@ -131,6 +133,8 @@ func TestBackendSpecificTimeout(t *testing.T) {
 		// Slow backend: ~5s timeout
 		// Total: should be at least 5.4 seconds
 		require.GreaterOrEqual(t, elapsed, 5400*time.Millisecond)
+		// and less than 5.6 seconds (time to hit both backends plus a threshold)
+		require.Less(t, elapsed, 5600*time.Millisecond)
 
 		// Verify that both backends were called
 		require.Equal(t, 1, len(fastBackend.Requests()))

@@ -9,6 +9,7 @@ response_timeout_seconds = 10
 rpc_url = "$FAST_BACKEND_RPC_URL"
 ws_url = "$FAST_BACKEND_RPC_URL"
 response_timeout_milliseconds = 400
+max_retries = 0
 
 [backends.slow_timeout]
 rpc_url = "$SLOW_BACKEND_RPC_URL"
