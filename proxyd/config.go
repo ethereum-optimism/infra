@@ -87,7 +87,9 @@ func (t *TOMLDuration) UnmarshalText(b []byte) error {
 }
 
 type BackendOptions struct {
+	// Deprecated: Use ResponseTimeoutMilliseconds instead. Note this field will be overridden if `ResponseTimeoutMilliseconds` is also set.
 	ResponseTimeoutSeconds      int          `toml:"response_timeout_seconds"`
+	ResponseTimeoutMilliseconds int          `toml:"response_timeout_milliseconds"`
 	MaxResponseSizeBytes        int64        `toml:"max_response_size_bytes"`
 	MaxRetries                  int          `toml:"max_retries"`
 	OutOfServiceSeconds         int          `toml:"out_of_service_seconds"`
@@ -112,7 +114,9 @@ type BackendConfig struct {
 
 	Weight int `toml:"weight"`
 
-	SkipIsSyncingCheck bool `toml:"skip_is_syncing_check"`
+	SkipIsSyncingCheck          bool `toml:"skip_is_syncing_check"`
+	ResponseTimeoutMilliseconds int  `toml:"response_timeout_milliseconds"`
+	MaxRetries                  *int `toml:"max_retries"`
 
 	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
 	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
