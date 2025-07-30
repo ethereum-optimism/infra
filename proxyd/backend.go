@@ -609,11 +609,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"err", err,
 				"method", metricLabelMethod,
 				"attempt_count", i+1,
-				"max_retries", b.maxRetries+1,
+				"max_attempts", b.maxRetries+1,
 			)
 			timer.ObserveDuration()
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
-			sleepContext(ctx, calcBackoff(i))
+			// perform a backoff if there are more retries for this backend
+			if (i < b.maxRetries) {
+				sleepContext(ctx, calcBackoff(i))
+			}
 			continue
 		}
 		timer.ObserveDuration()
