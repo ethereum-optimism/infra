@@ -36,6 +36,7 @@ const (
 	ContextKeyXForwardedFor                         = "x_forwarded_for"
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
+	ContextKeyHeadersToForward                      = "headers_to_forward"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
 	MaxBatchRPCCallsHardLimit                       = 1000
@@ -86,6 +87,7 @@ type Server struct {
 	rateLimitHeader         string
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
+	headersForwarder        *HeadersForwarder
 }
 
 type limiterFunc func(method string) bool
@@ -112,6 +114,7 @@ func NewServer(
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
+	headersForwarder *HeadersForwarder,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -212,6 +215,7 @@ func NewServer(
 		rateLimitHeader:         rateLimitHeader,
 		interopValidatingConfig: interopValidatingConfig,
 		interopStrategy:         interopStrategy,
+		headersForwarder:        headersForwarder,
 	}, nil
 }
 
@@ -745,6 +749,17 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 
+	headersToForward, err := s.headersForwarder.Forward(r.Header)
+	if err != nil {
+		log.Error("error select and forward headers", "err", err)
+		writeRPCError(ctx, w, nil, ErrInternal)
+		return nil
+	}
+
+	if len(headersToForward) > 0 {
+		ctx = context.WithValue(ctx, ContextKeyHeadersToForward, headersToForward) // nolint:staticcheck
+	}
+
 	return context.WithValue(
 		ctx,
 		ContextKeyReqID, // nolint:staticcheck
@@ -959,6 +974,14 @@ func GetXForwardedFor(ctx context.Context) string {
 		return ""
 	}
 	return xff
+}
+
+func GetHeadersToForward(ctx context.Context) http.Header {
+	headers, ok := ctx.Value(ContextKeyHeadersToForward).(http.Header)
+	if !ok {
+		return nil
+	}
+	return headers
 }
 
 type recordLenWriter struct {
