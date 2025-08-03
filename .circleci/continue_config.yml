@@ -2,6 +2,7 @@ version: 2.1
 
 orbs:
   gcp-cli: circleci/gcp-cli@3.3.0
+  utils: ethereum-optimism/circleci-utils@1.0.19
 
 parameters:
   run-build-op-conductor-mon:
@@ -32,6 +33,9 @@ parameters:
     type: boolean
     default: false
   run-build-rhc:
+    type: boolean
+    default: false
+  run-build-github-event-manager:
     type: boolean
     default: false
   run-all:
@@ -104,6 +108,7 @@ jobs:
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
             echo "run-build-op-acceptor: << pipeline.parameters.run-build-op-acceptor >>"
             echo "run-build-rhc: << pipeline.parameters.run-build-rhc >>"
+            echo "run-build-github-event-manager: << pipeline.parameters.run-build-github-event-manager >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
             echo "Pipeline Trigger Information:"
@@ -166,6 +171,12 @@ jobs:
               echo "replica-healthcheck tag regex match: true"
             else
               echo "replica-healthcheck tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^github-event-manager/v.* ]]; then
+              echo "github-event-manager tag regex match: true"
+            else
+              echo "github-event-manager tag regex match: false"
             fi
 
   docker-build:
@@ -461,6 +472,151 @@ jobs:
               echo "pyproject.toml not found in op-conductor-ops, skipping lint."
             fi
 
+  github-event-manager-lint:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout # Checks out code to ~/project
+      - restore_cache:
+          keys:
+            # Checksum relative to the root of the project
+            - v1-poetry-{{ checksum "github-event-manager/poetry.lock" }}
+            - v1-poetry-
+      - run:
+          name: Install Poetry & Dependencies
+          # Run commands within the specific module directory
+          working_directory: github-event-manager
+          command: |
+            pip install poetry
+            # Check if pyproject.toml exists before running poetry commands
+            if [ -f pyproject.toml ]; then
+              poetry check --lock
+              poetry install --no-interaction --no-root
+            else
+              echo "pyproject.toml not found in github-event-manager, skipping dependency installation."
+            fi
+      - save_cache:
+          key: v1-poetry-{{ checksum "github-event-manager/poetry.lock" }}
+          paths:
+            - /home/circleci/.cache/pypoetry # Default cache location in cimg images
+      - run:
+          name: Run Black Linter
+          # Run commands within the specific module directory
+          working_directory: github-event-manager
+          command: |
+            # Check if pyproject.toml exists and black is installed (implicitly via poetry install)
+            if [ -f pyproject.toml ]; then
+              # Check if black is available
+              if poetry run black --version > /dev/null 2>&1; then
+                poetry run black --check .
+              else
+                echo "Black not found in project dependencies, skipping lint."
+              fi
+            else
+              echo "pyproject.toml not found in github-event-manager, skipping lint."
+            fi
+
+  # Special docker-build job for github-event-manager (uses images repo)
+  github-event-manager-docker-build:
+    environment:
+      DOCKER_BUILDKIT: 1
+    machine:
+      image: <<pipeline.parameters.vm-image>>
+    steps:
+      - checkout
+      - run:
+          command: mkdir -p /tmp/docker_images
+      - run:
+          name: Build
+          command: |
+            # Check to see if DOCKER_HUB_READ_ONLY_TOKEN is set (i.e. we are in repo) before attempting to use secrets.
+            # Building should work without this read only login, but may get rate limited.
+            if [[ -v DOCKER_HUB_READ_ONLY_TOKEN ]]; then
+              echo "$DOCKER_HUB_READ_ONLY_TOKEN" | docker login -u "$DOCKER_HUB_READ_ONLY_USER" --password-stdin
+            fi
+            IMAGE_BASE="us-docker.pkg.dev/oplabs-tools-artifacts/images/github-event-manager"
+            DOCKER_TAGS=$(echo -ne <<pipeline.git.revision>>,<<pipeline.git.branch>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|-t ${IMAGE_BASE}:|")
+            docker build \
+            $(echo -ne $DOCKER_TAGS | tr '\n' ' ') \
+            -f github-event-manager/Dockerfile \
+            .
+      - run:
+          name: Save
+          command: |
+            IMAGE_BASE="us-docker.pkg.dev/oplabs-tools-artifacts/images/github-event-manager"
+            DOCKER_LABELS=$(echo -ne <<pipeline.git.revision>>,<<pipeline.git.branch>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
+            echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker save -o /tmp/docker_images/github-event-manager_{}.tar $IMAGE_BASE:{}
+      - persist_to_workspace:
+          root: /tmp/docker_images
+          paths:
+            - "."
+
+  # Special docker-publish job for github-event-manager (uses images repo)
+  github-event-manager-docker-publish:
+    machine:
+      image: <<pipeline.parameters.vm-image>>
+    steps:
+      - attach_workspace:
+          at: /tmp/docker_images
+      - run:
+          name: Docker load
+          command: |
+            DOCKER_LABELS=$(echo -ne <<pipeline.git.revision>>,<<pipeline.git.branch>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g")
+            echo -ne $DOCKER_LABELS | tr ' ' '\n' | xargs -I {} docker load -i /tmp/docker_images/github-event-manager_{}.tar
+      - utils/gcp-oidc-authenticate
+      # Below is CircleCI recommended way of specifying nameservers on an Ubuntu box:
+      # https://support.circleci.com/hc/en-us/articles/7323511028251-How-to-set-custom-DNS-on-Ubuntu-based-images-using-netplan
+      - run: sudo sed -i '13 i \ \ \ \ \ \ \ \ \ \ \ \ nameservers:' /etc/netplan/50-cloud-init.yaml
+      - run: sudo sed -i '14 i \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ addresses:' /etc/netplan/50-cloud-init.yaml
+      - run: sudo sed -i "s/addresses:/ addresses":" [8.8.8.8, 8.8.4.4] /g" /etc/netplan/50-cloud-init.yaml
+      - run: sudo cat /etc/netplan/50-cloud-init.yaml
+      - run: sudo netplan apply
+      - run:
+          name: Publish
+          command: |
+            gcloud auth configure-docker us-docker.pkg.dev
+            IMAGE_BASE="us-docker.pkg.dev/oplabs-tools-artifacts/images/github-event-manager"
+            DOCKER_TAGS=$(echo -ne <<pipeline.git.revision>>,<<pipeline.git.branch>> | sed "s/,/\n/g" | sed "s/[^a-zA-Z0-9\n]/-/g" | sed -e "s|^|${IMAGE_BASE}:|")
+            echo -ne $DOCKER_TAGS | tr ' ' '\n' | xargs -L1 docker push
+
+  # Security scan job for github-event-manager
+  github-event-manager-security-scan:
+    docker:
+      - image: cimg/python:3.11
+    parameters:
+      working_directory:
+        description: Working directory
+        type: string
+    environment:
+      WORKING_DIRECTORY: << parameters.working_directory >>
+    steps:
+      - checkout
+      - run:
+          name: Run Bandit Scan (Code)
+          command: |
+            cd $WORKING_DIRECTORY/src
+            pip install bandit
+            bandit -r ./ -ll -ii
+
+  # Run tests job for github-event-manager
+  github-event-manager-run-tests:
+    machine:
+      image: ubuntu-2204:current
+    parameters:
+      working_directory:
+        description: Working directory
+        type: string
+    environment:
+      WORKING_DIRECTORY: << parameters.working_directory >>
+    steps:
+      - checkout
+      - run:
+          name: Run Tests
+          command: |
+            cd $WORKING_DIRECTORY/src
+            make install
+            make test
+
 workflows:
   logging:
     jobs:
@@ -619,19 +775,40 @@ workflows:
           docker_name: replica-healthcheck
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: replica-healthcheck
+  github-event-manager:
+    when:
+      or: [<< pipeline.parameters.run-build-github-event-manager >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - github-event-manager-run-tests:
+          working_directory: github-event-manager
+      - github-event-manager-security-scan:
+          requires:
+            - github-event-manager-run-tests
+          working_directory: github-event-manager
+      - github-event-manager-lint:
+          requires:
+            - github-event-manager-run-tests
+      - github-event-manager-docker-build:
+          requires:
+            - github-event-manager-run-tests
+            - github-event-manager-security-scan
+            - github-event-manager-lint
+      - github-event-manager-docker-publish:
+          requires:
+            - github-event-manager-docker-build
   release:
     jobs:
       - log-config-results:
           filters:
             tags:
-              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*|github-event-manager)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*|github-event-manager)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -648,6 +825,7 @@ workflows:
                 - cci-stats
                 - op-acceptor
                 - replica-healthcheck
+                - github-event-manager
           name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
@@ -673,6 +851,7 @@ workflows:
                 - cci-stats
                 - op-acceptor
                 - replica-healthcheck
+                - github-event-manager
           name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
@@ -696,6 +875,7 @@ workflows:
                 - cci-stats
                 - op-acceptor
                 - replica-healthcheck
+                - github-event-manager
           name: <<matrix.docker_name>>-docker-tag
           filters:
             tags:
@@ -727,3 +907,5 @@ workflows:
           module: <<matrix.module>>
           context:
             - oplabs-gcr-release
+
+
