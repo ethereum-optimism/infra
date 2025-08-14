@@ -1103,7 +1103,7 @@ gates:
 			allowSkips: false,
 		},
 		{
-			name:       "With allowSkips=true, environment variable should be set to false",
+			name:       "With allowSkips=true, environment variable should not be set",
 			allowSkips: true,
 		},
 	}
@@ -1157,8 +1157,8 @@ gates:
 
 			// Verify the correct environment variable behavior based on allowSkips
 			if tc.allowSkips {
-				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET=false",
-					"DEVNET_EXPECT_PRECONDITIONS_MET should be set to 'false' when allowSkips=true")
+				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET is not set",
+					"DEVNET_EXPECT_PRECONDITIONS_MET should not be set when allowSkips=true")
 			} else {
 				assert.Contains(t, output, "ENV_VAR_CHECK: DEVNET_EXPECT_PRECONDITIONS_MET=true",
 					"DEVNET_EXPECT_PRECONDITIONS_MET should be set to 'true' when allowSkips=false")
@@ -1999,10 +1999,11 @@ gates:
 	})
 
 	t.Run("reproducible environment includes orchestrator", func(t *testing.T) {
-		// Test sysgo
+		// Test sysgo with allowSkips=false (default)
 		r := setupTestRunner(t, testContent, configContent)
 		r.env = nil
 		r.runID = "test-run-id"
+		r.allowSkips = false
 
 		reproEnv := r.ReproducibleEnv()
 		envStr := reproEnv.String()
@@ -2010,7 +2011,7 @@ gates:
 		assert.Contains(t, envStr, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
 		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
 
-		// Test sysext
+		// Test sysext with allowSkips=false (default)
 		r.env = &env.DevnetEnv{
 			URL: "file:///tmp/test.json",
 		}
@@ -2019,6 +2020,14 @@ gates:
 		envStr = reproEnv.String()
 		assert.Contains(t, envStr, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysext))
 		assert.Contains(t, envStr, "DEVNET_EXPECT_PRECONDITIONS_MET=true")
+		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
+
+		// Test with allowSkips=true
+		r.allowSkips = true
+		reproEnv = r.ReproducibleEnv()
+		envStr = reproEnv.String()
+		assert.Contains(t, envStr, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysext))
+		assert.NotContains(t, envStr, "DEVNET_EXPECT_PRECONDITIONS_MET")
 		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
 	})
 }

@@ -1487,16 +1487,19 @@ func (r *runner) ReproducibleEnv() Env {
 		orchestrator = flags.OrchestratorSysext
 	}
 
-	return Env{
+	base := Env{
 		// Set the orchestrator type
 		fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", orchestrator),
-		// Set DEVNET_EXPECT_PRECONDITIONS_MET to the opposite of allowSkips
-		// allowSkips=false -> ExpectPreconditionsMet=true (tests fail when preconditions not met)
-		// allowSkips=true -> ExpectPreconditionsMet=false (tests skip when preconditions not met)
-		fmt.Sprintf("%s=%t", env.ExpectPreconditionsMet, !r.allowSkips),
 		// salt the funder abstraction with DEVSTACK_KEYS_SALT=$runID
 		fmt.Sprintf("%s=%s", dsl.SaltEnvVar, r.runID),
 	}
+	// Only set DEVNET_EXPECT_PRECONDITIONS_MET when we DO expect preconditions to be met.
+	// op-devstack treats the mere presence of this variable as "enforce preconditions".
+	// Therefore, when allowSkips=true we must NOT set the variable at all.
+	if !r.allowSkips {
+		base = append(base, fmt.Sprintf("%s=%t", env.ExpectPreconditionsMet, true))
+	}
+	return base
 }
 
 type Env []string
