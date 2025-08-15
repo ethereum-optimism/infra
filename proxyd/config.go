@@ -241,6 +241,7 @@ type InteropValidationConfig struct {
 	ReqSizeLimit                      int                       `toml:"req_size_limit"`
 	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`
 	RateLimit                         SenderRateLimitConfig     `toml:"sender_rate_limit"`
+	ForceDisableInteropValidation     bool                      `toml:"force_disable_interop_validation"`
 }
 
 type InteropValidationStrategy string
