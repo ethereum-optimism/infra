@@ -248,6 +248,12 @@ func (n *nat) Start(ctx context.Context) error {
 	// Run tests immediately on startup
 	err := n.runTests(ctx)
 	if err != nil {
+		// Check the error type and return appropriate error for exit code handling
+		// Also check the error message as a fallback in case type information is lost
+		if IsTestFailureError(err) || strings.HasPrefix(err.Error(), "test failure:") {
+			// Test failures should use exit code 1
+			return cli.Exit(err.Error(), 1)
+		}
 		// For runtime errors (like panics or configuration issues), return exit code 2
 		n.config.Log.Error("Runtime error running tests", "error", err)
 		return cli.Exit(err.Error(), 2)
@@ -337,6 +343,12 @@ func (n *nat) runTests(ctx context.Context) error {
 	// Run the tests with our new logger
 	result, err := n.runner.RunAllTests(ctx)
 	if err != nil {
+		// Check if this is a test-related error (e.g., module resolution) vs a runtime error
+		if strings.Contains(err.Error(), "is not in module") {
+			// Module resolution errors should be treated as test failures, not runtime errors
+			n.config.Log.Error("Test execution failed", "error", err)
+			return NewTestFailureError(err.Error())
+		}
 		// This is a runtime error (not a test failure)
 		n.config.Log.Error("Runtime error running tests", "error", err)
 		return NewRuntimeError(err)

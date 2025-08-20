@@ -3,6 +3,7 @@ package main_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -437,7 +438,8 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defau
 		return exitcodes.Success
 	}
 
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 
@@ -615,10 +617,13 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -723,10 +728,13 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -869,10 +877,13 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -1036,7 +1047,8 @@ func runOpAcceptorGateless(t *testing.T, binary, testdir string, defaultTimeout 
 		return exitcodes.Success
 	}
 
-	if exitError, ok := err.(*exec.ExitError); ok {
+	exitError := &exec.ExitError{}
+	if errors.As(err, &exitError) {
 		return exitError.ExitCode()
 	}
 
@@ -1156,7 +1168,8 @@ func runOpAcceptorWithTimeoutFlag(t *testing.T, binary, testdir, validators, gat
 		return exitcodes.Success
 	}
 
-	if exitError, ok := err.(*exec.ExitError); ok {
+	exitError := &exec.ExitError{}
+	if errors.As(err, &exitError) {
 		return exitError.ExitCode()
 	}
 

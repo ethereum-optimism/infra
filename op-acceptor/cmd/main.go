@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -33,7 +34,8 @@ func main() {
 	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Action = cliapp.LifecycleCmd(run)
 	app.ExitErrHandler = func(c *cli.Context, err error) {
-		if exitErr, ok := err.(cli.ExitCoder); ok {
+		var exitErr cli.ExitCoder
+		if errors.As(err, &exitErr) {
 			// Use the exit code from the ExitCoder
 			cli.HandleExitCoder(exitErr)
 		} else if err != nil {

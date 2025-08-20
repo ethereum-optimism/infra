@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -227,7 +228,8 @@ gates:
 		// Should have non-zero exit code due to test failure
 		require.Error(t, err)
 
-		if exitError, ok := err.(*exec.ExitError); ok {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
 			assert.NotEqual(t, 0, exitError.ExitCode(), "Should have non-zero exit code for failing tests")
 		}
 	})
@@ -244,7 +246,8 @@ gates:
 		// Should have non-zero exit code due to test failure
 		require.Error(t, err)
 
-		if exitError, ok := err.(*exec.ExitError); ok {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
 			assert.NotEqual(t, 0, exitError.ExitCode(), "Should have non-zero exit code for failing tests in serial mode")
 		}
 	})

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/templates"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -63,28 +64,18 @@ type TestNodeJSON struct {
 	TestResult     interface{}            `json:"testResult,omitempty"`
 }
 
-// formatDuration formats a duration for display
+// formatDuration formats a duration for display using centralized template function
 func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	return d.Truncate(time.Millisecond).String()
+	templateFuncs := templates.GetTemplateFunc()
+	formatFunc := templateFuncs["formatDuration"].(func(time.Duration) string)
+	return formatFunc(d)
 }
 
-// getStatusString returns a consistent lowercase status string
+// getStatusString returns a consistent lowercase status string using centralized template function
 func getStatusString(status types.TestStatus) string {
-	switch status {
-	case types.TestStatusPass:
-		return "pass"
-	case types.TestStatusFail:
-		return "fail"
-	case types.TestStatusSkip:
-		return "skip"
-	case types.TestStatusError:
-		return "error"
-	default:
-		return "unknown"
-	}
+	templateFuncs := templates.GetTemplateFunc()
+	statusFunc := templateFuncs["getStatusClass"].(func(types.TestStatus) string)
+	return statusFunc(status)
 }
 
 // TreeHTMLFormatter formats test trees as HTML using the tree structure
@@ -94,38 +85,8 @@ type TreeHTMLFormatter struct {
 
 // NewTreeHTMLFormatter creates a new tree-based HTML formatter
 func NewTreeHTMLFormatter(templateContent string) (*TreeHTMLFormatter, error) {
-	tmpl, err := template.New("tree-report").Funcs(template.FuncMap{
-		"formatDuration": func(d time.Duration) string {
-			if d < time.Second {
-				return fmt.Sprintf("%dms", d.Milliseconds())
-			}
-			return d.Truncate(time.Millisecond).String()
-		},
-		"getStatusClass": func(status types.TestStatus) string {
-			return getStatusString(status)
-		},
-		"getStatusText": func(status types.TestStatus) string {
-			return getStatusString(status)
-		},
-		"getIndentClass": func(depth int) string {
-			return fmt.Sprintf("indent-%d", depth)
-		},
-		"multiply": func(a, b int) int {
-			return a * b
-		},
-		"getOverallStatus": func(stats types.TestTreeStats) types.TestStatus {
-			if stats.Failed > 0 {
-				return types.TestStatusFail
-			}
-			if stats.Passed > 0 {
-				return types.TestStatusPass
-			}
-			if stats.Skipped > 0 {
-				return types.TestStatusSkip
-			}
-			return types.TestStatusError
-		},
-	}).Parse(templateContent)
+	// Use centralized template functions from templates package
+	tmpl, err := template.New("tree-report").Funcs(templates.GetTemplateFunc()).Parse(templateContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTML template: %w", err)
 	}

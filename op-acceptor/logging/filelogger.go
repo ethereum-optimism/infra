@@ -173,10 +173,10 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 	rawJSONSink := &RawJSONSink{logger: logger}
 	logger.sinks = append(logger.sinks, rawJSONSink)
 
-	// Load HTML template
-	templateContent, err := templateFS.ReadFile("templates/" + HTMLResultsTemplate)
+	// Load raw template content for ReportingHTMLSink
+	templateContent, err := GetRawTemplateContent(HTMLResultsTemplate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read HTML template: %w", err)
+		return nil, fmt.Errorf("failed to load HTML template: %w", err)
 	}
 
 	// Load JavaScript content
