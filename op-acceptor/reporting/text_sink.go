@@ -109,27 +109,6 @@ func NewTableReporter(title string, showIndividualTests bool) *TableReporter {
 	}
 }
 
-// GenerateTableFromTestResults generates a table report using TestTree and returns the content as a string
-func (tr *TableReporter) GenerateTableFromTestResults(testResults []*types.TestResult, runID, networkName, gateName string) (string, error) {
-	// Build the TestTree
-	builder := types.NewTestTreeBuilder().WithSubtests(true)
-	tree := builder.BuildFromTestResults(testResults, runID, networkName)
-
-	// Format and return the table
-	return tr.formatter.Format(tree)
-}
-
-// PrintTableFromTestResults generates and prints a table report to stdout using TestTree
-func (tr *TableReporter) PrintTableFromTestResults(testResults []*types.TestResult, runID, networkName, gateName string) error {
-	content, err := tr.GenerateTableFromTestResults(testResults, runID, networkName, gateName)
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Print(content)
-	return err
-}
-
 // PrintTableFromTestResultsWithTiming generates and prints a table report to stdout with enhanced timing
 func (tr *TableReporter) PrintTableFromTestResultsWithTiming(testResults []*types.TestResult, runID, networkName, gateName string, wallClockTime time.Duration) error {
 	content, err := tr.GenerateTableFromTestResultsWithTiming(testResults, runID, networkName, gateName, wallClockTime)

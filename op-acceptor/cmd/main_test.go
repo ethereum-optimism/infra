@@ -202,7 +202,7 @@ gates:
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Setup test environment
 			gate, validatorPath, testDir := tc.setupFunc(t, tempDir)
@@ -457,7 +457,7 @@ func createMockDevnetFile(t *testing.T) string {
 	// Create a temporary file for the devnet manifest
 	tempFile, err := os.CreateTemp("", "test-devnet-*.json")
 	require.NoError(t, err)
-	defer tempFile.Close()
+	defer func() { _ = tempFile.Close() }()
 
 	// Create a valid devnet manifest structure
 	validContent := `{
@@ -562,7 +562,7 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-default-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -572,9 +572,9 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -584,9 +584,9 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 				devnetFile = filepath.Join(tempDir, "devnet.json")
 				err := os.WriteFile(devnetFile, []byte(tc.devnetContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", devnetFile)
+				_ = os.Setenv("DEVNET_ENV_URL", devnetFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Run command
@@ -669,7 +669,7 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-explicit-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -679,9 +679,9 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -691,9 +691,9 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 				devnetContent := `{"name": "test-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`
 				err := os.WriteFile(devnetFile, []byte(devnetContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", devnetFile)
+				_ = os.Setenv("DEVNET_ENV_URL", devnetFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Run command
@@ -795,7 +795,7 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-precedence-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -805,9 +805,9 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -818,9 +818,9 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 				envFile = filepath.Join(tempDir, "env-devnet.json")
 				err := os.WriteFile(envFile, []byte(tc.envVarContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", envFile)
+				_ = os.Setenv("DEVNET_ENV_URL", envFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Setup CLI flag file if needed

@@ -139,18 +139,6 @@ func ParseTestNameHierarchy(testName string) (depth int, path []string) {
 	return depth, cleanPath
 }
 
-// BuildHierarchyPath creates a hierarchy path from test names
-// This is useful when constructing test results programmatically
-func BuildHierarchyPath(testNames ...string) []string {
-	path := make([]string, 0, len(testNames))
-	for _, name := range testNames {
-		if name != "" {
-			path = append(path, name)
-		}
-	}
-	return path
-}
-
 // ValidateHierarchyPath checks if a hierarchy path is valid
 // Returns an error if the path is invalid
 func ValidateHierarchyPath(path []string) error {

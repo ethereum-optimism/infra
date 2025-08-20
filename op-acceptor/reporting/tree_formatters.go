@@ -2,7 +2,6 @@ package reporting
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"strings"
@@ -448,7 +447,7 @@ func (f *TreeTextFormatter) writeNodeText(buf *bytes.Buffer, node *types.TestTre
 	// Add error details if requested and available
 	if f.includeDetails && node.Error != nil {
 		errorPrefix := strings.Repeat(" ", len(prefix)+2) // Align with node content
-		buf.WriteString(fmt.Sprintf("%sError: %s\n", errorPrefix, node.Error.Error()))
+		fmt.Fprintf(buf, "%sError: %s\n", errorPrefix, node.Error.Error())
 	}
 }
 
@@ -510,123 +509,4 @@ func (f *TreeTextFormatter) getStatusChar(status types.TestStatus) string {
 	default:
 		return "?"
 	}
-}
-
-// TreeJSONFormatter formats test trees as JSON
-type TreeJSONFormatter struct {
-	includeTestResults bool
-	includeHierarchy   bool
-}
-
-// NewTreeJSONFormatter creates a new tree-based JSON formatter
-func NewTreeJSONFormatter(includeTestResults, includeHierarchy bool) *TreeJSONFormatter {
-	return &TreeJSONFormatter{
-		includeTestResults: includeTestResults,
-		includeHierarchy:   includeHierarchy,
-	}
-}
-
-// Format formats a test tree as JSON
-func (f *TreeJSONFormatter) Format(tree *types.TestTree) (string, error) {
-	response := TreeJSONResponse{
-		RunID:       tree.RunID,
-		NetworkName: tree.NetworkName,
-		Timestamp:   tree.Timestamp,
-		Duration:    tree.Duration,
-		Stats:       tree.Stats,
-	}
-
-	// Include hierarchy if requested
-	if f.includeHierarchy {
-		hierarchy := f.nodeToJSONStruct(tree.Root)
-		response.Hierarchy = &hierarchy
-	}
-
-	// Include flat test list
-	response.Tests = make([]TestNodeJSON, 0, len(tree.TestNodes))
-	for _, node := range tree.TestNodes {
-		testData := TestNodeJSON{
-			ID:             node.ID,
-			Name:           node.Name,
-			Type:           node.Type,
-			Status:         node.Status,
-			Duration:       node.Duration,
-			ExecutionOrder: node.ExecutionOrder,
-			Package:        node.Package,
-			Gate:           node.Gate,
-			Suite:          node.Suite,
-			Depth:          node.Depth,
-			Path:           node.GetPath(),
-		}
-
-		if node.Error != nil {
-			testData.Error = node.Error.Error()
-		}
-
-		if node.LogPath != "" {
-			testData.LogPath = node.LogPath
-		}
-
-		// Include original test result if requested
-		if f.includeTestResults && node.TestResult != nil {
-			testData.TestResult = node.TestResult
-		}
-
-		response.Tests = append(response.Tests, testData)
-	}
-
-	// Include failed tests summary
-	response.FailedTests = make([]string, 0, len(tree.FailedNodes))
-	for _, node := range tree.FailedNodes {
-		response.FailedTests = append(response.FailedTests, node.GetPath())
-	}
-
-	// Convert to JSON
-	jsonBytes, err := json.MarshalIndent(response, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal JSON: %w", err)
-	}
-
-	return string(jsonBytes), nil
-}
-
-// nodeToJSONStruct converts a tree node to TreeNodeJSON struct
-func (f *TreeJSONFormatter) nodeToJSONStruct(node *types.TestTreeNode) TreeNodeJSON {
-	nodeData := TreeNodeJSON{
-		ID:       node.ID,
-		Name:     node.Name,
-		Type:     node.Type,
-		Status:   node.Status,
-		Duration: node.Duration,
-		Depth:    node.Depth,
-		Package:  node.Package,
-		Gate:     node.Gate,
-		Suite:    node.Suite,
-	}
-
-	if node.Error != nil {
-		nodeData.Error = node.Error.Error()
-	}
-	if node.LogPath != "" {
-		nodeData.LogPath = node.LogPath
-	}
-	if node.Type == types.NodeTypeTest || node.Type == types.NodeTypeSubtest {
-		nodeData.ExecutionOrder = node.ExecutionOrder
-	}
-
-	// Add children if any
-	if len(node.Children) > 0 {
-		nodeData.Children = make([]TreeNodeJSON, 0, len(node.Children))
-		for _, child := range node.Children {
-			nodeData.Children = append(nodeData.Children, f.nodeToJSONStruct(child))
-		}
-	}
-
-	// Add statistics for containers
-	if node.Type != types.NodeTypeTest && node.Type != types.NodeTypeSubtest {
-		stats := node.GetTestStats()
-		nodeData.Stats = &stats
-	}
-
-	return nodeData
 }

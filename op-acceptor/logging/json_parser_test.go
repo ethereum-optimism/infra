@@ -1,7 +1,6 @@
 package logging
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 
@@ -67,17 +66,6 @@ func TestJSONOutputParser(t *testing.T) {
 
 	assert.Empty(t, emptyOutputs, "Should not process any data for empty input")
 
-	// Test the new GetOutputAsString method
-	// Create a new parser since the original parser's reader has been consumed
-	outputParser := NewJSONOutputParser(jsonOutput)
-	plaintext := outputParser.GetOutputAsString()
-	expectedOutput := "=== RUN   TestExample\nThis is line 1\nThis is line 2\n"
-	assert.Equal(t, expectedOutput, plaintext, "GetOutputAsString should concatenate all outputs")
-
-	// Test the extractPlainText function
-	extractedText := extractPlainText(jsonOutput)
-	assert.Equal(t, expectedOutput, extractedText, "extractPlainText should produce the same result")
-
 	// Create a more enhanced version that can filter by test name
 	testJSON := `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestOne","Output":"Output from TestOne\n"}
 {"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestTwo","Output":"Output from TestTwo\n"}
@@ -98,15 +86,11 @@ func TestJSONOutputParser(t *testing.T) {
 }
 
 func TestJSONOutputParserWithReader(t *testing.T) {
-	// Test with io.Reader input
-	jsonBytes := []byte(`{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"reader","Test":"TestReader","Output":"Reader output 1\n"}
-{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"reader","Test":"TestReader","Output":"Reader output 2\n"}`)
+	jsonData := `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"reader","Test":"TestReader","Output":"Reader output 1\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"reader","Test":"TestReader","Output":"Reader output 2\n"}`
 
-	// Create a reader
-	reader := bytes.NewReader(jsonBytes)
-
-	// Create parser from reader
-	parser := NewJSONOutputParserFromReader(reader)
+	// Create parser from string
+	parser := NewJSONOutputParser(jsonData)
 
 	// Collect output
 	var outputs []string
@@ -115,20 +99,13 @@ func TestJSONOutputParserWithReader(t *testing.T) {
 	})
 
 	// Verify output
-	assert.Equal(t, 2, len(outputs), "Should process lines from reader")
+	assert.Equal(t, 2, len(outputs), "Should process lines from string")
 	assert.Equal(t, "Reader output 1\n", outputs[0])
 	assert.Equal(t, "Reader output 2\n", outputs[1])
-
-	// Test with a new reader to get output as string
-	reader = bytes.NewReader(jsonBytes)
-	parser = NewJSONOutputParserFromReader(reader)
-	output := parser.GetOutputAsString()
-	assert.Equal(t, "Reader output 1\nReader output 2\n", output, "GetOutputAsString should work with reader")
 }
 
+// Test various edge cases in JSON parsing with individual lines
 func TestJSONParsingEdgeCases(t *testing.T) {
-	// Test various edge cases in JSON parsing with individual lines
-
 	// Test with valid single line
 	validLine := `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestLine","Output":"Line output\n"}`
 	validParser := NewJSONOutputParser(validLine)

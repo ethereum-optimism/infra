@@ -21,7 +21,7 @@ func TestRawJSONSink(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "raw_json_sink_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-raw-json"
@@ -167,7 +167,7 @@ func TestRealGoTestOutput(t *testing.T) {
 	// Create a temporary directory
 	tmpDir, err := os.MkdirTemp("", "raw_json_real_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a simple test file that will pass and fail tests
 	testFilePath := filepath.Join(tmpDir, "simple_test.go")
@@ -254,9 +254,10 @@ func TestFail(t *testing.T) {
 		err = json.Unmarshal([]byte(line), &event)
 		require.NoError(t, err)
 
-		if event.Test == "TestPass" {
+		switch event.Test {
+		case "TestPass":
 			passLines = append(passLines, line)
-		} else if event.Test == "TestFail" {
+		case "TestFail":
 			failLines = append(failLines, line)
 		}
 	}
@@ -379,9 +380,10 @@ func TestFail(t *testing.T) {
 			continue
 		}
 
-		if event.Test == "TestPass" {
+		switch event.Test {
+		case "TestPass":
 			passCount++
-		} else if event.Test == "TestFail" {
+		case "TestFail":
 			failCount++
 		}
 	}
@@ -406,7 +408,7 @@ func TestRawJSONSink_ComprehensiveLogging(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "comprehensive_raw_json_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a new FileLogger with a valid runID
 	runID := "comprehensive-test-run"
@@ -599,7 +601,7 @@ func TestRawJSONSink_IntegrationTest(t *testing.T) {
 	// Create a temporary directory
 	tmpDir, err := os.MkdirTemp("", "integration_raw_json_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create test files that will pass and fail
 	testFileContent := `
@@ -807,11 +809,11 @@ func TestRawJSONSink_IntegrationTest_SkipsWhenGoNotAvailable(t *testing.T) {
 	originalPath := os.Getenv("PATH")
 	defer func() {
 		// Restore the original PATH
-		os.Setenv("PATH", originalPath)
+		_ = os.Setenv("PATH", originalPath)
 	}()
 
 	// Set PATH to empty to simulate 'go' not being available
-	os.Setenv("PATH", "")
+	_ = os.Setenv("PATH", "")
 
 	// Create a test that should be skipped
 	skipped := false
@@ -828,7 +830,7 @@ func TestRawJSONSink_IntegrationTest_SkipsWhenGoNotAvailable(t *testing.T) {
 	assert.True(t, skipped, "Integration test should be skipped when 'go' command is not available")
 
 	// Restore PATH and verify go is available again
-	os.Setenv("PATH", originalPath)
+	_ = os.Setenv("PATH", originalPath)
 	_, err = exec.LookPath("go")
 	assert.NoError(t, err, "go command should be available after restoring PATH")
 }

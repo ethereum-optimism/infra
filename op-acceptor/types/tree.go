@@ -101,12 +101,6 @@ func (b *TestTreeBuilder) WithSubtests(show bool) *TestTreeBuilder {
 	return b
 }
 
-// WithCollapsedPackages controls whether package nodes start collapsed
-func (b *TestTreeBuilder) WithCollapsedPackages(collapsed bool) *TestTreeBuilder {
-	b.collapsePackages = collapsed
-	return b
-}
-
 // WithLogPathGenerator sets the function for generating log paths
 func (b *TestTreeBuilder) WithLogPathGenerator(fn func(*TestResult, bool, string) string) *TestTreeBuilder {
 	b.logPathGenerator = fn
@@ -407,7 +401,7 @@ func (b *TestTreeBuilder) calculateNodeStats(node *TestTreeNode) TestTreeStats {
 	// If this is a test/subtest node, count it
 	// For package tests with subtests, we only count the subtests
 	if (node.Type == NodeTypeTest || node.Type == NodeTypeSubtest) &&
-		!(node.Type == NodeTypeTest && node.TestResult != nil && node.TestResult.Metadata.RunAll && len(node.Children) > 0) {
+		(node.Type != NodeTypeTest || node.TestResult == nil || !node.TestResult.Metadata.RunAll || len(node.Children) == 0) {
 		stats.Total = 1
 		switch node.Status {
 		case TestStatusPass:

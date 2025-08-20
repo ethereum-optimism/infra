@@ -855,13 +855,6 @@ func NewJSONOutputParser(input string) *JSONOutputParser {
 	}
 }
 
-// NewJSONOutputParserFromReader creates a new JSON parser from an io.Reader
-func NewJSONOutputParserFromReader(reader io.Reader) *JSONOutputParser {
-	return &JSONOutputParser{
-		reader: reader,
-	}
-}
-
 // ProcessJSONOutput processes JSON output by applying the provided handler to each output line
 // The handler is called for each JSON line that has an "output" action
 func (p *JSONOutputParser) ProcessJSONOutput(handler func(jsonData map[string]interface{}, outputText string)) {
@@ -900,16 +893,6 @@ func (p *JSONOutputParser) ProcessJSONOutput(handler func(jsonData map[string]in
 		// Call the handler with the JSON data and output text
 		handler(jsonData, outputText)
 	}
-}
-
-// GetOutputAsString extracts and concatenates all "Output" fields from JSON
-// and returns them as a single string
-func (p *JSONOutputParser) GetOutputAsString() string {
-	var outputBuilder strings.Builder
-	p.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
-		outputBuilder.WriteString(outputText)
-	})
-	return outputBuilder.String()
 }
 
 // ErrorInfo holds extracted error information from test output
@@ -1007,12 +990,6 @@ func (p *JSONOutputParser) GetErrorInfo() ErrorInfo {
 }
 
 // Helper functions for backward compatibility or convenience
-
-// extractPlainText returns all output text from JSON as a string
-func extractPlainText(input string) string {
-	parser := NewJSONOutputParser(input)
-	return parser.GetOutputAsString()
-}
 
 // extractErrorData extracts error information from JSON output
 func extractErrorData(input string) ErrorInfo {

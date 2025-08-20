@@ -533,7 +533,7 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 		}, nil
 	}
 
-	var result types.TestStatus = types.TestStatusPass
+	var result = types.TestStatusPass
 	var testErrors []error
 	var totalDuration time.Duration
 	testResults := make(map[string]*types.TestResult)
@@ -608,7 +608,7 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	var finalError error
 	if len(testErrors) > 0 {
 		if timeoutCount > 0 {
-			finalError = fmt.Errorf("Package test failures include timeouts: %v", timedOutTests)
+			finalError = fmt.Errorf("package test failures include timeouts: %v", timedOutTests)
 		} else {
 			finalError = errors.Join(testErrors...)
 		}
@@ -627,9 +627,10 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	passed := 0
 	failed := 0
 	for _, testResult := range testResults {
-		if testResult.Status == types.TestStatusPass {
+		switch testResult.Status {
+		case types.TestStatusPass:
 			passed++
-		} else if testResult.Status == types.TestStatusFail {
+		case types.TestStatusFail:
 			failed++
 		}
 	}
@@ -1228,8 +1229,8 @@ func (r *RunnerResult) printSubTests(b *strings.Builder, subTests map[string]*ty
 		// Build the prefix for this depth level
 		prefix := ui.BuildTreePrefix(baseDepth, isLast, parentIsLast)
 
-		b.WriteString(fmt.Sprintf("%s Test: %s (%s) [status=%s]\n",
-			prefix, subTestName, formatDuration(subTest.Duration), subTest.Status))
+		fmt.Fprintf(b, "%s Test: %s (%s) [status=%s]\n",
+			prefix, subTestName, formatDuration(subTest.Duration), subTest.Status)
 
 		if subTest.Error != nil {
 			// Create error prefix (one level deeper, always last)
@@ -1237,7 +1238,7 @@ func (r *RunnerResult) printSubTests(b *strings.Builder, subTests map[string]*ty
 			copy(errorParentIsLast, parentIsLast)
 			errorParentIsLast[len(parentIsLast)] = isLast
 			errorPrefix := ui.BuildTreePrefix(baseDepth+1, true, errorParentIsLast)
-			b.WriteString(fmt.Sprintf("%sError: %s\n", errorPrefix, subTest.Error.Error()))
+			fmt.Fprintf(b, "%sError: %s\n", errorPrefix, subTest.Error.Error())
 		}
 
 		// Recursively print nested subtests
@@ -1359,12 +1360,6 @@ func determineStatusFromFlags(allSkipped, anyFailed bool) types.TestStatus {
 }
 
 // formatErrors combines multiple test errors into a single error message
-func (r *runner) formatErrors(errors []string) string {
-	if len(errors) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("Failed tests:\n%s", strings.Join(errors, "\n"))
-}
 
 // determineSuiteStatus determines the overall status of a suite based on its tests
 func determineSuiteStatus(suite *SuiteResult) types.TestStatus {

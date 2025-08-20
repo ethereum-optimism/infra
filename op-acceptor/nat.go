@@ -102,7 +102,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 
 	default:
 		// This should never happen due to CLI validation, but provide a clear error message
-		return nil, fmt.Errorf("invalid orchestrator: %s.", config.Orchestrator)
+		return nil, fmt.Errorf("invalid orchestrator: %s", config.Orchestrator)
 	}
 
 	config.Log.Info("Using network name for metrics", "network", networkName)
