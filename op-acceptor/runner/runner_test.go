@@ -1732,7 +1732,7 @@ gates:
 	require.Contains(t, result.SubTests, "TestSkipped", "Skipped test should be present in results")
 	skippedTest := result.SubTests["TestSkipped"]
 	require.Equal(t, types.TestStatusSkip, skippedTest.Status, "TestSkipped should have skip status")
-	require.Contains(t, skippedTest.Error.Error(), "This test is intentionally skipped", "Skip message should be preserved")
+	require.Nil(t, skippedTest.Error, "Skipped tests should not have error messages (skip reasons are not errors)")
 
 	t.Logf("Package timeout error message: %s", errorMsg)
 }
