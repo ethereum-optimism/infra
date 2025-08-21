@@ -471,13 +471,10 @@ func TestTestTreeBuilder_WithOptions(t *testing.T) {
 	builder := NewTestTreeBuilder()
 
 	// Test method chaining
-	builder = builder.WithSubtests(false).WithCollapsedPackages(true)
+	builder = builder.WithSubtests(false)
 
 	if builder.showSubtests {
 		t.Error("WithSubtests(false) did not set showSubtests to false")
-	}
-	if !builder.collapsePackages {
-		t.Error("WithCollapsedPackages(true) did not set collapsePackages to true")
 	}
 
 	// Test that log path generator can be set

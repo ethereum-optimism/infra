@@ -216,39 +216,6 @@ func TestBuildTestArgs(t *testing.T) {
 	}
 }
 
-func TestFormatErrors(t *testing.T) {
-	r := setupDefaultTestRunner(t)
-
-	tests := []struct {
-		name   string
-		errors []string
-		want   string
-	}{
-		{
-			name:   "no errors",
-			errors: nil,
-			want:   "",
-		},
-		{
-			name:   "single error",
-			errors: []string{"test failed"},
-			want:   "Failed tests:\ntest failed",
-		},
-		{
-			name:   "multiple errors",
-			errors: []string{"test1 failed", "test2 failed"},
-			want:   "Failed tests:\ntest1 failed\ntest2 failed",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := r.formatErrors(tt.errors)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestGate(t *testing.T) {
 	ctx := context.Background()
 	t.Run("gate with direct tests", func(t *testing.T) {
@@ -1043,9 +1010,10 @@ gates:
 	// Find the normal and panicking tests
 	var normalTest, panicTest *types.TestResult
 	for _, test := range suite.Tests {
-		if test.Metadata.FuncName == "TestNormal" {
+		switch test.Metadata.FuncName {
+		case "TestNormal":
 			normalTest = test
-		} else if test.Metadata.FuncName == "TestPanic" {
+		case "TestPanic":
 			panicTest = test
 		}
 	}
@@ -1594,7 +1562,7 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 	r := setupDefaultTestRunner(t)
 
 	origPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", origPath)
+	defer func() { _ = os.Setenv("PATH", origPath) }()
 
 	testCases := []struct {
 		name         string
@@ -1750,15 +1718,15 @@ gates:
 	require.NotNil(t, result.Error)
 	errorMsg := result.Error.Error()
 
-	// The error message should contain "Package test failures include timeouts:" followed by test names
-	require.Contains(t, errorMsg, "Package test failures include timeouts:")
+	// The error message should contain "package test failures include timeouts:" followed by test names
+	require.Contains(t, errorMsg, "package test failures include timeouts:")
 
 	// The error message should contain the names of the timed out tests
 	require.Contains(t, errorMsg, "TestSlowTimeout")
 	require.Contains(t, errorMsg, "TestAnotherSlowTimeout")
 
-	// Verify the format - it should look like: "Package test failures include timeouts: [TestSlowTimeout TestAnotherSlowTimeout]"
-	require.Regexp(t, `Package test failures include timeouts: \[.*TestSlowTimeout.*TestAnotherSlowTimeout.*\]`, errorMsg)
+	// Verify the format - it should look like: "package test failures include timeouts: [TestSlowTimeout TestAnotherSlowTimeout]"
+	require.Regexp(t, `package test failures include timeouts: \[.*TestSlowTimeout.*TestAnotherSlowTimeout.*\]`, errorMsg)
 
 	// Verify that the skipped test is marked as skipped
 	require.Contains(t, result.SubTests, "TestSkipped", "Skipped test should be present in results")

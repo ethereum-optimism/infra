@@ -3,6 +3,7 @@ package main_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -202,7 +203,7 @@ gates:
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Setup test environment
 			gate, validatorPath, testDir := tc.setupFunc(t, tempDir)
@@ -437,7 +438,8 @@ func runOpAcceptor(t *testing.T, binary, testdir, validators, gate string, defau
 		return exitcodes.Success
 	}
 
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 
@@ -457,7 +459,7 @@ func createMockDevnetFile(t *testing.T) string {
 	// Create a temporary file for the devnet manifest
 	tempFile, err := os.CreateTemp("", "test-devnet-*.json")
 	require.NoError(t, err)
-	defer tempFile.Close()
+	defer func() { _ = tempFile.Close() }()
 
 	// Create a valid devnet manifest structure
 	validContent := `{
@@ -562,7 +564,7 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-default-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -572,9 +574,9 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -584,9 +586,9 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 				devnetFile = filepath.Join(tempDir, "devnet.json")
 				err := os.WriteFile(devnetFile, []byte(tc.devnetContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", devnetFile)
+				_ = os.Setenv("DEVNET_ENV_URL", devnetFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Run command
@@ -615,10 +617,13 @@ func TestDefaultOrchestratorBehavior(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -669,7 +674,7 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-explicit-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -679,9 +684,9 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -691,9 +696,9 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 				devnetContent := `{"name": "test-net", "l1": {"name": "l1", "id": "1", "nodes": [], "addresses": {}, "wallets": {}}, "l2": []}`
 				err := os.WriteFile(devnetFile, []byte(devnetContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", devnetFile)
+				_ = os.Setenv("DEVNET_ENV_URL", devnetFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Run command
@@ -723,10 +728,13 @@ func TestExplicitOrchestratorOverride(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -795,7 +803,7 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			// Create temporary test directory
 			tempDir, err := os.MkdirTemp("/tmp", "op-acceptor-precedence-test-")
 			require.NoError(t, err, "Failed to create temporary directory")
-			defer os.RemoveAll(tempDir)
+			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// Create a simple test that will fail (we're testing orchestrator setup, not test success)
 			createMockTest(t, tempDir, false, 0) // failing test
@@ -805,9 +813,9 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			originalEnv := os.Getenv("DEVNET_ENV_URL")
 			defer func() {
 				if originalEnv != "" {
-					os.Setenv("DEVNET_ENV_URL", originalEnv)
+					_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 				} else {
-					os.Unsetenv("DEVNET_ENV_URL")
+					_ = os.Unsetenv("DEVNET_ENV_URL")
 				}
 			}()
 
@@ -818,9 +826,9 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 				envFile = filepath.Join(tempDir, "env-devnet.json")
 				err := os.WriteFile(envFile, []byte(tc.envVarContent), 0644)
 				require.NoError(t, err)
-				os.Setenv("DEVNET_ENV_URL", envFile)
+				_ = os.Setenv("DEVNET_ENV_URL", envFile)
 			} else {
-				os.Unsetenv("DEVNET_ENV_URL")
+				_ = os.Unsetenv("DEVNET_ENV_URL")
 			}
 
 			// Setup CLI flag file if needed
@@ -869,10 +877,13 @@ func TestDevnetEnvURLFlagPrecedence(t *testing.T) {
 			// Check exit code
 			if err == nil {
 				assert.Equal(t, exitcodes.Success, tc.expectedExit)
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
 			} else {
-				t.Fatalf("Unexpected error type: %v", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					assert.Equal(t, tc.expectedExit, exitErr.ExitCode())
+				} else {
+					t.Fatalf("Unexpected error type: %v", err)
+				}
 			}
 		})
 	}
@@ -1036,7 +1047,8 @@ func runOpAcceptorGateless(t *testing.T, binary, testdir string, defaultTimeout 
 		return exitcodes.Success
 	}
 
-	if exitError, ok := err.(*exec.ExitError); ok {
+	exitError := &exec.ExitError{}
+	if errors.As(err, &exitError) {
 		return exitError.ExitCode()
 	}
 
@@ -1156,7 +1168,8 @@ func runOpAcceptorWithTimeoutFlag(t *testing.T, binary, testdir, validators, gat
 		return exitcodes.Success
 	}
 
-	if exitError, ok := err.(*exec.ExitError); ok {
+	exitError := &exec.ExitError{}
+	if errors.As(err, &exitError) {
 		return exitError.ExitCode()
 	}
 

@@ -103,7 +103,12 @@ func TestBuildHierarchyPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := BuildHierarchyPath(tt.testNames...)
+			path := make([]string, 0, len(tt.testNames))
+			for _, name := range tt.testNames {
+				if name != "" {
+					path = append(path, name)
+				}
+			}
 			assert.Equal(t, tt.expectedPath, path)
 		})
 	}

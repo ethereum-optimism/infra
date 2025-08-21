@@ -83,11 +83,12 @@ func TestEnvVarFormat(t *testing.T) {
 			require.Equal(t, 1, len(envFlags), "flags should have exactly one env var")
 
 			// Special cases for flags that use direct environment variable names
-			if flagName == "orchestrator" {
+			switch flagName {
+			case "orchestrator":
 				require.Equal(t, "DEVSTACK_ORCHESTRATOR", envFlags[0])
-			} else if flagName == "devnet-env-url" {
+			case "devnet-env-url":
 				require.Equal(t, "DEVNET_ENV_URL", envFlags[0])
-			} else {
+			default:
 				expectedEnvVar := opservice.FlagNameToEnvVarName(flagName, EnvVarPrefix)
 				require.Equal(t, expectedEnvVar, envFlags[0])
 			}

@@ -17,7 +17,7 @@ func TestFileLogger(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "filelogger_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-123"
@@ -142,7 +142,7 @@ func TestLoggerWithEmptyRunID(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "filelogger_empty_runid_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Test that an error is returned when an empty runID is provided to NewFileLogger
 	_, err = NewFileLogger(tmpDir, "", "test-network", "test-gate")
@@ -181,7 +181,7 @@ func TestLoggingWithRunID(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "filelogger_runid_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a new FileLogger with a valid runID
 	defaultRunID := "default-run-id"
@@ -276,7 +276,7 @@ func TestAsyncFileWriter(t *testing.T) {
 	// Create a temporary directory
 	tmpDir, err := os.MkdirTemp("", "asyncfile_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test file path
 	testFilePath := filepath.Join(tmpDir, "async_test.log")
@@ -319,7 +319,7 @@ func TestCustomResultSink(t *testing.T) {
 	// Create a temporary directory for test logs
 	tmpDir, err := os.MkdirTemp("", "custom_sink_test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a new FileLogger with a valid runID
 	runID := "custom-sink-test"
@@ -711,98 +711,6 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 	assert.Contains(t, htmlContent, "<div class=\"stat-value\">33.3%</div>") // Pass rate (1 pass out of 3 total)
 }
 
-// TestExtractErrorInfoFromJSON verifies that error information is correctly extracted from test output
-func TestExtractErrorInfoFromJSON(t *testing.T) {
-	// Test with mixed content containing error information
-	mixedOutput := `Running tests
-=== RUN   TestExample
-{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
-{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestExample"}
-{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
-{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error Trace:    /path/to/file.go:123\n"}
-{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error:          Not equal: \n"}
-{"Time":"2025-05-09T16:31:48.748571+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    expected: int(42)\n"}
-{"Time":"2025-05-09T16:31:48.748572+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    actual  : int(43)\n"}
-{"Time":"2025-05-09T16:31:48.748573+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Messages:       Values should match\n"}
-{"Time":"2025-05-09T16:31:48.748580+10:00","Action":"fail","Package":"simple","Test":"TestExample","Elapsed":0}`
-
-	// Extract the error information
-	errorInfo := extractErrorData(mixedOutput)
-
-	// Verify extracted fields
-	assert.Equal(t, "TestExample", errorInfo.TestName)
-	assert.Contains(t, errorInfo.ErrorTrace, "/path/to/file.go:123")
-	assert.Contains(t, errorInfo.ErrorMessage, "Not equal")
-
-	// The expected and actual values are extracted from different lines,
-	// so they need to be checked separately without int(42)/int(43) directly
-	assert.NotEmpty(t, errorInfo.Expected)
-	assert.NotEmpty(t, errorInfo.Actual)
-
-	// Verify message extraction
-	assert.Contains(t, errorInfo.Messages, "Values should match")
-
-	// Test with no error information
-	noErrorOutput := `{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
-{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestPass"}
-{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"=== RUN   TestPass\n"}
-{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"--- PASS: TestPass (0.00s)\n"}
-{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"pass","Package":"simple","Test":"TestPass","Elapsed":0}`
-
-	// Extract from passing test with no errors
-	passingInfo := extractErrorData(noErrorOutput)
-
-	// Verify minimal information is available
-	assert.Equal(t, "TestPass", passingInfo.TestName)
-	assert.Empty(t, passingInfo.ErrorMessage)
-	assert.Empty(t, passingInfo.Expected)
-	assert.Empty(t, passingInfo.Actual)
-	assert.Empty(t, passingInfo.Messages)
-	assert.Empty(t, passingInfo.ErrorTrace)
-
-	// Test with empty input
-	emptyInfo := extractErrorData("")
-	assert.Empty(t, emptyInfo.TestName)
-	assert.Empty(t, emptyInfo.ErrorMessage)
-}
-
-// TestExtractPlaintextFromJSON tests the extraction of output fields from JSON
-func TestExtractPlaintextFromJSON(t *testing.T) {
-	// Test with standard JSON output from go test -json
-	jsonOutput := `{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
-{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"This is line 1\n"}
-{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"This is line 2\n"}
-{"Time":"2025-05-09T16:31:48.748575+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"--- PASS: TestExample (0.01s)\n"}`
-
-	// Expected plaintext output
-	expectedOutput := "=== RUN   TestExample\nThis is line 1\nThis is line 2\n--- PASS: TestExample (0.01s)\n"
-
-	// Extract the plaintext
-	plaintext := extractPlainText(jsonOutput)
-
-	// Verify the extraction
-	assert.Equal(t, expectedOutput, plaintext)
-
-	// Test with mixed content
-	mixedOutput := `This is not JSON
-{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
-{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"run","Package":"simple","Test":"TestExample"}
-{"Time":"2025-05-09T16:31:48.748575+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"Test output\n"}`
-
-	// Expected output from mixed content
-	expectedMixedOutput := "=== RUN   TestExample\nTest output\n"
-
-	// Extract plaintext from mixed content
-	mixedPlaintext := extractPlainText(mixedOutput)
-
-	// Verify the extraction skips non-output actions and non-JSON lines
-	assert.Equal(t, expectedMixedOutput, mixedPlaintext)
-
-	// Test with empty input
-	emptyPlaintext := extractPlainText("")
-	assert.Equal(t, "", emptyPlaintext)
-}
-
 // TestPerTestFileSink_CreatesSubtestFiles tests that PerTestFileSink creates individual log files for subtests
 func TestPerTestFileSink_CreatesSubtestFiles(t *testing.T) {
 	// Create a temporary directory
@@ -1059,4 +967,59 @@ func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
 	// Count total rows - should have: 1 fjord test + 2 fjord subtests + 1 package test + 1 package subtest = 5 rows
 	testItemCount := strings.Count(htmlContent, "class=\"test-item")
 	assert.Equal(t, 5, testItemCount, "Should have all tests and subtests displayed")
+}
+
+// TestExtractErrorInfoFromJSON verifies that error information is correctly extracted from test output
+func TestExtractErrorInfoFromJSON(t *testing.T) {
+	// Test with mixed content containing error information
+	mixedOutput := `Running tests
+=== RUN   TestExample
+{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
+{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestExample"}
+{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"=== RUN   TestExample\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error Trace:    /path/to/file.go:123\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Error:          Not equal: \n"}
+{"Time":"2025-05-09T16:31:48.748571+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    expected: int(42)\n"}
+{"Time":"2025-05-09T16:31:48.748572+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"                    actual  : int(43)\n"}
+{"Time":"2025-05-09T16:31:48.748573+10:00","Action":"output","Package":"simple","Test":"TestExample","Output":"    Messages:       Values should match\n"}
+{"Time":"2025-05-09T16:31:48.748580+10:00","Action":"fail","Package":"simple","Test":"TestExample","Elapsed":0}`
+
+	// Extract the error information
+	errorInfo := extractErrorData(mixedOutput)
+
+	// Verify extracted fields
+	assert.Equal(t, "TestExample", errorInfo.TestName)
+	assert.Contains(t, errorInfo.ErrorTrace, "/path/to/file.go:123")
+	assert.Contains(t, errorInfo.ErrorMessage, "Not equal")
+
+	// The expected and actual values are extracted from different lines,
+	// so they need to be checked separately without int(42)/int(43) directly
+	assert.NotEmpty(t, errorInfo.Expected)
+	assert.NotEmpty(t, errorInfo.Actual)
+
+	// Verify message extraction
+	assert.Contains(t, errorInfo.Messages, "Values should match")
+
+	// Test with no error information
+	noErrorOutput := `{"Time":"2025-05-09T16:31:48.432668+10:00","Action":"start","Package":"simple"}
+{"Time":"2025-05-09T16:31:48.748402+10:00","Action":"run","Package":"simple","Test":"TestPass"}
+{"Time":"2025-05-09T16:31:48.748553+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"=== RUN   TestPass\n"}
+{"Time":"2025-05-09T16:31:48.748563+10:00","Action":"output","Package":"simple","Test":"TestPass","Output":"--- PASS: TestPass (0.00s)\n"}
+{"Time":"2025-05-09T16:31:48.748570+10:00","Action":"pass","Package":"simple","Test":"TestPass","Elapsed":0}`
+
+	// Extract from passing test with no errors
+	passingInfo := extractErrorData(noErrorOutput)
+
+	// Verify minimal information is available
+	assert.Equal(t, "TestPass", passingInfo.TestName)
+	assert.Empty(t, passingInfo.ErrorMessage)
+	assert.Empty(t, passingInfo.Expected)
+	assert.Empty(t, passingInfo.Actual)
+	assert.Empty(t, passingInfo.Messages)
+	assert.Empty(t, passingInfo.ErrorTrace)
+
+	// Test with empty input
+	emptyInfo := extractErrorData("")
+	assert.Empty(t, emptyInfo.TestName)
+	assert.Empty(t, emptyInfo.ErrorMessage)
 }

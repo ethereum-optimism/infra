@@ -354,9 +354,9 @@ func TestNAT_New_OrchestratorBehavior(t *testing.T) {
 	originalEnv := os.Getenv("DEVNET_ENV_URL")
 	defer func() {
 		if originalEnv != "" {
-			os.Setenv("DEVNET_ENV_URL", originalEnv)
+			_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
 		} else {
-			os.Unsetenv("DEVNET_ENV_URL")
+			_ = os.Unsetenv("DEVNET_ENV_URL")
 		}
 	}()
 
