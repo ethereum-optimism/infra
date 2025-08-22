@@ -484,16 +484,22 @@ func Start(config *Config) (*Server, func(), error) {
 		bgcfg := config.BackendGroups[bgName]
 
 		if !bgcfg.ValidateRoutingStrategy(bgName) {
-			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, \"\"", "name", bgName)
+			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, consensus_aware_consensus_layer \"\"", "name", bgName)
 		}
 
 		log.Info("configuring routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 
-		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
-			log.Info("creating poller for consensus aware backend_group", "name", bgName)
+		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy || bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
+			log.Info("creating poller for consensus aware backend_group",
+				"name", bgName,
+				"routing_strategy", bgcfg.RoutingStrategy,
+			)
 
 			copts := make([]ConsensusOpt, 0)
 
+			if bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
+				copts = append(copts, WithConsensusLayerConsensusAwareness(true))
+			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))
 			}
