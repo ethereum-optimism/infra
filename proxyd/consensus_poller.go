@@ -692,7 +692,6 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, err
 	}
 
-	// TODO: Update this
 	elSyncResponse, ok := rpcRes.Result.(map[string]interface{})
 	log.Trace("syncStatus response for backend",
 		"backend", be.Name,
@@ -727,6 +726,7 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 	}, nil
 }
 
+// parseCLSyncStatusBlock is a helper function to parse the inner map structs of optimism_syncStatusResponse
 func parseCLSyncStatusBlock(jsonMap map[string]interface{}, safety string) (blockNumber uint64, blockHash string, err error) {
 	safetyMap, ok := jsonMap[safety].(map[string]interface{})
 	if !ok {
@@ -759,18 +759,19 @@ func (cp *ConsensusPoller) fetchCLBlock(ctx context.Context, be *Backend, block 
 		return 0, "", err
 	}
 
-	// TODO: Parse this response correctly
 	elSyncResponse, ok := rpcRes.Result.(map[string]interface{})
-	log.Trace("outputAtBlock response for backend",
-		"backend", be.Name,
-		"syncStatus", elSyncResponse,
-	)
 	if !ok {
 		return 0, "", fmt.Errorf("unexpected response to optimism_outputAtBlock on backend %s", be.Name)
 	}
 	blockRef := elSyncResponse["blockRef"].(map[string]interface{})
 	blockNumber = hexutil.Uint64(blockRef["number"].(float64))
 	blockHash = blockRef["hash"].(string)
+	log.Trace("outputAtBlock response for backend",
+		"backend", be.Name,
+		"syncStatus", elSyncResponse,
+		"blockNumber", blockNumber,
+		"blockHash", blockHash,
+	)
 
 	return blockNumber, blockHash, nil
 }
@@ -833,8 +834,7 @@ func (cp *ConsensusPoller) fetchCLPeerCount(ctx context.Context, be *Backend) (c
 // isInSync is a convenient wrapper to check if the backend is in sync from the network
 func (cp *ConsensusPoller) isInSync(ctx context.Context, be *Backend) (result bool, err error) {
 	if cp.consensusLayer {
-		// TODO: Implement determining if CL is in sync
-		return true, nil
+		return cp.isCLInSync(ctx, be)
 	}
 	return cp.isELInSync(ctx, be)
 
