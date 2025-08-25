@@ -40,4 +40,17 @@ stop-monitoring:
     docker compose -f 'docker-compose.yml' down
 
 lint:
-    golangci-lint run -E bodyclose,asciicheck,misspell,errorlint --timeout 5m --fix ./...
+    #!/bin/bash
+    # Run goimports with auto-fix (CI includes this but as a formatter, not linter)
+    echo "Fixing goimports formatting..."
+    if goimports -l . | grep -q .; then \
+        echo " - Found goimports issues; fixing..."; \
+        goimports -w .; \
+    fi
+    # Run golangci-lint matching CI config (excluding unsupported goimports linter and -e flags)
+    echo "Running golangci-lint..."
+    if [ -f .golangci.yml ]; then \
+        golangci-lint run -c .golangci.yml -E sqlclosecheck,bodyclose,asciicheck,misspell,errorlint --timeout "5m0s" ./...; \
+    else \
+        golangci-lint run -E sqlclosecheck,bodyclose,asciicheck,misspell,errorlint --timeout "5m0s" ./...; \
+    fi
