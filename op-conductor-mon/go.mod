@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/optimism/op-conductor-mon
 
-go 1.21
+go 1.23
 
 require (
 	github.com/ethereum-optimism/optimism v1.7.8-0.20240620182338-0bb839cfd664

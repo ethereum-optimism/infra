@@ -2,12 +2,12 @@ FROM golang:1.23.5-alpine3.21 AS builder
 
 WORKDIR /app
 
-# Install dependencies first for better caching
-RUN apk add --no-cache just
+# Install make and other build dependencies
+RUN apk add --no-cache make git
 
 COPY op-acceptor/ .
 
-RUN just build
+RUN make build
 
 FROM golang:1.23.5-alpine3.21
 

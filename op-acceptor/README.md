@@ -146,8 +146,7 @@ If a package is provided and no name is provided, op-acceptor runs all tests in 
 ## Development
 
 ### Prerequisites
-* [Go](https://go.dev/dl/) 1.22+
-* [Just](https://just.systems/)
+This project uses [mise](https://mise.jdx.dev/) to manage tool versions, ensuring consistency between local development and CI environments.
 
 ### Getting Started
 Build the binary:

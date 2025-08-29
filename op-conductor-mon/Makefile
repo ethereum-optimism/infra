@@ -3,9 +3,9 @@ GIT_DATE := $(shell git show -s --format='%ct')
 OP_CONDUCTOR_MON_VERSION := v0.0.0
 
 LDFLAGSSTRING +=-X main.GitCommit=$(GIT_COMMIT)
-LDFLAGSSTRING +=-X main.GitDate=$(GITDGIT_DATEATE)
+LDFLAGSSTRING +=-X main.GitDate=$(GIT_DATE)
 LDFLAGSSTRING +=-X main.Version=$(OP_CONDUCTOR_MON_VERSION)
-LDFLAGS := -ldflags "$(LDFLAGSSTRING)"
+LDFLAGS := -ldflags "$(LDFLAGSSTRING) -checklinkname=0"
 
 all: build
 
@@ -23,7 +23,7 @@ generate:
 	go generate ./...
 
 test: generate
-	go test -v ./...
+	go test -ldflags="-checklinkname=0" -v ./...
 
 lint:
 	golangci-lint run ./...
