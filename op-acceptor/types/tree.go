@@ -339,6 +339,7 @@ func (b *TestTreeBuilder) createTestNode(result *TestResult, parent *TestTreeNod
 
 // createSubtestNode creates a subtest node from a TestResult
 func (b *TestTreeBuilder) createSubtestNode(result *TestResult, parent *TestTreeNode, order int) *TestTreeNode {
+
 	return &TestTreeNode{
 		ID:             fmt.Sprintf("subtest-%d", order),
 		Name:           result.Metadata.FuncName,
