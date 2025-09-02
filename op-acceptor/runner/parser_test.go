@@ -427,3 +427,100 @@ func TestIsMainTestEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSubTestEvent(t *testing.T) {
+	tests := []struct {
+		name         string
+		event        TestEvent
+		mainTestName string
+		want         bool
+	}{
+		{
+			name: "actual subtest with slash should match",
+			event: TestEvent{
+				Test: "TestExample/SubTest1",
+			},
+			mainTestName: "TestExample",
+			want:         true,
+		},
+		{
+			name: "nested subtest with multiple slashes should match",
+			event: TestEvent{
+				Test: "TestExample/SubTest1/NestedTest",
+			},
+			mainTestName: "TestExample",
+			want:         true,
+		},
+		{
+			name: "individual test in package mode should match",
+			event: TestEvent{
+				Test: "TestSomeFunction",
+			},
+			mainTestName: "", // Package mode
+			want:         true,
+		},
+		{
+			name: "individual test with specific main test should not match",
+			event: TestEvent{
+				Test: "TestSomeFunction",
+			},
+			mainTestName: "TestExample", // Single test mode
+			want:         false,
+		},
+		{
+			name: "empty test name should not match (no test name)",
+			event: TestEvent{
+				Test: "",
+			},
+			mainTestName: "TestExample",
+			want:         false,
+		},
+		{
+			name: "empty test name in package mode should not match",
+			event: TestEvent{
+				Test: "",
+			},
+			mainTestName: "", // Package mode
+			want:         false,
+		},
+		{
+			name: "main test name itself should not match as subtest",
+			event: TestEvent{
+				Test: "TestExample",
+			},
+			mainTestName: "TestExample",
+			want:         false,
+		},
+		{
+			name: "subtest in package mode should match (both conditions)",
+			event: TestEvent{
+				Test: "TestExample/SubTest1",
+			},
+			mainTestName: "", // Package mode
+			want:         true,
+		},
+		{
+			name: "test name with slash-like but not subtest should match in package mode",
+			event: TestEvent{
+				Test: "TestURL/HTTP",
+			},
+			mainTestName: "", // Package mode
+			want:         true,
+		},
+		{
+			name: "test name with slash-like but not subtest should not match in single test mode",
+			event: TestEvent{
+				Test: "TestURL/HTTP",
+			},
+			mainTestName: "TestExample",
+			want:         true, // Still matches because it contains "/"
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSubTestEvent(tt.event, tt.mainTestName)
+			assert.Equal(t, tt.want, got, "Should match expected result for subtest classification")
+		})
+	}
+}

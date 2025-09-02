@@ -50,10 +50,7 @@ func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *t
 
 		if isMainTestEvent(event, metadata.FuncName) {
 			processMainTestEvent(event, result, &testStart, &testEnd, &errorMsg, &hasSkip)
-		} else if event.Test != "" && (strings.Contains(event.Test, "/") || metadata.FuncName == "") {
-			// Process as subtest if:
-			// 1. It contains "/" (actual subtest), OR
-			// 2. We're in package mode (metadata.FuncName == "") and it's an individual test
+		} else if isSubTestEvent(event, metadata.FuncName) {
 			processSubTestEvent(event, result, subTestStartTimes, &errorMsg)
 		}
 	}
@@ -118,6 +115,22 @@ func isMainTestEvent(event TestEvent, mainTestName string) bool {
 		(mainTestName == "" && event.Test == "") ||
 		(mainTestName != "" && event.Test == "" &&
 			(event.Action == ActionStart || event.Action == ActionFail || event.Action == ActionPass))
+}
+
+// isSubTestEvent determines if an event should be processed as a subtest
+func isSubTestEvent(event TestEvent, mainTestName string) bool {
+	// Only process events that have a test name
+	if event.Test == "" {
+		return false
+	}
+
+	// Case 1: Actual subtest (contains "/" separator)
+	isActualSubTest := strings.Contains(event.Test, "/")
+
+	// Case 2: Package mode - individual tests when no specific function is targeted
+	isPackageModeTest := mainTestName == ""
+
+	return isActualSubTest || isPackageModeTest
 }
 
 func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, testEnd *time.Time, errorMsg *strings.Builder, hasSkip *bool) {
