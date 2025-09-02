@@ -208,7 +208,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	// Create a timeout value
 	timeout := DefaultTestTimeout
 
-	r.executor = NewTestExecutor(
+	executor, err := NewTestExecutor(
 		cfg.WorkDir,
 		timeout,
 		r.goBinary,
@@ -217,6 +217,10 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		r.outputParser,
 		r.jsonStore,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create test executor: %w", err)
+	}
+	r.executor = executor
 
 	// Create parallel runner adapter if not in serial mode
 	var parallelRunner ParallelRunner

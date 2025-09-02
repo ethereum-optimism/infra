@@ -6,6 +6,8 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 )
 
+var _ JSONStore = (*jsonStore)(nil)
+
 // jsonStore implements JSONStore interface using FileLogger's RawJSONSink
 type jsonStore struct {
 	rawJSONSink *logging.RawJSONSink

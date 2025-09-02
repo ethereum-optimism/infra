@@ -12,6 +12,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+var _ TestExecutor = (*testExecutor)(nil)
+
 // TestExecutor handles individual test execution and process management.
 // It provides methods to execute single tests or entire packages, with proper
 // timeout handling, error management, and result parsing.
@@ -50,23 +52,23 @@ type OutputParser interface {
 // NewTestExecutor creates a new test executor
 func NewTestExecutor(testDir string, timeout time.Duration, goBinary string, envProvider func() Env,
 	cmdBuilder func(ctx context.Context, name string, arg ...string) (*exec.Cmd, func()),
-	outputParser OutputParser, jsonStore JSONStore) TestExecutor {
+	outputParser OutputParser, jsonStore JSONStore) (TestExecutor, error) {
 
 	// Input validation
 	if testDir == "" {
-		panic("testDir cannot be empty")
+		return nil, fmt.Errorf("testDir cannot be empty")
 	}
 	if goBinary == "" {
 		goBinary = DefaultGoBinary
 	}
 	if envProvider == nil {
-		panic("envProvider cannot be nil")
+		return nil, fmt.Errorf("envProvider cannot be nil")
 	}
 	if cmdBuilder == nil {
-		panic("cmdBuilder cannot be nil")
+		return nil, fmt.Errorf("cmdBuilder cannot be nil")
 	}
 	if outputParser == nil {
-		panic("outputParser cannot be nil")
+		return nil, fmt.Errorf("outputParser cannot be nil")
 	}
 
 	return &testExecutor{
@@ -77,7 +79,7 @@ func NewTestExecutor(testDir string, timeout time.Duration, goBinary string, env
 		cmdBuilder:   cmdBuilder,
 		outputParser: outputParser,
 		jsonStore:    jsonStore,
-	}
+	}, nil
 }
 
 // Execute runs a single test

@@ -11,6 +11,8 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
+var _ OutputParser = (*outputParser)(nil)
+
 // outputParser implements OutputParser interface
 type outputParser struct{}
 

@@ -6,6 +6,8 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
+var _ ResultCollector = (*resultCollector)(nil)
+
 // ResultCollector handles aggregation of test results
 type ResultCollector interface {
 	// Initialize a new run result
