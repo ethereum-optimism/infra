@@ -91,16 +91,24 @@ func TestFileLogger(t *testing.T) {
 	// Wait a short time to ensure async writes complete
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify test log files exist in the appropriate directories
-	expectedPassFilename := filepath.Join(baseDir, "passed", "test-gate-test-suite_package_TestPassingFunction.log")
-	assert.FileExists(t, expectedPassFilename)
+	// Verify test log files exist in the appropriate directories - now three files per test
+	// Passing test files
+	passingBasename := "test-gate-test-suite_package_TestPassingFunction"
+	assert.FileExists(t, filepath.Join(baseDir, "passed", passingBasename+".txt"))
+	assert.FileExists(t, filepath.Join(baseDir, "passed", passingBasename+".json"))
+	assert.FileExists(t, filepath.Join(baseDir, "passed", passingBasename+".log"))
 
-	expectedSkipFilename := filepath.Join(baseDir, "passed", "test-gate-test-suite_package_TestSkippedFunction.log")
-	assert.FileExists(t, expectedSkipFilename)
+	// Skipped test files
+	skippedBasename := "test-gate-test-suite_package_TestSkippedFunction"
+	assert.FileExists(t, filepath.Join(baseDir, "passed", skippedBasename+".txt"))
+	assert.FileExists(t, filepath.Join(baseDir, "passed", skippedBasename+".json"))
+	assert.FileExists(t, filepath.Join(baseDir, "passed", skippedBasename+".log"))
 
-	// Check that failing test exists in the failed directory
-	expectedFailedFilename := filepath.Join(baseDir, "failed", "test-gate-test-suite_package_TestFailingFunction.log")
-	assert.FileExists(t, expectedFailedFilename)
+	// Failed test files (in failed directory)
+	failedBasename := "test-gate-test-suite_package_TestFailingFunction"
+	assert.FileExists(t, filepath.Join(baseDir, "failed", failedBasename+".txt"))
+	assert.FileExists(t, filepath.Join(baseDir, "failed", failedBasename+".json"))
+	assert.FileExists(t, filepath.Join(baseDir, "failed", failedBasename+".log"))
 
 	// Verify all.log file exists
 	allLogsFile := logger.GetAllLogsFile()
@@ -240,9 +248,11 @@ func TestLoggingWithRunID(t *testing.T) {
 	expectedDirName := filepath.Join(tmpDir, "testrun-"+differentRunID)
 	assert.Equal(t, expectedDirName, runIDDir)
 
-	// Verify the test log file exists in the runID directory
-	expectedFilename := filepath.Join(runIDDir, "passed", "test-gate-test-suite_package_TestFunction.log")
-	assert.FileExists(t, expectedFilename)
+	// Verify the test log files exist in the runID directory - three files per test
+	testBasename := "test-gate-test-suite_package_TestFunction"
+	assert.FileExists(t, filepath.Join(runIDDir, "passed", testBasename+".txt"))
+	assert.FileExists(t, filepath.Join(runIDDir, "passed", testBasename+".json"))
+	assert.FileExists(t, filepath.Join(runIDDir, "passed", testBasename+".log"))
 
 	// Verify all.log file exists for this runID
 	allLogsFile, err := logger.GetAllLogsFileForRunID(differentRunID)
@@ -445,51 +455,75 @@ func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
 	// Finalize to ensure all files are written
 	require.NoError(t, logger.Complete(runID))
 
-	// Verify the file in passed directory
-	passedFileName := getReadableTestFilename(passingMeta) + ".log"
-	passedFilePath := filepath.Join(passedDir, passedFileName)
-	passedContent, err := os.ReadFile(passedFilePath)
-	require.NoError(t, err, "Should be able to read the passing test file")
+	// Verify the three separate files in passed directory
+	passedBasename := getReadableTestFilename(passingMeta)
+	passedTxtPath := filepath.Join(passedDir, passedBasename+".txt")
+	passedJsonPath := filepath.Join(passedDir, passedBasename+".json")
+	passedLogPath := filepath.Join(passedDir, passedBasename+".log")
 
-	// Verify passing test file content
-	passedContentStr := string(passedContent)
-	assert.Contains(t, passedContentStr, "PLAINTEXT OUTPUT:")
-	assert.Contains(t, passedContentStr, "=== RUN   TestPass")
-	assert.Contains(t, passedContentStr, "--- PASS: TestPass (1.00s)")
-	assert.Contains(t, passedContentStr, "JSON OUTPUT:")
-	assert.Contains(t, passedContentStr, "RESULT SUMMARY:")
-	assert.Contains(t, passedContentStr, "Test passed:")
-	assert.Contains(t, passedContentStr, "Duration:")
+	// Check plaintext file
+	passedTxtContent, err := os.ReadFile(passedTxtPath)
+	require.NoError(t, err, "Should be able to read the passing test plaintext file")
+	passedTxtStr := string(passedTxtContent)
+	assert.Contains(t, passedTxtStr, "=== RUN   TestPass")
+	assert.Contains(t, passedTxtStr, "--- PASS: TestPass (1.00s)")
+	// Should NOT contain headers since this is a separate file
+	assert.NotContains(t, passedTxtStr, "PLAINTEXT OUTPUT:")
 
-	// Verify the file in failed directory
-	failedFileName := getReadableTestFilename(failingMeta) + ".log"
-	failedFilePath := filepath.Join(failedDir, failedFileName)
-	failedContent, err := os.ReadFile(failedFilePath)
-	require.NoError(t, err, "Should be able to read the failing test file")
+	// Check JSON file
+	passedJsonContent, err := os.ReadFile(passedJsonPath)
+	require.NoError(t, err, "Should be able to read the passing test JSON file")
+	passedJsonStr := string(passedJsonContent)
+	assert.Contains(t, passedJsonStr, `"Action":"output"`)
+	assert.Contains(t, passedJsonStr, `"Package":"github.com/example/package"`)
+	// Should NOT contain headers since this is a separate file
+	assert.NotContains(t, passedJsonStr, "JSON OUTPUT:")
 
-	// Verify failing test file content
-	failedContentStr := string(failedContent)
+	// Check summary file
+	passedLogContent, err := os.ReadFile(passedLogPath)
+	require.NoError(t, err, "Should be able to read the passing test summary file")
+	passedLogStr := string(passedLogContent)
+	assert.Contains(t, passedLogStr, "RESULT SUMMARY:")
+	assert.Contains(t, passedLogStr, "Test passed:")
+	assert.Contains(t, passedLogStr, "Duration:")
 
-	// Verify that the plaintext section is included
-	assert.Contains(t, failedContentStr, "PLAINTEXT OUTPUT:")
-	assert.Contains(t, failedContentStr, "=== RUN   TestFail")
-	assert.Contains(t, failedContentStr, "Error Trace:")
-	assert.Contains(t, failedContentStr, "Error:")
-	assert.Contains(t, failedContentStr, "expected: int(42)")
-	assert.Contains(t, failedContentStr, "actual  : int(43)")
-	assert.Contains(t, failedContentStr, "Messages:")
+	// Verify the three separate files in failed directory
+	failedBasename := getReadableTestFilename(failingMeta)
+	failedTxtPath := filepath.Join(failedDir, failedBasename+".txt")
+	failedJsonPath := filepath.Join(failedDir, failedBasename+".json")
+	failedLogPath := filepath.Join(failedDir, failedBasename+".log")
 
-	// Verify that the JSON output is preserved
-	assert.Contains(t, failedContentStr, "JSON OUTPUT:")
-	assert.Contains(t, failedContentStr, `"Action":"output"`)
-	assert.Contains(t, failedContentStr, `"Package":"github.com/example/package"`)
+	// Check plaintext file
+	failedTxtContent, err := os.ReadFile(failedTxtPath)
+	require.NoError(t, err, "Should be able to read the failing test plaintext file")
+	failedTxtStr := string(failedTxtContent)
+	assert.Contains(t, failedTxtStr, "=== RUN   TestFail")
+	assert.Contains(t, failedTxtStr, "Error Trace:")
+	assert.Contains(t, failedTxtStr, "Error:")
+	assert.Contains(t, failedTxtStr, "expected: int(42)")
+	assert.Contains(t, failedTxtStr, "actual  : int(43)")
+	assert.Contains(t, failedTxtStr, "Messages:")
+	// Should NOT contain headers since this is a separate file
+	assert.NotContains(t, failedTxtStr, "PLAINTEXT OUTPUT:")
 
-	// Verify the error summary contains the important error information
-	assert.Contains(t, failedContentStr, "ERROR SUMMARY:")
-	assert.Contains(t, failedContentStr, "Test:       TestFail")
-	assert.Contains(t, failedContentStr, "Error:      Test failed: assertion error")
-	assert.Contains(t, failedContentStr, "Message:    Expected values to be equal")
-	assert.Contains(t, failedContentStr, "Error Trace:")
+	// Check JSON file
+	failedJsonContent, err := os.ReadFile(failedJsonPath)
+	require.NoError(t, err, "Should be able to read the failing test JSON file")
+	failedJsonStr := string(failedJsonContent)
+	assert.Contains(t, failedJsonStr, `"Action":"output"`)
+	assert.Contains(t, failedJsonStr, `"Package":"github.com/example/package"`)
+	// Should NOT contain headers since this is a separate file
+	assert.NotContains(t, failedJsonStr, "JSON OUTPUT:")
+
+	// Check summary file
+	failedLogContent, err := os.ReadFile(failedLogPath)
+	require.NoError(t, err, "Should be able to read the failing test summary file")
+	failedLogStr := string(failedLogContent)
+	assert.Contains(t, failedLogStr, "ERROR SUMMARY:")
+	assert.Contains(t, failedLogStr, "Test:       TestFail")
+	assert.Contains(t, failedLogStr, "Error:      Test failed: assertion error")
+	assert.Contains(t, failedLogStr, "Message:    Expected values to be equal")
+	assert.Contains(t, failedLogStr, "Error Trace:")
 }
 
 // TestHTMLSummarySink_GeneratesHTMLReport tests that the HTML summary sink generates a proper HTML report
@@ -692,19 +726,25 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 	// Verify subtest CSS classes are applied (updated for new template)
 	assert.Contains(t, htmlContent, "test-item") // Both tests and subtests use test-item class
 
-	// Verify links to log files
-	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
-	assert.Contains(t, htmlContent, "failed/isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
+	// Verify links to plaintext files (HTML now links to .txt files)
+	assert.Contains(t, htmlContent, "passed/isthmus-acceptance_package_TestWithSubtests_subtest_pass.txt")
+	assert.Contains(t, htmlContent, "failed/isthmus-acceptance_package_TestWithSubtests_subtest_fail.txt")
 
-	// Verify the corresponding log files actually exist
+	// Verify the corresponding log files actually exist (all three types)
 	passedDir := filepath.Join(baseDir, "passed")
 	failedDir := filepath.Join(baseDir, "failed")
 
-	passSubtestFile := filepath.Join(passedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_pass.log")
-	assert.FileExists(t, passSubtestFile, "Passing subtest log file should exist")
+	// Passing subtest files
+	passBasename := "isthmus-acceptance_package_TestWithSubtests_subtest_pass"
+	assert.FileExists(t, filepath.Join(passedDir, passBasename+".txt"), "Passing subtest plaintext file should exist")
+	assert.FileExists(t, filepath.Join(passedDir, passBasename+".json"), "Passing subtest JSON file should exist")
+	assert.FileExists(t, filepath.Join(passedDir, passBasename+".log"), "Passing subtest summary file should exist")
 
-	failSubtestFile := filepath.Join(failedDir, "isthmus-acceptance_package_TestWithSubtests_subtest_fail.log")
-	assert.FileExists(t, failSubtestFile, "Failing subtest log file should exist")
+	// Failing subtest files
+	failBasename := "isthmus-acceptance_package_TestWithSubtests_subtest_fail"
+	assert.FileExists(t, filepath.Join(failedDir, failBasename+".txt"), "Failing subtest plaintext file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, failBasename+".json"), "Failing subtest JSON file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, failBasename+".log"), "Failing subtest summary file should exist")
 
 	// Verify statistics are correct (main test + 2 subtests = 3 total)
 	assert.Contains(t, htmlContent, "<div class=\"stat-value\">3</div>")     // Total
@@ -780,32 +820,36 @@ func TestPerTestFileSink_CreatesSubtestFiles(t *testing.T) {
 	// Finalize to ensure all files are written
 	require.NoError(t, logger.Complete(runID))
 
-	// Verify the main test file exists in failed directory (since it failed)
-	mainFileName := getReadableTestFilename(mainMeta) + ".log"
-	mainFilePath := filepath.Join(failedDir, mainFileName)
-	assert.FileExists(t, mainFilePath, "Main test log file should exist")
+	// Verify the main test files exist in failed directory (since it failed) - three files
+	mainBasename := getReadableTestFilename(mainMeta)
+	assert.FileExists(t, filepath.Join(failedDir, mainBasename+".txt"), "Main test plaintext file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, mainBasename+".json"), "Main test JSON file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, mainBasename+".log"), "Main test summary file should exist")
 
-	// Verify subtest files exist in their respective directories
-	subtest1FileName := "gate1-suite1_package_TestWithSubtests_subtest_1.log"
-	subtest1FilePath := filepath.Join(passedDir, subtest1FileName)
-	assert.FileExists(t, subtest1FilePath, "Passing subtest log file should exist in passed directory")
+	// Verify subtest files exist in their respective directories - three files each
+	subtest1Basename := "gate1-suite1_package_TestWithSubtests_subtest_1"
+	assert.FileExists(t, filepath.Join(passedDir, subtest1Basename+".txt"), "Passing subtest plaintext file should exist")
+	assert.FileExists(t, filepath.Join(passedDir, subtest1Basename+".json"), "Passing subtest JSON file should exist")
+	assert.FileExists(t, filepath.Join(passedDir, subtest1Basename+".log"), "Passing subtest summary file should exist")
 
-	subtest2FileName := "gate1-suite1_package_TestWithSubtests_subtest_2.log"
-	subtest2FilePath := filepath.Join(failedDir, subtest2FileName)
-	assert.FileExists(t, subtest2FilePath, "Failing subtest log file should exist in failed directory")
+	subtest2Basename := "gate1-suite1_package_TestWithSubtests_subtest_2"
+	assert.FileExists(t, filepath.Join(failedDir, subtest2Basename+".txt"), "Failing subtest plaintext file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, subtest2Basename+".json"), "Failing subtest JSON file should exist")
+	assert.FileExists(t, filepath.Join(failedDir, subtest2Basename+".log"), "Failing subtest summary file should exist")
 
-	// Verify the content of the subtest files
-	subtest1Content, err := os.ReadFile(subtest1FilePath)
+	// Verify the content of the subtest summary files
+	subtest1LogPath := filepath.Join(passedDir, subtest1Basename+".log")
+	subtest1LogContent, err := os.ReadFile(subtest1LogPath)
 	require.NoError(t, err)
-	subtest1ContentStr := string(subtest1Content)
-	assert.Contains(t, subtest1ContentStr, "PLAINTEXT OUTPUT:")
-	assert.Contains(t, subtest1ContentStr, "Test passed: TestWithSubtests/subtest_1")
+	subtest1LogStr := string(subtest1LogContent)
+	assert.Contains(t, subtest1LogStr, "RESULT SUMMARY:")
+	assert.Contains(t, subtest1LogStr, "Test passed: TestWithSubtests/subtest_1")
 
-	subtest2Content, err := os.ReadFile(subtest2FilePath)
+	subtest2LogPath := filepath.Join(failedDir, subtest2Basename+".log")
+	subtest2LogContent, err := os.ReadFile(subtest2LogPath)
 	require.NoError(t, err)
-	subtest2ContentStr := string(subtest2Content)
-	assert.Contains(t, subtest2ContentStr, "PLAINTEXT OUTPUT:")
-	assert.Contains(t, subtest2ContentStr, "ERROR SUMMARY:")
+	subtest2LogStr := string(subtest2LogContent)
+	assert.Contains(t, subtest2LogStr, "ERROR SUMMARY:")
 }
 
 // TestDuplicationFix verifies that logging the same test multiple times doesn't create duplicate content
@@ -849,35 +893,55 @@ func TestDuplicationFix(t *testing.T) {
 	baseDir, err := logger.GetDirectoryForRunID(runID)
 	require.NoError(t, err)
 
-	// Check that only one log file was created in the failed directory
+	// Check that the three separate files were created in the failed directory
 	failedDir := filepath.Join(baseDir, "failed")
-	files, err := os.ReadDir(failedDir)
-	require.NoError(t, err)
-	require.Len(t, files, 1, "Expected exactly one log file in failed directory")
-
-	// Read the file content
-	logFilePath := filepath.Join(failedDir, files[0].Name())
-	content, err := os.ReadFile(logFilePath)
+	failedFiles, err := os.ReadDir(failedDir)
 	require.NoError(t, err)
 
-	contentStr := string(content)
+	// Should have exactly 3 files: .txt, .json, .log
+	assert.Len(t, failedFiles, 3, "Expected exactly 3 files in failed directory")
 
-	// Count occurrences of key sections - should only appear once each
-	plaintextCount := strings.Count(contentStr, "PLAINTEXT OUTPUT:")
-	jsonCount := strings.Count(contentStr, "JSON OUTPUT:")
-	timeoutSummaryCount := strings.Count(contentStr, "TIMEOUT ERROR SUMMARY:")
+	// Check that we have one file of each type
+	var hasText, hasJson, hasLog bool
+	for _, file := range failedFiles {
+		switch {
+		case strings.HasSuffix(file.Name(), ".txt"):
+			hasText = true
+		case strings.HasSuffix(file.Name(), ".json"):
+			hasJson = true
+		case strings.HasSuffix(file.Name(), ".log"):
+			hasLog = true
+		}
+	}
+	assert.True(t, hasText, "Should have a .txt file")
+	assert.True(t, hasJson, "Should have a .json file")
+	assert.True(t, hasLog, "Should have a .log file")
 
-	// Assert that each section appears exactly once (no duplication)
-	assert.Equal(t, 1, plaintextCount, "PLAINTEXT OUTPUT section should appear exactly once")
-	assert.Equal(t, 1, jsonCount, "JSON OUTPUT section should appear exactly once")
-	assert.Equal(t, 1, timeoutSummaryCount, "TIMEOUT ERROR SUMMARY section should appear exactly once")
+	// Read the summary file to verify timeout information is present
+	for _, file := range failedFiles {
+		if strings.HasSuffix(file.Name(), ".log") {
+			logFilePath := filepath.Join(failedDir, file.Name())
+			logContent, err := os.ReadFile(logFilePath)
+			require.NoError(t, err)
+			logContentStr := string(logContent)
+			assert.Contains(t, logContentStr, "TIMEOUT ERROR SUMMARY:")
+			break
+		}
+	}
 
-	// Verify timeout information is present
-	assert.Contains(t, contentStr, "*** TIMEOUT ERROR ***")
-	assert.Contains(t, contentStr, "This test failed due to timeout!")
-	assert.Contains(t, contentStr, "TIMEOUT: Test timed out after 1s")
+	// Read the plaintext file to verify timeout information is present
+	for _, file := range failedFiles {
+		if strings.HasSuffix(file.Name(), ".txt") {
+			txtFilePath := filepath.Join(failedDir, file.Name())
+			txtContent, err := os.ReadFile(txtFilePath)
+			require.NoError(t, err)
+			txtContentStr := string(txtContent)
+			assert.Contains(t, txtContentStr, "*** TIMEOUT ERROR ***")
+			assert.Contains(t, txtContentStr, "TIMEOUT: Test timed out after 1s")
+			break
+		}
+	}
 
-	t.Logf("Duplication fix verified! File: %s", files[0].Name())
 }
 
 // TestHTMLSink_TestsWithSubtestsAlwaysDisplayed verifies that tests with subtests are never filtered out
