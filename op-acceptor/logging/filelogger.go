@@ -699,11 +699,14 @@ func (s *PerTestFileSink) createTestLogFileOnce(result *types.TestResult, passed
 	s.mu.Unlock()
 
 	// Now create the test log file
-	return s.createTestLogFile(result, passedDir, failedDir, runID)
+	return s.createTestLogFiles(result, passedDir, failedDir, runID)
 }
 
-// createTestLogFile creates a log file for a single test result
-func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir, failedDir string, runID string) error {
+// createTestLogFiles creates three separate log files for a single test result:
+// 1. A plaintext log file containing the processed plaintext output
+// 2. A JSON log file containing the raw JSON output
+// 3. A summary log file containing the result summary
+func (s *PerTestFileSink) createTestLogFiles(result *types.TestResult, passedDir, failedDir string, runID string) error {
 	// Generate a safe filename based on the test metadata
 	filename := getReadableTestFilename(result.Metadata)
 
@@ -715,37 +718,44 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		targetDir = passedDir
 	}
 
-	// Full path to the test log file
-	testFilePath := filepath.Join(targetDir, filename+".log")
-
-	// Get or create the async writer
-	writer, err := s.logger.getAsyncWriter(testFilePath)
-	if err != nil {
-		return err
-	}
+	// Create the three separate files
+	plaintextPath := filepath.Join(targetDir, filename+".txt")
+	jsonPath := filepath.Join(targetDir, filename+".json")
+	summaryPath := filepath.Join(targetDir, filename+".log")
 
 	// Check if this is a timeout failure for special handling
 	isTimeout := result.TimedOut
 
-	// Build error summary header
-	var content strings.Builder
-
-	// Check if this is a timeout failure
-	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
-		if isTimeout {
-			fmt.Fprintf(&content, "TIMEOUT ERROR SUMMARY:\n")
-			fmt.Fprintf(&content, "======================\n\n")
-			fmt.Fprintf(&content, "This test failed due to timeout!\n")
-			fmt.Fprintf(&content, "Timeout Duration: %v\n", result.Metadata.Timeout)
-			fmt.Fprintf(&content, "Error: %s\n\n", result.Error.Error())
-		} else {
-			fmt.Fprintf(&content, "ERROR SUMMARY:\n")
-			fmt.Fprintf(&content, "=============\n\n")
-		}
+	// 1. Create the plaintext file
+	err := s.createPlaintextFile(result, plaintextPath, isTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to create plaintext file: %w", err)
 	}
 
-	// Extract the plaintext output first from all JSON Output fields
+	// 2. Create the JSON file
+	err = s.createJSONFile(result, jsonPath, isTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to create JSON file: %w", err)
+	}
+
+	// 3. Create the summary file
+	err = s.createSummaryFile(result, summaryPath, isTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to create summary file: %w", err)
+	}
+
+	return nil
+}
+
+// createPlaintextFile creates the plaintext output file
+func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath string, isTimeout bool) error {
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(filePath)
+	if err != nil {
+		return err
+	}
+
+	// Extract the plaintext output from JSON
 	var plaintext strings.Builder
 	if result.Stdout != "" {
 		parser := NewJSONOutputParser(result.Stdout)
@@ -754,11 +764,9 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 		})
 	}
 
-	// 1. Write the plaintext output first, with timeout information if applicable
-	fmt.Fprintf(&content, "PLAINTEXT OUTPUT:\n")
-	fmt.Fprintf(&content, "================\n\n")
+	var content strings.Builder
 
-	// For timeout cases, prominently display the timeout error at the beginning of plaintext output
+	// For timeout cases, prominently display the timeout error at the beginning
 	if isTimeout {
 		fmt.Fprintf(&content, "*** TIMEOUT ERROR ***\n")
 		fmt.Fprintf(&content, "%s\n", result.Error.Error())
@@ -774,39 +782,74 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 	} else {
 		// For non-timeout cases, show regular output
 		if plaintext.Len() > 0 {
-			fmt.Fprintf(&content, "%s\n", plaintext.String())
+			fmt.Fprintf(&content, "%s", plaintext.String())
 		} else {
 			fmt.Fprintf(&content, "No output captured.\n")
 		}
 	}
 
-	// 2. Add a clear separator between plaintext and JSON
-	fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
-	fmt.Fprintf(&content, "JSON OUTPUT:\n")
-	fmt.Fprintf(&content, "============\n\n")
+	// Write the content to the file
+	return writer.Write([]byte(content.String()))
+}
 
-	// 3. Include the raw JSON output for full debug information
+// createJSONFile creates the JSON output file
+func (s *PerTestFileSink) createJSONFile(result *types.TestResult, filePath string, isTimeout bool) error {
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(filePath)
+	if err != nil {
+		return err
+	}
+
+	var content strings.Builder
+
+	// Include the raw JSON output
 	if result.Stdout != "" {
 		if isTimeout {
-			fmt.Fprintf(&content, "PARTIAL JSON OUTPUT (BEFORE TIMEOUT):\n")
-			fmt.Fprintf(&content, "-------------------------------------\n")
+			fmt.Fprintf(&content, "# PARTIAL JSON OUTPUT (BEFORE TIMEOUT)\n")
+			fmt.Fprintf(&content, "# ------------------------------------\n")
 		}
-		fmt.Fprintf(&content, "%s\n", result.Stdout)
+		fmt.Fprintf(&content, "%s", result.Stdout)
+		if !strings.HasSuffix(result.Stdout, "\n") {
+			fmt.Fprintf(&content, "\n")
+		}
 	} else if isTimeout {
-		fmt.Fprintf(&content, "No JSON output captured before timeout.\n")
+		fmt.Fprintf(&content, "# No JSON output captured before timeout.\n")
 		// Include our timeout marker if we stored one
-		fmt.Fprintf(&content, "\nTimeout marker that would be stored:\n")
+		fmt.Fprintf(&content, "# Timeout marker that would be stored:\n")
 		fmt.Fprintf(&content, `{"Time":"%s","Action":"timeout","Package":"%s","Test":"%s","Output":"TEST TIMED OUT - no JSON output captured\n"}`,
 			time.Now().Format(time.RFC3339), result.Metadata.Package, result.Metadata.FuncName)
 		fmt.Fprintf(&content, "\n")
 	} else {
-		fmt.Fprintf(&content, "No JSON output available.\n")
+		fmt.Fprintf(&content, "# No JSON output available.\n")
 	}
 
-	// 4. Add a separator before the error summary section
+	// Write the content to the file
+	return writer.Write([]byte(content.String()))
+}
+
+// createSummaryFile creates the summary file
+func (s *PerTestFileSink) createSummaryFile(result *types.TestResult, filePath string, isTimeout bool) error {
+	// Get or create the async writer
+	writer, err := s.logger.getAsyncWriter(filePath)
+	if err != nil {
+		return err
+	}
+
+	var content strings.Builder
+
+	// Check if this is a timeout failure
 	if result.Status == types.TestStatusFail || result.Status == types.TestStatusError {
-		// Extract critical error information from non-timeout errors
-		if !isTimeout {
+		if isTimeout {
+			fmt.Fprintf(&content, "TIMEOUT ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "======================\n\n")
+			fmt.Fprintf(&content, "This test failed due to timeout!\n")
+			fmt.Fprintf(&content, "Timeout Duration: %v\n", result.Metadata.Timeout)
+			fmt.Fprintf(&content, "Error: %s\n\n", result.Error.Error())
+		} else {
+			fmt.Fprintf(&content, "ERROR SUMMARY:\n")
+			fmt.Fprintf(&content, "=============\n\n")
+
+			// Extract critical error information from non-timeout errors
 			errorInfo := extractErrorData(result.Stdout)
 
 			if errorInfo.TestName != "" {
@@ -831,8 +874,7 @@ func (s *PerTestFileSink) createTestLogFile(result *types.TestResult, passedDir,
 			}
 		}
 	} else {
-		// For passed tests, a simpler summary at the end
-		fmt.Fprintf(&content, "\n%s\n", strings.Repeat("-", 80))
+		// For passed tests, a simpler summary
 		fmt.Fprintf(&content, "RESULT SUMMARY:\n")
 		fmt.Fprintf(&content, "===============\n\n")
 		fmt.Fprintf(&content, "Test passed: %s\n", result.Metadata.FuncName)

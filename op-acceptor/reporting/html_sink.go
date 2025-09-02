@@ -66,7 +66,7 @@ func (s *ReportingHTMLSink) CompleteWithTiming(runID string, wallClockTime time.
 	builder := types.NewTestTreeBuilder().
 		WithSubtests(true).
 		WithLogPathGenerator(func(test *types.TestResult, isSubtest bool, parentName string) string {
-			filename := s.getReadableTestFilename(test.Metadata) + ".log"
+			filename := s.getReadableTestFilename(test.Metadata) + ".txt"
 			var subdir string
 			if test.Status == types.TestStatusFail || test.Status == types.TestStatusError {
 				subdir = "failed"
