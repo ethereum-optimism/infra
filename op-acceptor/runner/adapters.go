@@ -50,12 +50,6 @@ func (a *parallelRunnerAdapter) RunParallel(ctx context.Context, validators []ty
 	return nil
 }
 
-// SetConcurrency sets the concurrency level (this is handled at executor creation time)
-func (a *parallelRunnerAdapter) SetConcurrency(concurrency int) {
-	// The existing ParallelExecutor doesn't support runtime concurrency changes
-	// This would need to be set during creation in NewParallelExecutor
-}
-
 // GetConcurrency returns the current concurrency level
 func (a *parallelRunnerAdapter) GetConcurrency() int {
 	return a.executor.concurrency

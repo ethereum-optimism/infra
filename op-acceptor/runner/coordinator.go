@@ -12,7 +12,6 @@ import (
 // ParallelRunner interface for parallel execution
 type ParallelRunner interface {
 	RunParallel(ctx context.Context, validators []types.ValidatorMetadata, result *RunnerResult) error
-	SetConcurrency(concurrency int)
 	GetConcurrency() int
 }
 
