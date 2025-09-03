@@ -1,0 +1,25 @@
+[server]
+rpc_port = 8546
+
+[backend]
+response_timeout_seconds = 10
+
+[backends]
+[backends.fast_timeout]
+rpc_url = "$FAST_BACKEND_RPC_URL"
+ws_url = "$FAST_BACKEND_RPC_URL"
+response_timeout_milliseconds = 400
+max_retries = 0
+
+[backends.slow_timeout]
+rpc_url = "$SLOW_BACKEND_RPC_URL"
+ws_url = "$SLOW_BACKEND_RPC_URL"
+response_timeout_milliseconds = 5000
+
+[backend_groups]
+[backend_groups.main]
+backends = ["fast_timeout", "slow_timeout"]
+fallbacks = ["slow_timeout"]
+
+[rpc_method_mappings]
+eth_chainId = "main"

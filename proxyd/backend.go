@@ -18,6 +18,8 @@ import (
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
+	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
+	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -111,11 +113,163 @@ var (
 		HTTPErrorCode: 500,
 	}
 
+	ErrInteropAccessListOutOfBounds = &RPCErr{
+		Code:          JSONRPCErrorInternal - 22,
+		Message:       "access list out of bounds",
+		HTTPErrorCode: 413,
+	}
+
+	ErrContextCanceled = &RPCErr{
+		Code:          JSONRPCErrorInternal - 23,
+		Message:       context.Canceled.Error(),
+		HTTPErrorCode: 499,
+	}
+
+	ErrTooManyRequests = &RPCErr{
+		Code:          JSONRPCErrorInternal - 24,
+		Message:       "too many requests",
+		HTTPErrorCode: 429,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
 	ErrConsensusGetReceiptsInvalidTarget = errors.New("unsupported consensus_receipts_target")
 )
+
+/*
+These adhere to the interop RPC error codes defined in the supervisor spec
+Ref: https://github.com/ethereum-optimism/specs/blob/41a2ea8d362ac132ad2edf7f577bd393ec8beccc/specs/interop/supervisor.md
+Summary:
+
+	-3204XX DEADLINE_EXCEEDED errors
+	  -320400 UNINITIALIZED_CHAIN_DATABASE
+	-3205XX NOT_FOUND errors
+	  -320500 SKIPPED_DATA
+	  -320501 UNKNOWN_CHAIN
+	-3206XX ALREADY_EXISTS errors
+	  -320600 CONFLICTING_DATA
+	  -320601 INEFFECTIVE_DATA
+	-3209XX FAILED_PRECONDITION errors
+	  -320900 OUT_OF_ORDER
+	  -320901 AWAITING_REPLACEMENT_BLOCK
+	-3210XX ABORTED errors
+	  -321000 ITER_STOP
+	-3211XX OUT_OF_RANGE errors
+	  -321100 OUT_OF_SCOPE
+	-3212XX UNIMPLEMENTED errors
+	  -321200 CANNOT_GET_PARENT_OF_FIRST_BLOCK_IN_DB
+	-3214XX UNAVAILABLE errors
+	  -321401 FUTURE_DATA
+	-3215XX DATA_LOSS errors
+	  -321500 MISSED_DATA
+	  -321501 DATA_CORRUPTION
+*/
+var interopRPCErrorMap = map[error]*RPCErr{
+	supervisorTypes.ErrUninitialized: {
+		Code:          -320400,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrSkipped: {
+		Code:          -320500,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrUnknownChain: {
+		Code:          -320501,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrConflict: {
+		Code:          -320600,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrIneffective: {
+		Code:          -320601,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrOutOfOrder: {
+		Code:          -320900,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrAwaitReplacementBlock: {
+		Code:          -320901,
+		HTTPErrorCode: 409,
+	},
+	supervisorTypes.ErrStop: {
+		Code:          -321000,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrOutOfScope: {
+		Code:          -321100,
+		HTTPErrorCode: 400,
+	},
+	supervisorTypes.ErrPreviousToFirst: {
+		Code:          -321200,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrFuture: {
+		Code:          -321401,
+		HTTPErrorCode: 422,
+	},
+	supervisorTypes.ErrNotExact: {
+		Code:          -321500,
+		HTTPErrorCode: 404,
+	},
+	supervisorTypes.ErrDataCorruption: {
+		Code:          -321501,
+		HTTPErrorCode: 422,
+	},
+	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
+	},
+	errors.New("stopped acces-list check early"): {
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
+	},
+	errors.New("failed to read data"): {
+		Code:          -32602, // invalid params
+		HTTPErrorCode: 400,
+	},
+}
+
+func ParseInteropError(err error) *RPCErr {
+	var fallbackErr *RPCErr
+	httpErr, isHTTPError := err.(rpc.HTTPError)
+	if !isHTTPError {
+		fallbackErr = &RPCErr{
+			Code:          JSONRPCErrorInternal,
+			Message:       err.Error(),
+			HTTPErrorCode: 500,
+		}
+	} else {
+		// if the underlying error is a JSON-RPC error, overwrite it with the inherent error message body
+		var rpcErrJson rpcResJSON
+		unmarshalErr := json.Unmarshal(httpErr.Body, &rpcErrJson)
+		if unmarshalErr != nil {
+			fallbackErr = ErrInvalidParams(string(httpErr.Body))
+			fallbackErr.HTTPErrorCode = httpErr.StatusCode
+		} else {
+			fallbackErr = &RPCErr{
+				Code:          rpcErrJson.Error.Code,
+				Message:       rpcErrJson.Error.Message,
+				Data:          rpcErrJson.Error.Data,
+				HTTPErrorCode: httpErr.StatusCode,
+			}
+
+			err = fmt.Errorf(rpcErrJson.Error.Message)
+		}
+	}
+
+	errStr := err.Error()
+	for errSubStr, errCodes := range interopRPCErrorMap {
+		if strings.Contains(errStr, errSubStr.Error()) {
+			interopParsedErr := errCodes.Clone()
+			interopParsedErr.Message = errStr
+			return interopParsedErr
+		}
+	}
+	return fallbackErr
+}
 
 func ErrInvalidRequest(msg string) *RPCErr {
 	return &RPCErr{
@@ -151,12 +305,15 @@ type Backend struct {
 	stripTrailingXFF     bool
 	proxydIP             string
 
+	skipIsSyncingCheck bool
 	skipPeerCountCheck bool
 	forcedCandidate    bool
 
-	maxDegradedLatencyThreshold time.Duration
-	maxLatencyThreshold         time.Duration
-	maxErrorRateThreshold       float64
+	safeBlockDriftThreshold      uint64
+	finalizedBlockDriftThreshold uint64
+	maxDegradedLatencyThreshold  time.Duration
+	maxLatencyThreshold          time.Duration
+	maxErrorRateThreshold        float64
 
 	latencySlidingWindow            *sw.AvgSlidingWindow
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
@@ -234,6 +391,24 @@ func WithStrippedTrailingXFF() BackendOpt {
 func WithProxydIP(ip string) BackendOpt {
 	return func(b *Backend) {
 		b.proxydIP = ip
+	}
+}
+
+func WithSkipIsSyncingCheck(skipIsSyncingCheck bool) BackendOpt {
+	return func(b *Backend) {
+		b.skipIsSyncingCheck = skipIsSyncingCheck
+	}
+}
+
+func WithSafeBlockDriftThreshold(safeBlockDriftThreshold uint64) BackendOpt {
+	return func(b *Backend) {
+		b.safeBlockDriftThreshold = safeBlockDriftThreshold
+	}
+}
+
+func WithFinalizedBlockDriftThreshold(finalizedBlockDriftThreshold uint64) BackendOpt {
+	return func(b *Backend) {
+		b.finalizedBlockDriftThreshold = finalizedBlockDriftThreshold
 	}
 }
 
@@ -417,6 +592,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"req_id", GetReqID(ctx),
 				"err", err,
 			)
+		case ErrContextCanceled:
+			// return immediately on client cancellation
+			log.Debug("context canceled while forwarding request",
+				"name", b.Name,
+				"req_id", GetReqID(ctx),
+				"err", err,
+			)
+			return nil, err
 		default:
 			lastError = err
 			log.Warn(
@@ -426,11 +609,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"err", err,
 				"method", metricLabelMethod,
 				"attempt_count", i+1,
-				"max_retries", b.maxRetries+1,
+				"max_attempts", b.maxRetries+1,
 			)
 			timer.ObserveDuration()
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
-			sleepContext(ctx, calcBackoff(i))
+			// perform a backoff if there are more retries for this backend
+			if i < b.maxRetries {
+				sleepContext(ctx, calcBackoff(i))
+			}
 			continue
 		}
 		timer.ObserveDuration()
@@ -475,7 +661,7 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 		return fmt.Errorf("unexpected response len for non-batched request (len != 1)")
 	}
 	if slicedRes[0].IsError() {
-		return fmt.Errorf(slicedRes[0].Error.Error())
+		return slicedRes[0].Error
 	}
 
 	*res = *(slicedRes[0])
@@ -583,8 +769,13 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
 	if err != nil {
-		b.intermittentErrorsSlidingWindow.Incr()
-		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		if !(errors.Is(err, context.Canceled) || errors.Is(err, ErrTooManyRequests)) {
+			b.intermittentErrorsSlidingWindow.Incr()
+			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		}
+		if errors.Is(err, ErrContextCanceled) {
+			return nil, err
+		}
 		return nil, wrapErr(err, "error in backend request")
 	}
 
@@ -780,14 +971,14 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	}
 
+	rpcRequestsTotal.Inc()
+
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
 		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
-
-	rpcRequestsTotal.Inc()
 
 	ch := make(chan BackendGroupRPCResponse)
 	go func() {
@@ -1326,9 +1517,16 @@ type LimitedHTTPClient struct {
 }
 
 func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error) {
+	if c.sem == nil {
+		return c.Do(req)
+	}
+
 	if err := c.sem.Acquire(req.Context(), 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, ErrContextCanceled
+		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
-		return nil, wrapErr(err, "too many requests")
+		return nil, wrapErr(err, ErrTooManyRequests.Message)
 	}
 	defer c.sem.Release(1)
 	return c.Do(req)
@@ -1407,22 +1605,42 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 			res, err = back.Forward(ctx, rpcReqs, isBatch)
 
+			// below are errors that we explicitly handle so that we don't
+			// mark this request as unserviceable (unserviceable requests
+			// indicate a problem with our backends, but there is nothing
+			// wrong with our backends for these errors)
 			if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 				errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) ||
+				// context canceled happens when either the client cancels the request
+				// or proxyd cancels the request. Proxyd only cancels requests when
+				// the server is shutting down, so this must be the client cancelling
+				// the request.
+				// We catch this error here so that we don't mark this request as
+				// unserviceable
+				errors.Is(err, ErrContextCanceled) {
+				return &BackendGroupRPCResponse{
+					RPCRes:   nil,
+					ServedBy: "",
+					error:    err,
+				}
+			}
+
+			if errors.Is(err, ErrBackendResponseTooLarge) ||
+				// we check for "request body too large" when first serving a request,
+				// so this is a special case where the backend has its own rules around
+				// request body size and returns a 413 error. We've seen this with quicknode
+				errors.Is(err, ErrRequestBodyTooLarge) ||
 				errors.Is(err, ErrMethodNotWhitelisted) {
 				return &BackendGroupRPCResponse{
 					RPCRes:   nil,
-					ServedBy: "",
+					ServedBy: servedBy,
 					error:    err,
 				}
 			}
-			if errors.Is(err, ErrBackendResponseTooLarge) {
-				return &BackendGroupRPCResponse{
-					RPCRes:   nil,
-					ServedBy: "",
-					error:    err,
-				}
-			}
+
+			// below are errors that do indicate a problem with our backends
+			// and if these errors are encountered for all backends, we will
+			// mark this request as unserviceable
 			if errors.Is(err, ErrBackendOffline) {
 				log.Warn(
 					"skipping offline backend",

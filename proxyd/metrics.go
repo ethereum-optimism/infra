@@ -59,6 +59,17 @@ var (
 		"batched",
 	})
 
+	rpcSupervisorChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_supervisor_checks_total",
+		Help:      "Count of total supervisor checks.",
+	}, []string{
+		"supervisor_url",
+		"http_code",
+		"rpc_error_code",
+		"strategy",
+	})
+
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_errors_total",
@@ -203,6 +214,18 @@ var (
 		"gas price too high",
 		"gas price too low",
 		"invalid parameters",
+		"txpool is full",
+		"pool is full",
+		"pool overflow",
+		"transaction pool is full",
+		"insufficient funds",
+		"replacement underpriced",
+		"replacement transaction underpriced",
+		"already known",
+		"max initcode size exceeded",
+		"insufficient balance",
+		"gas limit exceeded",
+		"intrinsic gas too low",
 	}
 
 	redisCacheDurationSumm = promauto.NewHistogramVec(prometheus.HistogramOpts{

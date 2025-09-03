@@ -17,7 +17,9 @@ type ServerConfig struct {
 	WSPort            int    `toml:"ws_port"`
 	MaxBodySizeBytes  int64  `toml:"max_body_size_bytes"`
 	MaxConcurrentRPCs int64  `toml:"max_concurrent_rpcs"`
-	LogLevel          string `toml:"log_level"`
+	// DisableConcurrentRequestSemaphore=true allows unlimited concurrent RPC requests. This takes precedence over MaxConcurrentRPCs.
+	DisableConcurrentRequestSemaphore bool   `toml:"disable_concurrent_request_semaphore"`
+	LogLevel                          string `toml:"log_level"`
 
 	// TimeoutSeconds specifies the maximum time spent serving an HTTP request. Note that isn't used for websocket connections
 	TimeoutSeconds int `toml:"timeout_seconds"`
@@ -37,10 +39,16 @@ type CacheConfig struct {
 }
 
 type RedisConfig struct {
+	// If `redis_cluster = true`, you can specify url string for multi-node cluster:
+	//    "redis://<user>:<password>@<host>:<port>?addr=<host2>:<port2>&addr=<host3>:<port3>"
+	// OR "rediss://<user>:<password>@<host>:<port>?addr=<host2>:<port2>&addr=<host3>:<port3>"
+	//
+	// Otherwise, it is also possible to specify single url for Redis cluster with proxy support.
 	URL              string `toml:"url"`
 	Namespace        string `toml:"namespace"`
 	ReadURL          string `toml:"read_url"`
 	FallbackToMemory bool   `toml:"fallback_to_memory"`
+	RedisCluster     bool   `toml:"redis_cluster"`
 }
 
 type MetricsConfig struct {
@@ -87,7 +95,9 @@ func (t *TOMLDuration) UnmarshalText(b []byte) error {
 }
 
 type BackendOptions struct {
+	// Deprecated: Use ResponseTimeoutMilliseconds instead. Note this field will be overridden if `ResponseTimeoutMilliseconds` is also set.
 	ResponseTimeoutSeconds      int          `toml:"response_timeout_seconds"`
+	ResponseTimeoutMilliseconds int          `toml:"response_timeout_milliseconds"`
 	MaxResponseSizeBytes        int64        `toml:"max_response_size_bytes"`
 	MaxRetries                  int          `toml:"max_retries"`
 	OutOfServiceSeconds         int          `toml:"out_of_service_seconds"`
@@ -111,6 +121,13 @@ type BackendConfig struct {
 	Headers          map[string]string `toml:"headers"`
 
 	Weight int `toml:"weight"`
+
+	SkipIsSyncingCheck          bool `toml:"skip_is_syncing_check"`
+	ResponseTimeoutMilliseconds int  `toml:"response_timeout_milliseconds"`
+	MaxRetries                  *int `toml:"max_retries"`
+
+	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
+	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
 
 	ConsensusSkipPeerCountCheck bool   `toml:"consensus_skip_peer_count"`
 	ConsensusForcedCandidate    bool   `toml:"consensus_forced_candidate"`
@@ -207,23 +224,42 @@ type SenderRateLimitConfig struct {
 }
 
 type Config struct {
-	WSBackendGroup        string                `toml:"ws_backend_group"`
-	Server                ServerConfig          `toml:"server"`
-	Cache                 CacheConfig           `toml:"cache"`
-	Redis                 RedisConfig           `toml:"redis"`
-	Metrics               MetricsConfig         `toml:"metrics"`
-	RateLimit             RateLimitConfig       `toml:"rate_limit"`
-	Nacos                 NacosConfig           `toml:"nacos"`
-	BackendOptions        BackendOptions        `toml:"backend"`
-	Backends              BackendsConfig        `toml:"backends"`
-	BatchConfig           BatchConfig           `toml:"batch"`
-	Authentication        map[string]string     `toml:"authentication"`
-	BackendGroups         BackendGroupsConfig   `toml:"backend_groups"`
-	RPCMethodMappings     map[string]string     `toml:"rpc_method_mappings"`
-	WSMethodWhitelist     []string              `toml:"ws_method_whitelist"`
-	WhitelistErrorMessage string                `toml:"whitelist_error_message"`
-	SenderRateLimit       SenderRateLimitConfig `toml:"sender_rate_limit"`
+	WSBackendGroup          string                  `toml:"ws_backend_group"`
+	Server                  ServerConfig            `toml:"server"`
+	Cache                   CacheConfig             `toml:"cache"`
+	Redis                   RedisConfig             `toml:"redis"`
+	Metrics                 MetricsConfig           `toml:"metrics"`
+	RateLimit               RateLimitConfig         `toml:"rate_limit"`
+	Nacos                   NacosConfig           `toml:"nacos"`
+	BackendOptions          BackendOptions          `toml:"backend"`
+	Backends                BackendsConfig          `toml:"backends"`
+	BatchConfig             BatchConfig             `toml:"batch"`
+	Authentication          map[string]string       `toml:"authentication"`
+	BackendGroups           BackendGroupsConfig     `toml:"backend_groups"`
+	RPCMethodMappings       map[string]string       `toml:"rpc_method_mappings"`
+	WSMethodWhitelist       []string                `toml:"ws_method_whitelist"`
+	WhitelistErrorMessage   string                  `toml:"whitelist_error_message"`
+	SenderRateLimit         SenderRateLimitConfig   `toml:"sender_rate_limit"`
+	InteropValidationConfig InteropValidationConfig `toml:"interop_validation"`
 }
+
+type InteropValidationConfig struct {
+	Urls                              []string                  `toml:"urls"`
+	Strategy                          InteropValidationStrategy `toml:"strategy"`
+	LoadBalancingUnhealthinessTimeout time.Duration             `toml:"load_balancing_unhealthiness_timeout"`
+	ReqSizeLimit                      int                       `toml:"req_size_limit"`
+	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`
+	RateLimit                         SenderRateLimitConfig     `toml:"sender_rate_limit"`
+}
+
+type InteropValidationStrategy string
+
+const (
+	EmptyStrategy                    InteropValidationStrategy = ""
+	FirstSupervisorStrategy          InteropValidationStrategy = "first-supervisor"
+	MulticallStrategy                InteropValidationStrategy = "multicall"
+	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
+)
 
 func ReadFromEnvOrConfig(value string) (string, error) {
 	if strings.HasPrefix(value, "$") {

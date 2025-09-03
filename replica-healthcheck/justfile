@@ -1,0 +1,8 @@
+docker-build:
+  docker build .
+
+docker-run image reference target:
+  docker run {{image}} -- --referencerpcprovider {{reference}} --targetrpcprovider {{target}}
+
+docker-run-env image envfile:
+  docker run --env-file {{envfile}} {{image}}
