@@ -2,6 +2,7 @@ version: 2.1
 
 orbs:
   gcp-cli: circleci/gcp-cli@3.3.0
+  circleci-utils: ethereum-optimism/circleci-utils@1.0.20
 
 parameters:
   run-build-op-conductor-mon:
@@ -321,8 +322,9 @@ jobs:
         type: string
     docker:
       - image: cimg/go:1.23
+        user: root
     steps:
-      - checkout
+      - circleci-utils/checkout-with-mise
       - run:
           name: run generate
           command: |
@@ -336,10 +338,15 @@ jobs:
       - run:
           name: run lint
           command: |
-            if [ -f .golangci.yml ]; then
-             golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+            if [ "<<parameters.module>>" = "op-acceptor" ]; then
+              make lint
             else
-             golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+              # Original lint command for other projects
+              if [ -f .golangci.yml ]; then
+               golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+              else
+               golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+              fi
             fi
           working_directory: <<parameters.module>>
 
@@ -349,14 +356,24 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+      - image: cimg/go:1.23
+        user: root
       - image: cimg/postgres:14.6
         environment:
           POSTGRES_USER: opc
           POSTGRES_HOST_AUTH_METHOD: trust
     resource_class: small
     steps:
-      - checkout
+      - run:
+          name: Install codecov
+          command: |
+            # Install codecov CLI (previously provided by ci-builder image)
+            if ! command -v codecov &> /dev/null; then
+              curl -Os https://uploader.codecov.io/latest/linux/codecov
+              chmod +x codecov
+              sudo mv codecov /usr/local/bin/
+            fi
+      - circleci-utils/checkout-with-mise
       - run:
           name: go version
           command: go version
@@ -371,8 +388,9 @@ jobs:
       - run:
           name: run tests
           command: |
+            # Use gotestsum with junit output for CircleCI
             gotestsum --format=standard-verbose --junitfile=/tmp/test-results/<<parameters.module>>.xml \
-            -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
+            -- -ldflags="-checklinkname=0" -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
           working_directory: <<parameters.module>>
       - run:
           name: upload coverage
