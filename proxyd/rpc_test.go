@@ -87,3 +87,82 @@ func TestRPCResJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPendingRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       *RPCReq
+		expected bool
+	}{
+		{
+			"eth_getTransactionReceipt",
+			&RPCReq{
+				Method: "eth_getTransactionReceipt",
+				Params: mustMarshalJSON([]string{"0x00"}),
+			},
+			true,
+		},
+		{
+			"eth_getBlockByNumber with pending block number and detail flag set",
+			&RPCReq{
+				Method: "eth_getBlockByNumber",
+				Params: mustMarshalJSON([]any{"pending", "true"}),
+			},
+			true,
+		},
+		{
+			"eth_getBlockByNumber with pending block number and detail flag unset",
+			&RPCReq{
+				Method: "eth_getBlockByNumber",
+				Params: mustMarshalJSON([]any{"pending", false}),
+			},
+			false,
+		},
+		{
+			"eth_getBlockByNumber with latest block number and detail flag set",
+			&RPCReq{
+				Method: "eth_getBlockByNumber",
+				Params: mustMarshalJSON([]any{"latest", false}),
+			},
+			false,
+		},
+		{
+			"eth_getBalance with pending block number",
+			&RPCReq{
+				Method: "eth_getBalance",
+				Params: mustMarshalJSON([]string{"0x01", "pending"}),
+			},
+			true,
+		},
+		{
+			"eth_getBalance with latest block number",
+			&RPCReq{
+				Method: "eth_getBalance",
+				Params: mustMarshalJSON([]string{"0x01", "latest"}),
+			},
+			false,
+		},
+		{
+			"eth_getTransactionCount with pending block number",
+			&RPCReq{
+				Method: "eth_getTransactionCount",
+				Params: mustMarshalJSON([]string{"0x01", "pending"}),
+			},
+			true,
+		},
+		{
+			"eth_getTransactionCount with latest block number",
+			&RPCReq{
+				Method: "eth_getTransactionCount",
+				Params: mustMarshalJSON([]string{"0x01", "latest"}),
+			},
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, IsPendingRequest(tt.in), tt.expected)
+		})
+	}
+}
