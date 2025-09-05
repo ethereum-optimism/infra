@@ -1407,24 +1407,16 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 			}
 			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
 			log.Info("backend responded with error", "err", err)
-		} else {
-			if res.IsError() {
-				log.Info(
-					"backend responded with RPC error",
-					"code", res.Error.Code,
-					"msg", res.Error.Message,
-					"source", "ws",
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-				RecordRPCError(ctx, w.backend.Name, MethodUnknown, res.Error)
-			} else {
-				log.Info(
-					"forwarded WS message to client",
-					"auth", GetAuthCtx(ctx),
-					"req_id", GetReqID(ctx),
-				)
-			}
+		} else if res.IsError() {
+			log.Info(
+				"backend responded with RPC error",
+				"code", res.Error.Code,
+				"msg", res.Error.Message,
+				"source", "ws",
+				"auth", GetAuthCtx(ctx),
+				"req_id", GetReqID(ctx),
+			)
+			RecordRPCError(ctx, w.backend.Name, MethodUnknown, res.Error)
 		}
 
 		err = w.writeClientConn(msgType, msg)
