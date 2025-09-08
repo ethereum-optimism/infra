@@ -114,10 +114,7 @@ func (c *consoleProgressIndicator) UpdateTest(testName string, status types.Test
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Remove from running tests if it was there
-	if _, wasRunning := c.runningTests[testName]; wasRunning {
-		delete(c.runningTests, testName)
-	}
+	delete(c.runningTests, testName)
 
 	c.completedTests++
 	c.lastUpdateTime = time.Now()
