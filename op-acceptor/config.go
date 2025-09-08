@@ -17,7 +17,7 @@ type Config struct {
 	TestDir            string
 	ValidatorConfig    string
 	TargetGate         string
-	GatelessMode       bool // New field to indicate gateless mode
+	GatelessMode       bool
 	GoBinary           string
 	RunInterval        time.Duration          // Interval between test runs
 	RunOnce            bool                   // Indicates if the service should exit after one test run
@@ -31,6 +31,8 @@ type Config struct {
 	DevnetEnvURL       string                 // URL or path to the devnet environment file
 	Serial             bool                   // Whether to run tests serially instead of in parallel
 	Concurrency        int                    // Number of concurrent test workers (0 = auto-determine)
+	ShowProgress       bool                   // Whether to show periodic progress updates during test execution
+	ProgressInterval   time.Duration          // Interval between progress updates when ShowProgress is 'true'
 	Log                log.Logger
 }
 
@@ -113,6 +115,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		DevnetEnvURL:       devnetEnvURL,
 		Serial:             ctx.Bool(flags.Serial.Name),
 		Concurrency:        ctx.Int(flags.Concurrency.Name),
+		ShowProgress:       ctx.Bool(flags.ShowProgress.Name),
+		ProgressInterval:   ctx.Duration(flags.ProgressInterval.Name),
 		LogDir:             logDir,
 		Log:                log,
 	}, nil

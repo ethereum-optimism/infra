@@ -141,6 +141,8 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		DevnetEnv:          devnetEnv,
 		Serial:             config.Serial,
 		Concurrency:        config.Concurrency,
+		ShowProgress:       config.ShowProgress,
+		ProgressInterval:   config.ProgressInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)

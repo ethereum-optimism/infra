@@ -269,7 +269,7 @@ gates:
 
 	for _, concurrency := range []int{1, 2, 4, 8} {
 		t.Run(fmt.Sprintf("concurrency-%d", concurrency), func(t *testing.T) {
-			executor := NewParallelExecutor(r, concurrency)
+			executor := NewParallelExecutor(r, concurrency, nil)
 			assert.Equal(t, concurrency, executor.concurrency)
 
 			result, err := executor.ExecuteTests(ctx, workItems)

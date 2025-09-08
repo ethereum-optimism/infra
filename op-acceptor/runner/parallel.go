@@ -31,10 +31,11 @@ type ParallelExecutor struct {
 	concurrency int
 	log         log.Logger
 	resultMgr   *ResultHierarchyManager
+	ui          ProgressIndicator
 }
 
 // NewParallelExecutor creates a new parallel test executor with validation
-func NewParallelExecutor(runner *runner, concurrency int) *ParallelExecutor {
+func NewParallelExecutor(runner *runner, concurrency int, ui ProgressIndicator) *ParallelExecutor {
 	if runner == nil {
 		panic("runner cannot be nil")
 	}
@@ -53,6 +54,7 @@ func NewParallelExecutor(runner *runner, concurrency int) *ParallelExecutor {
 		concurrency: concurrency,
 		log:         runner.log.New("component", "parallel-executor"),
 		resultMgr:   NewResultHierarchyManager(),
+		ui:          ui,
 	}
 }
 
@@ -65,6 +67,11 @@ func (pe *ParallelExecutor) ExecuteTests(ctx context.Context, workItems []TestWo
 		// Return empty result for consistency
 		result := pe.resultMgr.CreateEmptyResult(pe.runner.runID, start)
 		return result, nil
+	}
+
+	// Initialize progress tracking if progress indicator is available
+	if pe.ui != nil {
+		pe.initializeProgressTracking(workItems)
 	}
 
 	pe.log.Info("Starting parallel test execution", "totalTests", len(workItems), "concurrency", pe.concurrency)
@@ -179,10 +186,20 @@ func (pe *ParallelExecutor) worker(ctx context.Context, wg *sync.WaitGroup, work
 
 			pe.log.Debug("Worker processing test", "workerID", workerID, "test", work.Validator.ID, "gate", work.GateID, "suite", work.SuiteID)
 
+			// Notify progress indicator that test is starting
+			if pe.ui != nil {
+				pe.ui.StartTest(work.Validator.GetName())
+			}
+
 			// Execute the test with proper error handling
 			testResult, err := pe.runner.RunTest(ctx, work.Validator)
 			if err != nil {
 				pe.log.Error("Test execution failed in worker", "workerID", workerID, "test", work.Validator.ID, "error", err)
+			}
+
+			// Notify progress indicator that test completed
+			if pe.ui != nil && testResult != nil {
+				pe.ui.UpdateTest(work.Validator.GetName(), testResult.Status)
 			}
 
 			// Send result back with timeout protection
@@ -248,4 +265,34 @@ func (r *runner) collectTestWork() []TestWork {
 	}
 
 	return workItems
+}
+
+// initializeProgressTracking sets up data structures to concurrently
+// track progress for each gate and suite in the scheduled work items
+func (pe *ParallelExecutor) initializeProgressTracking(workItems []TestWork) {
+	pe.log.Info("Initializing parallel progress tracking")
+
+	// Group work items by gate
+	gateGroups := make(map[string][]TestWork)
+	for _, item := range workItems {
+		gateGroups[item.GateID] = append(gateGroups[item.GateID], item)
+	}
+
+	// Initialize progress for each gate
+	for gateName, gateItems := range gateGroups {
+		pe.ui.StartGate(gateName, len(gateItems))
+
+		// Group by suite within this gate
+		suiteGroups := make(map[string][]TestWork)
+		for _, item := range gateItems {
+			if item.SuiteID != "" {
+				suiteGroups[item.SuiteID] = append(suiteGroups[item.SuiteID], item)
+			}
+		}
+
+		// Initialize progress for each suite
+		for suiteName, suiteItems := range suiteGroups {
+			pe.ui.StartSuite(suiteName, len(suiteItems))
+		}
+	}
 }

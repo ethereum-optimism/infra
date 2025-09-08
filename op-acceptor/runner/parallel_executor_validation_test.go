@@ -19,16 +19,16 @@ func TestParallelExecutorValidation(t *testing.T) {
 
 		// Test panic on nil runner
 		assert.Panics(t, func() {
-			NewParallelExecutor(nil, 4)
+			NewParallelExecutor(nil, 4, nil)
 		}, "Should panic with nil runner")
 
 		// Test panic on negative concurrency
 		assert.Panics(t, func() {
-			NewParallelExecutor(r, -1)
+			NewParallelExecutor(r, -1, nil)
 		}, "Should panic with negative concurrency")
 
 		// Test valid creation
-		executor := NewParallelExecutor(r, 4)
+		executor := NewParallelExecutor(r, 4, nil)
 		assert.NotNil(t, executor, "Should create valid executor")
 		assert.Equal(t, 4, executor.concurrency, "Should set correct concurrency")
 	})
@@ -39,7 +39,7 @@ func TestParallelExecutorValidation(t *testing.T) {
 			runID: "test-run",
 		}
 
-		executor := NewParallelExecutor(r, 4)
+		executor := NewParallelExecutor(r, 4, nil)
 		result, err := executor.ExecuteTests(context.Background(), []TestWork{})
 
 		assert.NoError(t, err, "Should handle empty work items without error")
