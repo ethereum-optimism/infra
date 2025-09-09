@@ -31,11 +31,10 @@ type ParallelExecutor struct {
 	concurrency int
 	log         log.Logger
 	resultMgr   *ResultHierarchyManager
-	ui          ProgressIndicator
 }
 
 // NewParallelExecutor creates a new parallel test executor with validation
-func NewParallelExecutor(runner *runner, concurrency int, ui ProgressIndicator) *ParallelExecutor {
+func NewParallelExecutor(runner *runner, concurrency int) *ParallelExecutor {
 	if runner == nil {
 		panic("runner cannot be nil")
 	}
@@ -54,8 +53,15 @@ func NewParallelExecutor(runner *runner, concurrency int, ui ProgressIndicator) 
 		concurrency: concurrency,
 		log:         runner.log.New("component", "parallel-executor"),
 		resultMgr:   NewResultHierarchyManager(),
-		ui:          ui,
 	}
+}
+
+// getUI returns the progress indicator from the runner's coordinator if available
+func (pe *ParallelExecutor) getUI() ProgressIndicator {
+	if pe.runner != nil && pe.runner.coordinator != nil {
+		return pe.runner.coordinator.GetUI()
+	}
+	return nil
 }
 
 // ExecuteTests runs the provided test work items in parallel and returns organized results
@@ -70,7 +76,8 @@ func (pe *ParallelExecutor) ExecuteTests(ctx context.Context, workItems []TestWo
 	}
 
 	// Initialize progress tracking if progress indicator is available
-	if pe.ui != nil {
+	ui := pe.getUI()
+	if ui != nil {
 		pe.initializeProgressTracking(workItems)
 	}
 
@@ -187,8 +194,11 @@ func (pe *ParallelExecutor) worker(ctx context.Context, wg *sync.WaitGroup, work
 			pe.log.Debug("Worker processing test", "workerID", workerID, "test", work.Validator.ID, "gate", work.GateID, "suite", work.SuiteID)
 
 			// Notify progress indicator that test is starting
-			if pe.ui != nil {
-				pe.ui.StartTest(work.Validator.GetName())
+			ui := pe.getUI()
+			if ui != nil {
+				ui.StartTest(work.Validator.GetName())
+			} else {
+				pe.log.Debug("Progress indicator unavailable for test start", "test", work.Validator.GetName())
 			}
 
 			// Execute the test with proper error handling
@@ -198,8 +208,8 @@ func (pe *ParallelExecutor) worker(ctx context.Context, wg *sync.WaitGroup, work
 			}
 
 			// Notify progress indicator that test completed
-			if pe.ui != nil && testResult != nil {
-				pe.ui.UpdateTest(work.Validator.GetName(), testResult.Status)
+			if ui != nil && testResult != nil {
+				ui.UpdateTest(work.Validator.GetName(), testResult.Status)
 			}
 
 			// Send result back with timeout protection
@@ -272,6 +282,11 @@ func (r *runner) collectTestWork() []TestWork {
 func (pe *ParallelExecutor) initializeProgressTracking(workItems []TestWork) {
 	pe.log.Info("Initializing parallel progress tracking")
 
+	ui := pe.getUI()
+	if ui == nil {
+		return
+	}
+
 	// Group work items by gate
 	gateGroups := make(map[string][]TestWork)
 	for _, item := range workItems {
@@ -280,7 +295,7 @@ func (pe *ParallelExecutor) initializeProgressTracking(workItems []TestWork) {
 
 	// Initialize progress for each gate
 	for gateName, gateItems := range gateGroups {
-		pe.ui.StartGate(gateName, len(gateItems))
+		ui.StartGate(gateName, len(gateItems))
 
 		// Group by suite within this gate
 		suiteGroups := make(map[string][]TestWork)
@@ -292,7 +307,7 @@ func (pe *ParallelExecutor) initializeProgressTracking(workItems []TestWork) {
 
 		// Initialize progress for each suite
 		for suiteName, suiteItems := range suiteGroups {
-			pe.ui.StartSuite(suiteName, len(suiteItems))
+			ui.StartSuite(suiteName, len(suiteItems))
 		}
 	}
 }
