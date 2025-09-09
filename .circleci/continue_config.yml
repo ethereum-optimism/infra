@@ -1,10 +1,13 @@
 version: 2.1
 
 orbs:
-  gcp-cli: circleci/gcp-cli@2.4.1
+  gcp-cli: circleci/gcp-cli@3.3.0
 
 parameters:
   run-build-op-conductor-mon:
+    type: boolean
+    default: false
+  run-build-op-conductor-ops:
     type: boolean
     default: false
   run-build-op-signer:
@@ -20,6 +23,15 @@ parameters:
     type: boolean
     default: false
   run-build-proxyd:
+    type: boolean
+    default: false
+  run-build-cci-stats:
+    type: boolean
+    default: false
+  run-build-op-acceptor:
+    type: boolean
+    default: false
+  run-build-rhc:
     type: boolean
     default: false
   run-all:
@@ -71,7 +83,6 @@ commands:
             # Configure ADC
             echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
 
-
 jobs:
   log-config-results:
     docker:
@@ -85,11 +96,14 @@ jobs:
           command: |
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-conductor-ops: << pipeline.parameters.run-build-op-conductor-ops >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
             echo "run-build-op-txproxy: << pipeline.parameters.run-build-op-txproxy >>"
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
+            echo "run-build-op-acceptor: << pipeline.parameters.run-build-op-acceptor >>"
+            echo "run-build-rhc: << pipeline.parameters.run-build-rhc >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
             echo "Pipeline Trigger Information:"
@@ -110,6 +124,12 @@ jobs:
               echo "op-conductor-mon tag regex match: true"
             else
               echo "op-conductor-mon tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-conductor-ops/v.* ]]; then
+              echo "op-conductor-ops tag regex match: true"
+            else
+              echo "op-conductor-ops tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-signer/v.* ]]; then
@@ -135,6 +155,19 @@ jobs:
             else
               echo "op-ufm tag regex match: false"
             fi
+
+            if [[ $CURRENT_TAG =~ ^op-acceptor/v.* ]]; then
+              echo "op-acceptor tag regex match: true"
+            else
+              echo "op-acceptor tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^replica-healthcheck/v.* ]]; then
+              echo "replica-healthcheck tag regex match: true"
+            else
+              echo "replica-healthcheck tag regex match: false"
+            fi
+
   docker-build:
     environment:
       DOCKER_BUILDKIT: 1
@@ -255,7 +288,6 @@ jobs:
                       --signer-logging-level="INFO"\
                       --attestor-key-id="//cloudkms.googleapis.com/v1/projects/$ATTESTOR_PROJECT_NAME/locations/global/keyRings/$ATTESTOR_NAME-key-ring/cryptoKeys/$ATTESTOR_NAME-key/cryptoKeyVersions/1"
 
-
   docker-tag-op-stack-release:
     parameters:
       docker_name:
@@ -288,7 +320,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.21
+      - image: cimg/go:1.23
     steps:
       - checkout
       - run:
@@ -304,11 +336,11 @@ jobs:
       - run:
           name: run lint
           command: |
-             if [ -f .golangci.yml ]; then
-              golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             else
-              golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "3m0s" ./...
-             fi
+            if [ -f .golangci.yml ]; then
+             golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+            else
+             golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+            fi
           working_directory: <<parameters.module>>
 
   go-test:
@@ -340,7 +372,7 @@ jobs:
           name: run tests
           command: |
             gotestsum --format=standard-verbose --junitfile=/tmp/test-results/<<parameters.module>>.xml \
-            -- -coverpkg=github.com/ethereum-optimism/infrastructure-services/... -coverprofile=coverage.out ./...
+            -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
           working_directory: <<parameters.module>>
       - run:
           name: upload coverage
@@ -385,6 +417,50 @@ jobs:
           command: |
             goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
 
+  op-conductor-ops-lint:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout # Checks out code to ~/project
+      - restore_cache:
+          keys:
+            # Checksum relative to the root of the project
+            - v1-poetry-{{ checksum "op-conductor-ops/poetry.lock" }}
+            - v1-poetry-
+      - run:
+          name: Install Poetry & Dependencies
+          # Run commands within the specific module directory
+          working_directory: op-conductor-ops
+          command: |
+            pip install poetry
+            # Check if pyproject.toml exists before running poetry commands
+            if [ -f pyproject.toml ]; then
+              poetry check --lock
+              poetry install --no-interaction --no-root
+            else
+              echo "pyproject.toml not found in op-conductor-ops, skipping dependency installation."
+            fi
+      - save_cache:
+          key: v1-poetry-{{ checksum "op-conductor-ops/poetry.lock" }}
+          paths:
+            - /home/circleci/.cache/pypoetry # Default cache location in cimg images
+      - run:
+          name: Run Black Linter
+          # Run commands within the specific module directory
+          working_directory: op-conductor-ops
+          command: |
+            # Check if pyproject.toml exists and black is installed (implicitly via poetry install)
+            if [ -f pyproject.toml ]; then
+              # Check if black is available
+              if poetry run black --version > /dev/null 2>&1; then
+                poetry run black --check .
+              else
+                echo "Black not found in project dependencies, skipping lint."
+              fi
+            else
+              echo "pyproject.toml not found in op-conductor-ops, skipping lint."
+            fi
+
 workflows:
   logging:
     jobs:
@@ -408,6 +484,17 @@ workflows:
           name: op-conductor-mon-docker-build
           docker_file: op-conductor-mon/Dockerfile
           docker_name: op-conductor-mon
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  op-conductor-ops:
+    when:
+      or: [<< pipeline.parameters.run-build-op-conductor-ops >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - op-conductor-ops-lint
+      - docker-build:
+          name: op-conductor-ops-docker-build
+          docker_file: op-conductor-ops/Dockerfile
+          docker_name: op-conductor-ops
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   op-signer:
@@ -490,19 +577,61 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+  cci-stats:
+    when:
+      or: [ << pipeline.parameters.run-build-cci-stats >>, << pipeline.parameters.run-all >> ]
+    jobs:
+      - go-lint:
+          name: cci-stats-lint
+          module: cci-stats
+      - go-test:
+          name: cci-stats-tests
+          module: cci-stats
+      - docker-build:
+          name: cci-stats-docker-build
+          docker_file: cci-stats/Dockerfile
+          docker_name: cci-stats
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  op-acceptor:
+    when:
+      or: [<< pipeline.parameters.run-build-op-acceptor >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: op-acceptor-lint
+          module: op-acceptor
+      - go-test:
+          name: op-acceptor-tests
+          module: op-acceptor
+      - docker-build:
+          name: op-acceptor-docker-build
+          docker_file: op-acceptor/Dockerfile
+          docker_name: op-acceptor
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  replica-healthcheck:
+    when:
+      or: [<< pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - docker-build:
+          name: replica-healthcheck-docker-build
+          docker_file: replica-healthcheck/Dockerfile
+          docker_name: replica-healthcheck
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: replica-healthcheck
   release:
     jobs:
       - log-config-results:
           filters:
             tags:
-              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - hold:
           type: approval
           filters:
             tags:
-              only: /^(peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
+              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
       - docker-build:
@@ -514,7 +643,11 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
+                - cci-stats
+                - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-build
           filters:
             tags:
@@ -535,7 +668,11 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
+                - cci-stats
+                - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-publish
           filters:
             tags:
@@ -554,7 +691,11 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
+                - cci-stats
+                - op-acceptor
+                - replica-healthcheck
           name: <<matrix.docker_name>>-docker-tag
           filters:
             tags:
@@ -575,6 +716,8 @@ workflows:
                 - proxyd
                 - op-conductor-mon
                 - peer-mgmt-service
+                - cci-stats
+                - op-acceptor
           name: <<matrix.module>>-go-release
           filters:
             tags:

@@ -167,13 +167,21 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 				"elapsed", time.Since(sentAt))
 		}
 		receipt, err = client.TransactionReceipt(ctx, txHash)
-		if err != nil && !errors.Is(err, ethereum.NotFound) {
-			log.Error("cant get receipt for transaction",
+		if err != nil {
+			var errorPrefix string
+			if errors.Is(err, ethereum.NotFound) {
+				errorPrefix = "transaction or transaction receipt not found"
+			} else {
+				errorPrefix = "cant get receipt for transaction"
+			}
+			log.Error(errorPrefix,
 				"provider", p.name,
 				"hash", txHash.Hex(),
 				"nonce", nonce,
 				"err", err)
-			return
+			if !errors.Is(err, ethereum.NotFound) {
+				return
+			}
 		}
 		attempt++
 	}

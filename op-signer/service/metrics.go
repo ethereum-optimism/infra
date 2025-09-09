@@ -9,4 +9,11 @@ var (
 			Help: ""},
 		[]string{"client", "status", "error"},
 	)
+
+	MetricSignBlockPayloadTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "signer_signblockpayload_total",
+			Help: ""},
+		[]string{"client", "status", "error"},
+	)
 )

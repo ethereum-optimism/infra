@@ -18,6 +18,7 @@ test:
 
 lint:
 	go vet ./...
+	goimports -w .
 .PHONY: test
 
 test-%:

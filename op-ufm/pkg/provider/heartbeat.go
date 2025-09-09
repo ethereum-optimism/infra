@@ -58,13 +58,22 @@ func (p *Provider) Heartbeat(ctx context.Context) {
 		hash := st.Hash.Hex()
 
 		_, isPending, err := client.TransactionByHash(ctx, st.Hash)
-		if err != nil && !errors.Is(err, ethereum.NotFound) {
-			log.Error("cant check transaction",
+		if err != nil {
+			var errorPrefix string
+			if errors.Is(err, ethereum.NotFound) {
+				errorPrefix = "transaction not found"
+			} else {
+				errorPrefix = "cant check transaction"
+			}
+
+			log.Error(errorPrefix,
 				"provider", p.name,
 				"hash", hash,
 				"url", p.config.URL,
 				"err", err)
-			continue
+			if !errors.Is(err, ethereum.NotFound) {
+				continue
+			}
 		}
 
 		log.Debug("got transaction",

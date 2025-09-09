@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./metrics/testdata/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./metrics/testdata/prometheus-data:/prometheus
+    networks:
+      - monitoring
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana-enterprise
+    ports:
+      - "3000:3000"
+    container_name: grafana
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+    volumes:
+      - ./metrics/testdata/grafana-data:/var/lib/grafana
+
+  op-acceptor:
+    container_name: op-acceptor
+    ports:
+      - "7300:7300"
+    build:
+      context: ..
+      dockerfile: op-acceptor/Dockerfile
+    volumes:
+      - ./devnets:/devnets
+      - ../../optimism/op-acceptance-tests:/acceptance-tests
+    tmpfs:
+      - /app/logs:exec,mode=0777
+    environment:
+      # Orchestrator type: 'sysext' (default, external provider) or 'sysgo' (in-memory Go)
+      # For sysgo, comment out the DEVNET_ENV_URL line below as it's not needed
+      - DEVSTACK_ORCHESTRATOR=sysext
+      - DEVNET_ENV_URL=/devnets/simple-devnet.json
+    command: ["--gate", "base", "--testdir", "/acceptance-tests", "--validators", "/acceptance-tests/acceptance-tests.yaml", "--log.level", "debug", "--run-interval", "60s"]
+    depends_on:
+      - prometheus
+      - grafana
+    networks:
+      - monitoring
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7300"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: "no"
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  grafana-data:
+    driver: local 

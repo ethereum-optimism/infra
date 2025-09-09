@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -40,13 +40,13 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	// redis primary client
-	var redisClient *redis.Client
+	var redisClient redis.UniversalClient
 	if config.Redis.URL != "" {
 		rURL, err := ReadFromEnvOrConfig(config.Redis.URL)
 		if err != nil {
 			return nil, nil, err
 		}
-		redisClient, err = NewRedisClient(rURL)
+		redisClient, err = NewRedisClient(rURL, config.Redis.RedisCluster)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -70,7 +70,7 @@ func Start(config *Config) (*Server, func(), error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		redisReadClient, err = NewRedisClient(rURL)
+		redisReadClient, err = NewRedisClient(rURL, config.Redis.RedisCluster)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -112,10 +112,17 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	maxConcurrentRPCs := config.Server.MaxConcurrentRPCs
-	if maxConcurrentRPCs == 0 {
-		maxConcurrentRPCs = math.MaxInt64
+	var rpcRequestSemaphore *semaphore.Weighted
+	if config.Server.DisableConcurrentRequestSemaphore {
+		rpcRequestSemaphore = nil
+		log.Info("Using unlimited RPC concurrency")
+	} else {
+		if maxConcurrentRPCs == 0 {
+			maxConcurrentRPCs = math.MaxInt64
+		}
+		rpcRequestSemaphore = semaphore.NewWeighted(maxConcurrentRPCs)
+		log.Info("Using max concurrent RPCs of", "maxConcurrentRPCs", maxConcurrentRPCs)
 	}
-	rpcRequestSemaphore := semaphore.NewWeighted(maxConcurrentRPCs)
 
 	backendNames := make([]string, 0)
 	backendsByName := make(map[string]*Backend)
@@ -134,7 +141,10 @@ func Start(config *Config) (*Server, func(), error) {
 			return nil, nil, fmt.Errorf("must define an RPC URL for backend %s", name)
 		}
 
-		if config.BackendOptions.ResponseTimeoutSeconds != 0 {
+		if config.BackendOptions.ResponseTimeoutMilliseconds != 0 {
+			timeout := millisecondsToDuration(config.BackendOptions.ResponseTimeoutMilliseconds)
+			opts = append(opts, WithTimeout(timeout))
+		} else if config.BackendOptions.ResponseTimeoutSeconds != 0 {
 			timeout := secondsToDuration(config.BackendOptions.ResponseTimeoutSeconds)
 			opts = append(opts, WithTimeout(timeout))
 		}
@@ -192,7 +202,16 @@ func Start(config *Config) (*Server, func(), error) {
 		if cfg.StripTrailingXFF {
 			opts = append(opts, WithStrippedTrailingXFF())
 		}
+		if cfg.ResponseTimeoutMilliseconds != 0 {
+			opts = append(opts, WithTimeout(millisecondsToDuration(cfg.ResponseTimeoutMilliseconds)))
+		}
+		if cfg.MaxRetries != nil {
+			opts = append(opts, WithMaxRetries(*cfg.MaxRetries))
+		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
+		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
+		opts = append(opts, WithSafeBlockDriftThreshold(cfg.SafeBlockDriftThreshold))
+		opts = append(opts, WithFinalizedBlockDriftThreshold(cfg.FinalizedBlockDriftThreshold))
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
@@ -216,6 +235,29 @@ func Start(config *Config) (*Server, func(), error) {
 			"rpc_url", rpcURL,
 			"ws_url", wsURL)
 	}
+
+	if config.InteropValidationConfig.Strategy == "" {
+		log.Warn("no interop validation strategy provided, using default strategy", "strategy", defaultInteropValidationStrategy)
+		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
+	}
+
+	if config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout == 0 && config.InteropValidationConfig.Strategy == HealthAwareLoadBalancingStrategy {
+		log.Warn("no interop validation load balancing unhealthiness timeout provided for health aware strategy, using default timeout", "timeout", defaultInteropLoadBalancingUnhealthinessTimeout)
+		config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout = defaultInteropLoadBalancingUnhealthinessTimeout
+	}
+
+	if config.InteropValidationConfig.ReqSizeLimit == 0 {
+		log.Warn("no interop validation request size limit provided, using default size limit", "size_limit", defaultInteropReqSizeLimit)
+		config.InteropValidationConfig.ReqSizeLimit = defaultInteropReqSizeLimit
+	}
+
+	if config.InteropValidationConfig.AccessListSizeLimit == 0 {
+		log.Warn("no interop validation access list size limit provided, using default size limit", "size_limit", defaultInteropAccessListSizeLimit)
+		config.InteropValidationConfig.AccessListSizeLimit = defaultInteropAccessListSizeLimit
+	}
+
+	log.Info("configured interop validation urls", "urls", config.InteropValidationConfig.Urls)
+	log.Info("configured interop validation strategy", "strategy", config.InteropValidationConfig.Strategy)
 
 	backendGroups := make(map[string]*BackendGroup)
 	for bgName, bg := range config.BackendGroups {
@@ -336,6 +378,34 @@ func Start(config *Config) (*Server, func(), error) {
 		return NewMemoryFrontendRateLimit(dur, max)
 	}
 
+	var interopStrategy InteropStrategy
+
+	opts := CommonStrategyOpts(
+		WithReqSizeLimit(config.InteropValidationConfig.ReqSizeLimit),
+		WithAccessListSizeLimit(config.InteropValidationConfig.AccessListSizeLimit),
+	)
+
+	switch config.InteropValidationConfig.Strategy {
+	case FirstSupervisorStrategy, EmptyStrategy:
+		interopStrategy = NewFirstSupervisorStrategy(
+			config.InteropValidationConfig.Urls,
+			opts...,
+		)
+	case MulticallStrategy:
+		interopStrategy = NewMulticallStrategy(
+			config.InteropValidationConfig.Urls,
+			opts...,
+		)
+	case HealthAwareLoadBalancingStrategy:
+		interopStrategy = NewHealthAwareLoadBalancingStrategy(
+			config.InteropValidationConfig.Urls,
+			config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout,
+			opts...,
+		)
+	default:
+		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -349,10 +419,13 @@ func Start(config *Config) (*Server, func(), error) {
 		rpcCache,
 		config.RateLimit,
 		config.SenderRateLimit,
+		config.InteropValidationConfig.RateLimit,
 		config.Server.EnableRequestLog,
 		config.Server.MaxRequestBodyLogLen,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
+		config.InteropValidationConfig,
+		interopStrategy,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -464,7 +537,7 @@ func Start(config *Config) (*Server, func(), error) {
 				if bgcfg.ConsensusHAHeartbeatInterval > 0 {
 					topts = append(topts, WithHeartbeatInterval(time.Duration(bgcfg.ConsensusHAHeartbeatInterval)))
 				}
-				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL)
+				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL, bgcfg.ConsensusHARedis.RedisCluster)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -514,6 +587,10 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func millisecondsToDuration(ms int) time.Duration {
+	return time.Duration(ms) * time.Millisecond
 }
 
 func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
