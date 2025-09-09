@@ -245,6 +245,20 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	return r, nil
 }
 
+// GetUI implements UIProvider interface
+// Returns the progress indicator from the coordinator if available.
+// 
+// Coordinator Lifecycle Contract:
+// - The coordinator MUST be initialized before parallel test execution begins
+// - The coordinator SHOULD NOT be modified during active test execution 
+// - When coordinator is nil, progress tracking is gracefully disabled
+func (r *runner) GetUI() ProgressIndicator {
+	if r.coordinator != nil {
+		return r.coordinator.GetUI()
+	}
+	return nil
+}
+
 // RunAllTests implements the TestRunner interface
 func (r *runner) RunAllTests(ctx context.Context) (*RunnerResult, error) {
 	// Use fileLogger's runID if available, otherwise generate new

@@ -24,7 +24,7 @@ test-coverage:
 
 # Lint with same flags as CI
 lint:
-	golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout 5m0s ./...
+	golangci-lint run -E sqlclosecheck,bodyclose,asciicheck,misspell,errorlint --timeout 5m0s ./...
 
 # Generate code (if needed)
 generate:

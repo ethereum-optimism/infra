@@ -81,6 +81,27 @@ func TestParallelExecutorValidation(t *testing.T) {
 		assert.NotNil(t, result, "Should return valid result")
 		assert.Equal(t, 0, result.Stats.Total, "Should have zero total tests")
 	})
+
+	t.Run("UIProvider dependency injection", func(t *testing.T) {
+		// Test that dependency injection works through UIProvider interface
+		r := &runner{
+			log:   log.NewLogger(log.DiscardHandler()),
+			runID: "test-run",
+		}
+
+		executor := NewParallelExecutor(r, 1)
+		assert.NotNil(t, executor, "Should create executor")
+
+		// Verify the runner implements UIProvider interface
+		var _ UIProvider = r
+
+		// Verify that UIProvider is set correctly
+		assert.Equal(t, r, executor.uiProvider, "UIProvider should be set to runner")
+
+		// When coordinator is nil, GetUI should return nil
+		assert.Nil(t, r.GetUI(), "GetUI should return nil when coordinator is nil")
+		assert.Nil(t, executor.getUI(), "executor getUI should return nil when coordinator is nil")
+	})
 }
 
 // TestImprovedErrorAggregation tests the enhanced error handling

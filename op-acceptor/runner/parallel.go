@@ -25,12 +25,20 @@ type TestWorkResult struct {
 	Error  error
 }
 
+// UIProvider defines how to obtain a progress indicator for progress tracking.
+// This interface allows dependency injection and reduces coupling between
+// ParallelExecutor and the specific UI implementation source.
+type UIProvider interface {
+	GetUI() ProgressIndicator
+}
+
 // ParallelExecutor manages parallel test execution across multiple workers
 type ParallelExecutor struct {
 	runner      *runner
 	concurrency int
 	log         log.Logger
 	resultMgr   *ResultHierarchyManager
+	uiProvider  UIProvider // Optional UI provider for progress tracking
 }
 
 // NewParallelExecutor creates a new parallel test executor with validation
@@ -53,13 +61,14 @@ func NewParallelExecutor(runner *runner, concurrency int) *ParallelExecutor {
 		concurrency: concurrency,
 		log:         runner.log.New("component", "parallel-executor"),
 		resultMgr:   NewResultHierarchyManager(),
+		uiProvider:  runner, // runner implements UIProvider through its coordinator
 	}
 }
 
-// getUI returns the progress indicator from the runner's coordinator if available
+// getUI returns the progress indicator from the UI provider if available
 func (pe *ParallelExecutor) getUI() ProgressIndicator {
-	if pe.runner != nil && pe.runner.coordinator != nil {
-		return pe.runner.coordinator.GetUI()
+	if pe.uiProvider != nil {
+		return pe.uiProvider.GetUI()
 	}
 	return nil
 }
