@@ -155,52 +155,11 @@ func (c *consoleProgressIndicator) progressReporter() {
 	}
 }
 
-// reportProgress logs the current progress status
 func (c *consoleProgressIndicator) reportProgress() {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Don't report if no gate is active
-	if c.currentGate == "" {
-		return
-	}
-
-	// Build running tests string
-	var detailsStr string
-	if len(c.runningTests) > 0 {
-		// Sort running tests by duration (longest first)
-		type runningTest struct {
-			name     string
-			duration time.Duration
-		}
-
-		var running []runningTest
-		now := time.Now()
-		for testName, startTime := range c.runningTests {
-			running = append(running, runningTest{
-				name:     testName,
-				duration: now.Sub(startTime),
-			})
-		}
-
-		// Sort by duration (longest running first)
-		sort.Slice(running, func(i, j int) bool {
-			return running[i].duration > running[j].duration
-		})
-
-		// Format running tests string (limit to first 3)
-		var runningStrs []string
-		maxShow := 3
-		for i, test := range running {
-			if i >= maxShow {
-				break
-			}
-			duration := test.duration.Truncate(time.Second)
-			runningStrs = append(runningStrs, fmt.Sprintf("%s (%v)", test.name, duration))
-		}
-
-		detailsStr = strings.Join(runningStrs, ", ")
-	}
+	detailsStr := formatRunningTests(c.runningTests, 3)
 
 	// Create structured log with JSON fields
 	logFields := []interface{}{
@@ -219,4 +178,43 @@ func (c *consoleProgressIndicator) Stop() {
 		c.ticker.Stop()
 	}
 	close(c.stopCh)
+}
+
+// Helper function that formats running tests into a display string
+func formatRunningTests(runningTests map[string]time.Time, maxShow int) string {
+	if len(runningTests) == 0 {
+		return ""
+	}
+
+	// Sort running tests by duration (longest first)
+	type runningTest struct {
+		name     string
+		duration time.Duration
+	}
+
+	var running []runningTest
+	now := time.Now()
+	for testName, startTime := range runningTests {
+		running = append(running, runningTest{
+			name:     testName,
+			duration: now.Sub(startTime),
+		})
+	}
+
+	// Sort by duration (longest running first)
+	sort.Slice(running, func(i, j int) bool {
+		return running[i].duration > running[j].duration
+	})
+
+	// Format running tests string (limit to maxShow)
+	var runningStrs []string
+	for i, test := range running {
+		if i >= maxShow {
+			break
+		}
+		duration := test.duration.Truncate(time.Second)
+		runningStrs = append(runningStrs, fmt.Sprintf("%s (%v)", test.name, duration))
+	}
+
+	return strings.Join(runningStrs, ", ")
 }

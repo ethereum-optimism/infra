@@ -205,3 +205,57 @@ gates:
 
 	assert.Empty(t, progressLogs, "Should not have captured any progress update logs when disabled")
 }
+
+func TestFormatRunningTests(t *testing.T) {
+	baseTime := time.Now()
+
+	tests := []struct {
+		name         string
+		runningTests map[string]time.Time
+		maxShow      int
+		expected     string
+	}{
+		{
+			name:         "empty map",
+			runningTests: map[string]time.Time{},
+			maxShow:      3,
+			expected:     "",
+		},
+		{
+			name: "single test",
+			runningTests: map[string]time.Time{
+				"TestOne": baseTime.Add(-2 * time.Second),
+			},
+			maxShow:  3,
+			expected: "TestOne (2s)",
+		},
+		{
+			name: "multiple tests sorted by duration",
+			runningTests: map[string]time.Time{
+				"TestOne":   baseTime.Add(-1 * time.Second),
+				"TestTwo":   baseTime.Add(-3 * time.Second),
+				"TestThree": baseTime.Add(-2 * time.Second),
+			},
+			maxShow:  3,
+			expected: "TestTwo (3s), TestThree (2s), TestOne (1s)",
+		},
+		{
+			name: "respects maxShow limit",
+			runningTests: map[string]time.Time{
+				"TestOne":   baseTime.Add(-1 * time.Second),
+				"TestTwo":   baseTime.Add(-4 * time.Second),
+				"TestThree": baseTime.Add(-3 * time.Second),
+				"TestFour":  baseTime.Add(-2 * time.Second),
+			},
+			maxShow:  2,
+			expected: "TestTwo (4s), TestThree (3s)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatRunningTests(tt.runningTests, tt.maxShow)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
