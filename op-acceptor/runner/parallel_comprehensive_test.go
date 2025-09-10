@@ -565,7 +565,7 @@ gates:
 			}, configContent)
 
 			workItems := r.collectTestWork()
-			executor := NewParallelExecutor(r, concurrency, nil)
+			executor := NewParallelExecutor(r, concurrency)
 
 			result, err := executor.ExecuteTests(ctx, workItems)
 			require.NoError(t, err)

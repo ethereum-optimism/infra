@@ -232,16 +232,31 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		progressIndicator = NewNoOpProgressIndicator()
 	}
 
-	// Create parallel runner adapter if not in serial mode
+	// Create parallel runner first if needed, then coordinator once
 	var parallelRunner ParallelRunner
 	if !cfg.Serial && cfg.Concurrency > 0 {
-		parallelExecutor := NewParallelExecutor(r, cfg.Concurrency, progressIndicator)
+		parallelExecutor := NewParallelExecutor(r, cfg.Concurrency)
 		parallelRunner = NewParallelRunnerAdapter(parallelExecutor)
 	}
 
+	// Initialize coordinator once with correct parallel runner
 	r.coordinator = NewTestCoordinator(r.executor, r.collector, parallelRunner, progressIndicator)
 
 	return r, nil
+}
+
+// GetUI implements UIProvider interface
+// Returns the progress indicator from the coordinator if available.
+// 
+// Coordinator Lifecycle Contract:
+// - The coordinator MUST be initialized before parallel test execution begins
+// - The coordinator SHOULD NOT be modified during active test execution 
+// - When coordinator is nil, progress tracking is gracefully disabled
+func (r *runner) GetUI() ProgressIndicator {
+	if r.coordinator != nil {
+		return r.coordinator.GetUI()
+	}
+	return nil
 }
 
 // RunAllTests implements the TestRunner interface
@@ -308,7 +323,7 @@ func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error)
 	r.log.Debug("Work items", "workItems", workItems)
 
 	// Create parallel executor with reasonable concurrency
-	executor := NewParallelExecutor(r, concurrency, r.coordinator.GetUI())
+	executor := NewParallelExecutor(r, concurrency)
 
 	// Execute tests in parallel
 	result, err := executor.ExecuteTests(ctx, workItems)

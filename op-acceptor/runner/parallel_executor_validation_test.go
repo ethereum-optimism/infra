@@ -19,16 +19,16 @@ func TestParallelExecutorValidation(t *testing.T) {
 
 		// Test panic on nil runner
 		assert.Panics(t, func() {
-			NewParallelExecutor(nil, 4, nil)
+			NewParallelExecutor(nil, 4)
 		}, "Should panic with nil runner")
 
 		// Test panic on negative concurrency
 		assert.Panics(t, func() {
-			NewParallelExecutor(r, -1, nil)
+			NewParallelExecutor(r, -1)
 		}, "Should panic with negative concurrency")
 
 		// Test valid creation
-		executor := NewParallelExecutor(r, 4, nil)
+		executor := NewParallelExecutor(r, 4)
 		assert.NotNil(t, executor, "Should create valid executor")
 		assert.Equal(t, 4, executor.concurrency, "Should set correct concurrency")
 	})
@@ -39,7 +39,7 @@ func TestParallelExecutorValidation(t *testing.T) {
 			runID: "test-run",
 		}
 
-		executor := NewParallelExecutor(r, 4, nil)
+		executor := NewParallelExecutor(r, 4)
 		result, err := executor.ExecuteTests(context.Background(), []TestWork{})
 
 		assert.NoError(t, err, "Should handle empty work items without error")
@@ -56,6 +56,51 @@ func TestParallelExecutorValidation(t *testing.T) {
 		assert.Equal(t, 5, min(10, 5), "min should return smaller value")
 		assert.Equal(t, 5, min(5, 5), "min should handle equal values")
 		assert.Equal(t, 0, min(0, 5), "min should handle zero")
+	})
+
+	t.Run("Nil coordinator handling", func(t *testing.T) {
+		// Test that ParallelExecutor works correctly when coordinator is nil
+		// This simulates the case where NewParallelExecutor is called before
+		// the coordinator is initialized
+		r := &runner{
+			log:   log.NewLogger(log.DiscardHandler()),
+			runID: "test-run",
+			// coordinator is nil by default
+		}
+
+		executor := NewParallelExecutor(r, 2)
+		assert.NotNil(t, executor, "Should create executor even with nil coordinator")
+
+		// Verify that getUI returns nil when coordinator is nil
+		ui := executor.getUI()
+		assert.Nil(t, ui, "getUI should return nil when coordinator is nil")
+
+		// The executor should still be functional for empty work items
+		result, err := executor.ExecuteTests(context.Background(), []TestWork{})
+		assert.NoError(t, err, "Should handle empty work items without coordinator")
+		assert.NotNil(t, result, "Should return valid result")
+		assert.Equal(t, 0, result.Stats.Total, "Should have zero total tests")
+	})
+
+	t.Run("UIProvider dependency injection", func(t *testing.T) {
+		// Test that dependency injection works through UIProvider interface
+		r := &runner{
+			log:   log.NewLogger(log.DiscardHandler()),
+			runID: "test-run",
+		}
+
+		executor := NewParallelExecutor(r, 1)
+		assert.NotNil(t, executor, "Should create executor")
+
+		// Verify the runner implements UIProvider interface
+		var _ UIProvider = r
+
+		// Verify that UIProvider is set correctly
+		assert.Equal(t, r, executor.uiProvider, "UIProvider should be set to runner")
+
+		// When coordinator is nil, GetUI should return nil
+		assert.Nil(t, r.GetUI(), "GetUI should return nil when coordinator is nil")
+		assert.Nil(t, executor.getUI(), "executor getUI should return nil when coordinator is nil")
 	})
 }
 
