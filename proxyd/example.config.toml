@@ -1,11 +1,9 @@
 # List of WS methods to whitelist.
-ws_method_whitelist = [
-  "eth_subscribe",
-  "eth_call",
-  "eth_chainId"
-]
+ws_method_whitelist = ["eth_subscribe", "eth_call", "eth_chainId"]
 # Enable WS on this backend group. There can only be one WS-enabled backend group.
 ws_backend_group = "main"
+# Enable Flashblocks-aware routing on this backend group. There can only be one flashblocks-aware backend group.
+flashblocks_aware_backend_group = "flashblocks"
 
 [server]
 # Host for the proxyd RPC server to listen on.
@@ -22,6 +20,8 @@ max_body_size_bytes = 10485760
 max_concurrent_rpcs = 1000
 # Server log level
 log_level = "info"
+# Enable flashblocks-aware routing for pending JSON-RPC calls.
+enable_flashblocks_aware_routing = true
 
 [redis]
 # URL to a Redis instance.
@@ -112,6 +112,9 @@ backends = ["infura"]
 # consensus_min_peer_count = 4
 
 [backend_groups.alchemy]
+backends = ["alchemy"]
+
+[backend_groups.flashblocks]
 backends = ["alchemy"]
 
 # If the authentication group below is in the config,
