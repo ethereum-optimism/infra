@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -30,9 +31,11 @@ import (
 )
 
 const (
-	JSONRPCVersion       = "2.0"
-	JSONRPCErrorInternal = -32000
-	notFoundRpcError     = -32601
+	JSONRPCVersion             = "2.0"
+	JSONRPCErrorInternal       = -32000
+	notFoundRpcError           = -32601
+	DefaultMaxIdleConns        = 1000
+	DefaultMaxIdleConnsPerHost = 1000
 )
 
 var (
@@ -491,15 +494,42 @@ func NewBackend(
 	rpcURL string,
 	wsURL string,
 	rpcSemaphore *semaphore.Weighted,
+	options *BackendOptions,
 	opts ...BackendOpt,
 ) *Backend {
+	maxIdleConns := DefaultMaxIdleConns
+	if options != nil && options.MaxIdleConns > 0 {
+		maxIdleConns = options.MaxIdleConns
+	}
+	maxIdleConnsPerHost := DefaultMaxIdleConnsPerHost
+	if options != nil && options.MaxIdleConnsPerHost > 0 {
+		maxIdleConnsPerHost = options.MaxIdleConnsPerHost
+	}
 	backend := &Backend{
 		Name:            name,
 		rpcURL:          rpcURL,
 		wsURL:           wsURL,
 		maxResponseSize: math.MaxInt64,
 		client: &LimitedHTTPClient{
-			Client:      http.Client{Timeout: 5 * time.Second},
+			Client: http.Client{
+				Transport: &http.Transport{
+					Proxy: http.ProxyFromEnvironment,
+					DialContext: (&net.Dialer{
+						Timeout:   30 * time.Second,
+						KeepAlive: 30 * time.Second,
+					}).DialContext,
+					ForceAttemptHTTP2:     true,
+					MaxIdleConns:          maxIdleConns,        // default: 100
+					MaxIdleConnsPerHost:   maxIdleConnsPerHost, // default: 2
+					IdleConnTimeout:       90 * time.Second,
+					TLSHandshakeTimeout:   10 * time.Second,
+					ExpectContinueTimeout: 1 * time.Second,
+
+					DisableKeepAlives:  false,
+					DisableCompression: false,
+				},
+				Timeout: 5 * time.Second,
+			},
 			sem:         rpcSemaphore,
 			backendName: name,
 		},

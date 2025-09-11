@@ -226,7 +226,7 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		opts = append(opts, WithConsensusReceiptTarget(receiptsTarget))
 
-		back := NewBackend(name, rpcURL, wsURL, rpcRequestSemaphore, opts...)
+		back := NewBackend(name, rpcURL, wsURL, rpcRequestSemaphore, &config.BackendOptions, opts...)
 		backendNames = append(backendNames, name)
 		backendsByName[name] = back
 		log.Info("configured backend",

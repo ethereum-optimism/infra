@@ -104,6 +104,8 @@ type BackendOptions struct {
 	MaxDegradedLatencyThreshold TOMLDuration `toml:"max_degraded_latency_threshold"`
 	MaxLatencyThreshold         TOMLDuration `toml:"max_latency_threshold"`
 	MaxErrorRateThreshold       float64      `toml:"max_error_rate_threshold"`
+	MaxIdleConns                int          `toml:"max_idle_conns"`
+	MaxIdleConnsPerHost         int          `toml:"max_idle_conns_per_host"`
 }
 
 type BackendConfig struct {
@@ -230,7 +232,7 @@ type Config struct {
 	Redis                   RedisConfig             `toml:"redis"`
 	Metrics                 MetricsConfig           `toml:"metrics"`
 	RateLimit               RateLimitConfig         `toml:"rate_limit"`
-	Nacos                   NacosConfig           `toml:"nacos"`
+	Nacos                   NacosConfig             `toml:"nacos"`
 	BackendOptions          BackendOptions          `toml:"backend"`
 	Backends                BackendsConfig          `toml:"backends"`
 	BatchConfig             BatchConfig             `toml:"batch"`

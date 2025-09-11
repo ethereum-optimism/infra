@@ -102,7 +102,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 	}))
 	defer backendServer.Close()
 
-	backend := NewBackend("test-backend", backendServer.URL, "", semaphore.NewWeighted(1))
+	backend := NewBackend("test-backend", backendServer.URL, "", semaphore.NewWeighted(1), nil)
 	backendGroup := &BackendGroup{
 		Name:     "test-group",
 		Backends: []*Backend{backend},
