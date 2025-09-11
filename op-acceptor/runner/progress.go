@@ -161,12 +161,21 @@ func (c *consoleProgressIndicator) reportProgress() {
 
 	detailsStr := formatRunningTests(c.runningTests, 3)
 
+	// Calculate completion percentage
+	var percentComplete float64
+	if c.totalTests > 0 {
+		percentComplete = float64(c.completedTests) * 100.0 / float64(c.totalTests)
+	}
+
 	// Create structured log with JSON fields
 	logFields := []interface{}{
 		"gate", c.currentGate,
 		"suite", c.currentSuite,
+		"completed", c.completedTests,
+		"total", c.totalTests,
+		"percent", fmt.Sprintf("%.1f%%", percentComplete),
 		"numRunning", len(c.runningTests),
-		"details", detailsStr,
+		"longestRunning", detailsStr,
 	}
 
 	c.logger.Info("progress update", logFields...)
@@ -214,6 +223,11 @@ func formatRunningTests(runningTests map[string]time.Time, maxShow int) string {
 		}
 		duration := test.duration.Truncate(time.Second)
 		runningStrs = append(runningStrs, fmt.Sprintf("%s (%v)", test.name, duration))
+	}
+
+	// Add indicator for additional tests not shown
+	if len(running) > maxShow {
+		runningStrs = append(runningStrs, fmt.Sprintf("+%d more", len(running)-maxShow))
 	}
 
 	return strings.Join(runningStrs, ", ")

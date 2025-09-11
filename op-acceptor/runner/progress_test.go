@@ -123,13 +123,18 @@ gates:
 
 	// Verify the progress logs contain expected content
 	foundRunningTests := false
+	foundCompletionInfo := false
 	for _, logMsg := range progressLogs {
-		if strings.Contains(logMsg, "details=") && strings.Contains(logMsg, "TestProgress") {
+		if strings.Contains(logMsg, "longestRunning=") && strings.Contains(logMsg, "TestProgress") {
 			foundRunningTests = true
-			break
+		}
+		// Check for new completion tracking fields
+		if strings.Contains(logMsg, "completed=") && strings.Contains(logMsg, "total=") && strings.Contains(logMsg, "percent=") {
+			foundCompletionInfo = true
 		}
 	}
 	require.True(t, foundRunningTests, "Should have found progress logs with running tests information")
+	require.True(t, foundCompletionInfo, "Should have found progress logs with completion information (completed, total, percent)")
 
 	// Verify that the last progress log only contains TestProgressTwo (TestProgressOne should be completed and removed)
 	lastLog := progressLogs[len(progressLogs)-1]
@@ -248,7 +253,19 @@ func TestFormatRunningTests(t *testing.T) {
 				"TestFour":  baseTime.Add(-2 * time.Second),
 			},
 			maxShow:  2,
-			expected: "TestTwo (4s), TestThree (3s)",
+			expected: "TestTwo (4s), TestThree (3s), +2 more",
+		},
+		{
+			name: "shows +more indicator for many tests",
+			runningTests: map[string]time.Time{
+				"TestOne":   baseTime.Add(-1 * time.Second),
+				"TestTwo":   baseTime.Add(-5 * time.Second),
+				"TestThree": baseTime.Add(-3 * time.Second),
+				"TestFour":  baseTime.Add(-2 * time.Second),
+				"TestFive":  baseTime.Add(-4 * time.Second),
+			},
+			maxShow:  3,
+			expected: "TestTwo (5s), TestFive (4s), TestThree (3s), +2 more",
 		},
 	}
 
