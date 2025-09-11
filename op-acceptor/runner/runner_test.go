@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 	"github.com/ethereum-optimism/optimism/devnet-sdk/shell/env"
+	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +32,33 @@ func initGoModule(t testing.TB, dir string, pkgPath string) {
 	require.NoError(t, err)
 }
 
-func setupTestRunner(t *testing.T, testContent, configContent []byte) *runner {
+type TestRunnerOption func(*Config)
+
+func WithShowProgress(enabled bool) TestRunnerOption {
+	return func(c *Config) {
+		c.ShowProgress = enabled
+	}
+}
+
+func WithProgressInterval(interval time.Duration) TestRunnerOption {
+	return func(c *Config) {
+		c.ProgressInterval = interval
+	}
+}
+
+func WithLogger(logger log.Logger) TestRunnerOption {
+	return func(c *Config) {
+		c.Log = logger
+	}
+}
+
+func WithSerial(serial bool) TestRunnerOption {
+	return func(c *Config) {
+		c.Serial = serial
+	}
+}
+
+func setupTestRunner(t *testing.T, testContent, configContent []byte, opts ...TestRunnerOption) *runner {
 	// Create test directory and config file
 	testDir := t.TempDir()
 
@@ -57,10 +85,21 @@ func setupTestRunner(t *testing.T, testContent, configContent []byte) *runner {
 	})
 	require.NoError(t, err)
 
-	r, err := NewTestRunner(Config{
+	lgr := testlog.Logger(t, slog.LevelDebug)
+
+	// Start with default config
+	config := Config{
 		Registry: reg,
 		WorkDir:  testDir,
-	})
+		Log:      lgr,
+	}
+
+	// Apply all options
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	r, err := NewTestRunner(config)
 	require.NoError(t, err)
 	return r.(*runner)
 }
@@ -94,7 +133,7 @@ gates:
       - name: TestTwo
         package: "./feature"
 `)
-	return setupTestRunner(t, testContent, configContent)
+	return setupTestRunner(t, testContent, configContent, WithShowProgress(true), WithProgressInterval(100*time.Millisecond))
 }
 
 func TestRunTest_SingleTest(t *testing.T) {
@@ -1646,7 +1685,7 @@ gates:
       - name: TestFast
         package: "."
         timeout: 2s
-      - name: TestSlowTimeout  
+      - name: TestSlowTimeout
         package: "."
         timeout: 1s
       - name: TestAnotherSlowTimeout

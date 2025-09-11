@@ -143,8 +143,10 @@ type Config struct {
 	FileLogger         *logging.FileLogger // Logger for storing test results
 	NetworkName        string              // Name of the network being tested
 	DevnetEnv          *env.DevnetEnv
-	Serial             bool // Whether to run tests serially instead of in parallel
-	Concurrency        int  // Number of concurrent test workers (0 = auto-determine)
+	Serial             bool          // Whether to run tests serially instead of in parallel
+	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
+	ShowProgress       bool          // Whether to show periodic progress updates during test execution
+	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
 }
 
 // NewTestRunner creates a new test runner instance
@@ -222,19 +224,39 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	}
 	r.executor = executor
 
-	// Create parallel runner adapter if not in serial mode
+	// Create progress indicator if ShowProgress is true
+	var progressIndicator ProgressIndicator
+	if cfg.ShowProgress {
+		progressIndicator = NewConsoleProgressIndicator(cfg.Log, cfg.ProgressInterval)
+	} else {
+		progressIndicator = NewNoOpProgressIndicator()
+	}
+
+	// Create parallel runner first if needed, then coordinator once
 	var parallelRunner ParallelRunner
 	if !cfg.Serial && cfg.Concurrency > 0 {
 		parallelExecutor := NewParallelExecutor(r, cfg.Concurrency)
 		parallelRunner = NewParallelRunnerAdapter(parallelExecutor)
 	}
 
-	// Create progress indicator (no-op for now)
-	progressIndicator := NewNoOpProgressIndicator()
-
+	// Initialize coordinator once with correct parallel runner
 	r.coordinator = NewTestCoordinator(r.executor, r.collector, parallelRunner, progressIndicator)
 
 	return r, nil
+}
+
+// GetUI implements UIProvider interface
+// Returns the progress indicator from the coordinator if available.
+// 
+// Coordinator Lifecycle Contract:
+// - The coordinator MUST be initialized before parallel test execution begins
+// - The coordinator SHOULD NOT be modified during active test execution 
+// - When coordinator is nil, progress tracking is gracefully disabled
+func (r *runner) GetUI() ProgressIndicator {
+	if r.coordinator != nil {
+		return r.coordinator.GetUI()
+	}
+	return nil
 }
 
 // RunAllTests implements the TestRunner interface

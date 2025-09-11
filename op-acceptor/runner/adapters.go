@@ -55,20 +55,6 @@ func (a *parallelRunnerAdapter) GetConcurrency() int {
 	return a.executor.concurrency
 }
 
-// noOpProgressIndicator provides a no-op implementation of ProgressIndicator
-type noOpProgressIndicator struct{}
-
-// NewNoOpProgressIndicator creates a progress indicator that does nothing
-func NewNoOpProgressIndicator() ProgressIndicator {
-	return &noOpProgressIndicator{}
-}
-
-func (n *noOpProgressIndicator) StartGate(gateName string, totalTests int)           {}
-func (n *noOpProgressIndicator) StartSuite(suiteName string, totalTests int)         {}
-func (n *noOpProgressIndicator) UpdateTest(testName string, status types.TestStatus) {}
-func (n *noOpProgressIndicator) CompleteSuite(suiteName string)                      {}
-func (n *noOpProgressIndicator) CompleteGate(gateName string)                        {}
-
 // Helper functions
 
 func getTestKeyFromValidator(validator types.ValidatorMetadata) string {

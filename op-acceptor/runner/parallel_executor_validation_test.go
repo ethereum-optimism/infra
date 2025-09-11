@@ -57,6 +57,51 @@ func TestParallelExecutorValidation(t *testing.T) {
 		assert.Equal(t, 5, min(5, 5), "min should handle equal values")
 		assert.Equal(t, 0, min(0, 5), "min should handle zero")
 	})
+
+	t.Run("Nil coordinator handling", func(t *testing.T) {
+		// Test that ParallelExecutor works correctly when coordinator is nil
+		// This simulates the case where NewParallelExecutor is called before
+		// the coordinator is initialized
+		r := &runner{
+			log:   log.NewLogger(log.DiscardHandler()),
+			runID: "test-run",
+			// coordinator is nil by default
+		}
+
+		executor := NewParallelExecutor(r, 2)
+		assert.NotNil(t, executor, "Should create executor even with nil coordinator")
+
+		// Verify that getUI returns nil when coordinator is nil
+		ui := executor.getUI()
+		assert.Nil(t, ui, "getUI should return nil when coordinator is nil")
+
+		// The executor should still be functional for empty work items
+		result, err := executor.ExecuteTests(context.Background(), []TestWork{})
+		assert.NoError(t, err, "Should handle empty work items without coordinator")
+		assert.NotNil(t, result, "Should return valid result")
+		assert.Equal(t, 0, result.Stats.Total, "Should have zero total tests")
+	})
+
+	t.Run("UIProvider dependency injection", func(t *testing.T) {
+		// Test that dependency injection works through UIProvider interface
+		r := &runner{
+			log:   log.NewLogger(log.DiscardHandler()),
+			runID: "test-run",
+		}
+
+		executor := NewParallelExecutor(r, 1)
+		assert.NotNil(t, executor, "Should create executor")
+
+		// Verify the runner implements UIProvider interface
+		var _ UIProvider = r
+
+		// Verify that UIProvider is set correctly
+		assert.Equal(t, r, executor.uiProvider, "UIProvider should be set to runner")
+
+		// When coordinator is nil, GetUI should return nil
+		assert.Nil(t, r.GetUI(), "GetUI should return nil when coordinator is nil")
+		assert.Nil(t, executor.getUI(), "executor getUI should return nil when coordinator is nil")
+	})
 }
 
 // TestImprovedErrorAggregation tests the enhanced error handling

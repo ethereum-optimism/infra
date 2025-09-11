@@ -25,12 +25,20 @@ type TestWorkResult struct {
 	Error  error
 }
 
+// UIProvider defines how to obtain a progress indicator for progress tracking.
+// This interface allows dependency injection and reduces coupling between
+// ParallelExecutor and the specific UI implementation source.
+type UIProvider interface {
+	GetUI() ProgressIndicator
+}
+
 // ParallelExecutor manages parallel test execution across multiple workers
 type ParallelExecutor struct {
 	runner      *runner
 	concurrency int
 	log         log.Logger
 	resultMgr   *ResultHierarchyManager
+	uiProvider  UIProvider // Optional UI provider for progress tracking
 }
 
 // NewParallelExecutor creates a new parallel test executor with validation
@@ -53,7 +61,16 @@ func NewParallelExecutor(runner *runner, concurrency int) *ParallelExecutor {
 		concurrency: concurrency,
 		log:         runner.log.New("component", "parallel-executor"),
 		resultMgr:   NewResultHierarchyManager(),
+		uiProvider:  runner, // runner implements UIProvider through its coordinator
 	}
+}
+
+// getUI returns the progress indicator from the UI provider if available
+func (pe *ParallelExecutor) getUI() ProgressIndicator {
+	if pe.uiProvider != nil {
+		return pe.uiProvider.GetUI()
+	}
+	return nil
 }
 
 // ExecuteTests runs the provided test work items in parallel and returns organized results
@@ -65,6 +82,12 @@ func (pe *ParallelExecutor) ExecuteTests(ctx context.Context, workItems []TestWo
 		// Return empty result for consistency
 		result := pe.resultMgr.CreateEmptyResult(pe.runner.runID, start)
 		return result, nil
+	}
+
+	// Initialize progress tracking if progress indicator is available
+	ui := pe.getUI()
+	if ui != nil {
+		pe.initializeProgressTracking(workItems)
 	}
 
 	pe.log.Info("Starting parallel test execution", "totalTests", len(workItems), "concurrency", pe.concurrency)
@@ -179,10 +202,23 @@ func (pe *ParallelExecutor) worker(ctx context.Context, wg *sync.WaitGroup, work
 
 			pe.log.Debug("Worker processing test", "workerID", workerID, "test", work.Validator.ID, "gate", work.GateID, "suite", work.SuiteID)
 
+			// Notify progress indicator that test is starting
+			ui := pe.getUI()
+			if ui != nil {
+				ui.StartTest(work.Validator.GetName())
+			} else {
+				pe.log.Debug("Progress indicator unavailable for test start", "test", work.Validator.GetName())
+			}
+
 			// Execute the test with proper error handling
 			testResult, err := pe.runner.RunTest(ctx, work.Validator)
 			if err != nil {
 				pe.log.Error("Test execution failed in worker", "workerID", workerID, "test", work.Validator.ID, "error", err)
+			}
+
+			// Notify progress indicator that test completed
+			if ui != nil && testResult != nil {
+				ui.UpdateTest(work.Validator.GetName(), testResult.Status)
 			}
 
 			// Send result back with timeout protection
@@ -248,4 +284,39 @@ func (r *runner) collectTestWork() []TestWork {
 	}
 
 	return workItems
+}
+
+// initializeProgressTracking sets up data structures to concurrently
+// track progress for each gate and suite in the scheduled work items
+func (pe *ParallelExecutor) initializeProgressTracking(workItems []TestWork) {
+	pe.log.Info("Initializing parallel progress tracking")
+
+	ui := pe.getUI()
+	if ui == nil {
+		return
+	}
+
+	// Group work items by gate
+	gateGroups := make(map[string][]TestWork)
+	for _, item := range workItems {
+		gateGroups[item.GateID] = append(gateGroups[item.GateID], item)
+	}
+
+	// Initialize progress for each gate
+	for gateName, gateItems := range gateGroups {
+		ui.StartGate(gateName, len(gateItems))
+
+		// Group by suite within this gate
+		suiteGroups := make(map[string][]TestWork)
+		for _, item := range gateItems {
+			if item.SuiteID != "" {
+				suiteGroups[item.SuiteID] = append(suiteGroups[item.SuiteID], item)
+			}
+		}
+
+		// Initialize progress for each suite
+		for suiteName, suiteItems := range suiteGroups {
+			ui.StartSuite(suiteName, len(suiteItems))
+		}
+	}
 }

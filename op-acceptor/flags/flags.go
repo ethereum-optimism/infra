@@ -121,6 +121,18 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
 		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
 	}
+	ShowProgress = &cli.BoolFlag{
+		Name:    "show-progress",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SHOW_PROGRESS"),
+		Usage:   "Show periodic progress updates during test execution. Defaults to false.",
+	}
+	ProgressInterval = &cli.DurationFlag{
+		Name:    "progress-interval",
+		Value:   30 * time.Second,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "PROGRESS_INTERVAL"),
+		Usage:   "Interval between progress updates when --show-progress is enabled. Defaults to 30s.",
+	}
 	Orchestrator = &cli.StringFlag{
 		Name:    "orchestrator",
 		Value:   OrchestratorSysext.String(),
@@ -166,6 +178,8 @@ var optionalFlags = []cli.Flag{
 	LogDir,
 	TestLogLevel,
 	OutputRealtimeLogs,
+	ShowProgress,
+	ProgressInterval,
 	Orchestrator,
 	DevnetEnvURL,
 	Serial,

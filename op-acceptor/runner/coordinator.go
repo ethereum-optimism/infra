@@ -15,15 +15,6 @@ type ParallelRunner interface {
 	GetConcurrency() int
 }
 
-// ProgressIndicator interface for UI updates
-type ProgressIndicator interface {
-	StartGate(gateName string, totalTests int)
-	StartSuite(suiteName string, totalTests int)
-	UpdateTest(testName string, status types.TestStatus)
-	CompleteSuite(suiteName string)
-	CompleteGate(gateName string)
-}
-
 // TestCoordinator orchestrates test execution
 type TestCoordinator interface {
 	// Run all tests with the given validators
@@ -31,6 +22,7 @@ type TestCoordinator interface {
 
 	// Run tests for a specific gate
 	RunGate(ctx context.Context, gateName string, validators []types.ValidatorMetadata) (*GateResult, error)
+	GetUI() ProgressIndicator
 }
 
 // testCoordinator implements TestCoordinator
@@ -49,6 +41,11 @@ func NewTestCoordinator(executor TestExecutor, collector ResultCollector, parall
 		parallelRunner: parallelRunner,
 		ui:             ui,
 	}
+}
+
+// GetUI returns the progress indicator
+func (c *testCoordinator) GetUI() ProgressIndicator {
+	return c.ui
 }
 
 // Run orchestrates the execution of all tests
@@ -85,6 +82,11 @@ func (c *testCoordinator) RunGate(ctx context.Context, gateName string, validato
 		}
 
 		for _, validator := range suiteTests {
+			// Notify progress indicator that test is starting
+			if c.ui != nil {
+				c.ui.StartTest(validator.GetName())
+			}
+
 			testResult, err := c.executor.Execute(ctx, validator)
 			if err != nil {
 				log.Error("Test execution failed", "test", validator.GetName(), "error", err)
@@ -107,6 +109,11 @@ func (c *testCoordinator) RunGate(ctx context.Context, gateName string, validato
 
 	// Process direct tests
 	for _, validator := range directTests {
+		// Notify progress indicator that test is starting
+		if c.ui != nil {
+			c.ui.StartTest(validator.GetName())
+		}
+
 		testResult, err := c.executor.Execute(ctx, validator)
 		if err != nil {
 			log.Error("Test execution failed", "test", validator.GetName(), "error", err)
@@ -171,6 +178,11 @@ func (c *testCoordinator) processGate(ctx context.Context, gateName string, vali
 		}
 
 		for _, validator := range suiteTests {
+			// Notify progress indicator that test is starting
+			if c.ui != nil {
+				c.ui.StartTest(validator.GetName())
+			}
+
 			testResult, err := c.executor.Execute(ctx, validator)
 			if err != nil {
 				log.Error("Test execution failed", "test", validator.GetName(), "error", err)
@@ -191,6 +203,11 @@ func (c *testCoordinator) processGate(ctx context.Context, gateName string, vali
 
 	// Process direct tests
 	for _, validator := range directTests {
+		// Notify progress indicator that test is starting
+		if c.ui != nil {
+			c.ui.StartTest(validator.GetName())
+		}
+
 		testResult, err := c.executor.Execute(ctx, validator)
 		if err != nil {
 			log.Error("Test execution failed", "test", validator.GetName(), "error", err)
