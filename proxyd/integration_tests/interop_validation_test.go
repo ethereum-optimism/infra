@@ -85,11 +85,11 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
+	errResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())
 	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badValidatingBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
+	errResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error())
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
@@ -111,12 +111,13 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		jsonResponse []byte
 	}
 	type testCase struct {
-		name                  string
-		strategy              proxyd.InteropValidationStrategy
-		urls                  []string
-		expectedResp          respDetails
-		possibilities         []respDetails
-		multiplePossibilities bool
+		name                          string
+		strategy                      proxyd.InteropValidationStrategy
+		urls                          []string
+		expectedResp                  respDetails
+		possibilities                 []respDetails
+		multiplePossibilities         bool
+		forceDisableInteropValidation bool
 	}
 	cases := []testCase{
 		{
@@ -129,6 +130,16 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 			},
 		},
 		{
+			name:     "first-supervisor strategy with first url returning success but interop validation is disabled",
+			strategy: proxyd.FirstSupervisorStrategy,
+			urls:     []string{goodSupervisorUrl},
+			expectedResp: respDetails{
+				code:         403,
+				jsonResponse: []byte(fmt.Sprintf(errResTmpl, -32600, "interop transactions are not allowed")),
+			},
+			forceDisableInteropValidation: true,
+		},
+		{
 			name:     "default strategy with first url returning success",
 			strategy: proxyd.EmptyStrategy,
 			urls:     []string{goodSupervisorUrl, badSupervisorUrl1},
@@ -136,6 +147,16 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 				code:         200,
 				jsonResponse: []byte(dummyHealthyRes),
 			},
+		},
+		{
+			name:     "default strategy with first url returning success but interop validation is disabled",
+			strategy: proxyd.EmptyStrategy,
+			urls:     []string{goodSupervisorUrl},
+			expectedResp: respDetails{
+				code:         403,
+				jsonResponse: []byte(fmt.Sprintf(errResTmpl, -32600, "interop transactions are not allowed")),
+			},
+			forceDisableInteropValidation: true,
 		},
 		{
 			name:     "multicall strategy with atleast one good url",
@@ -171,6 +192,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			config.InteropValidationConfig.Strategy = c.strategy
 			config.InteropValidationConfig.Urls = c.urls
+			config.InteropValidationConfig.ForceDisableInteropValidation = c.forceDisableInteropValidation
 			_, shutdown, err := proxyd.Start(config)
 			require.NoError(t, err)
 			defer shutdown()
@@ -658,11 +680,11 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
+	errResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())
 	badHealthyBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badHealthyBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
+	errResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error())
 	badHealthyBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badHealthyBackend2.Close()
 
@@ -729,6 +751,8 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 	// should start with no requests made to any of the backends obviously
 	assertExpectations(t, expectations)
 
+	proceed := false
+
 	// First request
 	// expectation:
 	// - unhealthyBackend1 should receive 1 request only to realise that it's unhealthy
@@ -736,7 +760,7 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 	// - badHealthyBackend1 should receive 1 request and return with a bad validation response yet representing a healthy response
 	// - badHealthyBackend2, unhealthyBackend3 should receive 0 requests because of the request already have being treated by badHealthyBackend1
 	t.Run("First Request", func(t *testing.T) {
-		fmt.Println("\t\t- Request should go through unhealthyBackend1(backed called) -> unhealthyBackend2(backend called) -> badHealthyBackend1(backend called)\n ")
+		fmt.Println("\t\t- Request should go through unhealthyBackend1(backend called) -> unhealthyBackend2(backend called) -> badHealthyBackend1(backend called)\n ")
 
 		sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
 		observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
@@ -755,7 +779,14 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		expectations.badHealthyBackend1++
 
 		assertExpectations(t, expectations)
+		proceed = true
 	})
+
+	if !proceed {
+		t.Fatal("First request did not proceed")
+	}
+
+	proceed = false
 
 	// second request
 	// expectation:
@@ -777,7 +808,14 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		assertExpectations(t, expectations)
 
 		time.Sleep(100 * time.Millisecond)
+		proceed = true
 	})
+
+	if !proceed {
+		t.Fatal("Second request did not proceed")
+	}
+
+	proceed = false
 
 	// third request
 	// expectation
@@ -800,7 +838,14 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 
 		expectations.badHealthyBackend1 += 1 // the request tries the badHealthyBackend1 again as the next available healthy backend
 		assertExpectations(t, expectations)
+		proceed = true
 	})
+
+	if !proceed {
+		t.Fatal("Third request did not proceed")
+	}
+
+	proceed = false
 
 	// fourth request:
 	// expectation:
@@ -820,7 +865,12 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		expectations.badHealthyBackend2++
 
 		assertExpectations(t, expectations)
+		proceed = true
 	})
+
+	if !proceed {
+		t.Fatal("Fourth request did not proceed")
+	}
 
 	// wait for the unhealthiness timeout to expire before trying the next request
 	fmt.Println("\nWaiting 10 seconds for the unhealthiness timeout to expire...")
@@ -851,7 +901,12 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 		expectations.badHealthyBackend1 += 1
 
 		assertExpectations(t, expectations)
+		proceed = true
 	})
+
+	if !proceed {
+		t.Fatal("Fifth request did not proceed")
+	}
 }
 
 func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends_CustomUnhealthinessTimeout(t *testing.T) {

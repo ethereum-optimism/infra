@@ -86,6 +86,7 @@ type Server struct {
 	rateLimitHeader         string
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
+	interopBackoffStrategy  BackoffStrategy
 }
 
 type limiterFunc func(method string) bool
@@ -457,6 +458,20 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 	if !isInterop {
 		return nil
 	}
+	if s.interopValidatingConfig.ForceDisableInteropValidation {
+		return &RPCErr{
+			Code:          JSONRPCErrorInvalidRequest,
+			Message:       "interop transactions are not allowed",
+			HTTPErrorCode: 403,
+		}
+	}
+	if s.interopBackoffStrategy != nil && s.interopBackoffStrategy.WithinBackoff() {
+		return &RPCErr{
+			Code:          JSONRPCErrorInvalidRequest,
+			Message:       "auto-stop observed, please try again later",
+			HTTPErrorCode: 403,
+		}
+	}
 	// at this point, we know it's an interop transaction worthy of being validated
 	log.Info(
 		"validating interop access list",
@@ -478,6 +493,9 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
 	} else {
 		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "tx_hash", tx.Hash(), "error", finalErr)
+	}
+	if IsAutoStop(finalErr) {
+		s.interopBackoffStrategy.Backoff()
 	}
 	return finalErr
 }
@@ -589,7 +607,6 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-
 		}
 
 		id := string(parsedReq.ID)

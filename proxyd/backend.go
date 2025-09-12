@@ -18,7 +18,6 @@ import (
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
-	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -30,9 +29,11 @@ import (
 )
 
 const (
-	JSONRPCVersion       = "2.0"
-	JSONRPCErrorInternal = -32000
-	notFoundRpcError     = -32601
+	JSONRPCVersion             = "2.0"
+	JSONRPCErrorInternal       = -32000
+	JSONRPCErrorInvalidRequest = -32600
+	notFoundRpcError           = -32601
+	JSONRPCErrorInvalidParams  = -32602
 )
 
 var (
@@ -165,115 +166,95 @@ Summary:
 	  -321500 MISSED_DATA
 	  -321501 DATA_CORRUPTION
 */
-var interopRPCErrorMap = map[error]*RPCErr{
-	supervisorTypes.ErrUninitialized: {
-		Code:          -320400,
-		HTTPErrorCode: 400,
-	},
-	supervisorTypes.ErrSkipped: {
-		Code:          -320500,
-		HTTPErrorCode: 422,
-	},
-	supervisorTypes.ErrUnknownChain: {
-		Code:          -320501,
-		HTTPErrorCode: 404,
-	},
-	supervisorTypes.ErrConflict: {
-		Code:          -320600,
-		HTTPErrorCode: 409,
-	},
-	supervisorTypes.ErrIneffective: {
-		Code:          -320601,
-		HTTPErrorCode: 422,
-	},
-	supervisorTypes.ErrOutOfOrder: {
-		Code:          -320900,
-		HTTPErrorCode: 409,
-	},
-	supervisorTypes.ErrAwaitReplacementBlock: {
-		Code:          -320901,
-		HTTPErrorCode: 409,
-	},
-	supervisorTypes.ErrStop: {
-		Code:          -321000,
-		HTTPErrorCode: 400,
-	},
-	supervisorTypes.ErrOutOfScope: {
-		Code:          -321100,
-		HTTPErrorCode: 400,
-	},
-	supervisorTypes.ErrPreviousToFirst: {
-		Code:          -321200,
-		HTTPErrorCode: 404,
-	},
-	supervisorTypes.ErrFuture: {
-		Code:          -321401,
-		HTTPErrorCode: 422,
-	},
-	supervisorTypes.ErrNotExact: {
-		Code:          -321500,
-		HTTPErrorCode: 404,
-	},
-	supervisorTypes.ErrDataCorruption: {
-		Code:          -321501,
-		HTTPErrorCode: 422,
-	},
-	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
-		Code:          -32602, // invalid params
-		HTTPErrorCode: 400,
-	},
-	errors.New("stopped acces-list check early"): {
-		Code:          -32602, // invalid params
-		HTTPErrorCode: 400,
-	},
-	errors.New("failed to read data"): {
-		Code:          -32602, // invalid params
-		HTTPErrorCode: 400,
-	},
+func getInteropRPCErrorHttpCode(err error) (httpCode int, knownErr bool) {
+	knownErr = true
+	switch err.Error() {
+	case supervisorTypes.ErrUninitialized.Error():
+		httpCode = 400
+	case supervisorTypes.ErrSkipped.Error():
+		httpCode = 422
+	case supervisorTypes.ErrUnknownChain.Error():
+		httpCode = 404
+	case supervisorTypes.ErrConflict.Error():
+		httpCode = 409
+	case supervisorTypes.ErrIneffective.Error():
+		httpCode = 422
+	case supervisorTypes.ErrOutOfOrder.Error():
+		httpCode = 409
+	case supervisorTypes.ErrAwaitReplacementBlock.Error():
+		httpCode = 409
+	case supervisorTypes.ErrStop.Error():
+		httpCode = 400
+	case supervisorTypes.ErrOutOfScope.Error():
+		httpCode = 400
+	case supervisorTypes.ErrPreviousToFirst.Error():
+		httpCode = 404
+	case supervisorTypes.ErrFuture.Error():
+		httpCode = 422
+	case supervisorTypes.ErrNotExact.Error():
+		httpCode = 404
+	case supervisorTypes.ErrDataCorruption.Error():
+		httpCode = 422
+	default:
+		httpCode = 400
+		knownErr = false
+	}
+	return
 }
 
 func ParseInteropError(err error) *RPCErr {
-	var fallbackErr *RPCErr
+	if rpcErr, ok := err.(*RPCErr); ok {
+		return rpcErr
+	}
+
 	httpErr, isHTTPError := err.(rpc.HTTPError)
 	if !isHTTPError {
-		fallbackErr = &RPCErr{
+		return &RPCErr{
 			Code:          JSONRPCErrorInternal,
 			Message:       err.Error(),
 			HTTPErrorCode: 500,
 		}
-	} else {
-		// if the underlying error is a JSON-RPC error, overwrite it with the inherent error message body
-		var rpcErrJson rpcResJSON
-		unmarshalErr := json.Unmarshal(httpErr.Body, &rpcErrJson)
-		if unmarshalErr != nil {
-			fallbackErr = ErrInvalidParams(string(httpErr.Body))
-			fallbackErr.HTTPErrorCode = httpErr.StatusCode
-		} else {
-			fallbackErr = &RPCErr{
-				Code:          rpcErrJson.Error.Code,
-				Message:       rpcErrJson.Error.Message,
-				Data:          rpcErrJson.Error.Data,
-				HTTPErrorCode: httpErr.StatusCode,
+	}
+
+	// if the underlying error is a JSON-RPC error, overwrite it with the inherent error message body
+	var rpcResponse rpcResJSON
+	if unmarshalErr := json.Unmarshal(httpErr.Body, &rpcResponse); unmarshalErr == nil {
+		httpCode, knownErr := getInteropRPCErrorHttpCode(rpcResponse.Error)
+		if !knownErr {
+			httpCode = httpErr.StatusCode // fallback to the HTTP status code of the original error
+		}
+		rpcResponse.Error.HTTPErrorCode = httpCode
+		return rpcResponse.Error
+	}
+	var rpcErrResponse rpc.JsonError
+	if unmarshalErr := json.Unmarshal(httpErr.Body, &rpcErrResponse); unmarshalErr == nil {
+		var data json.RawMessage
+		if rpcErrResponse.Data != nil {
+			dataBytes, err := json.Marshal(rpcErrResponse.Data)
+			if err == nil {
+				data = json.RawMessage(dataBytes)
+			} else {
+				data = json.RawMessage([]byte(fmt.Sprintf("%+v", rpcErrResponse.Data)))
 			}
-
-			err = fmt.Errorf(rpcErrJson.Error.Message)
+		}
+		httpCode, _ := getInteropRPCErrorHttpCode(err) // no knownErr check as we're already want to fallback to 400
+		return &RPCErr{
+			Code:          rpcErrResponse.Code,
+			Message:       rpcErrResponse.Message,
+			Data:          data,
+			HTTPErrorCode: httpCode,
 		}
 	}
 
-	errStr := err.Error()
-	for errSubStr, errCodes := range interopRPCErrorMap {
-		if strings.Contains(errStr, errSubStr.Error()) {
-			interopParsedErr := errCodes.Clone()
-			interopParsedErr.Message = errStr
-			return interopParsedErr
-		}
-	}
+	fallbackErr := ErrInvalidParams(string(httpErr.Body))
+	fallbackErr.HTTPErrorCode = httpErr.StatusCode
+
 	return fallbackErr
 }
 
 func ErrInvalidRequest(msg string) *RPCErr {
 	return &RPCErr{
-		Code:          -32600,
+		Code:          JSONRPCErrorInvalidRequest,
 		Message:       msg,
 		HTTPErrorCode: 400,
 	}
@@ -281,7 +262,7 @@ func ErrInvalidRequest(msg string) *RPCErr {
 
 func ErrInvalidParams(msg string) *RPCErr {
 	return &RPCErr{
-		Code:          -32602,
+		Code:          JSONRPCErrorInvalidParams,
 		Message:       msg,
 		HTTPErrorCode: 400,
 	}

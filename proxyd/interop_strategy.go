@@ -94,7 +94,10 @@ func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.
 		interopAccessList, err = validateAndDeduplicateInteropAccessList(interopAccessList)
 		if err != nil {
 			log.Error("error validating and deduplicating interop access list", "req_id", GetReqID(ctx), "error", err)
-			return nil, false, ParseInteropError(fmt.Errorf("failed to read data: %w", err))
+			rpcErr := ParseInteropError(fmt.Errorf("failed to parse access list entries: %w", err))
+			rpcErr.HTTPErrorCode = 400
+			rpcErr.Code = JSONRPCErrorInvalidParams
+			return nil, false, rpcErr
 		}
 	}
 
