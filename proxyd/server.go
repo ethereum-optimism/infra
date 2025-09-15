@@ -834,7 +834,7 @@ func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transacti
 	var signer types.Signer
 	// If you pass in a zero chain ID, types.LatestSignerForChainID panics. So we need to handle that case
 	// manually.
-	if tx.ChainId().Cmp(common.Big0) == 0 {
+	if tx.ChainId().Sign() == 0 {
 		signer = new(types.HomesteadSigner)
 	} else {
 		signer = types.LatestSignerForChainID(tx.ChainId())
