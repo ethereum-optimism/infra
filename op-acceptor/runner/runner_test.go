@@ -2038,3 +2038,58 @@ gates:
 		assert.Contains(t, envStr, "DEVSTACK_KEYS_SALT=test-run-id")
 	})
 }
+func TestStdoutCaptured_PackageModeAndSingleTest(t *testing.T) {
+	ctx := context.Background()
+	// Create a runner with a simple package that logs to stdout
+	testContent := []byte(`
+package feature_test
+
+import "testing"
+
+func TestLogsA(t *testing.T) { t.Log("alpha") }
+func TestLogsB(t *testing.T) { t.Log("beta") }
+`)
+	configContent := []byte(`
+gates:
+  - id: out-gate
+    description: "Gate with stdout tests"
+    suites:
+      out-suite:
+        description: "Suite"
+        tests:
+          - package: "./feature"
+            run_all: true
+    tests:
+      - name: TestLogsA
+        package: "./feature"
+`)
+	r := setupTestRunner(t, testContent, configContent)
+
+	// 1) Package mode (FuncName empty): should capture stdout in the package result
+	pkgRes, err := r.RunTest(ctx, types.ValidatorMetadata{
+		ID:      "pkg",
+		Gate:    "out-gate",
+		Suite:   "out-suite",
+		Package: "./feature",
+		RunAll:  true,
+		Type:    types.ValidatorTypeTest,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, pkgRes)
+	// Stdout for package mode may be large; just ensure non-empty and contains JSON or RUN markers
+	require.NotEmpty(t, pkgRes.Stdout)
+	assert.Contains(t, pkgRes.Stdout, "=== RUN")
+
+	// 2) Single test mode: capture stdout for the single test result
+	singleRes, err := r.RunTest(ctx, types.ValidatorMetadata{
+		ID:       "single",
+		Gate:     "out-gate",
+		FuncName: "TestLogsA",
+		Package:  "./feature",
+		Type:     types.ValidatorTypeTest,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, singleRes)
+	require.NotEmpty(t, singleRes.Stdout)
+	assert.Contains(t, singleRes.Stdout, "alpha")
+}

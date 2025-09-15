@@ -2,6 +2,7 @@ package nat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,6 +55,53 @@ type nat struct {
 
 	tracer           trace.Tracer
 	shutdownCallback func(error) // Callback to signal application shutdown
+}
+
+// buildEffectiveSnapshot builds a snapshot of the effective configuration for logging and artifacts
+func (n *nat) buildEffectiveSnapshot(runID string) types.EffectiveConfigSnapshot {
+	workDir := n.config.TestDir
+	if n.config.GatelessMode {
+		if wd, err := os.Getwd(); err == nil {
+			workDir = wd
+		}
+	} else if strings.HasSuffix(workDir, "/...") {
+		workDir = strings.TrimSuffix(workDir, "/...")
+	}
+
+	return types.EffectiveConfigSnapshot{
+		Runner: types.RunnerConfigSnapshot{
+			AllowSkips:       n.config.AllowSkips,
+			DefaultTimeout:   n.config.DefaultTimeout,
+			Timeout:          n.config.Timeout,
+			Serial:           n.config.Serial,
+			Concurrency:      n.config.Concurrency,
+			ShowProgress:     n.config.ShowProgress,
+			ProgressInterval: n.config.ProgressInterval,
+		},
+		Orchestration: types.OrchestrationConfigSnapshot{
+			Orchestrator: n.config.Orchestrator.String(),
+			DevnetEnvURL: n.config.DevnetEnvURL,
+		},
+		Logging: types.LoggingConfigSnapshot{
+			TestLogLevel:       n.config.TestLogLevel,
+			OutputRealtimeLogs: n.config.OutputRealtimeLogs,
+		},
+		Execution: types.ExecutionConfigSnapshot{
+			RunInterval: n.config.RunInterval,
+			RunOnce:     n.config.RunOnce,
+			GoBinary:    n.config.GoBinary,
+			TargetGate:  n.config.TargetGate,
+			Gateless:    n.config.GatelessMode,
+		},
+		Paths: types.PathsConfigSnapshot{
+			TestDir:         n.config.TestDir,
+			ValidatorConfig: n.config.ValidatorConfig,
+			LogDir:          n.config.LogDir,
+			WorkDir:         workDir,
+		},
+		NetworkName: n.networkName,
+		RunID:       runID,
+	}
 }
 
 func New(ctx context.Context, config *Config, version string, shutdownCallback func(error)) (*nat, error) {
@@ -175,24 +223,26 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		tracer:           otel.Tracer("op-acceptor"),
 	}
 
-	// Create addons manager
-	addonsOpts := []addons.Option{}
-	if devnetEnv != nil {
-		features := devnetEnv.Env.Features
-		if !slices.Contains(features, "faucet") {
-			addonsOpts = append(addonsOpts, addons.WithFaucet())
+	// Create addons manager (skip in dry-run)
+	if true {
+		addonsOpts := []addons.Option{}
+		if devnetEnv != nil {
+			features := devnetEnv.Env.Features
+			if !slices.Contains(features, "faucet") {
+				addonsOpts = append(addonsOpts, addons.WithFaucet())
+			}
+		} else {
+			// For sysgo orchestrator, we don't have devnet environment features
+			// so we'll use default addons behavior (which may include faucet if needed)
+			config.Log.Debug("No devnet environment available (sysgo orchestrator), using default addons configuration")
 		}
-	} else {
-		// For sysgo orchestrator, we don't have devnet environment features
-		// so we'll use default addons behavior (which may include faucet if needed)
-		config.Log.Debug("No devnet environment available (sysgo orchestrator), using default addons configuration")
-	}
 
-	addonsManager, err := addons.NewAddonsManager(ctx, devnetEnv, addonsOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create addons manager: %w", err)
+		addonsManager, err := addons.NewAddonsManager(ctx, devnetEnv, addonsOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create addons manager: %w", err)
+		}
+		res.addonsManager = addonsManager
 	}
-	res.addonsManager = addonsManager
 	return res, nil
 }
 
@@ -228,8 +278,10 @@ func (n *nat) Start(ctx context.Context) error {
 	ctx, span := n.tracer.Start(ctx, "acceptance tests")
 	defer span.End()
 
-	if err := n.addonsManager.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start addons: %w", err)
+	if n.addonsManager != nil {
+		if err := n.addonsManager.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start addons: %w", err)
+		}
 	}
 
 	n.ctx = ctx
@@ -240,6 +292,34 @@ func (n *nat) Start(ctx context.Context) error {
 		n.config.Log.Info("Starting op-acceptor in run-once mode")
 	} else {
 		n.config.Log.Info("Starting op-acceptor in continuous mode", "interval", n.config.RunInterval)
+	}
+
+	// Log Effective Configuration summary (INFO)
+	{
+		snap := n.buildEffectiveSnapshot("")
+		n.config.Log.Info("Effective Configuration",
+			"orchestrator", snap.Orchestration.Orchestrator,
+			"devnet_env_url", snap.Orchestration.DevnetEnvURL,
+			"testdir", snap.Paths.TestDir,
+			"validator_config", snap.Paths.ValidatorConfig,
+			"logdir", snap.Paths.LogDir,
+			"workdir", snap.Paths.WorkDir,
+			"go_binary", snap.Execution.GoBinary,
+			"target_gate", snap.Execution.TargetGate,
+			"gateless", snap.Execution.Gateless,
+			"run_interval", snap.Execution.RunInterval,
+			"run_once", snap.Execution.RunOnce,
+			"allow_skips", snap.Runner.AllowSkips,
+			"default_timeout", snap.Runner.DefaultTimeout,
+			"timeout", snap.Runner.Timeout,
+			"serial", snap.Runner.Serial,
+			"concurrency", snap.Runner.Concurrency,
+			"show_progress", snap.Runner.ShowProgress,
+			"progress_interval", snap.Runner.ProgressInterval,
+			"test_log_level", snap.Logging.TestLogLevel,
+			"output_realtime_logs", snap.Logging.OutputRealtimeLogs,
+			"network", snap.NetworkName,
+		)
 	}
 
 	n.config.Log.Debug("NAT config paths",
@@ -333,6 +413,14 @@ func (n *nat) runTests(ctx context.Context) error {
 	// Save the new logger
 	n.fileLogger = fileLogger
 
+	// Provide effective configuration snapshot to HTML sink for this run
+	if sink, ok := n.fileLogger.GetSinkByType("ReportingHTMLSink"); ok {
+		if htmlSink, ok := sink.(*reporting.ReportingHTMLSink); ok {
+			snap := n.buildEffectiveSnapshot(runID)
+			htmlSink.SetConfigSnapshot(runID, &snap)
+		}
+	}
+
 	// Update the runner with the new file logger
 	if n.runner != nil {
 		if fileLoggerRunner, ok := n.runner.(runner.TestRunnerWithFileLogger); ok {
@@ -409,6 +497,11 @@ func (n *nat) runTests(ctx context.Context) error {
 		n.config.Log.Error("Error getting log directory path", "error", err)
 		// Use default base directory as fallback
 		logDir = n.fileLogger.GetBaseDir()
+	}
+
+	// Write artifacts for this run
+	if err := n.writeRunArtifacts(result.RunID); err != nil {
+		n.config.Log.Error("Error writing run artifacts", "error", err)
 	}
 
 	// Record metrics for the test run
@@ -488,6 +581,33 @@ func (n *nat) runTests(ctx context.Context) error {
 	return nil
 }
 
+// writeRunArtifacts writes basic artifacts describing the run configuration and reproduction env
+func (n *nat) writeRunArtifacts(runID string) error {
+	if n.fileLogger == nil {
+		return nil
+	}
+	dir, err := n.fileLogger.GetDirectoryForRunID(runID)
+	if err != nil {
+		return err
+	}
+	// reproducible-env.txt
+	envPath := filepath.Join(dir, "reproducible-env.txt")
+	repro := n.runner.ReproducibleEnv().String()
+	if err := os.WriteFile(envPath, []byte(repro+"\n"), 0644); err != nil {
+		return fmt.Errorf("failed to write reproducible-env.txt: %w", err)
+	}
+	// config.json (effective snapshot)
+	snap := n.buildEffectiveSnapshot(runID)
+	b, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config.json: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), b, 0644); err != nil {
+		return fmt.Errorf("failed to write config.json: %w", err)
+	}
+	return nil
+}
+
 // Stop stops the op-acceptor service.
 // Stop implements the cliapp.Lifecycle interface.
 func (n *nat) Stop(ctx context.Context) error {
@@ -506,9 +626,11 @@ func (n *nat) Stop(ctx context.Context) error {
 	n.config.Log.Debug("Sending done signal to goroutines")
 	close(n.done)
 
-	n.config.Log.Debug("Stopping addons")
-	if err := n.addonsManager.Stop(ctx); err != nil {
-		return fmt.Errorf("failed to stop addons: %w", err)
+	if n.addonsManager != nil {
+		n.config.Log.Debug("Stopping addons")
+		if err := n.addonsManager.Stop(ctx); err != nil {
+			return fmt.Errorf("failed to stop addons: %w", err)
+		}
 	}
 
 	n.config.Log.Info("op-acceptor stopped successfully")
