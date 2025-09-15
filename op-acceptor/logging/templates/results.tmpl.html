@@ -426,6 +426,40 @@
         </div>
     </div>
     
+    <div class="summary">
+        <h2>Run Configuration</h2>
+        <p>See generated artifacts in this run directory:</p>
+        <ul>
+            <li><a href="config.json" target="_blank">config.json</a></li>
+            <li><a href="reproducible-env.txt" target="_blank">reproducible-env.txt</a></li>
+        </ul>
+        {{if .Config}}
+        <h3>Details</h3>
+        <ul>
+            <li><strong>Orchestrator:</strong> {{.Config.Orchestration.Orchestrator}}</li>
+            {{if .Config.Orchestration.DevnetEnvURL}}<li><strong>Devnet Env URL:</strong> {{.Config.Orchestration.DevnetEnvURL}}</li>{{end}}
+            <li><strong>Target Gate:</strong> {{.Config.Execution.TargetGate}}</li>
+            <li><strong>Gateless Mode:</strong> {{.Config.Execution.Gateless}}</li>
+            <li><strong>Run Once:</strong> {{.Config.Execution.RunOnce}}</li>
+            {{if not .Config.Execution.RunOnce}}<li><strong>Run Interval:</strong> {{formatDuration .Config.Execution.RunInterval}}</li>{{end}}
+            <li><strong>Go Binary:</strong> {{.Config.Execution.GoBinary}}</li>
+            <li><strong>Allow Skips:</strong> {{.Config.Runner.AllowSkips}}</li>
+            <li><strong>Default Timeout:</strong> {{formatDuration .Config.Runner.DefaultTimeout}}</li>
+            {{if .Config.Runner.Timeout}}<li><strong>Timeout:</strong> {{formatDuration .Config.Runner.Timeout}}</li>{{end}}
+            <li><strong>Serial:</strong> {{.Config.Runner.Serial}}</li>
+            <li><strong>Concurrency:</strong> {{.Config.Runner.Concurrency}}</li>
+            <li><strong>Show Progress:</strong> {{.Config.Runner.ShowProgress}}</li>
+            {{if .Config.Runner.ShowProgress}}<li><strong>Progress Interval:</strong> {{formatDuration .Config.Runner.ProgressInterval}}</li>{{end}}
+            <li><strong>Test Log Level:</strong> {{.Config.Logging.TestLogLevel}}</li>
+            <li><strong>Output Realtime Logs:</strong> {{.Config.Logging.OutputRealtimeLogs}}</li>
+            <li><strong>Test Directory:</strong> {{.Config.Paths.TestDir}}</li>
+            <li><strong>Validator Config:</strong> {{.Config.Paths.ValidatorConfig}}</li>
+            <li><strong>Log Directory:</strong> {{.Config.Paths.LogDir}}</li>
+            <li><strong>Work Directory:</strong> {{.Config.Paths.WorkDir}}</li>
+        </ul>
+        {{end}}
+    </div>
+    
     <div class="controls">
         <input type="text" id="searchInput" class="search-input" placeholder="Search tests, packages, gates..." oninput="filterTests()">
         <button id="showAllBtn" class="btn active" onclick="showAll()">Show All</button>

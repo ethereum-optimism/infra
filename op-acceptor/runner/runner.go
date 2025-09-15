@@ -29,7 +29,6 @@ import (
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
 	"github.com/ethereum-optimism/infra/op-acceptor/metrics"
 	"github.com/ethereum-optimism/infra/op-acceptor/registry"
-	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum-optimism/infra/op-acceptor/ui"
 )
@@ -247,10 +246,10 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 
 // GetUI implements UIProvider interface
 // Returns the progress indicator from the coordinator if available.
-// 
+//
 // Coordinator Lifecycle Contract:
 // - The coordinator MUST be initialized before parallel test execution begins
-// - The coordinator SHOULD NOT be modified during active test execution 
+// - The coordinator SHOULD NOT be modified during active test execution
 // - When coordinator is nil, progress tracking is gracefully disabled
 func (r *runner) GetUI() ProgressIndicator {
 	if r.coordinator != nil {
@@ -569,22 +568,18 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 
 // runAllTestsInPackage discovers and runs all tests in a package
 func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
-	testNames, err := r.listTestsInPackage(metadata.Package)
-	if err != nil {
-		return nil, fmt.Errorf("listing tests in package %s: %w", metadata.Package, err)
+	// Execute the entire package as a single go test process to preserve intra-package parallelism.
+	pkgMeta := metadata
+	pkgMeta.RunAll = false
+	pkgMeta.FuncName = ""
+
+	r.log.Info("Running entire package as single process", "package", pkgMeta.Package)
+	res, err := r.runSingleTest(ctx, pkgMeta)
+	if res != nil {
+		// Preserve the caller intent for reporting
+		res.Metadata.RunAll = true
 	}
-
-	r.log.Debug("Found tests in package",
-		"package", metadata.Package,
-		"count", len(testNames),
-		"tests", strings.Join(testNames, ", "))
-
-	return r.runTestList(ctx, metadata, testNames)
-}
-
-// listTestsInPackage returns all test names in a package
-func (r *runner) listTestsInPackage(pkg string) ([]string, error) {
-	return testlist.FindTestFunctions(pkg, r.workDir)
+	return res, err
 }
 
 // runTestList runs a list of tests and aggregates their results
@@ -1327,17 +1322,34 @@ func (r *runner) ReproducibleEnv() Env {
 		orchestrator = flags.OrchestratorSysext
 	}
 
+	// Prefer the runner's runID; fall back to the file logger's runID if not set
+	seedRunID := r.runID
+	if seedRunID == "" && r.fileLogger != nil {
+		seedRunID = r.fileLogger.GetRunID()
+	}
+
 	base := Env{
 		// Set the orchestrator type
 		fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", orchestrator),
 		// salt the funder abstraction with DEVSTACK_KEYS_SALT=$runID
-		fmt.Sprintf("%s=%s", dsl.SaltEnvVar, r.runID),
+		fmt.Sprintf("%s=%s", dsl.SaltEnvVar, seedRunID),
+		// align test logging level for reproduction
+		fmt.Sprintf("TEST_LOG_LEVEL=%s", r.testLogLevel),
 	}
 	// Only set DEVNET_EXPECT_PRECONDITIONS_MET when we DO expect preconditions to be met.
 	// op-devstack treats the mere presence of this variable as "enforce preconditions".
 	// Therefore, when allowSkips=true we must NOT set the variable at all.
 	if !r.allowSkips {
 		base = append(base, fmt.Sprintf("%s=%t", env.ExpectPreconditionsMet, true))
+	}
+	// For sysext, include original ENV URL and control scheme (if available)
+	if r.env != nil && r.env.URL != "" {
+		if u, err := url.Parse(r.env.URL); err == nil {
+			base = append(base,
+				fmt.Sprintf("%s=%s", env.EnvURLVar, r.env.URL),
+				fmt.Sprintf("%s=%s", env.EnvCtrlVar, u.Scheme),
+			)
+		}
 	}
 	return base
 }

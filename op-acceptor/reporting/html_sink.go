@@ -19,6 +19,7 @@ type ReportingHTMLSink struct {
 	testResults             map[string][]*types.TestResult
 	getReadableTestFilename func(metadata types.ValidatorMetadata) string
 	jsContent               []byte
+	configSnapshots         map[string]*types.EffectiveConfigSnapshot // map of runID to effective config snapshot
 }
 
 // NewReportingHTMLSink creates a new HTML sink using TestTree
@@ -37,7 +38,16 @@ func NewReportingHTMLSink(baseDir, loggerRunID, networkName, gateName, templateC
 		testResults:             make(map[string][]*types.TestResult),
 		getReadableTestFilename: getReadableTestFilename,
 		jsContent:               jsContent,
+		configSnapshots:         make(map[string]*types.EffectiveConfigSnapshot),
 	}, nil
+}
+
+// SetConfigSnapshot associates an effective config snapshot with a runID
+func (s *ReportingHTMLSink) SetConfigSnapshot(runID string, snap *types.EffectiveConfigSnapshot) {
+	if runID == "" || snap == nil {
+		return
+	}
+	s.configSnapshots[runID] = snap
 }
 
 // Consume collects test results for later HTML generation
@@ -77,6 +87,9 @@ func (s *ReportingHTMLSink) CompleteWithTiming(runID string, wallClockTime time.
 		})
 
 	tree := builder.BuildFromTestResults(results, runID, s.networkName)
+	if snap, ok := s.configSnapshots[runID]; ok {
+		tree.Config = snap
+	}
 
 	// Override tree duration with wall clock time if provided
 	if wallClockTime > 0 {

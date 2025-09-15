@@ -69,6 +69,9 @@ type TestTree struct {
 	Timestamp   time.Time     // When the run started
 	NetworkName string        // Network name
 
+	// Effective configuration snapshot for this run (optional)
+	Config *EffectiveConfigSnapshot `json:"config,omitempty"`
+
 	// Flat indices for quick lookup
 	AllNodes    []*TestTreeNode // All nodes in execution order
 	TestNodes   []*TestTreeNode // Only test/subtest nodes (no containers)

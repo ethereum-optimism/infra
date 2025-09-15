@@ -23,6 +23,17 @@ func TestReportingHTMLSink(t *testing.T) {
 <h1>{{.RunID}}</h1>
 <p>Network: {{.NetworkName}}</p>
 <div>Total: {{.Stats.Total}}, Passed: {{.Stats.Passed}}, Failed: {{.Stats.Failed}}</div>
+{{if .Config}}
+<div id="config">
+  <div>Orchestrator: {{.Config.Orchestration.Orchestrator}}</div>
+  <div>TargetGate: {{.Config.Execution.TargetGate}}</div>
+  <div>Concurrency: {{.Config.Runner.Concurrency}}</div>
+  <div>TestLogLevel: {{.Config.Logging.TestLogLevel}}</div>
+  <div>TestDir: {{.Config.Paths.TestDir}}</div>
+  {{if .Config.Orchestration.DevnetEnvURL}}<div>DevnetEnvURL: {{.Config.Orchestration.DevnetEnvURL}}</div>{{end}}
+  {{if .Config.Runner.ShowProgress}}<div>ProgressInterval: {{formatDuration .Config.Runner.ProgressInterval}}</div>{{end}}
+</div>
+{{end}}
 {{range .TestNodes}}
 <div class="test {{getStatusClass .Status}}">{{.Name}} - {{getStatusText .Status}}</div>
 {{end}}
@@ -69,6 +80,15 @@ func TestReportingHTMLSink(t *testing.T) {
 
 	runID := "test-run-123"
 
+	// Provide a config snapshot and consume results
+	sink.SetConfigSnapshot(runID, &types.EffectiveConfigSnapshot{
+		Orchestration: types.OrchestrationConfigSnapshot{Orchestrator: "sysext", DevnetEnvURL: "file:///devnet.json"},
+		Execution:     types.ExecutionConfigSnapshot{TargetGate: "test-gate"},
+		Runner:        types.RunnerConfigSnapshot{Concurrency: 2, ShowProgress: true, ProgressInterval: time.Second},
+		Logging:       types.LoggingConfigSnapshot{TestLogLevel: "info"},
+		Paths:         types.PathsConfigSnapshot{TestDir: "/tmp/tests"},
+	})
+
 	// Consume the test results
 	for _, result := range testResults {
 		err := sink.Consume(result, runID)
@@ -93,6 +113,12 @@ func TestReportingHTMLSink(t *testing.T) {
 	assert.Contains(t, htmlContent, "Total: 2, Passed: 1, Failed: 1")
 	assert.Contains(t, htmlContent, "TestPassing")
 	assert.Contains(t, htmlContent, "TestFailing")
+	// Verify config fields rendered
+	assert.Contains(t, htmlContent, "Orchestrator: sysext")
+	assert.Contains(t, htmlContent, "TargetGate: test-gate")
+	assert.Contains(t, htmlContent, "Concurrency: 2")
+	assert.Contains(t, htmlContent, "TestLogLevel: info")
+	assert.Contains(t, htmlContent, "TestDir: /tmp/tests")
 }
 
 func TestReportingHTMLSink_InvalidTemplate(t *testing.T) {
