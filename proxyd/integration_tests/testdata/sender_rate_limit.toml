@@ -1,5 +1,6 @@
 [server]
 rpc_port = 8545
+max_body_size_bytes = 1048576
 
 [backend]
 response_timeout_seconds = 1

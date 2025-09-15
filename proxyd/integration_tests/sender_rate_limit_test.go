@@ -13,6 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// scanBufSize is the buffer size for the scanner. It needs to be set larger to support
+// the testdata file, which includes ~512k blob transactions.
+const scanBufSize = 1024 * 1024
+
 const txHex1 = "0x02f8b28201a406849502f931849502f931830147f9948f3ddd0fbf3e78ca1d6c" +
 	"d17379ed88e261249b5280b84447e7ef2400000000000000000000000089c8b1" +
 	"b2774201bac50f627403eac1b732459cf7000000000000000000000000000000" +
@@ -50,6 +54,8 @@ func TestSenderRateLimitValidation(t *testing.T) {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	// use a larger buffer to accommodate the testdata file's blob txs. See scanBufSize above.
+	scanner.Buffer(make([]byte, scanBufSize), scanBufSize)
 	scanner.Scan() // skip header
 	for scanner.Scan() {
 		record := strings.Split(scanner.Text(), "|")
@@ -61,6 +67,9 @@ func TestSenderRateLimitValidation(t *testing.T) {
 			RequireEqualJSON(t, []byte(expResponseBody), res)
 		})
 	}
+	// Ensure that the scanner didn't encounter any errors. This is important, as otherwise
+	// we could be missing some tests.
+	require.NoError(t, scanner.Err())
 }
 
 func TestSenderRateLimitLimiting(t *testing.T) {
