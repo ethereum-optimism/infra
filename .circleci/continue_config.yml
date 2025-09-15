@@ -362,7 +362,7 @@ jobs:
         environment:
           POSTGRES_USER: opc
           POSTGRES_HOST_AUTH_METHOD: trust
-    resource_class: small
+    resource_class: medium
     steps:
       - run:
           name: Install codecov
