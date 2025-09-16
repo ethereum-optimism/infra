@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -40,6 +41,9 @@ type ConsensusPoller struct {
 	maxBlockLag        uint64
 	maxBlockRange      uint64
 	interval           time.Duration
+
+	// Add atomic execution status flag
+	isUpdating atomic.Bool
 }
 
 type backendState struct {
@@ -341,9 +345,38 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
-	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
-	if err != nil {
-		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
+	// Concurrently fetch three block types
+	var wg sync.WaitGroup
+	var latestBlockNumber, safeBlockNumber, finalizedBlockNumber hexutil.Uint64
+	var latestBlockHash string
+	var latestErr, safeErr, finalizedErr error
+
+	wg.Add(3)
+
+	// Fetch latest block
+	go func() {
+		defer wg.Done()
+		latestBlockNumber, latestBlockHash, latestErr = cp.fetchBlock(ctx, be, "latest")
+	}()
+
+	// Fetch safe block
+	go func() {
+		defer wg.Done()
+		safeBlockNumber, _, safeErr = cp.fetchBlock(ctx, be, "safe")
+	}()
+
+	// Fetch finalized block
+	go func() {
+		defer wg.Done()
+		finalizedBlockNumber, _, finalizedErr = cp.fetchBlock(ctx, be, "finalized")
+	}()
+
+	// Wait for all requests to complete
+	wg.Wait()
+
+	// Check latest block request result
+	if latestErr != nil {
+		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", latestErr)
 		return
 	}
 	if latestBlockNumber == 0 {
@@ -352,24 +385,22 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	safeBlockNumber, _, err := cp.fetchBlock(ctx, be, "safe")
-	if err != nil {
-		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
+	// Check safe block request result
+	if safeErr != nil {
+		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", safeErr)
 		return
 	}
-
 	if safeBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
 		return
 	}
 
-	finalizedBlockNumber, _, err := cp.fetchBlock(ctx, be, "finalized")
-	if err != nil {
-		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
+	// Check finalized block request result
+	if finalizedErr != nil {
+		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", finalizedErr)
 		return
 	}
-
 	if finalizedBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
@@ -408,16 +439,22 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	RecordBackendUnexpectedBlockTags(be, !expectedBlockTags)
 
-	if !expectedBlockTags && !be.forcedCandidate {
-		log.Warn("backend banned - unexpected block tags",
+	if !expectedBlockTags {
+		log.Warn("backend unexpected block tags",
 			"backend", be.Name,
 			"oldFinalized", bs.finalizedBlockNumber,
 			"finalizedBlockNumber", finalizedBlockNumber,
 			"oldSafe", bs.safeBlockNumber,
 			"safeBlockNumber", safeBlockNumber,
 			"latestBlockNumber", latestBlockNumber,
+			"forcedCandidate", be.forcedCandidate,
+			"banned", !be.forcedCandidate,
 		)
-		cp.Ban(be)
+
+		// if the backend is a forced candidate we don't ban it
+		if !be.forcedCandidate {
+			cp.Ban(be)
+		}
 	}
 }
 
@@ -449,6 +486,14 @@ func (cp *ConsensusPoller) checkExpectedBlockTags(
 
 // UpdateBackendGroupConsensus resolves the current group consensus based on the state of the backends
 func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
+	// Check if an instance is already executing
+	if !cp.isUpdating.CompareAndSwap(false, true) {
+		log.Debug("UpdateBackendGroupConsensus already in progress, skipping")
+		return
+	}
+
+	defer cp.isUpdating.Store(false)
+
 	// get the latest block number from the tracker
 	currentConsensusBlockNumber := cp.GetLatestBlockNumber()
 
@@ -490,22 +535,57 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	if proposedBlock > 0 {
 		for !hasConsensus {
 			allAgreed := true
+
+			// Define result struct
+			type fetchResult struct {
+				be                *Backend
+				actualBlockNumber hexutil.Uint64
+				actualBlockHash   string
+				err               error
+			}
+
+			// Create channel and waitGroup
+			resultChan := make(chan fetchResult, len(candidates))
+			var wg sync.WaitGroup
+
+			// Concurrently call fetchBlock
 			for be := range candidates {
-				actualBlockNumber, actualBlockHash, err := cp.fetchBlock(ctx, be, proposedBlock.String())
-				if err != nil {
-					log.Warn("error updating backend", "name", be.Name, "err", err)
+				wg.Add(1)
+				go func(backend *Backend) {
+					defer wg.Done()
+					actualBlockNumber, actualBlockHash, err := cp.fetchBlock(ctx, backend, proposedBlock.String())
+
+					resultChan <- fetchResult{
+						be:                backend,
+						actualBlockNumber: actualBlockNumber,
+						actualBlockHash:   actualBlockHash,
+						err:               err,
+					}
+				}(be)
+			}
+
+			// Wait for all goroutines to complete
+			go func() {
+				wg.Wait()
+				close(resultChan)
+			}()
+
+			// Process results
+			for result := range resultChan {
+				if result.err != nil {
+					log.Warn("error updating backend", "name", result.be.Name, "err", result.err)
 					continue
 				}
 				if proposedBlockHash == "" {
-					proposedBlockHash = actualBlockHash
+					proposedBlockHash = result.actualBlockHash
 				}
-				blocksDontMatch := (actualBlockNumber != proposedBlock) || (actualBlockHash != proposedBlockHash)
+				blocksDontMatch := (result.actualBlockNumber != proposedBlock) || (result.actualBlockHash != proposedBlockHash)
 				if blocksDontMatch {
-					if currentConsensusBlockNumber >= actualBlockNumber {
+					if currentConsensusBlockNumber >= result.actualBlockNumber {
 						log.Warn("backend broke consensus",
-							"name", be.Name,
-							"actualBlockNumber", actualBlockNumber,
-							"actualBlockHash", actualBlockHash,
+							"name", result.be.Name,
+							"actualBlockNumber", result.actualBlockNumber,
+							"actualBlockHash", result.actualBlockHash,
 							"proposedBlock", proposedBlock,
 							"proposedBlockHash", proposedBlockHash)
 						broken = true

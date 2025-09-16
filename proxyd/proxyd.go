@@ -503,8 +503,10 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusMaxUpdateThreshold > 0 {
 				copts = append(copts, WithMaxUpdateThreshold(time.Duration(bgcfg.ConsensusMaxUpdateThreshold)))
 			}
-			if bgcfg.ConsensusMaxBlockLag > 0 {
-				copts = append(copts, WithMaxBlockLag(bgcfg.ConsensusMaxBlockLag))
+			// Allow 0 here to disable lag checking
+			// If negative, don't set it and use the default (8)
+			if bgcfg.ConsensusMaxBlockLag >= 0 {
+				copts = append(copts, WithMaxBlockLag(uint64(bgcfg.ConsensusMaxBlockLag)))
 			}
 			if bgcfg.ConsensusMinPeerCount > 0 {
 				copts = append(copts, WithMinPeerCount(uint64(bgcfg.ConsensusMinPeerCount)))
