@@ -20,10 +20,11 @@ const (
 	RPCRequestSourceHTTP = "http"
 	RPCRequestSourceWS   = "ws"
 
-	BackendProxyd = "proxyd"
-	SourceClient  = "client"
-	SourceBackend = "backend"
-	MethodUnknown = "unknown"
+	BackendProxyd    = "proxyd"
+	SourceClient     = "client"
+	SourceBackend    = "backend"
+	MethodUnknown    = "unknown"
+	MethodNotAllowed = "method_not_allowed"
 )
 
 var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000}

@@ -530,7 +530,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		group := s.rpcMethodMappings[parsedReq.Method]
 		if group == "" {
-			// use unknown below to prevent DOS vector that fills up memory
+			// Use constant method_not_allowed to prevent DOS vector that fills up memory
 			// with arbitrary method names.
 			log.Info(
 				"blocked request for non-whitelisted method",
@@ -538,7 +538,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
 			)
-			RecordRPCError(ctx, BackendProxyd, MethodUnknown, ErrMethodNotWhitelisted)
+			RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted)
 			continue
 		}
