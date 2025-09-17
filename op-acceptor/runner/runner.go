@@ -567,8 +567,8 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 }
 
 // runAllTestsInPackage discovers and runs all tests in a package
+// Executes the entire package as a single go test process to preserve intra-package parallelism.
 func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
-	// Execute the entire package as a single go test process to preserve intra-package parallelism.
 	pkgMeta := metadata
 	pkgMeta.RunAll = false
 	pkgMeta.FuncName = ""
@@ -736,11 +736,16 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 
 	var timeoutDuration time.Duration
 	if metadata.Timeout != 0 {
-		var cancel func()
 		timeoutDuration = metadata.Timeout
+	} else if metadata.FuncName == "" {
+		// Apply default timeout for package-mode runs when none provided
+		timeoutDuration = DefaultTestTimeout
+	}
+	if timeoutDuration != 0 {
+		var cancel func()
 		// This parent process timeout is redundant, add 200ms to allow child process
 		// to trigger timeout before parent process.
-		ctx, cancel = context.WithTimeout(ctx, metadata.Timeout+200*time.Millisecond)
+		ctx, cancel = context.WithTimeout(ctx, timeoutDuration+200*time.Millisecond)
 		defer cancel()
 	}
 
@@ -767,13 +772,19 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		cmd.Stderr = &stderr
 	}
 
-	r.log.Info("Running test", "test", metadata.FuncName)
+	// If there's no function name use package name
+	testLabel := metadata.FuncName
+	if testLabel == "" {
+		testLabel = metadata.Package
+	}
+
+	r.log.Info("Running test", "test", testLabel)
 	r.log.Debug("Running test command",
 		"dir", cmd.Dir,
 		"package", metadata.Package,
-		"test", metadata.FuncName,
+		"test", testLabel,
 		"command", cmd.String(),
-		"timeout", metadata.Timeout,
+		"timeout", timeoutDuration,
 		"allowSkips", r.allowSkips)
 
 	// Run the command
@@ -923,9 +934,11 @@ func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
 	// Always disable caching
 	args = append(args, "-count", "1")
 
-	// Add timeout if it's not 0
+	// Add timeout: use provided value, otherwise in package-mode apply default
 	if metadata.Timeout != 0 {
 		args = append(args, "-timeout", metadata.Timeout.String())
+	} else if metadata.FuncName == "" { // package-mode
+		args = append(args, "-timeout", DefaultTestTimeout.String())
 	}
 
 	// Always use verbose output

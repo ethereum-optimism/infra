@@ -236,7 +236,7 @@ func TestBuildTestArgs(t *testing.T) {
 				Package: "pkg/foo",
 				RunAll:  true,
 			},
-			want: []string{"test", "pkg/foo", "-count", "1", "-v", "-json"},
+			want: []string{"test", "pkg/foo", "-count", "1", "-timeout", "10m0s", "-v", "-json"},
 		},
 		{
 			name: "no package specified",
