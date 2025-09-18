@@ -59,14 +59,7 @@ type nat struct {
 
 // buildEffectiveSnapshot builds a snapshot of the effective configuration for logging and artifacts
 func (n *nat) buildEffectiveSnapshot(runID string) types.EffectiveConfigSnapshot {
-	workDir := n.config.TestDir
-	if n.config.GatelessMode {
-		if wd, err := os.Getwd(); err == nil {
-			workDir = wd
-		}
-	} else if strings.HasSuffix(workDir, "/...") {
-		workDir = strings.TrimSuffix(workDir, "/...")
-	}
+	workDir := strings.TrimSuffix(n.config.TestDir, "/...")
 
 	return types.EffectiveConfigSnapshot{
 		Runner: types.RunnerConfigSnapshot{
@@ -162,19 +155,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	}
 
 	// Set working directory for the runner
-	workDir := config.TestDir
-	if config.GatelessMode {
-		// For gateless mode, use the current working directory since package paths
-		// are discovered relative to it and should not be adjusted
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get current working directory: %w", err)
-		}
-	} else if strings.HasSuffix(workDir, "/...") {
-		// For traditional mode with "..." notation, clean the suffix
-		workDir = strings.TrimSuffix(workDir, "/...")
-	}
+	workDir := strings.TrimSuffix(config.TestDir, "/...")
 
 	testRunner, err := runner.NewTestRunner(runner.Config{
 		Registry:           reg,

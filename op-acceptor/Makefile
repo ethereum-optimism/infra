@@ -16,15 +16,30 @@ clean:
 	rm -f ./bin/op-acceptor
 
 test:
-	gotestsum --format=standard-verbose ./...
+	gotestsum --format=pkgname-and-test-fails ./...
 
 # Test with coverage (matches CI)
 test-coverage:
-	gotestsum --format=standard-verbose -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
+	gotestsum --format=dots -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
 
 # Lint with same flags as CI
 lint:
 	golangci-lint run -E sqlclosecheck,bodyclose,asciicheck,misspell,errorlint --timeout 5m0s ./...
+
+prep-acceptance:
+	@echo "Tidying dependencies..."
+	(cd testdata/acceptance && go mod tidy)
+
+	@echo "Building tests..."
+	(cd testdata/acceptance && go test -c ./...)
+
+# Run real acceptance tests to test integration with op-devstack
+# Note: pass a OP_ACCEPTOR_ARTIFACTS_URL environment variable to use custom artifacts
+test-acceptance: build prep-acceptance
+	@echo "Running op-acceptor..."
+	./bin/op-acceptor --testdir ./testdata/acceptance --orchestrator sysgo --log.level INFO
+
+test-all: build lint generate tidy test test-acceptance
 
 # Generate code (if needed)
 generate:
@@ -55,6 +70,8 @@ stop-monitoring:
 	clean \
 	test \
 	test-coverage \
+	test-acceptance \
+	test-all \
 	lint \
 	generate \
 	tidy \

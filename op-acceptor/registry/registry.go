@@ -71,11 +71,9 @@ func (r *Registry) loadGatelessValidators() error {
 
 	r.config.Log.Info("Auto-discovering test packages in gateless mode", "testDir", r.config.TestDir)
 
-	// Get the current working directory for relative path resolution
-	workingDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current working directory: %w", err)
-	}
+	// Use the configured test directory as the working root for package discovery
+	// so discovered package paths are relative to the testdir's go.mod when present
+	workingDir := r.config.TestDir
 
 	// Discover test packages
 	packages, err := testlist.FindTestPackages(r.config.TestDir, workingDir)
