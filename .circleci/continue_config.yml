@@ -447,6 +447,25 @@ jobs:
           command: |
             goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
 
+  # Run full op-acceptor suite, including acceptance tests via make test-all
+  op-acceptor-test-all:
+    docker:
+      - image: cimg/go:1.23
+        user: root
+    resource_class: medium
+    steps:
+      - circleci-utils/checkout-with-mise
+      - run:
+          name: go version
+          command: go version
+      - run:
+          name: run test-all
+          command: make test-all
+          working_directory: op-acceptor
+      - store_artifacts:
+          path: op-acceptor/logs
+          destination: op-acceptor-logs
+
   op-conductor-ops-lint:
     docker:
       - image: cimg/python:3.12
@@ -633,12 +652,14 @@ workflows:
       - go-test:
           name: op-acceptor-tests
           module: op-acceptor
+      - op-acceptor-test-all
       - docker-build:
           name: op-acceptor-docker-build
           docker_file: op-acceptor/Dockerfile
           docker_name: op-acceptor
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+
   replica-healthcheck:
     when:
       or: [<< pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >>]
