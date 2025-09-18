@@ -64,7 +64,7 @@ func NewConfig(ctx *cli.Context) *Config {
 	return &Config{
 		ClientEndpoint:    ctx.String(ClientEndpointFlagName),
 		ServiceConfigPath: ctx.String(ServiceConfigPathFlagName),
-		TLSConfig:         optls.ReadCLIConfig(ctx),
+		TLSConfig:         optls.ReadCLIConfigWithPrefix(ctx, ""),
 		RPCConfig:         oprpc.ReadCLIConfig(ctx),
 		LogConfig:         oplog.ReadCLIConfig(ctx),
 		MetricsConfig:     opmetrics.ReadCLIConfig(ctx),
