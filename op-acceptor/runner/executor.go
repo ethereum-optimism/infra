@@ -92,7 +92,12 @@ func (e *testExecutor) Execute(ctx context.Context, metadata types.ValidatorMeta
 		return nil, fmt.Errorf("package cannot be empty in metadata")
 	}
 
-	log.Info("Running test", "test", metadata.FuncName, "package", metadata.Package, "suite", metadata.Suite)
+	// Choose a meaningful label for logging: function name or package path
+	testLabel := metadata.FuncName
+	if testLabel == "" {
+		testLabel = metadata.Package
+	}
+	log.Info("Running test", "test", testLabel, "package", metadata.Package, "suite", metadata.Suite)
 
 	if metadata.FuncName == "" {
 		return e.ExecutePackage(ctx, metadata)
