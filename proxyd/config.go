@@ -147,6 +147,8 @@ func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
 	switch b.RoutingStrategy {
 	case ConsensusAwareRoutingStrategy:
 		return true
+	case ConsensusAwareCLRoutingStrategy:
+		return true
 	case MulticallRoutingStrategy:
 		return true
 	case FallbackRoutingStrategy:
@@ -161,9 +163,10 @@ func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
 }
 
 const (
-	ConsensusAwareRoutingStrategy RoutingStrategy = "consensus_aware"
-	MulticallRoutingStrategy      RoutingStrategy = "multicall"
-	FallbackRoutingStrategy       RoutingStrategy = "fallback"
+	ConsensusAwareRoutingStrategy   RoutingStrategy = "consensus_aware"
+	ConsensusAwareCLRoutingStrategy RoutingStrategy = "consensus_aware_consensus_layer"
+	MulticallRoutingStrategy        RoutingStrategy = "multicall"
+	FallbackRoutingStrategy         RoutingStrategy = "fallback"
 )
 
 type BackendGroupConfig struct {
