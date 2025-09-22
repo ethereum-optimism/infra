@@ -91,10 +91,10 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kurtosis-tech/kurtosis-portal/api/golang v0.0.0-20230818182330-1a86869414d2 // indirect
-	github.com/kurtosis-tech/kurtosis/api/golang v1.8.1 // indirect
-	github.com/kurtosis-tech/kurtosis/contexts-config-store v0.0.0-20230818184218-f4e3e773463b // indirect
-	github.com/kurtosis-tech/kurtosis/grpc-file-transfer/golang v0.0.0-20230803130419-099ee7a4e3dc // indirect
-	github.com/kurtosis-tech/kurtosis/path-compression v0.0.0-20250108161014-0819b8ca912f // indirect
+	github.com/kurtosis-tech/kurtosis/api/golang v1.11.1 // indirect
+	github.com/kurtosis-tech/kurtosis/contexts-config-store v0.0.0-20250827174605-dfe0800d6595 // indirect
+	github.com/kurtosis-tech/kurtosis/grpc-file-transfer/golang v0.0.0-20250827174605-dfe0800d6595 // indirect
+	github.com/kurtosis-tech/kurtosis/path-compression v0.0.0-20250827174605-dfe0800d6595 // indirect
 	github.com/kurtosis-tech/stacktrace v0.0.0-20211028211901-1c67a77b5409 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-libp2p v0.36.2 // indirect
@@ -139,7 +139,7 @@ require (
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/rogpeppe/go-internal v1.13.1 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sethvargo/go-envconfig v1.1.0 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
