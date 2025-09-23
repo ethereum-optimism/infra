@@ -4,10 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
+
+// extractTestNameFromParent extracts the test function name from a parent test name
+// For example, from "TestRPCConnectivity" or "TestRPCConnectivity/SubTest" it returns "TestRPCConnectivity"
+func extractTestNameFromParent(parentName string) string {
+	// If the parent name contains a slash, it's already a subtest, extract the root test name
+	if idx := strings.Index(parentName, "/"); idx != -1 {
+		return parentName[:idx]
+	}
+	// Otherwise, it's the root test name
+	return parentName
+}
 
 // ReportingHTMLSink generates HTML reports using the TestTree intermediate representation
 type ReportingHTMLSink struct {
@@ -76,14 +88,72 @@ func (s *ReportingHTMLSink) CompleteWithTiming(runID string, wallClockTime time.
 	builder := types.NewTestTreeBuilder().
 		WithSubtests(true).
 		WithLogPathGenerator(func(test *types.TestResult, isSubtest bool, parentName string) string {
-			filename := s.getReadableTestFilename(test.Metadata) + ".txt"
+			// Try different filename patterns to find the actual file that was created
+			// This handles inconsistencies between how files are created vs how TestTree structures the data
+
+			var possibleFilenames []string
+			baseFilename := s.getReadableTestFilename(test.Metadata)
+
+			// Always prefer the current computed filename first
+			possibleFilenames = append(possibleFilenames, baseFilename)
+
+			// For package tests, also try the legacy doubled package-name variant (e.g., "gateless_base_base")
+			if test.Metadata.RunAll {
+				parts := strings.Split(baseFilename, "_")
+				if len(parts) >= 1 {
+					last := parts[len(parts)-1]
+					if last != "" {
+						doubled := baseFilename + "_" + last
+						// Avoid adding a duplicate entry if base already ends with _last
+						if doubled != baseFilename {
+							possibleFilenames = append(possibleFilenames, doubled)
+						}
+					}
+				}
+
+				// If we somehow still receive a doubled base from generator, also try simplified variant
+				if len(parts) >= 2 && parts[len(parts)-1] == parts[len(parts)-2] {
+					simplifiedName := strings.Join(parts[:len(parts)-1], "_")
+					// Prefer current first, then doubled, then simplified
+					if simplifiedName != baseFilename {
+						possibleFilenames = append(possibleFilenames, simplifiedName)
+					}
+				}
+			}
+
+			// For subtests that might be missing parent test name
+			if isSubtest && strings.Contains(parentName, "(package)") && !strings.HasPrefix(test.Metadata.FuncName, "Test") {
+				// Try adding TestRPCConnectivity prefix for known subtests
+				if strings.HasPrefix(test.Metadata.FuncName, "L2_Chain") {
+					withParent := s.getReadableTestFilename(types.ValidatorMetadata{
+						Gate:     test.Metadata.Gate,
+						Suite:    test.Metadata.Suite,
+						Package:  test.Metadata.Package,
+						FuncName: "TestRPCConnectivity/" + test.Metadata.FuncName,
+					})
+					possibleFilenames = append(possibleFilenames, withParent)
+				}
+			}
+
 			var subdir string
 			if test.Status == types.TestStatusFail || test.Status == types.TestStatusError {
 				subdir = "failed"
 			} else {
 				subdir = "passed"
 			}
-			return filepath.Join(subdir, filename)
+
+			// Check which file actually exists
+			outputDir := filepath.Join(s.baseDir, "testrun-"+runID)
+			for _, filename := range possibleFilenames {
+				testPath := filepath.Join(outputDir, subdir, filename+".txt")
+				if _, err := os.Stat(testPath); err == nil {
+					// File exists, use this path
+					return filepath.Join(subdir, filename+".txt")
+				}
+			}
+
+			// Fallback to the computed filename
+			return filepath.Join(subdir, baseFilename+".txt")
 		})
 
 	tree := builder.BuildFromTestResults(results, runID, s.networkName)
