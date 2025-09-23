@@ -1291,6 +1291,8 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 	if r.env == nil {
 		// For sysgo orchestrator, just add the orchestrator type to the environment
 		runEnv = append(runEnv, fmt.Sprintf("DEVSTACK_ORCHESTRATOR=%s", flags.OrchestratorSysgo))
+		// Disable color output in test logs to avoid ANSI escape sequences
+		runEnv = append(runEnv, "NO_COLOR=1")
 		cmd.Env = runEnv
 		return cmd, func() {}
 	}
@@ -1317,6 +1319,8 @@ func (r *runner) testCommandContext(ctx context.Context, name string, arg ...str
 			fmt.Sprintf("%s=%s", env.EnvURLVar, envFile.Name()),
 			// override the control resolution scheme with the original one
 			fmt.Sprintf("%s=%s", env.EnvCtrlVar, url.Scheme),
+			// Disable color output in test logs to avoid ANSI escape sequences
+			"NO_COLOR=1",
 		)
 		cmd.Env = runEnv
 	}

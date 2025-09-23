@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,14 @@ const (
 	HTMLResultsFilename = "results.html"
 	RunDirectoryPrefix  = "testrun-" // Standardized prefix for run directories
 )
+
+// ansiRegex matches ANSI escape sequences
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripANSIEscapeSequences removes ANSI color codes from text
+func stripANSIEscapeSequences(text string) string {
+	return ansiRegex.ReplaceAllString(text, "")
+}
 
 // ResultSink is an interface for different ways of consuming test results
 type ResultSink interface {
@@ -434,33 +443,56 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 	// Use the function name as the base
 	if metadata.FuncName != "" {
 		fileName = metadata.FuncName
+		// Clean up function names that start with "./"
+		fileName = strings.TrimPrefix(fileName, "./")
 	} else if metadata.RunAll {
 		// For package tests that run all tests, use package basename
 		if metadata.Package != "" {
-			packageParts := strings.Split(metadata.Package, "/")
-			// Find the last non-empty part
-			for i := len(packageParts) - 1; i >= 0; i-- {
-				if packageParts[i] != "" {
-					fileName = packageParts[i]
-					break
+			// Handle special case where package is "." (current directory)
+			if metadata.Package == "." {
+				// Use a generic name - will rarely happen in practice
+				fileName = "package"
+			} else {
+				packageParts := strings.Split(metadata.Package, "/")
+				// Find the last non-empty part
+				for i := len(packageParts) - 1; i >= 0; i-- {
+					if packageParts[i] != "" && packageParts[i] != "." {
+						fileName = packageParts[i]
+						break
+					}
 				}
-			}
-			// If we didn't find a package name, use a fallback
-			if fileName == "" {
-				fileName = "PackageSuite"
+				// If we didn't find a package name, use a fallback
+				if fileName == "" {
+					fileName = "PackageSuite"
+				}
 			}
 		} else {
 			fileName = "PackageSuite"
 		}
 	} else {
 		fileName = metadata.ID // Fallback to ID if no function name
+		// Clean up ID that starts with "./"
+		fileName = strings.TrimPrefix(fileName, "./")
 	}
 
 	// Extract package basename for cleaner filenames
 	pkgName := ""
 	if metadata.Package != "" {
-		// Handle GitHub-style package paths
-		if strings.Contains(metadata.Package, "github.com") {
+		// Handle special case where package is "." (current directory)
+		// or "./something" (subdirectory of current directory)
+		if metadata.Package == "." {
+			// Package "." is rare - usually packages are like "./base", "./isthmus", etc.
+			// Don't add a package prefix for "."
+			pkgName = ""
+		} else if strings.HasPrefix(metadata.Package, "./") {
+			// For packages like "./base", extract the directory name
+			pkgName = strings.TrimPrefix(metadata.Package, "./")
+			// If it contains further slashes, take the last part
+			if idx := strings.LastIndex(pkgName, "/"); idx != -1 {
+				pkgName = pkgName[idx+1:]
+			}
+		} else if strings.Contains(metadata.Package, "github.com") {
+			// Handle GitHub-style package paths
 			// For github.com/org/repo/pkg/subpkg -> extract the last part
 			parts := strings.Split(metadata.Package, "/")
 			if len(parts) > 0 {
@@ -499,25 +531,26 @@ func getReadableTestFilename(metadata types.ValidatorMetadata) string {
 		prefix = metadata.Suite
 	}
 
-	// Build the final filename with appropriate components
-	var nameBuilder strings.Builder
-
-	// Add prefix if it exists and doesn't duplicate the package name
-	if prefix != "" && prefix != pkgName {
-		nameBuilder.WriteString(prefix)
-		nameBuilder.WriteString("_")
+	// Build the final filename components then join with underscores to avoid stray separators
+	var components []string
+	if prefix != "" {
+		components = append(components, prefix)
 	}
-
-	// Add package name if it exists and doesn't duplicate the prefix or function name
-	if pkgName != "" && pkgName != prefix && pkgName != fileName {
-		nameBuilder.WriteString(pkgName)
-		nameBuilder.WriteString("_")
+	if pkgName != "" && pkgName != prefix {
+		components = append(components, pkgName)
 	}
-
-	nameBuilder.WriteString(fileName)
+	baseName := fileName
+	// Avoid duplicated package/file for package-level entries (no FuncName),
+	// regardless of temporary RunAll flag propagation timing
+	if metadata.FuncName == "" && pkgName != "" && pkgName == fileName {
+		baseName = ""
+	}
+	if baseName != "" {
+		components = append(components, baseName)
+	}
 
 	// Finally ensure the name is safe for a filename
-	return safeFilename(nameBuilder.String())
+	return safeFilename(strings.Join(components, "_"))
 }
 
 // Sink implementations
@@ -758,10 +791,19 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 	// Extract the plaintext output from JSON
 	var plaintext strings.Builder
 	if result.Stdout != "" {
+		// First, try to parse as JSON (go test -json output)
 		parser := NewJSONOutputParser(result.Stdout)
 		parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
-			plaintext.WriteString(outputText)
+			// Strip ANSI escape sequences from the output
+			plaintext.WriteString(stripANSIEscapeSequences(outputText))
 		})
+
+		// If JSON parsing produced no output, the Stdout might already be plain text
+		// (e.g., for subtests extracted from a package run)
+		if plaintext.Len() == 0 && strings.Contains(result.Stdout, "===") {
+			// It's already plain text, strip ANSI sequences and use it
+			plaintext.WriteString(stripANSIEscapeSequences(result.Stdout))
+		}
 	}
 
 	var content strings.Builder
@@ -784,7 +826,26 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 		if plaintext.Len() > 0 {
 			fmt.Fprintf(&content, "%s", plaintext.String())
 		} else {
-			fmt.Fprintf(&content, "No output captured.\n")
+			// Handle cases where no output was captured
+			// This should be rare after parser fixes, but can happen if:
+			// - A test genuinely produces no output (no t.Log, no assertions, etc.)
+			// - The test was skipped before any output
+			// - There was an error capturing output
+			if result.Metadata.FuncName != "" {
+				// Provide informative message about the test result
+				fmt.Fprintf(&content, "Test completed with status: %s\n", result.Status)
+				if result.Duration > 0 {
+					fmt.Fprintf(&content, "Duration: %v\n", result.Duration)
+				}
+				if result.Error != nil {
+					fmt.Fprintf(&content, "Error: %v\n", result.Error)
+				} else {
+					fmt.Fprintf(&content, "No output was produced by this test.\n")
+				}
+			} else {
+				// Package-level result with no output
+				fmt.Fprintf(&content, "No output captured.\n")
+			}
 		}
 	}
 

@@ -214,6 +214,14 @@ func processSubTestEvent(event TestEvent, result *types.TestResult,
 		subTest.Status = types.TestStatusSkip
 		calculateSubTestDuration(subTest, event, subTestStartTimes)
 	case ActionOutput:
+		// Store the plain text output in the subtest's Stdout field
+		// We store plain text here since subtests don't have their own JSON stream
+		// The filelogger will handle plain text appropriately
+		if subTest.Stdout == "" {
+			subTest.Stdout = event.Output
+		} else {
+			subTest.Stdout += event.Output
+		}
 		updateSubTestError(subTest, event.Output)
 	}
 
