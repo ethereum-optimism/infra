@@ -3,8 +3,11 @@ package registry
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"strings"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -71,12 +74,14 @@ func (r *Registry) loadGatelessValidators() error {
 
 	r.config.Log.Info("Auto-discovering test packages in gateless mode", "testDir", r.config.TestDir)
 
-	// Use the configured test directory as the working root for package discovery
-	// so discovered package paths are relative to the testdir's go.mod when present
-	workingDir := r.config.TestDir
+	// Use the test directory (sans "/...") as the working root for discovery
+	workingRoot := strings.TrimSuffix(r.config.TestDir, "/...")
+	if wdAbs, err := filepath.Abs(workingRoot); err == nil {
+		workingRoot = wdAbs
+	}
 
-	// Discover test packages
-	packages, err := testlist.FindTestPackages(r.config.TestDir, workingDir)
+	// Discover test packages rooted at workingRoot
+	packages, err := testlist.FindTestPackages(".", workingRoot)
 	if err != nil {
 		return fmt.Errorf("failed to discover test packages: %w", err)
 	}

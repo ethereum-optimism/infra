@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -321,4 +322,44 @@ func TestRegistryGatelessModeInvalidDir(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
+}
+
+// Ensure that gateless discovery never emits package paths that begin with "../"
+// which can cause local path checks to fail under CI (e.g., sysgo orchestrator).
+func TestRegistryGatelessMode_NoParentComponents(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a nested working root with a path that includes ".." when joined
+	rootDir := filepath.Join(tmpDir, "root")
+	require.NoError(t, os.MkdirAll(rootDir, 0o755))
+
+	subDir := filepath.Join(rootDir, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+
+	// Create two go test packages under subDir
+	pkg1 := filepath.Join(subDir, "pkg1")
+	require.NoError(t, os.MkdirAll(pkg1, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkg1, "pkg1_test.go"), []byte("package pkg1\nimport \"testing\"\nfunc TestOne(t *testing.T){}\n"), 0o644))
+
+	pkg2 := filepath.Join(subDir, "pkg2")
+	require.NoError(t, os.MkdirAll(pkg2, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkg2, "pkg2_test.go"), []byte("package pkg2\nimport \"testing\"\nfunc TestTwo(t *testing.T){}\n"), 0o644))
+
+	// Construct a TestDir expression that contains a ".." component
+	// When resolved, it still points at subDir.
+	testDirWithParent := filepath.Join(subDir, "..", "sub") + "/..."
+
+	reg, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      testDirWithParent,
+	})
+	require.NoError(t, err)
+
+	validators := reg.GetValidators()
+	require.NotEmpty(t, validators)
+
+	for _, v := range validators {
+		assert.False(t, strings.HasPrefix(v.Package, "../"), "package path should not start with ../: %s", v.Package)
+	}
 }

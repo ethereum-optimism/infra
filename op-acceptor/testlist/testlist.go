@@ -1,11 +1,13 @@
 package testlist
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,12 +21,20 @@ func FindTestPackages(testDir string, workingDir string) ([]string, error) {
 	// Handle "..." notation (e.g., "./acceptance-tests/...")
 	testDir = strings.TrimSuffix(testDir, "/...")
 
-	// Convert to absolute path for consistent processing
+	// Normalize workingDir to absolute for consistent processing
+	absWorkingDir := workingDir
+	if !filepath.IsAbs(absWorkingDir) {
+		if wdAbs, err := filepath.Abs(absWorkingDir); err == nil {
+			absWorkingDir = wdAbs
+		}
+	}
+
+	// Convert to absolute search path for consistent processing
 	var searchPath string
 	if filepath.IsAbs(testDir) {
 		searchPath = testDir
 	} else {
-		searchPath = filepath.Join(workingDir, testDir)
+		searchPath = filepath.Join(absWorkingDir, testDir)
 	}
 
 	// Clean the path to avoid issues with ".." components
@@ -36,6 +46,13 @@ func FindTestPackages(testDir string, workingDir string) ([]string, error) {
 	}
 
 	var packages []string
+
+	// Ensure searchPath is absolute for walking
+	if !filepath.IsAbs(searchPath) {
+		if spAbs, err := filepath.Abs(searchPath); err == nil {
+			searchPath = spAbs
+		}
+	}
 
 	// Walk the directory tree
 	err := filepath.WalkDir(searchPath, func(path string, d os.DirEntry, err error) error {
@@ -55,18 +72,22 @@ func FindTestPackages(testDir string, workingDir string) ([]string, error) {
 		}
 
 		if hasTestFiles {
-			// Convert back to a relative path from workingDir
-			relPath, err := filepath.Rel(workingDir, path)
-			if err != nil {
-				return fmt.Errorf("failed to get relative path for %s: %w", path, err)
+			// Try to get the Go package name using 'go list'
+			packageName, err := getGoPackageName(path)
+			if err == nil && packageName != "" {
+				packages = append(packages, packageName)
+				return nil
 			}
 
-			// Clean the relative path to remove any ".." components
+			// Fallback: relative path from absWorkingDir, normalized to avoid ".." components
+			relPath, relErr := filepath.Rel(absWorkingDir, path)
+			if relErr != nil {
+				return fmt.Errorf("failed to get relative path for %s: %w", path, relErr)
+			}
 			relPath = filepath.Clean(relPath)
 
-			// Normalize to use "./" prefix for relative paths, but avoid problematic paths
 			if relPath == "." {
-				relPath = "."
+				relPath = filepath.Base(path)
 			} else if !strings.HasPrefix(relPath, "./") && !strings.HasPrefix(relPath, "../") {
 				relPath = "./" + relPath
 			}
@@ -98,6 +119,30 @@ func hasGoTestFiles(dir string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// getGoPackageName uses 'go list' to get the proper Go package name for a directory
+func getGoPackageName(dir string) (string, error) {
+	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}")
+	cmd.Dir = dir
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+
+	err := cmd.Run()
+	if err != nil {
+		// Return error with stderr output for debugging
+		return "", fmt.Errorf("go list failed: %w (stderr: %s)", err, errOut.String())
+	}
+
+	packageName := strings.TrimSpace(out.String())
+	if packageName == "" {
+		return "", fmt.Errorf("go list returned empty package name")
+	}
+
+	return packageName, nil
 }
 
 // FindTestFunctions takes a package path and working directory, and returns a list of test function names

@@ -59,6 +59,44 @@ DEVNET_ENV_URL=kt://isthmus-devnet op-acceptor \
     --log.level INFO
 ```
 
+## Flake‑Shake (stability analysis)
+
+Analyze test stability by running tests multiple times and aggregating results.
+
+### Usage
+
+Gate-based (with validators):
+
+```bash
+op-acceptor \
+  --validators acceptance-tests.yaml \
+  --gate flake-shake \
+  --flake-shake \
+  --flake-shake-iterations 100 \
+  --orchestrator sysgo
+```
+
+Gateless (directory-based):
+
+```bash
+op-acceptor \
+  --testdir ./path/to/tests/... \
+  --flake-shake \
+  --flake-shake-iterations 10 \
+  --orchestrator sysgo
+```
+
+### Output
+
+- Per run, two reports are generated under the run directory `logs/testrun-<runID>/`:
+  - `flake-shake-report.json` (machine-readable)
+  - `flake-shake-report.html` (human-readable)
+- The final console line includes `flake_report_html` and `flake_report_json` fields with absolute paths.
+
+Tests are classified as:
+- **STABLE**: 100% pass rate across all iterations
+- **UNSTABLE**: any failure (<100% pass rate)
+
 ## Concepts
 
 ### Test Discovery

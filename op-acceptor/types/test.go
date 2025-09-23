@@ -26,6 +26,10 @@ type TestResult struct {
 	Stdout   string                 // Capture stdout for failing tests
 	TimedOut bool                   // Track if this test timed out
 
+	// Artifact naming propagation: when file sinks create a specific basename for log files,
+	// they can store it here so HTML and other sinks use exactly the same basename
+	ArtifactBaseName string
+
 	// Hierarchy tracking
 	Depth         int      // Nesting depth (0=top-level, 1=first subtest, etc.)
 	HierarchyPath []string // Full path from root to this test (e.g., ["TestParent", "SubTest1", "SubSubTest"])
