@@ -119,6 +119,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		rpcMethodMappings,
 		1024*1024,               // maxBodySize
 		map[string]string{},     // authenticatedPaths
+		false,                   // publicAccess
 		5*time.Second,           // timeout - longer than our test
 		10,                      // maxUpstreamBatchSize
 		false,                   // enableServedByHeader
