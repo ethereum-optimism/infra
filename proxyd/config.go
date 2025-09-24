@@ -26,11 +26,12 @@ type ServerConfig struct {
 
 	MaxUpstreamBatchSize int `toml:"max_upstream_batch_size"`
 
-	EnableRequestLog      bool `toml:"enable_request_log"`
-	MaxRequestBodyLogLen  int  `toml:"max_request_body_log_len"`
-	EnablePprof           bool `toml:"enable_pprof"`
-	EnableXServedByHeader bool `toml:"enable_served_by_header"`
-	AllowAllOrigins       bool `toml:"allow_all_origins"`
+	EnableRequestLog              bool `toml:"enable_request_log"`
+	MaxRequestBodyLogLen          int  `toml:"max_request_body_log_len"`
+	EnablePprof                   bool `toml:"enable_pprof"`
+	EnableXServedByHeader         bool `toml:"enable_served_by_header"`
+	AllowAllOrigins               bool `toml:"allow_all_origins"`
+	EnableFlashblocksAwareRouting bool `toml:"enable_flashblocks_aware_routing"`
 }
 
 type CacheConfig struct {
@@ -216,22 +217,23 @@ type SenderRateLimitConfig struct {
 }
 
 type Config struct {
-	WSBackendGroup          string                  `toml:"ws_backend_group"`
-	Server                  ServerConfig            `toml:"server"`
-	Cache                   CacheConfig             `toml:"cache"`
-	Redis                   RedisConfig             `toml:"redis"`
-	Metrics                 MetricsConfig           `toml:"metrics"`
-	RateLimit               RateLimitConfig         `toml:"rate_limit"`
-	BackendOptions          BackendOptions          `toml:"backend"`
-	Backends                BackendsConfig          `toml:"backends"`
-	BatchConfig             BatchConfig             `toml:"batch"`
-	Authentication          map[string]string       `toml:"authentication"`
-	BackendGroups           BackendGroupsConfig     `toml:"backend_groups"`
-	RPCMethodMappings       map[string]string       `toml:"rpc_method_mappings"`
-	WSMethodWhitelist       []string                `toml:"ws_method_whitelist"`
-	WhitelistErrorMessage   string                  `toml:"whitelist_error_message"`
-	SenderRateLimit         SenderRateLimitConfig   `toml:"sender_rate_limit"`
-	InteropValidationConfig InteropValidationConfig `toml:"interop_validation"`
+	WSBackendGroup               string                  `toml:"ws_backend_group"`
+	FlashblocksAwareBackendGroup string                  `toml:"flashblocks_aware_backend_group"`
+	Server                       ServerConfig            `toml:"server"`
+	Cache                        CacheConfig             `toml:"cache"`
+	Redis                        RedisConfig             `toml:"redis"`
+	Metrics                      MetricsConfig           `toml:"metrics"`
+	RateLimit                    RateLimitConfig         `toml:"rate_limit"`
+	BackendOptions               BackendOptions          `toml:"backend"`
+	Backends                     BackendsConfig          `toml:"backends"`
+	BatchConfig                  BatchConfig             `toml:"batch"`
+	Authentication               map[string]string       `toml:"authentication"`
+	BackendGroups                BackendGroupsConfig     `toml:"backend_groups"`
+	RPCMethodMappings            map[string]string       `toml:"rpc_method_mappings"`
+	WSMethodWhitelist            []string                `toml:"ws_method_whitelist"`
+	WhitelistErrorMessage        string                  `toml:"whitelist_error_message"`
+	SenderRateLimit              SenderRateLimitConfig   `toml:"sender_rate_limit"`
+	InteropValidationConfig      InteropValidationConfig `toml:"interop_validation"`
 }
 
 type InteropValidationConfig struct {
