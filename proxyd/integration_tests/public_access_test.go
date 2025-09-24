@@ -37,7 +37,7 @@ func TestPublicAccess(t *testing.T) {
 		require.Equal(t, http.StatusOK, code)
 	})
 
-	t.Run("rejects invalid authentication when public_access is enabled", func(t *testing.T) {
+	t.Run("allows invalid authentication when public_access is enabled", func(t *testing.T) {
 		hdrs := http.Header{}
 		hdrs.Set("Authorization", "invalid_auth")
 
