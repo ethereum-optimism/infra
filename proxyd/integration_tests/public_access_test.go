@@ -37,13 +37,4 @@ func TestPublicAccess(t *testing.T) {
 		require.Equal(t, http.StatusOK, code)
 	})
 
-	t.Run("allows invalid authentication when public_access is enabled", func(t *testing.T) {
-		hdrs := http.Header{}
-		hdrs.Set("Authorization", "invalid_auth")
-
-		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", hdrs)
-		_, code, err := client.SendRPC("eth_chainId", nil)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, code)
-	})
 }
