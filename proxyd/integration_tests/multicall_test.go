@@ -118,7 +118,7 @@ func setServerBackend(s *proxyd.Server, nm map[string]nodeContext) *proxyd.Serve
 }
 
 func nodeBackendRequestCount(nodes map[string]nodeContext, node string) int {
-	return len(nodes[node].mockBackend.requests)
+	return len(nodes[node].mockBackend.Requests())
 }
 
 func TestMulticall(t *testing.T) {

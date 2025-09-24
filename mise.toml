@@ -1,0 +1,3 @@
+# Shared tools for Go projects
+[tools]
+go = "1.23.12"  # Matches CI: cimg/go:1.23

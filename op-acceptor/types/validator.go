@@ -33,7 +33,7 @@ type ValidatorMetadata struct {
 	Suite    string
 	FuncName string
 	Package  string
-	Timeout  string
+	Timeout  time.Duration
 	RunAll   bool
 }
 

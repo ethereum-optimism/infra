@@ -2,9 +2,13 @@ version: 2.1
 
 orbs:
   gcp-cli: circleci/gcp-cli@3.3.0
+  circleci-utils: ethereum-optimism/circleci-utils@1.0.20
 
 parameters:
   run-build-op-conductor-mon:
+    type: boolean
+    default: false
+  run-build-op-conductor-ops:
     type: boolean
     default: false
   run-build-op-signer:
@@ -80,7 +84,6 @@ commands:
             # Configure ADC
             echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
 
-
 jobs:
   log-config-results:
     docker:
@@ -94,6 +97,7 @@ jobs:
           command: |
             echo "Configuration Results:"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
+            echo "run-build-op-conductor-ops: << pipeline.parameters.run-build-op-conductor-ops >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
             echo "run-build-op-txproxy: << pipeline.parameters.run-build-op-txproxy >>"
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
@@ -121,6 +125,12 @@ jobs:
               echo "op-conductor-mon tag regex match: true"
             else
               echo "op-conductor-mon tag regex match: false"
+            fi
+
+            if [[ $CURRENT_TAG =~ ^op-conductor-ops/v.* ]]; then
+              echo "op-conductor-ops tag regex match: true"
+            else
+              echo "op-conductor-ops tag regex match: false"
             fi
 
             if [[ $CURRENT_TAG =~ ^op-signer/v.* ]]; then
@@ -312,8 +322,9 @@ jobs:
         type: string
     docker:
       - image: cimg/go:1.23
+        user: root
     steps:
-      - checkout
+      - circleci-utils/checkout-with-mise
       - run:
           name: run generate
           command: |
@@ -327,11 +338,16 @@ jobs:
       - run:
           name: run lint
           command: |
-             if [ -f .golangci.yml ]; then
-              golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-             else
-              golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-             fi
+            if [ "<<parameters.module>>" = "op-acceptor" ]; then
+              make lint
+            else
+              # Original lint command for other projects
+              if [ -f .golangci.yml ]; then
+               golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+              else
+               golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
+              fi
+            fi
           working_directory: <<parameters.module>>
 
   go-test:
@@ -340,14 +356,24 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest # only used to enable codecov.
+      - image: cimg/go:1.23
+        user: root
       - image: cimg/postgres:14.6
         environment:
           POSTGRES_USER: opc
           POSTGRES_HOST_AUTH_METHOD: trust
-    resource_class: small
+    resource_class: medium
     steps:
-      - checkout
+      - run:
+          name: Install codecov
+          command: |
+            # Install codecov CLI (previously provided by ci-builder image)
+            if ! command -v codecov &> /dev/null; then
+              curl -Os https://uploader.codecov.io/latest/linux/codecov
+              chmod +x codecov
+              sudo mv codecov /usr/local/bin/
+            fi
+      - circleci-utils/checkout-with-mise
       - run:
           name: go version
           command: go version
@@ -362,8 +388,9 @@ jobs:
       - run:
           name: run tests
           command: |
+            # Use gotestsum with junit output for CircleCI
             gotestsum --format=standard-verbose --junitfile=/tmp/test-results/<<parameters.module>>.xml \
-            -- -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
+            -- -ldflags="-checklinkname=0" -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
           working_directory: <<parameters.module>>
       - run:
           name: upload coverage
@@ -392,6 +419,18 @@ jobs:
           oidc_token_file_path: /root/oidc_token.json
       - checkout
       - run:
+          name: Setup mise for op-acceptor
+          command: |
+            # Only install mise tools for op-acceptor which uses mise
+            if [ "<<parameters.module>>" = "op-acceptor" ]; then
+              # Install mise
+              curl -fsSL https://mise.run | sh
+              echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
+              source $BASH_ENV
+              # Install tools from mise.toml
+              mise install
+            fi
+      - run:
           name: Install goreleaser pro
           command: |
             mkdir -p /tmp/goreleaser
@@ -407,6 +446,69 @@ jobs:
           name: Run goreleaser
           command: |
             goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
+
+  # Run full op-acceptor suite, including acceptance tests via make test-all
+  op-acceptor-test-all:
+    docker:
+      - image: cimg/go:1.23
+        user: root
+    resource_class: medium
+    steps:
+      - circleci-utils/checkout-with-mise
+      - run:
+          name: go version
+          command: go version
+      - run:
+          name: run test-all
+          command: make test-all
+          working_directory: op-acceptor
+      - store_artifacts:
+          path: op-acceptor/logs
+          destination: op-acceptor-logs
+
+  op-conductor-ops-lint:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout # Checks out code to ~/project
+      - restore_cache:
+          keys:
+            # Checksum relative to the root of the project
+            - v1-poetry-{{ checksum "op-conductor-ops/poetry.lock" }}
+            - v1-poetry-
+      - run:
+          name: Install Poetry & Dependencies
+          # Run commands within the specific module directory
+          working_directory: op-conductor-ops
+          command: |
+            pip install poetry
+            # Check if pyproject.toml exists before running poetry commands
+            if [ -f pyproject.toml ]; then
+              poetry check --lock
+              poetry install --no-interaction --no-root
+            else
+              echo "pyproject.toml not found in op-conductor-ops, skipping dependency installation."
+            fi
+      - save_cache:
+          key: v1-poetry-{{ checksum "op-conductor-ops/poetry.lock" }}
+          paths:
+            - /home/circleci/.cache/pypoetry # Default cache location in cimg images
+      - run:
+          name: Run Black Linter
+          # Run commands within the specific module directory
+          working_directory: op-conductor-ops
+          command: |
+            # Check if pyproject.toml exists and black is installed (implicitly via poetry install)
+            if [ -f pyproject.toml ]; then
+              # Check if black is available
+              if poetry run black --version > /dev/null 2>&1; then
+                poetry run black --check .
+              else
+                echo "Black not found in project dependencies, skipping lint."
+              fi
+            else
+              echo "pyproject.toml not found in op-conductor-ops, skipping lint."
+            fi
 
 workflows:
   logging:
@@ -431,6 +533,17 @@ workflows:
           name: op-conductor-mon-docker-build
           docker_file: op-conductor-mon/Dockerfile
           docker_name: op-conductor-mon
+          docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
+          docker_context: .
+  op-conductor-ops:
+    when:
+      or: [<< pipeline.parameters.run-build-op-conductor-ops >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - op-conductor-ops-lint
+      - docker-build:
+          name: op-conductor-ops-docker-build
+          docker_file: op-conductor-ops/Dockerfile
+          docker_name: op-conductor-ops
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
   op-signer:
@@ -539,12 +652,14 @@ workflows:
       - go-test:
           name: op-acceptor-tests
           module: op-acceptor
+      - op-acceptor-test-all
       - docker-build:
           name: op-acceptor-docker-build
           docker_file: op-acceptor/Dockerfile
           docker_name: op-acceptor
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+
   replica-healthcheck:
     when:
       or: [<< pipeline.parameters.run-build-rhc >>, << pipeline.parameters.run-all >>]
@@ -579,6 +694,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
@@ -603,6 +719,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor
@@ -625,6 +742,7 @@ workflows:
                 - op-ufm
                 - proxyd
                 - op-conductor-mon
+                - op-conductor-ops
                 - peer-mgmt-service
                 - cci-stats
                 - op-acceptor

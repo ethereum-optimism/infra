@@ -4,7 +4,7 @@ version: 2.1
 setup: true
 
 orbs:
-  path-filtering: circleci/path-filtering@1.0.0
+  path-filtering: circleci/path-filtering@1.3.0
 
 workflows:
   check-updated-files:
@@ -16,6 +16,7 @@ workflows:
           # <regex path-to-test> <parameter-to-set> <value-of-pipeline-parameter>
           mapping: |
             op-conductor-mon/.* run-build-op-conductor-mon true
+            op-conductor-ops/.* run-build-op-conductor-ops true
             op-signer/.* run-build-op-signer true
             op-txproxy/.* run-build-op-txproxy true
             peer-mgmt-service/.* run-build-pms true

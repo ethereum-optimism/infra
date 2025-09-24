@@ -20,10 +20,11 @@ const (
 	RPCRequestSourceHTTP = "http"
 	RPCRequestSourceWS   = "ws"
 
-	BackendProxyd = "proxyd"
-	SourceClient  = "client"
-	SourceBackend = "backend"
-	MethodUnknown = "unknown"
+	BackendProxyd    = "proxyd"
+	SourceClient     = "client"
+	SourceBackend    = "backend"
+	MethodUnknown    = "unknown"
+	MethodNotAllowed = "method_not_allowed"
 )
 
 var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000}
@@ -57,6 +58,17 @@ var (
 		"method_name",
 		"status_code",
 		"batched",
+	})
+
+	rpcSupervisorChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_supervisor_checks_total",
+		Help:      "Count of total supervisor checks.",
+	}, []string{
+		"supervisor_url",
+		"http_code",
+		"rpc_error_code",
+		"strategy",
 	})
 
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{

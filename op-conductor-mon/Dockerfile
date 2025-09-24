@@ -1,4 +1,4 @@
-FROM golang:1.21.3-alpine3.18 as builder
+FROM golang:1.23-alpine AS builder
 
 COPY ./op-conductor-mon /app
 

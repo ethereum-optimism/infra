@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/testlist"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"gopkg.in/yaml.v3"
@@ -21,13 +23,15 @@ type Registry struct {
 type Config struct {
 	Log                 log.Logger
 	ValidatorConfigFile string
+	DefaultTimeout      time.Duration
+	Timeout             time.Duration // Timeout for gateless mode tests (if specified)
+	// Gateless mode fields
+	GatelessMode bool
+	TestDir      string
 }
 
 // NewRegistry creates a new registry instance
 func NewRegistry(cfg Config) (*Registry, error) {
-	if cfg.ValidatorConfigFile == "" {
-		return nil, fmt.Errorf("validator config file is required")
-	}
 	if cfg.Log == nil {
 		cfg.Log = log.New()
 		cfg.Log.Error("No logger provided, using default")
@@ -38,14 +42,79 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		config: cfg,
 	}
 
-	// Load the source
-	if err := r.loadValidators(cfg.ValidatorConfigFile); err != nil {
-		return nil, fmt.Errorf("failed to load source: %w", err)
+	// Load validators based on mode
+	if cfg.GatelessMode {
+		if cfg.TestDir == "" {
+			return nil, fmt.Errorf("test directory is required for gateless mode")
+		}
+		if err := r.loadGatelessValidators(); err != nil {
+			return nil, fmt.Errorf("failed to load gateless validators: %w", err)
+		}
+	} else {
+		if cfg.ValidatorConfigFile == "" {
+			return nil, fmt.Errorf("validator config file is required")
+		}
+		if err := r.loadValidators(cfg.ValidatorConfigFile); err != nil {
+			return nil, fmt.Errorf("failed to load validators: %w", err)
+		}
 	}
 
-	cfg.Log.Debug("Registry loaded", "len(validators)", len(r.validators))
+	cfg.Log.Debug("Registry loaded", "len(validators)", len(r.validators), "gatelessMode", cfg.GatelessMode)
 
 	return r, nil
+}
+
+// loadGatelessValidators auto-discovers test packages and creates synthetic validators
+func (r *Registry) loadGatelessValidators() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.config.Log.Info("Auto-discovering test packages in gateless mode", "testDir", r.config.TestDir)
+
+	// Use the configured test directory as the working root for package discovery
+	// so discovered package paths are relative to the testdir's go.mod when present
+	workingDir := r.config.TestDir
+
+	// Discover test packages
+	packages, err := testlist.FindTestPackages(r.config.TestDir, workingDir)
+	if err != nil {
+		return fmt.Errorf("failed to discover test packages: %w", err)
+	}
+
+	if len(packages) == 0 {
+		return fmt.Errorf("no test packages found in directory: %s", r.config.TestDir)
+	}
+
+	r.config.Log.Info("Found test packages", "count", len(packages), "packages", packages)
+
+	// Create synthetic validators for each discovered package
+	var validators []types.ValidatorMetadata
+	for _, pkg := range packages {
+		// For gateless mode, use the discovered package paths directly
+		adjustedPkg := pkg
+
+		// Determine which timeout to use: prefer Timeout flag, fall back to DefaultTimeout
+		timeout := r.config.DefaultTimeout
+		if r.config.Timeout > 0 {
+			timeout = r.config.Timeout
+		}
+
+		validator := types.ValidatorMetadata{
+			ID:      adjustedPkg, // Use the discovered package path as ID
+			Gate:    "gateless",  // Use a synthetic gate name
+			Suite:   "",          // No suite in gateless mode
+			Package: adjustedPkg,
+			RunAll:  true, // Always run all tests in package for gateless mode
+			Type:    types.ValidatorTypeTest,
+			Timeout: timeout,
+		}
+		validators = append(validators, validator)
+	}
+
+	r.validators = validators
+	r.config.Log.Info("Created synthetic validators for gateless mode", "count", len(validators))
+
+	return nil
 }
 
 // loadValidators loads a test source and its configuration
@@ -200,6 +269,13 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 	var tests []types.ValidatorMetadata
 
 	for _, cfg := range configs {
+		var timeout time.Duration
+		if cfg.Timeout != nil {
+			timeout = *cfg.Timeout
+		} else {
+			timeout = r.config.DefaultTimeout
+		}
+
 		// If only package is specified (no name), treat it as "run all"
 		if cfg.Name == "" {
 			tests = append(tests, types.ValidatorMetadata{
@@ -209,6 +285,7 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 				Package: cfg.Package,
 				RunAll:  true,
 				Type:    types.ValidatorTypeTest,
+				Timeout: timeout,
 			})
 			continue
 		}
@@ -221,6 +298,7 @@ func (r *Registry) discoverTestsInConfig(configs []types.TestConfig, gateID stri
 			FuncName: cfg.Name,
 			Package:  cfg.Package,
 			Type:     types.ValidatorTypeTest,
+			Timeout:  timeout,
 		})
 	}
 

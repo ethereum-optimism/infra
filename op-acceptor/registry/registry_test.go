@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,4 +220,105 @@ gates:
 	require.Equal(t, "suite-test1", validators[1].ID)
 	require.Equal(t, "test-gate", validators[1].Gate)
 	require.Equal(t, "test-suite", validators[1].Suite)
+}
+
+func TestRegistryGatelessMode(t *testing.T) {
+	// Create temporary directory for the test
+	tmpDir := t.TempDir()
+
+	// Create test packages structure
+	pkg1Dir := filepath.Join(tmpDir, "pkg1")
+	pkg2Dir := filepath.Join(tmpDir, "subdir", "pkg2")
+
+	require.NoError(t, os.MkdirAll(pkg1Dir, 0755))
+	require.NoError(t, os.MkdirAll(pkg2Dir, 0755))
+
+	// Create test files with proper test function format
+	testContent := `package pkg1_test
+
+import "testing"
+
+func TestExample(t *testing.T) {
+    t.Log("test running")
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkg1Dir, "pkg1_test.go"), []byte(testContent), 0644))
+
+	test2Content := `package pkg2_test
+
+import "testing"
+
+func TestExample2(t *testing.T) {
+    t.Log("test2 running")
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkg2Dir, "pkg2_test.go"), []byte(test2Content), 0644))
+
+	// Save current working directory and change to tmpDir for the test
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(originalWd))
+	}()
+
+	// Create registry in gateless mode using relative path from tmpDir
+	registry, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      ".", // Use current directory (tmpDir)
+	})
+	require.NoError(t, err)
+
+	// Verify validators were created
+	validators := registry.GetValidators()
+	require.Len(t, validators, 2)
+
+	// Check that all validators are configured for gateless mode
+	for _, validator := range validators {
+		assert.Equal(t, "gateless", validator.Gate)
+		assert.Empty(t, validator.Suite)
+		assert.True(t, validator.RunAll)
+		assert.Equal(t, types.ValidatorTypeTest, validator.Type)
+	}
+
+	// Check that we can find validators by gate
+	gatelessValidators := registry.GetValidatorsByGate("gateless")
+	require.Len(t, gatelessValidators, 2)
+
+	// Verify the package paths are correct - should be relative paths
+	var packages []string
+	for _, validator := range validators {
+		packages = append(packages, validator.Package)
+	}
+	expected := []string{"./pkg1", "./subdir/pkg2"}
+	require.ElementsMatch(t, expected, packages)
+}
+
+func TestRegistryGatelessModeEmpty(t *testing.T) {
+	// Create temporary directory with no test files
+	tmpDir := t.TempDir()
+
+	// Create registry in gateless mode
+	_, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      tmpDir,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no test packages found")
+}
+
+func TestRegistryGatelessModeInvalidDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	nonExistentDir := filepath.Join(tmpDir, "nonexistent")
+
+	// Create registry in gateless mode with non-existent directory
+	_, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      nonExistentDir,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not exist")
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ethereum-optimism/infra/op-signer/service/provider"
+	"github.com/ethereum-optimism/infra/op-signer/provider"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 	"github.com/ethereum-optimism/optimism/op-service/signer"
@@ -21,32 +21,36 @@ import (
 
 type SignerService struct {
 	eth      *EthService
-	opsigner *OpsignerSerivce
+	opsigner *OpsignerService
 }
 
 type EthService struct {
 	logger   log.Logger
-	config   SignerServiceConfig
+	config   provider.ProviderConfig
 	provider provider.SignatureProvider
 }
 
-type OpsignerSerivce struct {
+type OpsignerService struct {
 	logger   log.Logger
-	config   SignerServiceConfig
+	config   provider.ProviderConfig
 	provider provider.SignatureProvider
 }
 
-func NewSignerService(logger log.Logger, config SignerServiceConfig) *SignerService {
-	return NewSignerServiceWithProvider(logger, config, provider.NewCloudKMSSignatureProvider(logger))
+func NewSignerService(logger log.Logger, config provider.ProviderConfig) (*SignerService, error) {
+	provider, err := provider.NewSignatureProvider(logger, config.ProviderType, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signature provider: %w", err)
+	}
+	return NewSignerServiceWithProvider(logger, config, provider), nil
 }
 
 func NewSignerServiceWithProvider(
 	logger log.Logger,
-	config SignerServiceConfig,
+	config provider.ProviderConfig,
 	provider provider.SignatureProvider,
 ) *SignerService {
 	ethService := EthService{logger, config, provider}
-	opsignerService := OpsignerSerivce{logger, config, provider}
+	opsignerService := OpsignerService{logger, config, provider}
 	return &SignerService{&ethService, &opsignerService}
 }
 
@@ -169,15 +173,15 @@ func (s *EthService) SignTransaction(ctx context.Context, args signer.Transactio
 	return hexutil.Bytes(txraw), nil
 }
 
-func (s *OpsignerSerivce) SignBlockPayload(ctx context.Context, args signer.BlockPayloadArgs) (*eth.Bytes65, error) {
+func (s *OpsignerService) SignBlockPayload(ctx context.Context, args signer.BlockPayloadArgs) (*eth.Bytes65, error) {
 	return s.signBlockPayload(ctx, args.Message, args.SenderAddress)
 }
 
-func (s *OpsignerSerivce) SignBlockPayloadV2(ctx context.Context, args signer.BlockPayloadArgsV2) (*eth.Bytes65, error) {
+func (s *OpsignerService) SignBlockPayloadV2(ctx context.Context, args signer.BlockPayloadArgsV2) (*eth.Bytes65, error) {
 	return s.signBlockPayload(ctx, args.Message, args.SenderAddress)
 }
 
-func (s *OpsignerSerivce) signBlockPayload(
+func (s *OpsignerService) signBlockPayload(
 	ctx context.Context,
 	getMsg func() (*signer.BlockSigningMessage, error),
 	fromAddress *common.Address,
@@ -190,7 +194,7 @@ func (s *OpsignerSerivce) signBlockPayload(
 
 	labels := prometheus.Labels{"client": clientInfo.ClientName, "status": "error", "error": ""}
 	defer func() {
-		MetricSignTransactionTotal.With(labels).Inc()
+		MetricSignBlockPayloadTotal.With(labels).Inc()
 	}()
 
 	msg, err := getMsg()

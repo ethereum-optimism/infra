@@ -2,17 +2,22 @@ package nat
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/logging"
+	"github.com/ethereum-optimism/infra/op-acceptor/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 
+	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/runner"
-	"github.com/ethereum-optimism/infra/op-acceptor/types"
 )
 
 // trackedMockRunner is a mock runner that counts executions and provides synchronization
@@ -28,12 +33,12 @@ func newTrackedMockRunner() *trackedMockRunner {
 	}
 }
 
-func (m *trackedMockRunner) RunTest(metadata types.ValidatorMetadata) (*types.TestResult, error) {
+func (m *trackedMockRunner) RunTest(_ context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
 	args := m.Called(metadata)
 	return args.Get(0).(*types.TestResult), args.Error(1)
 }
 
-func (m *trackedMockRunner) RunAllTests() (*runner.RunnerResult, error) {
+func (m *trackedMockRunner) RunAllTests(_ context.Context) (*runner.RunnerResult, error) {
 	args := m.Called()
 
 	// Track execution and signal on channel
@@ -44,6 +49,10 @@ func (m *trackedMockRunner) RunAllTests() (*runner.RunnerResult, error) {
 	}
 
 	return args.Get(0).(*runner.RunnerResult), args.Error(1)
+}
+
+func (m *trackedMockRunner) ReproducibleEnv() runner.Env {
+	return runner.Env{}
 }
 
 // waitForExecutions waits for a specific number of executions with timeout
@@ -90,15 +99,22 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	// Create a basic logger
 	logger := log.New()
 
+	// Set up a mock file logger
+	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", "test-gate")
+	require.NoError(t, err)
+
 	// Create service with the mock
 	service := &nat{
 		ctx: ctx,
 		config: &Config{
 			Log:         logger,
 			RunInterval: 25 * time.Millisecond, // Short interval for testing
+			LogDir:      t.TempDir(),
 		},
-		runner: mockRunner,
-		done:   make(chan struct{}),
+		runner:     mockRunner,
+		fileLogger: mockFileLogger,
+		done:       make(chan struct{}),
+		tracer:     otel.Tracer("test"),
 	}
 
 	return mockRunner, service, ctx, cancel
@@ -330,4 +346,168 @@ func TestNAT_RunOnceMode(t *testing.T) {
 		"Expected exactly one test execution")
 	assert.True(t, shutdownCalled,
 		"Expected shutdown to be called in run-once mode")
+}
+
+// TestNAT_New_OrchestratorBehavior consolidates all orchestrator-related tests
+func TestNAT_New_OrchestratorBehavior(t *testing.T) {
+	// Save and restore original environment variable
+	originalEnv := os.Getenv("DEVNET_ENV_URL")
+	defer func() {
+		if originalEnv != "" {
+			_ = os.Setenv("DEVNET_ENV_URL", originalEnv)
+		} else {
+			_ = os.Unsetenv("DEVNET_ENV_URL")
+		}
+	}()
+
+	// Helper function to create a valid validator config file
+	createValidatorConfig := func(t *testing.T) string {
+		validatorConfigDir := t.TempDir()
+		validatorConfigFile := validatorConfigDir + "/validators.yaml"
+		validatorConfig := `
+gates:
+  - id: test-gate
+    description: "Test gate"
+    tests:
+      - name: TestExample
+        package: "./example"
+`
+		err := os.WriteFile(validatorConfigFile, []byte(validatorConfig), 0644)
+		require.NoError(t, err)
+		return validatorConfigFile
+	}
+
+	// Helper function to create a devnet file with given name
+	createDevnetFile := func(t *testing.T, networkName string) string {
+		tempDir := t.TempDir()
+		devnetFile := tempDir + "/devnet.json"
+		devnetContent := fmt.Sprintf(`{
+			"name": "%s",
+			"l1": {
+				"name": "test-l1",
+				"id": "1", 
+				"nodes": [],
+				"addresses": {},
+				"wallets": {}
+			},
+			"l2": []
+		}`, networkName)
+		err := os.WriteFile(devnetFile, []byte(devnetContent), 0644)
+		require.NoError(t, err)
+		return devnetFile
+	}
+
+	// Helper function to create config
+	createConfig := func(t *testing.T, validatorConfigFile string, orchestrator flags.OrchestratorType, devnetURL string) *Config {
+		logger := log.New()
+		return &Config{
+			Log:             logger,
+			ValidatorConfig: validatorConfigFile,
+			TestDir:         t.TempDir(),
+			TargetGate:      "test-gate",
+			Orchestrator:    orchestrator,
+			DevnetEnvURL:    devnetURL,
+		}
+	}
+
+	t.Run("sysgo orchestrator", func(t *testing.T) {
+		validatorConfigFile := createValidatorConfig(t)
+
+		t.Run("succeeds without DEVNET_ENV_URL", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysgo, "")
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "in-memory", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
+
+		t.Run("ignores DEVNET_ENV_URL when set", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysgo, "/some/path/that/doesnt/exist.json")
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "in-memory", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
+	})
+
+	t.Run("sysext orchestrator", func(t *testing.T) {
+		validatorConfigFile := createValidatorConfig(t)
+
+		t.Run("fails without devnet URL", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, "")
+			ctx := context.Background()
+
+			_, err := New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "devnet environment URL not provided")
+		})
+
+		t.Run("fails with non-existent file", func(t *testing.T) {
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, "/path/to/non/existent/file.json")
+			ctx := context.Background()
+
+			_, err := New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		})
+
+		t.Run("fails with invalid devnet file", func(t *testing.T) {
+			tempDir := t.TempDir()
+			invalidFile := tempDir + "/invalid-devnet.json"
+			err := os.WriteFile(invalidFile, []byte("invalid json content"), 0644)
+			require.NoError(t, err)
+
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, invalidFile)
+			ctx := context.Background()
+
+			_, err = New(ctx, config, "test-version", func(error) {})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to load devnet environment from")
+		})
+
+		t.Run("succeeds with valid devnet file", func(t *testing.T) {
+			devnetFile := createDevnetFile(t, "test-network")
+			config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, devnetFile)
+			ctx := context.Background()
+
+			nat, err := New(ctx, config, "test-version", func(error) {})
+			require.NoError(t, err)
+			require.NotNil(t, nat)
+			assert.Equal(t, "test-network", nat.networkName)
+			_ = nat.Stop(ctx)
+		})
+
+		t.Run("handles different network names correctly", func(t *testing.T) {
+			networkNames := []string{"env-network", "cli-network", "test-network"}
+			for _, networkName := range networkNames {
+				t.Run(networkName, func(t *testing.T) {
+					devnetFile := createDevnetFile(t, networkName)
+					config := createConfig(t, validatorConfigFile, flags.OrchestratorSysext, devnetFile)
+					ctx := context.Background()
+
+					nat, err := New(ctx, config, "test-version", func(error) {})
+					require.NoError(t, err)
+					require.NotNil(t, nat)
+					assert.Equal(t, networkName, nat.networkName)
+					_ = nat.Stop(ctx)
+				})
+			}
+		})
+	})
+
+	t.Run("invalid orchestrator type", func(t *testing.T) {
+		validatorConfigFile := createValidatorConfig(t)
+		config := createConfig(t, validatorConfigFile, flags.OrchestratorType("invalid-orchestrator"), "")
+		ctx := context.Background()
+
+		_, err := New(ctx, config, "test-version", func(error) {})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid orchestrator: invalid-orchestrator")
+	})
 }

@@ -1,5 +1,6 @@
 [server]
 rpc_port = 8545
+max_body_size_bytes = 1048576
 
 [backend]
 response_timeout_seconds = 1
@@ -16,9 +17,10 @@ backends = ["good"]
 [rpc_method_mappings]
 eth_chainId = "main"
 eth_sendRawTransaction = "main"
+eth_sendRawTransactionConditional = "main"
 
 [sender_rate_limit]
-allowed_chain_ids = [0, 420] # adding 0 allows pre-EIP-155 transactions
+allowed_chain_ids = [420, 1, 10, 0] # adding 0 allows pre-EIP-155 transactions
 enabled = true
 interval = "1s"
 limit = 1

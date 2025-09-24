@@ -2,6 +2,7 @@ package flags
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -14,6 +15,44 @@ import (
 
 const EnvVarPrefix = "OP_ACCEPTOR"
 
+// OrchestratorType represents the type of devstack orchestrator
+type OrchestratorType string
+
+// Orchestrator type constants
+const (
+	OrchestratorSysgo  OrchestratorType = "sysgo"
+	OrchestratorSysext OrchestratorType = "sysext"
+)
+
+// String returns the string representation of the orchestrator type
+func (o OrchestratorType) String() string {
+	return string(o)
+}
+
+// ValidOrchestratorTypes returns a slice of all valid orchestrator types
+func ValidOrchestratorTypes() []OrchestratorType {
+	return []OrchestratorType{OrchestratorSysgo, OrchestratorSysext}
+}
+
+// IsValid checks if the orchestrator type is valid
+func (o OrchestratorType) IsValid() bool {
+	for _, valid := range ValidOrchestratorTypes() {
+		if o == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateOrchestrator validates that the orchestrator value is one of the allowed types
+func validateOrchestrator(value string) error {
+	orchestrator := OrchestratorType(value)
+	if !orchestrator.IsValid() {
+		return fmt.Errorf("orchestrator must be one of: %s, %s", OrchestratorSysgo, OrchestratorSysext)
+	}
+	return nil
+}
+
 var (
 	TestDir = &cli.StringFlag{
 		Name:    "testdir",
@@ -24,16 +63,16 @@ var (
 	ValidatorConfig = &cli.StringFlag{
 		Name:     "validators",
 		Value:    "",
-		Required: true,
+		Required: false,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "VALIDATORS"),
-		Usage:    "Path to validator config file (eg. 'validators.yaml')",
+		Usage:    "Path to validator config file (eg. 'validators.yaml'). Optional - if not provided, gateless mode will auto-discover tests in the test directory.",
 	}
 	Gate = &cli.StringFlag{
 		Name:     "gate",
 		Value:    "",
-		Required: true,
+		Required: false,
 		EnvVars:  opservice.PrefixEnvVar(EnvVarPrefix, "GATE"),
-		Usage:    "Gate to run (eg. 'alphanet')",
+		Usage:    "Gate to run (eg. 'alphanet'). Optional - if not provided, gateless mode will run all discovered tests.",
 	}
 	GoBinary = &cli.StringFlag{
 		Name:    "go-binary",
@@ -53,18 +92,98 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "ALLOW_SKIPS"),
 		Usage:   "Allow tests to be skipped instead of failing when preconditions are not met.",
 	}
+	DefaultTimeout = &cli.DurationFlag{
+		Name:    "default-timeout",
+		Value:   5 * time.Minute,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "DEFAULT_TIMEOUT"),
+		Usage:   "Default timeout of an individual test (e.g. '30s', '5m', etc.). This setting is superseded by test or suite level timeout configuration. Set to '0' to disable any default timeout. Defaults to '5m'.",
+	}
+	Timeout = &cli.DurationFlag{
+		Name:    "timeout",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TIMEOUT"),
+		Usage:   "Timeout for all tests in gateless mode (e.g. '30s', '5m', etc.). If not specified, falls back to --default-timeout. Only applies in gateless mode.",
+	}
+	LogDir = &cli.StringFlag{
+		Name:    "logdir",
+		Value:   "logs",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "LOGDIR"),
+		Usage:   "Directory to store test logs. Defaults to 'logs' if not specified.",
+	}
+	TestLogLevel = &cli.StringFlag{
+		Name:    "test-log-level",
+		Value:   "info",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "TEST_LOG_LEVEL"),
+		Usage:   "Log level to be used for the tests. Defaults to 'info'.",
+	}
+	OutputRealtimeLogs = &cli.BoolFlag{
+		Name:    "output-realtime-logs",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
+		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
+	}
+	ShowProgress = &cli.BoolFlag{
+		Name:    "show-progress",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SHOW_PROGRESS"),
+		Usage:   "Show periodic progress updates during test execution. Defaults to false.",
+	}
+	ProgressInterval = &cli.DurationFlag{
+		Name:    "progress-interval",
+		Value:   30 * time.Second,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "PROGRESS_INTERVAL"),
+		Usage:   "Interval between progress updates when --show-progress is enabled. Defaults to 30s.",
+	}
+	Orchestrator = &cli.StringFlag{
+		Name:    "orchestrator",
+		Value:   OrchestratorSysext.String(),
+		EnvVars: []string{"DEVSTACK_ORCHESTRATOR"},
+		Usage:   "Devstack orchestrator type: 'sysext' (external provider) or 'sysgo' (in-memory Go). Defaults to 'sysext'.",
+		Action: func(ctx *cli.Context, value string) error {
+			return validateOrchestrator(value)
+		},
+	}
+	DevnetEnvURL = &cli.StringFlag{
+		Name:    "devnet-env-url",
+		Value:   "",
+		EnvVars: []string{"DEVNET_ENV_URL"},
+		Usage:   "URL or path to the devnet environment file. Required for sysext orchestrator.",
+	}
+	Serial = &cli.BoolFlag{
+		Name:    "serial",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SERIAL"),
+		Usage:   "Run tests serially instead of in parallel. By default, tests run in parallel across packages.",
+	}
+
+	Concurrency = &cli.IntFlag{
+		Name:    "concurrency",
+		Value:   0, // 0 means auto-determine
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "CONCURRENCY"),
+		Usage:   "Number of concurrent test workers. 0 (default) auto-determines based on system capabilities.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
 	TestDir,
-	ValidatorConfig,
-	Gate,
 }
 
 var optionalFlags = []cli.Flag{
+	ValidatorConfig,
+	Gate,
 	GoBinary,
 	RunInterval,
 	AllowSkips,
+	DefaultTimeout,
+	Timeout,
+	LogDir,
+	TestLogLevel,
+	OutputRealtimeLogs,
+	ShowProgress,
+	ProgressInterval,
+	Orchestrator,
+	DevnetEnvURL,
+	Serial,
+	Concurrency,
 }
 var Flags []cli.Flag
 
