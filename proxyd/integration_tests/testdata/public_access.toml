@@ -1,6 +1,7 @@
 [server]
 rpc_port = 8545
 public_access = true
+log_level = "debug"
 
 [backend]
 response_timeout_seconds = 1

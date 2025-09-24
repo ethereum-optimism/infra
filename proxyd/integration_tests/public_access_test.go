@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,6 +15,8 @@ func TestPublicAccess(t *testing.T) {
 	defer goodBackend.Close()
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	proxyd.SetLogLevel(log.LevelDebug)
 
 	config := ReadConfig("public_access")
 	_, shutdown, err := proxyd.Start(config)
@@ -28,13 +31,18 @@ func TestPublicAccess(t *testing.T) {
 	})
 
 	t.Run("allows authenticated requests when public_access is enabled", func(t *testing.T) {
-		hdrs := http.Header{}
-		hdrs.Set("Authorization", "test_alias")
-
-		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", hdrs)
+		client := NewProxydClient("http://127.0.0.1:8545/secret")
 		_, code, err := client.SendRPC("eth_chainId", nil)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, code)
+	})
+
+	t.Run("rejects invalid authentication even when public_access is enabled", func(t *testing.T) {
+		client := NewProxydClient("http://127.0.0.1:8545/invalid_auth_key")
+		_, code, err := client.SendRPC("eth_chainId", nil)
+		require.NoError(t, err)
+		t.Logf("Response code: %d", code)
+		require.Equal(t, http.StatusUnauthorized, code)
 	})
 
 }

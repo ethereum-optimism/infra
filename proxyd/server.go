@@ -750,7 +750,6 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 			}
 		} else if s.authenticatedPaths[authorization] == "" {
 			// Invalid API key provided - always reject regardless of public_access
-			log.Info("blocked request with invalid API key", "authorization", authorization)
 			httpResponseCodesTotal.WithLabelValues("401").Inc()
 			w.WriteHeader(401)
 			return nil
