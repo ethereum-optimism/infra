@@ -395,14 +395,6 @@ func TestFail(t *testing.T) {
 		passCount, failCount)
 }
 
-// min returns the smaller of x or y - for test use only
-func min(x, y int) int {
-	if x < y {
-		return x
-	}
-	return y
-}
-
 // TestRawJSONSink_ComprehensiveLogging tests that raw JSON logging works for all test scenarios
 func TestRawJSONSink_ComprehensiveLogging(t *testing.T) {
 	// Create a temporary directory for test logs
