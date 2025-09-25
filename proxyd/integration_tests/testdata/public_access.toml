@@ -1,0 +1,22 @@
+[server]
+rpc_port = 8545
+public_access = true
+log_level = "debug"
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+ws_url = "$GOOD_BACKEND_RPC_URL"
+
+[backend_groups]
+[backend_groups.main]
+backends = ["good"]
+
+[authentication]
+secret = "test_alias"
+
+[rpc_method_mappings]
+eth_chainId = "main"

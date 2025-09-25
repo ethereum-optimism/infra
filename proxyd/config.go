@@ -31,6 +31,7 @@ type ServerConfig struct {
 	EnablePprof           bool `toml:"enable_pprof"`
 	EnableXServedByHeader bool `toml:"enable_served_by_header"`
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
+	PublicAccess          bool `toml:"public_access"`
 }
 
 type CacheConfig struct {

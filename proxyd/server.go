@@ -86,6 +86,7 @@ type Server struct {
 	rateLimitHeader         string
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
+	publicAccess            bool
 }
 
 type limiterFunc func(method string) bool
@@ -99,6 +100,7 @@ func NewServer(
 	rpcMethodMappings map[string]string,
 	maxBodySize int64,
 	authenticatedPaths map[string]string,
+	publicAccess bool,
 	timeout time.Duration,
 	maxUpstreamBatchSize int,
 	enableServedByHeader bool,
@@ -191,6 +193,7 @@ func NewServer(
 		rpcMethodMappings:    rpcMethodMappings,
 		maxBodySize:          maxBodySize,
 		authenticatedPaths:   authenticatedPaths,
+		publicAccess:         publicAccess,
 		timeout:              timeout,
 		maxUpstreamBatchSize: maxUpstreamBatchSize,
 		enableServedByHeader: enableServedByHeader,
@@ -735,14 +738,25 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	if len(s.authenticatedPaths) > 0 {
-		if authorization == "" || s.authenticatedPaths[authorization] == "" {
-			log.Info("blocked unauthorized request", "authorization", authorization)
+		if authorization == "" {
+			// No API key provided - allow if public access is enabled
+			if s.publicAccess {
+				log.Debug("allowing unauthenticated request due to public_access enabled")
+			} else {
+				log.Info("blocked unauthorized request", "authorization", authorization)
+				httpResponseCodesTotal.WithLabelValues("401").Inc()
+				w.WriteHeader(401)
+				return nil
+			}
+		} else if s.authenticatedPaths[authorization] == "" {
+			// Invalid API key provided - always reject regardless of public_access
 			httpResponseCodesTotal.WithLabelValues("401").Inc()
 			w.WriteHeader(401)
 			return nil
+		} else {
+			// Valid authentication provided
+			ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 		}
-
-		ctx = context.WithValue(ctx, ContextKeyAuth, s.authenticatedPaths[authorization]) // nolint:staticcheck
 	}
 
 	return context.WithValue(

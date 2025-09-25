@@ -413,6 +413,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.RPCMethodMappings,
 		config.Server.MaxBodySizeBytes,
 		resolvedAuth,
+		config.Server.PublicAccess,
 		secondsToDuration(config.Server.TimeoutSeconds),
 		config.Server.MaxUpstreamBatchSize,
 		config.Server.EnableXServedByHeader,
