@@ -681,25 +681,52 @@ func (s *PerTestFileSink) Consume(result *types.TestResult, runID string) error 
 
 	// Create individual log files for each subtest
 	for subTestName, subTest := range result.SubTests {
-		// Create a copy of the subtest with proper metadata for filename generation
-		subTestResult := &types.TestResult{
-			Metadata: types.ValidatorMetadata{
-				ID:       subTest.Metadata.ID,
-				Gate:     result.Metadata.Gate,    // Use parent's gate
-				Suite:    result.Metadata.Suite,   // Use parent's suite
-				FuncName: subTestName,             // Use the subtest name
-				Package:  result.Metadata.Package, // Use parent's package
-				RunAll:   false,
-			},
-			Status:   subTest.Status,
-			Error:    subTest.Error,
-			Duration: subTest.Duration,
-			Stdout:   subTest.Stdout,
-		}
-
-		err = s.createTestLogFileOnce(subTestResult, passedDir, failedDir, runID)
-		if err != nil {
+		// Write this subtest and all nested subtests recursively, tracking full hierarchical name
+		if err := s.writeSubtestRecursive(result.Metadata, subTestName, subTest, passedDir, failedDir, runID); err != nil {
 			return fmt.Errorf("failed to create subtest log file for %s: %w", subTestName, err)
+		}
+	}
+
+	return nil
+}
+
+// writeSubtestRecursive writes log files for a subtest and all of its nested subtests
+func (s *PerTestFileSink) writeSubtestRecursive(parentMeta types.ValidatorMetadata, fullPath string, subTest *types.TestResult, passedDir, failedDir, runID string) error {
+	// Create a copy of the subtest with proper metadata for filename generation
+	subTestResult := &types.TestResult{
+		Metadata: types.ValidatorMetadata{
+			ID:       subTest.Metadata.ID,
+			Gate:     parentMeta.Gate,    // Use parent's gate
+			Suite:    parentMeta.Suite,   // Use parent's suite
+			FuncName: fullPath,           // Use the full subtest path name
+			Package:  parentMeta.Package, // Use parent's package
+			RunAll:   false,
+		},
+		Status:   subTest.Status,
+		Error:    subTest.Error,
+		Duration: subTest.Duration,
+		Stdout:   subTest.Stdout,
+		SubTests: subTest.SubTests,
+	}
+
+	// Compute and propagate the artifact basename to the original subTest as well
+	computedBase := getReadableTestFilename(subTestResult.Metadata)
+	subTest.ArtifactBaseName = computedBase
+
+	if err := s.createTestLogFileOnce(subTestResult, passedDir, failedDir, runID); err != nil {
+		return err
+	}
+
+	// Recurse into nested subtests, if any
+	for nestedName, nested := range subTest.SubTests {
+		nextPath := fullPath
+		if nextPath != "" {
+			nextPath += "/" + nestedName
+		} else {
+			nextPath = nestedName
+		}
+		if err := s.writeSubtestRecursive(parentMeta, nextPath, nested, passedDir, failedDir, runID); err != nil {
+			return err
 		}
 	}
 
@@ -719,8 +746,8 @@ func (s *PerTestFileSink) createTestLogFileOnce(result *types.TestResult, passed
 		targetDir = passedDir
 	}
 
-	// Full path to the test log file
-	testFilePath := filepath.Join(targetDir, filename+".log")
+	// Full path to the test log file (use .txt to be consistent with links)
+	testFilePath := filepath.Join(targetDir, filename+".txt")
 
 	// Check if we've already processed this test file
 	s.mu.Lock()
@@ -732,16 +759,18 @@ func (s *PerTestFileSink) createTestLogFileOnce(result *types.TestResult, passed
 	s.mu.Unlock()
 
 	// Now create the test log file
-	return s.createTestLogFiles(result, passedDir, failedDir, runID)
+	return s.createTestLogFiles(result, passedDir, failedDir)
 }
 
 // createTestLogFiles creates three separate log files for a single test result:
 // 1. A plaintext log file containing the processed plaintext output
 // 2. A JSON log file containing the raw JSON output
 // 3. A summary log file containing the result summary
-func (s *PerTestFileSink) createTestLogFiles(result *types.TestResult, passedDir, failedDir string, runID string) error {
+func (s *PerTestFileSink) createTestLogFiles(result *types.TestResult, passedDir, failedDir string) error {
 	// Generate a safe filename based on the test metadata
 	filename := getReadableTestFilename(result.Metadata)
+	// Persist the artifact basename on the result for downstream sinks
+	result.ArtifactBaseName = filename
 
 	// Determine which directory to use based on test status
 	var targetDir string

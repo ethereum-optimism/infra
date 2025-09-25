@@ -1,6 +1,7 @@
 package nat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -411,45 +414,112 @@ func (n *nat) runTests(ctx context.Context) error {
 		}
 	}
 
-	// Run the tests with our new logger
-	result, err := n.runner.RunAllTests(ctx)
-	if err != nil {
-		// Check if this is a test-related error (e.g., module resolution) vs a runtime error
-		if strings.Contains(err.Error(), "is not in module") {
-			// Module resolution errors should be treated as test failures, not runtime errors
-			n.config.Log.Error("Test execution failed", "error", err)
-			return NewTestFailureError(err.Error())
+	// Run the tests - either flake-shake mode or regular mode
+	// Optional flake-shake report artifact paths for final consolidated log
+	var flakeReportHTML string
+	var flakeReportJSON string
+
+	if n.config.FlakeShake {
+		// Run in flake-shake mode
+		n.config.Log.Info("Running in flake-shake mode", "iterations", n.config.FlakeShakeIterations)
+
+		flakeShakeRunner := runner.NewFlakeShakeRunner(n.runner, n.config.FlakeShakeIterations, n.config.Log)
+		// Ensure gate is set to "gateless" when running in gateless mode
+		gateForReport := n.config.TargetGate
+		if n.config.GatelessMode || gateForReport == "" {
+			gateForReport = "gateless"
 		}
-		// This is a runtime error (not a test failure)
-		n.config.Log.Error("Runtime error running tests", "error", err)
-		return NewRuntimeError(err)
-	}
-	n.result = result
+		flakeShakeReport, err := flakeShakeRunner.RunFlakeShake(ctx, gateForReport)
+		if err != nil {
+			n.config.Log.Error("Flake-shake analysis failed", "error", err)
+			return NewRuntimeError(err)
+		}
 
-	// We should have the same runID from the test run result
-	if result.RunID != runID {
+		// Save flake-shake reports (both JSON and HTML) in this run's directory
+		// Set the RunID on the report for traceability
+		flakeShakeReport.RunID = runID
+		runDir, getDirErr := n.fileLogger.GetDirectoryForRunID(runID)
+		if getDirErr != nil || runDir == "" {
+			// Fallback to default layout if for some reason run dir isn't available
+			runDir = filepath.Join(n.config.LogDir, "testrun-"+runID)
+			_ = os.MkdirAll(runDir, 0755)
+		}
+		savedFiles, err := runner.SaveFlakeShakeReport(flakeShakeReport, runDir)
+		if err != nil {
+			n.config.Log.Error("Failed to save flake-shake reports", "error", err)
+		}
+		// Capture flake report filepaths
+		for _, file := range savedFiles {
+			if strings.HasSuffix(file, ".html") {
+				flakeReportHTML = file
+			} else if strings.HasSuffix(file, ".json") {
+				flakeReportJSON = file
+			}
+		}
+
+		// Create a summary result for display purposes
+		n.result = &runner.RunnerResult{
+			RunID:         runID,
+			Status:        types.TestStatusPass,
+			WallClockTime: time.Since(time.Now()),
+			Stats: runner.ResultStats{
+				Total: len(flakeShakeReport.Tests),
+			},
+		}
+
+		// Print flake-shake summary
+		n.printFlakeShakeSummary(flakeShakeReport)
+
+	} else {
+		// Regular test execution
+		result, err := n.runner.RunAllTests(ctx)
+		if err != nil {
+			// Check if this is a test-related error (e.g., module resolution) vs a runtime error
+			if strings.Contains(err.Error(), "is not in module") {
+				// Module resolution errors should be treated as test failures, not runtime errors
+				n.config.Log.Error("Test execution failed", "error", err)
+				return NewTestFailureError(err.Error())
+			}
+			// This is a runtime error (not a test failure)
+			n.config.Log.Error("Runtime error running tests", "error", err)
+			return NewRuntimeError(err)
+		}
+		n.result = result
+	}
+
+	// We should have the same runID from the test run result (skip for flake-shake mode)
+	if !n.config.FlakeShake && n.result.RunID != runID {
 		n.config.Log.Warn("RunID from result doesn't match expected runID",
-			"expected", runID, "actual", result.RunID)
+			"expected", runID, "actual", n.result.RunID)
 	}
 
-	reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
+	// Skip regular result printing for flake-shake mode
+	if !n.config.FlakeShake {
+		reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
 
-	n.config.Log.Info("Printing results table")
-	n.printResultsTable(result.RunID)
-	for _, line := range strings.Split(reproBlurb, "\n") {
-		n.config.Log.Info(line)
+		n.config.Log.Info("Printing results table")
+		n.printResultsTable(n.result.RunID)
+		for _, line := range strings.Split(reproBlurb, "\n") {
+			n.config.Log.Info(line)
+		}
 	}
 
 	// Complete the file logging
-	if err := n.fileLogger.CompleteWithTiming(result.RunID, n.result.WallClockTime); err != nil {
+	if err := n.fileLogger.CompleteWithTiming(n.result.RunID, n.result.WallClockTime); err != nil {
 		n.config.Log.Error("Error completing file logging", "error", err)
 	}
 
 	// Save the original detailed summary to the all.log file
-	resultSummary := n.result.String() + reproBlurb
+	var resultSummary string
+	if n.config.FlakeShake {
+		resultSummary = "Flake-Shake Analysis Complete\n"
+	} else {
+		reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
+		resultSummary = n.result.String() + reproBlurb
+	}
 
 	// Get the all.log file path
-	allLogsFile, err := n.fileLogger.GetAllLogsFileForRunID(result.RunID)
+	allLogsFile, err := n.fileLogger.GetAllLogsFileForRunID(n.result.RunID)
 	if err != nil {
 		n.config.Log.Error("Error getting all.log file path", "error", err)
 	} else {
@@ -461,19 +531,19 @@ func (n *nat) runTests(ctx context.Context) error {
 	}
 
 	// Get the raw_go_events.log file path
-	rawEventsFile, err := n.fileLogger.GetRawEventsFileForRunID(result.RunID)
+	rawEventsFile, err := n.fileLogger.GetRawEventsFileForRunID(n.result.RunID)
 	if err != nil {
 		n.config.Log.Error("Error getting raw_go_events.log file path", "error", err)
 	} else {
 		n.config.Log.Info("Raw Go test events saved", "file", rawEventsFile)
 	}
 
-	if n.result.Status == types.TestStatusFail && result.Stats.Failed > result.Stats.Passed {
+	if n.result.Status == types.TestStatusFail && n.result.Stats.Failed > n.result.Stats.Passed {
 		printGandalf()
 	}
 
 	// Get log directory for this run
-	logDir, err := n.fileLogger.GetDirectoryForRunID(result.RunID)
+	logDir, err := n.fileLogger.GetDirectoryForRunID(n.result.RunID)
 	if err != nil {
 		n.config.Log.Error("Error getting log directory path", "error", err)
 		// Use default base directory as fallback
@@ -481,14 +551,14 @@ func (n *nat) runTests(ctx context.Context) error {
 	}
 
 	// Write artifacts for this run
-	if err := n.writeRunArtifacts(result.RunID); err != nil {
+	if err := n.writeRunArtifacts(n.result.RunID); err != nil {
 		n.config.Log.Error("Error writing run artifacts", "error", err)
 	}
 
 	// Record metrics for the test run
 	metrics.RecordAcceptance(
 		n.networkName,
-		result.RunID,
+		n.result.RunID,
 		string(n.result.Status),
 		n.result.Stats.Total,
 		n.result.Stats.Passed,
@@ -502,7 +572,7 @@ func (n *nat) runTests(ctx context.Context) error {
 		for testName, test := range gate.Tests {
 			metrics.RecordIndividualTest(
 				n.networkName,
-				result.RunID,
+				n.result.RunID,
 				testName,
 				gate.ID,
 				"", // No suite for direct gate tests
@@ -514,7 +584,7 @@ func (n *nat) runTests(ctx context.Context) error {
 			for subTestName, subTest := range test.SubTests {
 				metrics.RecordIndividualTest(
 					n.networkName,
-					result.RunID,
+					n.result.RunID,
 					subTestName,
 					gate.ID,
 					"", // No suite for direct gate tests
@@ -529,7 +599,7 @@ func (n *nat) runTests(ctx context.Context) error {
 			for testName, test := range suite.Tests {
 				metrics.RecordIndividualTest(
 					n.networkName,
-					result.RunID,
+					n.result.RunID,
 					testName,
 					gate.ID,
 					suiteName,
@@ -541,7 +611,7 @@ func (n *nat) runTests(ctx context.Context) error {
 				for subTestName, subTest := range test.SubTests {
 					metrics.RecordIndividualTest(
 						n.networkName,
-						result.RunID,
+						n.result.RunID,
 						subTestName,
 						gate.ID,
 						suiteName,
@@ -553,12 +623,24 @@ func (n *nat) runTests(ctx context.Context) error {
 		}
 	}
 
-	n.config.Log.Info("Test run completed",
-		"run_id", result.RunID,
+	// Build consolidated fields for final log line
+	fields := []interface{}{
+		"run_id", n.result.RunID,
 		"status", n.result.Status,
 		"log_dir", logDir,
 		"results_html", filepath.Join(logDir, logging.HTMLResultsFilename),
-	)
+	}
+	// Include flake-shake report paths if available (flake-shake mode)
+	if n.config.FlakeShake {
+		if flakeReportHTML != "" {
+			fields = append(fields, "flake_report_html", flakeReportHTML)
+		}
+		if flakeReportJSON != "" {
+			fields = append(fields, "flake_report_json", flakeReportJSON)
+		}
+	}
+
+	n.config.Log.Info("Test run completed", fields...)
 	return nil
 }
 
@@ -626,6 +708,111 @@ func (n *nat) Stopped() bool {
 }
 
 // printResultsTable prints the results of the acceptance tests to the console.
+func (n *nat) printFlakeShakeSummary(report *runner.FlakeShakeReport) {
+	n.config.Log.Info("Printing flake-shake results...")
+
+	// Print the formatted table
+	tableStr := n.formatFlakeShakeTable(report)
+	fmt.Print(tableStr)
+}
+
+// formatFlakeShakeTable formats the flake-shake report as a table
+func (n *nat) formatFlakeShakeTable(report *runner.FlakeShakeReport) string {
+	var buf bytes.Buffer
+
+	// Create table writer
+	t := table.NewWriter()
+	t.SetOutputMirror(&buf)
+	t.SetTitle(fmt.Sprintf("Flake-Shake Analysis Results (gate: %s, iterations: %d)", report.Gate, report.Iterations))
+
+	// Set headers
+	t.AppendHeader(table.Row{"TEST NAME", "PACKAGE", "RUNS", "PASS RATE", "AVG DURATION", "RECOMMENDATION", "STATUS"})
+
+	// Configure columns
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Name: "TEST NAME"},
+		{Name: "PACKAGE"},
+		{Name: "RUNS", Align: text.AlignRight},
+		{Name: "PASS RATE", Align: text.AlignRight},
+		{Name: "AVG DURATION", Align: text.AlignRight},
+		{Name: "RECOMMENDATION", Align: text.AlignCenter},
+		{Name: "STATUS", Align: text.AlignCenter},
+	})
+
+	// Count statistics
+	stable := 0
+	unstable := 0
+
+	// Add test rows
+	for _, test := range report.Tests {
+		status := "✓"
+		if test.PassRate < 100 {
+			status = "✗"
+		}
+
+		// Format test name - extract actual test name from package if empty
+		testName := test.TestName
+		packageName := test.Package
+		if testName == "" && packageName != "" {
+			// Try to extract test name from package string
+			parts := strings.Split(packageName, "::")
+			if len(parts) > 1 {
+				packageName = parts[0]
+				// Take last part after last /
+				pkgParts := strings.Split(parts[len(parts)-1], "/")
+				testName = pkgParts[len(pkgParts)-1]
+			} else {
+				// Extract last part of package path as test name
+				pkgParts := strings.Split(packageName, "/")
+				testName = pkgParts[len(pkgParts)-1]
+			}
+		}
+
+		// Determine color for status
+		var statusColor text.Color
+		if test.Recommendation == "STABLE" {
+			statusColor = text.FgGreen
+			stable++
+		} else {
+			statusColor = text.FgRed
+			unstable++
+		}
+
+		t.AppendRow(table.Row{
+			testName,
+			packageName,
+			fmt.Sprintf("%d/%d", test.Passes, test.TotalRuns),
+			fmt.Sprintf("%.1f%%", test.PassRate),
+			test.AvgDuration.Round(time.Millisecond).String(),
+			statusColor.Sprint(test.Recommendation),
+			status,
+		})
+	}
+
+	// Add summary footer
+	t.AppendFooter(table.Row{
+		"TOTAL",
+		fmt.Sprintf("%d tests", len(report.Tests)),
+		"",
+		"",
+		"",
+		fmt.Sprintf("Stable: %d | Unstable: %d", stable, unstable),
+		"",
+	})
+
+	// Set style based on overall results
+	if unstable > 0 {
+		t.SetStyle(table.StyleColoredBlackOnRedWhite)
+	} else if stable == len(report.Tests) && len(report.Tests) > 0 {
+		t.SetStyle(table.StyleColoredBlackOnGreenWhite)
+	} else {
+		t.SetStyle(table.StyleDefault)
+	}
+
+	t.Render()
+	return buf.String()
+}
+
 func (n *nat) printResultsTable(runID string) {
 	n.config.Log.Info("Printing results...")
 

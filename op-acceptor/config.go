@@ -31,9 +31,11 @@ type Config struct {
 	DevnetEnvURL       string                 // URL or path to the devnet environment file
 	Serial             bool                   // Whether to run tests serially instead of in parallel
 	Concurrency        int                    // Number of concurrent test workers (0 = auto-determine)
-	ShowProgress       bool                   // Whether to show periodic progress updates during test execution
-	ProgressInterval   time.Duration          // Interval between progress updates when ShowProgress is 'true'
-	Log                log.Logger
+	ShowProgress         bool                   // Whether to show periodic progress updates during test execution
+	ProgressInterval     time.Duration          // Interval between progress updates when ShowProgress is 'true'
+	FlakeShake           bool                   // Enable flake-shake mode for test stability validation
+	FlakeShakeIterations int                    // Number of times to run each test in flake-shake mode
+	Log                  log.Logger
 }
 
 // NewConfig creates a new Config from cli context
@@ -115,9 +117,11 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		DevnetEnvURL:       devnetEnvURL,
 		Serial:             ctx.Bool(flags.Serial.Name),
 		Concurrency:        ctx.Int(flags.Concurrency.Name),
-		ShowProgress:       ctx.Bool(flags.ShowProgress.Name),
-		ProgressInterval:   ctx.Duration(flags.ProgressInterval.Name),
-		LogDir:             logDir,
-		Log:                log,
+		ShowProgress:         ctx.Bool(flags.ShowProgress.Name),
+		ProgressInterval:     ctx.Duration(flags.ProgressInterval.Name),
+		FlakeShake:           ctx.Bool(flags.FlakeShake.Name),
+		FlakeShakeIterations: ctx.Int(flags.FlakeShakeIterations.Name),
+		LogDir:               logDir,
+		Log:                  log,
 	}, nil
 }

@@ -161,6 +161,18 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "CONCURRENCY"),
 		Usage:   "Number of concurrent test workers. 0 (default) auto-determines based on system capabilities.",
 	}
+	FlakeShake = &cli.BoolFlag{
+		Name:    "flake-shake",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "FLAKE_SHAKE"),
+		Usage:   "Enable flake-shake mode to run tests multiple times for stability validation.",
+	}
+	FlakeShakeIterations = &cli.IntFlag{
+		Name:    "flake-shake-iterations",
+		Value:   100,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "FLAKE_SHAKE_ITERATIONS"),
+		Usage:   "Number of times to run each test in flake-shake mode. Defaults to 100.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -184,6 +196,8 @@ var optionalFlags = []cli.Flag{
 	DevnetEnvURL,
 	Serial,
 	Concurrency,
+	FlakeShake,
+	FlakeShakeIterations,
 }
 var Flags []cli.Flag
 
