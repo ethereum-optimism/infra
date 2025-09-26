@@ -442,7 +442,7 @@ jobs:
       - run:
           name: Run goreleaser
           command: |
-            goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
+            goreleaser release --snapshot -f ./<<parameters.module>>/<<parameters.filename>>
 
   # Run full op-acceptor suite, including acceptance tests via make test-all
   op-acceptor-test-all:
@@ -651,13 +651,6 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
-      - go-release:
-          matrix:
-            parameters:
-              module:
-                - proxyd
-          context:
-            - oplabs-gcr-release
   cci-stats:
     when:
       or:
