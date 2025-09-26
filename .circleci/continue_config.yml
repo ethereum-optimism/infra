@@ -656,6 +656,8 @@ workflows:
             parameters:
               module:
                 - proxyd
+          context:
+            - oplabs-gcr-release
   cci-stats:
     when:
       or:
