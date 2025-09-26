@@ -442,7 +442,7 @@ jobs:
       - run:
           name: Run goreleaser
           command: |
-            goreleaser release --snapshot  --clean -f ./<<parameters.module>>/<<parameters.filename>>
+            goreleaser release --snapshot -f ./<<parameters.module>>/<<parameters.filename>>
 
   # Run full op-acceptor suite, including acceptance tests via make test-all
   op-acceptor-test-all:
