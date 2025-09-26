@@ -419,17 +419,14 @@ jobs:
           oidc_token_file_path: /root/oidc_token.json
       - checkout
       - run:
-          name: Setup mise for op-acceptor
+          name: Setup mise
           command: |
-            # Only install mise tools for op-acceptor which uses mise
-            if [ "<<parameters.module>>" = "op-acceptor" ]; then
-              # Install mise
-              curl -fsSL https://mise.run | sh
-              echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
-              source $BASH_ENV
-              # Install tools from mise.toml
-              mise install
-            fi
+            # Install mise
+            curl -fsSL https://mise.run | sh
+            echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
+            source $BASH_ENV
+            # Install tools from mise.toml
+            mise install
       - run:
           name: Install goreleaser pro
           command: |
