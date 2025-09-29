@@ -5,6 +5,7 @@ go 1.23.5
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101511.1-0.20250523133920-e3f85bf38455
 
 require (
+	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 	github.com/ethereum-optimism/optimism v1.13.4-0.20250529183319-4b049d03b411
 	github.com/ethereum/go-ethereum v1.15.11
 	github.com/google/uuid v1.6.0

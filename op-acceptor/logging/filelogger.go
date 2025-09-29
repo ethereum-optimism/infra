@@ -7,10 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/acarl005/stripansi"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/reporting"
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -22,14 +23,6 @@ const (
 	HTMLResultsFilename = "results.html"
 	RunDirectoryPrefix  = "testrun-" // Standardized prefix for run directories
 )
-
-// ansiRegex matches ANSI escape sequences
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// stripANSIEscapeSequences removes ANSI color codes from text
-func stripANSIEscapeSequences(text string) string {
-	return ansiRegex.ReplaceAllString(text, "")
-}
 
 // ResultSink is an interface for different ways of consuming test results
 type ResultSink interface {
@@ -824,14 +817,14 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 		parser := NewJSONOutputParser(result.Stdout)
 		parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
 			// Strip ANSI escape sequences from the output
-			plaintext.WriteString(stripANSIEscapeSequences(outputText))
+			plaintext.WriteString(stripansi.Strip(outputText))
 		})
 
 		// If JSON parsing produced no output, the Stdout might already be plain text
 		// (e.g., for subtests extracted from a package run)
 		if plaintext.Len() == 0 && strings.Contains(result.Stdout, "===") {
 			// It's already plain text, strip ANSI sequences and use it
-			plaintext.WriteString(stripANSIEscapeSequences(result.Stdout))
+			plaintext.WriteString(stripansi.Strip(result.Stdout))
 		}
 	}
 
