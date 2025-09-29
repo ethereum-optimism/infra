@@ -303,6 +303,7 @@ type Backend struct {
 	maxWSConns           int
 	outOfServiceInterval time.Duration
 	stripTrailingXFF     bool
+	ingressRPC           string
 	proxydIP             string
 
 	skipIsSyncingCheck bool
@@ -451,6 +452,12 @@ func WithMaxErrorRateThreshold(maxErrorRateThreshold float64) BackendOpt {
 func WithConsensusReceiptTarget(receiptsTarget string) BackendOpt {
 	return func(b *Backend) {
 		b.receiptsTarget = receiptsTarget
+	}
+}
+
+func WithIngressRPC(ingressRPC string) BackendOpt {
+	return func(b *Backend) {
+		b.ingressRPC = ingressRPC
 	}
 }
 
@@ -765,6 +772,20 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	for name, value := range b.headers {
 		httpReq.Header.Set(name, value)
 	}
+
+	if b.ingressRPC != "" {
+		// Send async copy to ingress service, don't wait for error handling
+		go func() {
+			ingressReq, _ := http.NewRequestWithContext(ctx, "POST", b.ingressRPC, bytes.NewReader(body))
+			ingressReq.Header.Set("content-type", "application/json")
+			ingressReq.Header.Set("X-Forwarded-For", xForwardedFor)
+			for name, value := range b.headers {
+				ingressReq.Header.Set(name, value)
+			}
+			httpRes, _ := http.DefaultClient.Do(ingressReq)
+			httpRes.Body.Close()
+		}()
+	}	
 
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
