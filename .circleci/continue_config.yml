@@ -418,15 +418,7 @@ jobs:
           gcp_cred_config_file_path: /root/gcp_cred_config.json
           oidc_token_file_path: /root/oidc_token.json
       - checkout
-      - run:
-          name: Setup mise
-          command: |
-            # Install mise
-            curl -fsSL https://mise.run | sh
-            echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
-            source $BASH_ENV
-            # Install tools from mise.toml
-            mise install
+      - circleci-utils/install-mise
       - run:
           name: Install goreleaser pro
           command: |
@@ -623,9 +615,20 @@ workflows:
           docker_name: proxyd
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
           docker_context: .
+      - go-release:
+          matrix:
+            parameters:
+              module:
+                - proxyd
+          context:
+            - oplabs-gcr-release
   cci-stats:
     when:
-      or: [ << pipeline.parameters.run-build-cci-stats >>, << pipeline.parameters.run-all >> ]
+      or:
+        [
+          << pipeline.parameters.run-build-cci-stats >>,
+          << pipeline.parameters.run-all >>,
+        ]
     jobs:
       - go-lint:
           name: cci-stats-lint
