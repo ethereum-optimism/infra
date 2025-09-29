@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -164,6 +165,75 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 	finalCount := getHttpResponseCodeCount("499")
 
 	assert.Greater(t, finalCount, initialCount, "httpResponseCodesTotal should be incremented for 499 status code")
+}
+
+func TestIngressForwarding(t *testing.T) {
+	backendRequests := make(chan []byte, 10)
+	ingressRequests := make(chan []byte, 10)
+
+	// Mock backend server
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		backendRequests <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1234","id":1}`))
+	}))
+	defer backendServer.Close()
+
+	// Mock ingress server
+	ingressServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		ingressRequests <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"ok","id":1}`))
+	}))
+	defer ingressServer.Close()
+
+	// Create backend with ingress RPC configured
+	backend := NewBackend(
+		"test-backend",
+		backendServer.URL,
+		"",
+		semaphore.NewWeighted(10),
+		WithIngressRPC(ingressServer.URL),
+	)
+
+	// Create a test RPC request
+	rpcReq := &RPCReq{
+		JSONRPC: "2.0",
+		Method:  "eth_blockNumber",
+		Params:  []byte(`[]`),
+		ID:      []byte(`1`),
+	}
+
+	// Forward the request
+	ctx := context.Background()
+	res, err := backend.Forward(ctx, []*RPCReq{rpcReq}, false)
+
+	// Verify the backend request was successful
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.False(t, res[0].IsError())
+
+	// Verify both backend and ingress received the request
+	select {
+	case backendBody := <-backendRequests:
+		require.Contains(t, string(backendBody), "eth_blockNumber")
+		require.Contains(t, string(backendBody), `"id":1`)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Backend did not receive request")
+	}
+
+	// Give a bit more time for the async ingress request to complete
+	select {
+	case ingressBody := <-ingressRequests:
+		require.Contains(t, string(ingressBody), "eth_blockNumber")
+		require.Contains(t, string(ingressBody), `"id":1`)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Ingress did not receive request")
+	}
 }
 
 func getHttpResponseCodeCount(statusCode string) float64 {
