@@ -839,7 +839,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 			httpRes, _ := http.DefaultClient.Do(ingressReq)
 			httpRes.Body.Close()
 		}()
-	}	
+	}
 
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
