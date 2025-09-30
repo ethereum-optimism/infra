@@ -835,7 +835,7 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 	}
 
 	// Log transaction hash for all sendRawTransaction requests
-	log.Info("processing sendRawTransaction", 
+	log.Info("processing sendRawTransaction",
 		"tx_hash", tx.Hash(),
 		"method", req.Method,
 		"req_id", GetReqID(ctx),
