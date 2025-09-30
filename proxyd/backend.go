@@ -776,14 +776,19 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	if b.ingressRPC != "" {
 		// Send async copy to ingress service, don't wait for error handling
 		go func() {
+			RecordIngressRequest(b.Name)
+
 			ingressReq, _ := http.NewRequestWithContext(ctx, "POST", b.ingressRPC, bytes.NewReader(body))
 			ingressReq.Header.Set("content-type", "application/json")
 			ingressReq.Header.Set("X-Forwarded-For", xForwardedFor)
 			for name, value := range b.headers {
 				ingressReq.Header.Set(name, value)
 			}
+
+			ingressStart := time.Now()
 			httpRes, _ := http.DefaultClient.Do(ingressReq)
 			httpRes.Body.Close()
+			RecordIngressRequestDuration(b.Name, time.Since(ingressStart))
 		}()
 	}
 
