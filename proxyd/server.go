@@ -834,6 +834,16 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 		return nil, ErrInvalidParams(err.Error())
 	}
 
+	// Log transaction hash for all sendRawTransaction requests
+	log.Info("processing sendRawTransaction", 
+		"tx_hash", tx.Hash(),
+		"method", req.Method,
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"chain_id", tx.ChainId(),
+		"nonce", tx.Nonce(),
+	)
+
 	return tx, nil
 }
 
