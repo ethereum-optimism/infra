@@ -427,6 +427,7 @@ func Start(config *Config) (*Server, func(), error) {
 		limiterFactory,
 		config.InteropValidationConfig,
 		interopStrategy,
+		config.Server.EnableTxHashLogging,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

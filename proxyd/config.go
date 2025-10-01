@@ -32,6 +32,7 @@ type ServerConfig struct {
 	EnableXServedByHeader bool `toml:"enable_served_by_header"`
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
 	PublicAccess          bool `toml:"public_access"`
+	EnableTxHashLogging   bool `toml:"enable_tx_hash_logging"`
 }
 
 type CacheConfig struct {

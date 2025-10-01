@@ -31,7 +31,9 @@ func TestConvertSendReqToSendTx_Fusaka(t *testing.T) {
 				ID:     json.RawMessage("1"),
 			}
 
-			tx, err := convertSendReqToSendTx(context.Background(), rpcReq)
+			// Create a minimal server instance for testing
+			server := &Server{enableTxHashLogging: false}
+			tx, err := server.convertSendReqToSendTx(context.Background(), rpcReq)
 			require.NoError(t, err)
 
 			require.Len(t, tx.BlobTxSidecar().Blobs, 2)

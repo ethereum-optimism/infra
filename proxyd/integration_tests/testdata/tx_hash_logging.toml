@@ -1,5 +1,6 @@
 [server]
 rpc_port = 8545
+enable_tx_hash_logging = true
 
 [backend]
 response_timeout_seconds = 1
