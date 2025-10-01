@@ -87,6 +87,7 @@ type Server struct {
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
 	publicAccess            bool
+	enableTxHashLogging     bool
 }
 
 type limiterFunc func(method string) bool
@@ -114,6 +115,7 @@ func NewServer(
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
+	enableTxHashLogging bool,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -215,6 +217,7 @@ func NewServer(
 		rateLimitHeader:         rateLimitHeader,
 		interopValidatingConfig: interopValidatingConfig,
 		interopStrategy:         interopStrategy,
+		enableTxHashLogging:     enableTxHashLogging,
 	}, nil
 }
 
@@ -576,7 +579,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
 		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" {
-			tx, err := convertSendReqToSendTx(ctx, parsedReq)
+			tx, err := s.convertSendReqToSendTx(ctx, parsedReq)
 			if err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
@@ -798,7 +801,7 @@ func (s *Server) isGlobalLimit(method string) bool {
 }
 
 // convertSendReqToSendTx converts a sendRawTransaction or sendRawTransactionConditional rpc to a transaction.
-func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transaction, error) {
+func (s *Server) convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transaction, error) {
 	var params []any
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		log.Debug("error unmarshalling raw transaction params", "err", err, "req_Id", GetReqID(ctx))
@@ -832,6 +835,18 @@ func convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*types.Transactio
 	if err := tx.UnmarshalBinary(data); err != nil {
 		log.Debug("could not unmarshal transaction", "err", err, "req_id", GetReqID(ctx))
 		return nil, ErrInvalidParams(err.Error())
+	}
+
+	// Log transaction hash for all sendRawTransaction requests if enabled
+	if s.enableTxHashLogging {
+		log.Info("processing sendRawTransaction",
+			"tx_hash", tx.Hash(),
+			"method", req.Method,
+			"req_id", GetReqID(ctx),
+			"auth", GetAuthCtx(ctx),
+			"chain_id", tx.ChainId(),
+			"nonce", tx.Nonce(),
+		)
 	}
 
 	return tx, nil

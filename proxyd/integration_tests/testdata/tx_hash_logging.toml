@@ -1,0 +1,26 @@
+[server]
+rpc_port = 8545
+enable_tx_hash_logging = true
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+ws_url = "$GOOD_BACKEND_RPC_URL"
+
+[backend_groups]
+[backend_groups.main]
+backends = ["good"]
+
+[rpc_method_mappings]
+eth_chainId = "main"
+eth_sendRawTransaction = "main"
+eth_sendRawTransactionConditional = "main"
+
+[sender_rate_limit]
+allowed_chain_ids = [0, 420, 420120003]
+enabled = false
+interval = "1s"
+limit = 1000
