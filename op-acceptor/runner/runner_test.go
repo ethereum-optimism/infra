@@ -1633,6 +1633,53 @@ func TestRunTest_PackagePath_Local(t *testing.T) {
 	}
 }
 
+// TestUserEnvironmentForwarding verifies that arbitrary user-provided environment variables
+// are forwarded into the child `go test` process that op-acceptor spawns.
+// This covers the use-case from op-devstack where variables like DEVSTACK_L2CL_KIND
+// may influence behavior and should be honored by tests.
+func TestUserEnvironmentForwarding(t *testing.T) {
+	ctx := context.Background()
+	r := setupDefaultTestRunner(t)
+
+	// Create a test that reads a specific env var and logs it
+	testContent := []byte(`
+package main
+
+import (
+    "os"
+    "testing"
+)
+
+func TestEnvForwarding(t *testing.T) {
+    if v := os.Getenv("DEVSTACK_L2CL_KIND"); v == "" {
+        t.Fatalf("DEVSTACK_L2CL_KIND not forwarded")
+    } else {
+        t.Logf("DEVSTACK_L2CL_KIND=%s", v)
+    }
+}
+`)
+	err := os.WriteFile(filepath.Join(r.workDir, "main_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	// Ensure our process environment contains the variable that should be forwarded.
+	// The runner builds the child env based on os.Environ() with additions, so setting
+	// here simulates a user invoking `DEVSTACK_L2CL_KIND=kind op-acceptor ...`.
+	const key = "DEVSTACK_L2CL_KIND"
+	const val = "super"
+	t.Setenv(key, val)
+
+	// Run the test through the runner, which will spawn `go test`.
+	res, err := r.RunTest(ctx, types.ValidatorMetadata{
+		ID:       "env-forward",
+		Gate:     "test-gate",
+		FuncName: "TestEnvForwarding",
+		Package:  ".",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.TestStatusPass, res.Status)
+	assert.Contains(t, res.Stdout, "DEVSTACK_L2CL_KIND=super")
+}
+
 func TestPackageTimeoutErrorMessage(t *testing.T) {
 	// Create a temporary directory for test execution
 	tempDir := t.TempDir()
