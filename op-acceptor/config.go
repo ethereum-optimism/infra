@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -14,28 +15,29 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	TestDir            string
-	ValidatorConfig    string
-	TargetGate         string
-	GatelessMode       bool
-	GoBinary           string
-	RunInterval        time.Duration          // Interval between test runs
-	RunOnce            bool                   // Indicates if the service should exit after one test run
-	AllowSkips         bool                   // Allow tests to be skipped instead of failing when preconditions are not met
-	DefaultTimeout     time.Duration          // Default timeout for individual tests, can be overridden by test config
-	Timeout            time.Duration          // Timeout for gateless mode tests (if specified)
-	LogDir             string                 // Directory to store test logs
-	OutputRealtimeLogs bool                   // If enabled, test logs will be outputted in realtime
-	TestLogLevel       string                 // Log level to be used for the tests
-	Orchestrator       flags.OrchestratorType // Devstack orchestrator type
-	DevnetEnvURL       string                 // URL or path to the devnet environment file
-	Serial             bool                   // Whether to run tests serially instead of in parallel
-	Concurrency        int                    // Number of concurrent test workers (0 = auto-determine)
+	TestDir              string
+	ValidatorConfig      string
+	TargetGate           string
+	GatelessMode         bool
+	GoBinary             string
+	RunInterval          time.Duration          // Interval between test runs
+	RunOnce              bool                   // Indicates if the service should exit after one test run
+	AllowSkips           bool                   // Allow tests to be skipped instead of failing when preconditions are not met
+	DefaultTimeout       time.Duration          // Default timeout for individual tests, can be overridden by test config
+	Timeout              time.Duration          // Timeout for gateless mode tests (if specified)
+	LogDir               string                 // Directory to store test logs
+	OutputRealtimeLogs   bool                   // If enabled, test logs will be outputted in realtime
+	TestLogLevel         string                 // Log level to be used for the tests
+	Orchestrator         flags.OrchestratorType // Devstack orchestrator type
+	DevnetEnvURL         string                 // URL or path to the devnet environment file
+	Serial               bool                   // Whether to run tests serially instead of in parallel
+	Concurrency          int                    // Number of concurrent test workers (0 = auto-determine)
 	ShowProgress         bool                   // Whether to show periodic progress updates during test execution
 	ProgressInterval     time.Duration          // Interval between progress updates when ShowProgress is 'true'
 	FlakeShake           bool                   // Enable flake-shake mode for test stability validation
 	FlakeShakeIterations int                    // Number of times to run each test in flake-shake mode
 	Log                  log.Logger
+	ExcludeGates         []string // List of gate IDs whose tests should be excluded
 }
 
 // NewConfig creates a new Config from cli context
@@ -48,8 +50,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		return nil, errors.New("test directory is required")
 	}
 
-	// Determine if we're in gateless mode
-	gatelessMode := validatorConfig == "" && gate == ""
+	// Determine if we're in gateless mode (gate not specified). Validator config is optional in gateless mode
+	gatelessMode := gate == ""
 
 	// In gateless mode, we don't require validator config or gate
 	if !gatelessMode {
@@ -100,28 +102,49 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 
 	devnetEnvURL := ctx.String(flags.DevnetEnvURL.Name)
 
+	excludeGates := parseExcludeGates(ctx.String(flags.ExcludeGates.Name))
+
 	return &Config{
-		TestDir:            absTestDir,
-		ValidatorConfig:    absValidatorConfig,
-		TargetGate:         gate,
-		GatelessMode:       gatelessMode,
-		GoBinary:           ctx.String(flags.GoBinary.Name),
-		RunInterval:        runInterval,
-		RunOnce:            runOnce,
-		AllowSkips:         ctx.Bool(flags.AllowSkips.Name),
-		DefaultTimeout:     ctx.Duration(flags.DefaultTimeout.Name),
-		Timeout:            ctx.Duration(flags.Timeout.Name),
-		OutputRealtimeLogs: ctx.Bool(flags.OutputRealtimeLogs.Name),
-		TestLogLevel:       ctx.String(flags.TestLogLevel.Name),
-		Orchestrator:       orchestrator,
-		DevnetEnvURL:       devnetEnvURL,
-		Serial:             ctx.Bool(flags.Serial.Name),
-		Concurrency:        ctx.Int(flags.Concurrency.Name),
+		TestDir:              absTestDir,
+		ValidatorConfig:      absValidatorConfig,
+		TargetGate:           gate,
+		GatelessMode:         gatelessMode,
+		GoBinary:             ctx.String(flags.GoBinary.Name),
+		RunInterval:          runInterval,
+		RunOnce:              runOnce,
+		AllowSkips:           ctx.Bool(flags.AllowSkips.Name),
+		DefaultTimeout:       ctx.Duration(flags.DefaultTimeout.Name),
+		Timeout:              ctx.Duration(flags.Timeout.Name),
+		OutputRealtimeLogs:   ctx.Bool(flags.OutputRealtimeLogs.Name),
+		TestLogLevel:         ctx.String(flags.TestLogLevel.Name),
+		Orchestrator:         orchestrator,
+		DevnetEnvURL:         devnetEnvURL,
+		Serial:               ctx.Bool(flags.Serial.Name),
+		Concurrency:          ctx.Int(flags.Concurrency.Name),
 		ShowProgress:         ctx.Bool(flags.ShowProgress.Name),
 		ProgressInterval:     ctx.Duration(flags.ProgressInterval.Name),
 		FlakeShake:           ctx.Bool(flags.FlakeShake.Name),
 		FlakeShakeIterations: ctx.Int(flags.FlakeShakeIterations.Name),
 		LogDir:               logDir,
 		Log:                  log,
+		ExcludeGates:         excludeGates,
 	}, nil
+}
+
+// parseExcludeGates determines which gates to exclude based on env/flag.
+
+func parseExcludeGates(value string) []string {
+	val := strings.TrimSpace(value)
+	if val == "" {
+		// No default exclusions: empty means no skip gates
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	var gates []string
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			gates = append(gates, s)
+		}
+	}
+	return gates
 }
