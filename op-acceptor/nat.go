@@ -707,7 +707,7 @@ func (n *nat) Stopped() bool {
 	return !n.running.Load()
 }
 
-// printResultsTable prints the results of the acceptance tests to the console.
+// printFlakeShakeSummary prints the flake-shake analysis results to the console.
 func (n *nat) printFlakeShakeSummary(report *runner.FlakeShakeReport) {
 	n.config.Log.Info("Printing flake-shake results...")
 
