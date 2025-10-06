@@ -768,6 +768,9 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
+	if httpRes != nil && httpRes.Body != nil {
+		defer httpRes.Body.Close()
+	}
 	if err != nil {
 		if !(errors.Is(err, context.Canceled) || errors.Is(err, ErrTooManyRequests)) {
 			b.intermittentErrorsSlidingWindow.Incr()
@@ -798,7 +801,6 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
-	defer httpRes.Body.Close()
 	resB, err := io.ReadAll(LimitReader(httpRes.Body, b.maxResponseSize))
 	if errors.Is(err, ErrLimitReaderOverLimit) {
 		return nil, ErrBackendResponseTooLarge
