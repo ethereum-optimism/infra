@@ -59,6 +59,26 @@ DEVNET_ENV_URL=kt://isthmus-devnet op-acceptor \
     --log.level INFO
 ```
 
+## Excluding tests via skip gates
+You can exclude tests that belong to one or more gates from every run.
+
+- **Flag**: `--exclude-gates` (comma-separated gate IDs). Default: no exclusions.
+- **Env var**: `ACCEPTOR_EXCLUDE_GATES` overrides the flag if set. Set to an empty string to disable all exclusions.
+- **Gateless note**: in gateless mode, exclusions are applied only if a validators YAML is provided (so gate membership can be resolved).
+
+Examples:
+
+```bash
+# No default exclusions; to exclude, specify one or more gates
+op-acceptor --validators acceptance-tests.yaml --gate base --exclude-gates "flake-shake"
+
+# Exclude multiple gates
+op-acceptor --validators acceptance-tests.yaml --gate base --exclude-gates "flake-shake,experimental"
+
+# Using env var to override
+ACCEPTOR_EXCLUDE_GATES=experimental op-acceptor --validators acceptance-tests.yaml --gate base
+```
+
 ## Flake‑Shake (stability analysis)
 
 Analyze test stability by running tests multiple times and aggregating results.
@@ -130,7 +150,6 @@ Benefits of using op-acceptor over plain `go test`:
 - Integration with devstack orchestrators
 
 ## Contributing
-
 Please note that this project is under active development and the API may evolve. We welcome all contributions and appreciate your interest in improving op-acceptor!
 
 ### Adding a new test/suite/gate

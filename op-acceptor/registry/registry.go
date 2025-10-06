@@ -31,6 +31,8 @@ type Config struct {
 	// Gateless mode fields
 	GatelessMode bool
 	TestDir      string
+	// Skip behavior
+	ExcludeGates []string
 }
 
 // NewRegistry creates a new registry instance
@@ -60,6 +62,11 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		if err := r.loadValidators(cfg.ValidatorConfigFile); err != nil {
 			return nil, fmt.Errorf("failed to load validators: %w", err)
 		}
+	}
+
+	// Apply skip filters if any exclude gates were specified and we have a validator config
+	if len(cfg.ExcludeGates) > 0 && cfg.ValidatorConfigFile != "" {
+		r.applyExcludeGates(cfg.ValidatorConfigFile, cfg.ExcludeGates)
 	}
 
 	cfg.Log.Debug("Registry loaded", "len(validators)", len(r.validators), "gatelessMode", cfg.GatelessMode)
@@ -120,6 +127,120 @@ func (r *Registry) loadGatelessValidators() error {
 	r.config.Log.Info("Created synthetic validators for gateless mode", "count", len(validators))
 
 	return nil
+}
+
+// TestRef uniquely identifies a test by package/name pair. Name may be empty
+// for package-level entries.
+type TestRef struct {
+	Package string
+	Name    string
+}
+
+type skipSet struct {
+	byTuple   map[TestRef]struct{}
+	byPackage map[string]struct{}
+}
+
+// applyExcludeGates builds and applies a skip filter set based on provided gates.
+// It logs warnings for unknown gates and malformed entries.
+func (r *Registry) applyExcludeGates(cfgPath string, gates []string) {
+	if len(gates) == 0 {
+		return
+	}
+
+	// Load config to inspect gates
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		r.config.Log.Warn("Failed to load validators for exclude-gates; skipping filter", "error", err)
+		return
+	}
+
+	// Index gates by ID
+	gateIndex := make(map[string]types.GateConfig)
+	for _, g := range cfg.Gates {
+		gateIndex[g.ID] = g
+	}
+
+	// Build skip set
+	s := skipSet{byTuple: map[TestRef]struct{}{}, byPackage: map[string]struct{}{}}
+	for _, gid := range gates {
+		g, ok := gateIndex[gid]
+		if !ok {
+			r.config.Log.Warn("exclude gate not found; ignoring", "gate", gid)
+			continue
+		}
+		// Direct tests
+		for _, t := range g.Tests {
+			pkg := strings.TrimSpace(t.Package)
+			name := strings.TrimSpace(t.Name)
+			switch {
+			case pkg != "" && name != "":
+				s.byTuple[TestRef{Package: pkg, Name: name}] = struct{}{}
+			case pkg != "":
+				s.byPackage[pkg] = struct{}{}
+			default:
+				r.config.Log.Warn("malformed test in skip gate; missing package", "gate", gid)
+			}
+		}
+		// Suite tests
+		for _, suite := range g.Suites {
+			for _, t := range suite.Tests {
+				pkg := strings.TrimSpace(t.Package)
+				name := strings.TrimSpace(t.Name)
+				switch {
+				case pkg != "" && name != "":
+					s.byTuple[TestRef{Package: pkg, Name: name}] = struct{}{}
+				case pkg != "":
+					s.byPackage[pkg] = struct{}{}
+				default:
+					r.config.Log.Warn("malformed test in skip gate suite; missing package", "gate", gid)
+				}
+			}
+		}
+	}
+
+	// Filter validators
+	original := len(r.validators)
+	var excludedPrev []string
+	filtered := r.validators[:0]
+	excludedCount := 0
+	for _, v := range r.validators {
+		// Only tests are considered
+		if v.Type != types.ValidatorTypeTest {
+			filtered = append(filtered, v)
+			continue
+		}
+		// Match by tuple or package
+		if _, ok := s.byTuple[TestRef{Package: v.Package, Name: v.FuncName}]; ok {
+			excludedCount++
+			if len(excludedPrev) < 20 {
+				excludedPrev = append(excludedPrev, formatRef(v.Package, v.FuncName))
+			}
+			continue
+		}
+		if _, ok := s.byPackage[v.Package]; ok {
+			excludedCount++
+			if len(excludedPrev) < 20 {
+				excludedPrev = append(excludedPrev, formatRef(v.Package, ""))
+			}
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	r.validators = filtered
+
+	if excludedCount > 0 {
+		r.config.Log.Info("Excluding tests from gates", "count", excludedCount, "gates", gates)
+		r.config.Log.Debug("Excluded tests preview", "tests", excludedPrev)
+		r.config.Log.Debug("Validators filtered", "before", original, "after", len(filtered))
+	}
+}
+
+func formatRef(pkg string, name string) string {
+	if name == "" {
+		return pkg + "::*"
+	}
+	return pkg + "::" + name
 }
 
 // loadValidators loads a test source and its configuration

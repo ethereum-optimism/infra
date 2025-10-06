@@ -112,6 +112,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Timeout:             config.Timeout,
 		GatelessMode:        config.GatelessMode,
 		TestDir:             config.TestDir,
+		ExcludeGates:        config.ExcludeGates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry: %w", err)

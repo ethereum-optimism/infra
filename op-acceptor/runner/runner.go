@@ -77,6 +77,15 @@ type RunnerResult struct {
 	Stats         ResultStats
 	RunID         string
 	IsParallel    bool // Indicates if this run used parallel execution
+	// Skip summary (optional)
+	SkipCounts *SkipCounts
+}
+
+// SkipCounts captures exclusion stats from skip gates filtering
+type SkipCounts struct {
+	TotalExcluded  int `json:"total_excluded"`
+	ExcludedByPkg  int `json:"excluded_by_package"`
+	ExcludedByName int `json:"excluded_by_name"`
 }
 
 // ResultStats tracks test statistics at each level

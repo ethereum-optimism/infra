@@ -173,6 +173,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "FLAKE_SHAKE_ITERATIONS"),
 		Usage:   "Number of times to run each test in flake-shake mode. Defaults to 100.",
 	}
+	ExcludeGates = &cli.StringFlag{
+		Name:    "exclude-gates",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "EXCLUDE_GATES"),
+		Usage:   "Comma-separated list of gate IDs whose tests are excluded from execution.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -198,6 +204,7 @@ var optionalFlags = []cli.Flag{
 	Concurrency,
 	FlakeShake,
 	FlakeShakeIterations,
+	ExcludeGates,
 }
 var Flags []cli.Flag
 
