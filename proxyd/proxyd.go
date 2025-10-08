@@ -179,6 +179,9 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 			opts = append(opts, WithBasicAuth(cfg.Username, passwordVal))
 		}
+		if cfg.IngressRPC != "" {
+			opts = append(opts, WithIngressRPC(cfg.IngressRPC))
+		}
 
 		headers := map[string]string{}
 		for headerName, headerValue := range cfg.Headers {
