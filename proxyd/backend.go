@@ -840,9 +840,14 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 			}
 
 			ingressStart := time.Now()
-			httpRes, _ := http.DefaultClient.Do(ingressReq)
-			httpRes.Body.Close()
-			RecordIngressRequestDuration(b.Name, time.Since(ingressStart))
+			httpRes, err := http.DefaultClient.Do(ingressReq)
+			if err != nil {
+				log.Warn("failed to proxy to ingress rpc", err)
+			} else {
+				defer httpRes.Body.Close()
+				RecordIngressRequestDuration(b.Name, time.Since(ingressStart))
+			}
+
 		}()
 	}
 
