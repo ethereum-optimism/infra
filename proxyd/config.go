@@ -251,6 +251,7 @@ type Config struct {
 	SenderRateLimit              SenderRateLimitConfig        `toml:"sender_rate_limit"`
 	InteropValidationConfig      InteropValidationConfig      `toml:"interop_validation"`
 	TxValidationMiddlewareConfig TxValidationMiddlewareConfig `toml:"tx_validation_middleware"`
+	IngressRPC              string                  `toml:"ingress_rpc"`
 }
 
 type InteropValidationConfig struct {

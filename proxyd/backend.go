@@ -475,12 +475,6 @@ func WithConsensusReceiptTarget(receiptsTarget string) BackendOpt {
 	}
 }
 
-func WithIngressRPC(ingressRPC string) BackendOpt {
-	return func(b *Backend) {
-		b.ingressRPC = ingressRPC
-	}
-}
-
 func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendOpt {
 	return func(b *Backend) {
 		b.intermittentErrorsSlidingWindow = sw
@@ -825,30 +819,6 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	for name, value := range b.headers {
 		httpReq.Header.Set(name, value)
-	}
-
-	if b.ingressRPC != "" {
-		// Send async copy to ingress service, don't wait for error handling
-		go func() {
-			RecordIngressRequest(b.Name)
-
-			ingressReq, _ := http.NewRequestWithContext(ctx, "POST", b.ingressRPC, bytes.NewReader(body))
-			ingressReq.Header.Set("content-type", "application/json")
-			ingressReq.Header.Set("X-Forwarded-For", xForwardedFor)
-			for name, value := range b.headers {
-				ingressReq.Header.Set(name, value)
-			}
-
-			ingressStart := time.Now()
-			httpRes, err := http.DefaultClient.Do(ingressReq)
-			if err != nil {
-				log.Warn("failed to proxy to ingress rpc", err)
-			} else {
-				defer httpRes.Body.Close()
-				RecordIngressRequestDuration(b.Name, time.Since(ingressStart))
-			}
-
-		}()
 	}
 
 	start := time.Now()

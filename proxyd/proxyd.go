@@ -512,6 +512,7 @@ func Start(config *Config) (*Server, func(), error) {
 		apiKeys,
 		config.TxValidationMiddlewareConfig,
 		time.Duration(config.Server.GracefulShutdownSeconds)*time.Second,
+		config.IngressRPC,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
