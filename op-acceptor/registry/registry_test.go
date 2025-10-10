@@ -272,6 +272,90 @@ func TestParseExcludeGates_DefaultAndEmpty(t *testing.T) {
 	// We cover the main exclusion path in TestExcludeGatesFiltering.
 }
 
+func TestExcludeGates_PackagePrefix_Gateless(t *testing.T) {
+	// Layout:
+	// tmpDir/
+	//   tests/
+	//     pkg/
+	//       pkg_test.go
+	//     pkg/sub/
+	//       sub_test.go
+	// validators.yaml defines gate 'black' with a package-only entry ./tests/pkg
+
+	tmpDir := t.TempDir()
+
+	// Create packages
+	pkgDir := filepath.Join(tmpDir, "tests", "pkg")
+	subDir := filepath.Join(tmpDir, "tests", "pkg", "sub")
+	require.NoError(t, os.MkdirAll(pkgDir, 0755))
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+
+	// Write minimal *_test.go files
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "pkg_test.go"), []byte("package pkg_test\nimport \"testing\"\nfunc TestX(t *testing.T){}\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "sub_test.go"), []byte("package sub_test\nimport \"testing\"\nfunc TestY(t *testing.T){}\n"), 0644))
+
+	// Create validators.yaml with package-only blacklist (relative to TestDir)
+	validators := `gates:
+  - id: black
+    tests:
+      - package: ./pkg
+`
+	cfgPath := filepath.Join(tmpDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(validators), 0644))
+
+	// Create registry in gateless mode with exclude gate
+	reg, err := NewRegistry(Config{
+		Log:                 log.New(),
+		GatelessMode:        true,
+		TestDir:             filepath.Join(tmpDir, "tests"),
+		ValidatorConfigFile: cfgPath,
+		ExcludeGates:        []string{"black"},
+	})
+	require.NoError(t, err)
+
+	vals := reg.GetValidators()
+	// Expect zero validators after blacklist matches prefix (both ./tests/pkg and ./tests/pkg/sub)
+	assert.Len(t, vals, 0, "all discovered tests under ./tests/pkg should be excluded by prefix blacklist")
+}
+
+func TestExcludeGates_Inheritance(t *testing.T) {
+	// Excluding a gate should also exclude tests it inherits from parents
+	tmpDir := t.TempDir()
+
+	cfg := `gates:
+  - id: parent
+    tests:
+      - name: TParent
+        package: ./pkg
+  - id: child
+    inherits: [parent]
+    tests:
+      - name: TChild
+        package: ./pkg
+  - id: base
+    tests:
+      - name: TKeep
+        package: ./pkg2
+`
+	cfgPath := filepath.Join(tmpDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0644))
+
+	reg, err := NewRegistry(Config{
+		ValidatorConfigFile: cfgPath,
+		ExcludeGates:        []string{"child"},
+	})
+	require.NoError(t, err)
+
+	vals := reg.GetValidators()
+	// Expect that TParent and TChild tuples are excluded everywhere; only TKeep remains
+	for _, v := range vals {
+		assert.Equal(t, types.ValidatorTypeTest, v.Type)
+		assert.False(t, v.FuncName == "TParent" && v.Package == "./pkg")
+		assert.False(t, v.FuncName == "TChild" && v.Package == "./pkg")
+		assert.True(t, v.FuncName == "TKeep" || v.Package == "./pkg2")
+	}
+}
+
 func TestRegistryGatelessMode(t *testing.T) {
 	// Create temporary directory for the test
 	tmpDir := t.TempDir()

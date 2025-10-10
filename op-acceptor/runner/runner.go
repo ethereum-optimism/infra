@@ -176,9 +176,6 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 	} else {
 		validators = cfg.Registry.GetValidators()
 	}
-	if len(validators) == 0 {
-		return nil, fmt.Errorf("no validators found")
-	}
 
 	if cfg.GoBinary == "" {
 		cfg.GoBinary = "go" // Default to "go" if not specified
