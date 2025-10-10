@@ -150,7 +150,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, fmt.Errorf("invalid orchestrator: %s", config.Orchestrator)
 	}
 
-	config.Log.Info("Using network name for metrics", "network", networkName)
+	config.Log.Debug("Using network name for metrics", "network", networkName)
 
 	// Create runner with registry
 	targetGate := config.TargetGate
@@ -386,7 +386,7 @@ func (n *nat) runTests(ctx context.Context) error {
 
 	// Generate a runID for this test run
 	runID := uuid.New().String()
-	n.config.Log.Info("Generated new runID for test run", "runID", runID)
+	n.config.Log.Debug("Generated new runID for test run", "runID", runID)
 
 	// Create a new file logger with the runID
 	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
@@ -498,7 +498,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	if !n.config.FlakeShake {
 		reproBlurb := "\nTo reproduce this run, set the following environment variables:\n" + n.runner.ReproducibleEnv().String()
 
-		n.config.Log.Info("Printing results table")
+		n.config.Log.Debug("Printing results table")
 		n.printResultsTable(n.result.RunID)
 		for _, line := range strings.Split(reproBlurb, "\n") {
 			n.config.Log.Info(line)

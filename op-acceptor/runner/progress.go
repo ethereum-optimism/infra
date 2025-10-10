@@ -178,7 +178,7 @@ func (c *consoleProgressIndicator) reportProgress() {
 		"longestRunning", detailsStr,
 	}
 
-	c.logger.Info("progress update", logFields...)
+	c.logger.Info("Progress update", logFields...)
 }
 
 // Stop stops the progress indicator

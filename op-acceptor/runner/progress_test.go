@@ -74,7 +74,7 @@ gates:
 			defer mu.Unlock()
 
 			// Capture different types of progress-related log messages
-			if strings.Contains(msg, "progress update") && strings.Contains(msg, "gate=progress-gate") {
+			if strings.Contains(msg, "Progress update") && strings.Contains(msg, "gate=progress-gate") {
 				progressLogs = append(progressLogs, msg)
 			} else if strings.Contains(msg, "Starting gate") && strings.Contains(msg, "progress-gate") {
 				gateStartLogs = append(gateStartLogs, msg)
