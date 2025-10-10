@@ -582,7 +582,7 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 	pkgMeta.RunAll = false
 	pkgMeta.FuncName = ""
 
-	r.log.Info("Running entire package as single process", "package", pkgMeta.Package)
+	r.log.Debug("Running package as single process", "package", pkgMeta.Package)
 	res, err := r.runSingleTest(ctx, pkgMeta)
 	if res != nil {
 		// Preserve the caller intent for reporting
@@ -1612,9 +1612,8 @@ func (r *runner) determineConcurrency(numWorkItems int) int {
 	}
 
 	// 2. Cap at reasonable upper bound to avoid resource exhaustion
-	maxReasonableConcurrency := 16 // Reasonable upper limit for most systems
-	if targetConcurrency > maxReasonableConcurrency {
-		targetConcurrency = maxReasonableConcurrency
+	if targetConcurrency > MaxReasonableConcurrency {
+		targetConcurrency = MaxReasonableConcurrency
 	}
 
 	// 3. Finally, never exceed number of work items (most important constraint)
@@ -1627,7 +1626,7 @@ func (r *runner) determineConcurrency(numWorkItems int) int {
 		"baseConcurrency", baseConcurrency,
 		"targetConcurrency", targetConcurrency,
 		"workItems", numWorkItems,
-		"reasoning", "I/O-bound acceptance tests with network and blockchain operations")
+	)
 
 	return targetConcurrency
 }

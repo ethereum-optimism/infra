@@ -28,4 +28,7 @@ const (
 
 	// Raw JSON sink type identifier
 	RawJSONSinkType = "raw_json"
+
+	// MaxReasonableConcurrency caps auto-determined concurrency to avoid resource exhaustion
+	MaxReasonableConcurrency = 32
 )

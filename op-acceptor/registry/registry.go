@@ -97,7 +97,7 @@ func (r *Registry) loadGatelessValidators() error {
 		return fmt.Errorf("no test packages found in directory: %s", r.config.TestDir)
 	}
 
-	r.config.Log.Info("Found test packages", "count", len(packages), "packages", packages)
+	r.config.Log.Debug("Found test packages", "count", len(packages), "packages", packages)
 
 	// Create synthetic validators for each discovered package
 	var validators []types.ValidatorMetadata
