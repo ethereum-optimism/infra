@@ -32,7 +32,7 @@ func TestDetermineConcurrency(t *testing.T) {
 			name:            "Auto-determine with many work items",
 			userConcurrency: 0, // auto-determine
 			numWorkItems:    20,
-			expectedRange:   [2]int{1, 16}, // Should cap at reasonable max
+			expectedRange:   [2]int{1, MaxReasonableConcurrency}, // Should cap at reasonable max
 		},
 		{
 			name:               "User override within work items",
@@ -122,7 +122,7 @@ func TestConcurrencyHeuristics(t *testing.T) {
 
 	// General constraints
 	assert.GreaterOrEqual(t, actualConcurrency, 1, "Should have at least 1 worker")
-	assert.LessOrEqual(t, actualConcurrency, 16, "Should cap at reasonable maximum")
+	assert.LessOrEqual(t, actualConcurrency, MaxReasonableConcurrency, "Should cap at reasonable maximum")
 	assert.LessOrEqual(t, actualConcurrency, numWorkItems, "Should not exceed work items")
 
 	t.Logf("CPU cores: %d, determined concurrency: %d", numCPU, actualConcurrency)

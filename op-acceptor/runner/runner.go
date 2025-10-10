@@ -1612,9 +1612,8 @@ func (r *runner) determineConcurrency(numWorkItems int) int {
 	}
 
 	// 2. Cap at reasonable upper bound to avoid resource exhaustion
-	maxReasonableConcurrency := 32 // Reasonable upper limit for most systems
-	if targetConcurrency > maxReasonableConcurrency {
-		targetConcurrency = maxReasonableConcurrency
+	if targetConcurrency > MaxReasonableConcurrency {
+		targetConcurrency = MaxReasonableConcurrency
 	}
 
 	// 3. Finally, never exceed number of work items (most important constraint)
