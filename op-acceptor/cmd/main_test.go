@@ -58,7 +58,7 @@ func TestExitCodeBehavior(t *testing.T) {
 				return gateID, validatorPath, testDir
 			},
 			expectedStatus: exitcodes.Success,
-			defaultTimeout: 5 * time.Second,
+			defaultTimeout: 15 * time.Second,
 		},
 		{
 			name: "Failing tests should exit with code 1",

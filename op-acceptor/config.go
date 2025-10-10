@@ -104,6 +104,15 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 
 	excludeGates := parseExcludeGates(ctx.String(flags.ExcludeGates.Name))
 
+	// Conflict: selected gate is also excluded
+	if gate != "" {
+		for _, eg := range excludeGates {
+			if eg == gate {
+				return nil, fmt.Errorf("the selected gate '%s' is also specified in --exclude-gates; remove it from exclusions or choose a different gate", gate)
+			}
+		}
+	}
+
 	return &Config{
 		TestDir:              absTestDir,
 		ValidatorConfig:      absValidatorConfig,

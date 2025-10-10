@@ -177,7 +177,7 @@ var (
 		Name:    "exclude-gates",
 		Value:   "",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "EXCLUDE_GATES"),
-		Usage:   "Comma-separated list of gate IDs whose tests are excluded from execution.",
+		Usage:   "Comma-separated list of gate IDs to blacklist globally across all modes.",
 	}
 )
 

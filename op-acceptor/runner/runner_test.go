@@ -292,6 +292,39 @@ func TestTwo(t *testing.T) {
 		assert.Len(t, gate.Tests, 2, "should have two direct tests")
 	})
 
+	// Separate test to verify all-excluded becomes a no-op
+	t.Run("all tests excluded becomes noop", func(t *testing.T) {
+		cfgContent := []byte(`
+gates:
+  - id: base
+    tests:
+      - name: TestT1
+        package: "./feature"
+`)
+		testContent2 := []byte(`
+package feature_test
+
+import "testing"
+
+func TestT1(t *testing.T) { t.Log("T1 running") }
+`)
+		_ = setupTestRunner(t, testContent2, cfgContent)
+		// Write a temp validators file
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "validators.yaml")
+		require.NoError(t, os.WriteFile(cfgPath, cfgContent, 0644))
+
+		reg, err := registry.NewRegistry(registry.Config{ValidatorConfigFile: cfgPath, ExcludeGates: []string{"base"}})
+		require.NoError(t, err)
+
+		rr, err := NewTestRunner(Config{Registry: reg, WorkDir: t.TempDir(), Log: log.New()})
+		require.NoError(t, err)
+
+		res, err := rr.RunAllTests(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 0, res.Stats.Total)
+	})
+
 	t.Run("gate with inheritance", func(t *testing.T) {
 		configContent := []byte(`
 gates:

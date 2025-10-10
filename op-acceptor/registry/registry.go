@@ -155,6 +155,12 @@ func (r *Registry) applyExcludeGates(cfgPath string, gates []string) {
 		return
 	}
 
+	// Resolve inheritance so that excluded gates include tests inherited from parents
+	if err := r.validateGateInheritance(cfg); err != nil {
+		r.config.Log.Warn("Failed to resolve gate inheritance for exclude-gates; skipping filter", "error", err)
+		return
+	}
+
 	// Index gates by ID
 	gateIndex := make(map[string]types.GateConfig)
 	for _, g := range cfg.Gates {
@@ -211,18 +217,11 @@ func (r *Registry) applyExcludeGates(cfgPath string, gates []string) {
 			continue
 		}
 		// Match by tuple or package
-		if _, ok := s.byTuple[TestRef{Package: v.Package, Name: v.FuncName}]; ok {
+		if _, ok := s.byTuple[TestRef{Package: v.Package, Name: v.FuncName}]; ok || packagePrefixBlacklisted(v.Package, s.byPackage) {
 			excludedCount++
-			if len(excludedPrev) < 20 {
-				excludedPrev = append(excludedPrev, formatRef(v.Package, v.FuncName))
-			}
-			continue
-		}
-		if _, ok := s.byPackage[v.Package]; ok {
-			excludedCount++
-			if len(excludedPrev) < 20 {
-				excludedPrev = append(excludedPrev, formatRef(v.Package, ""))
-			}
+			name := v.FuncName
+			excludedPrev = append(excludedPrev, formatRef(v.Package, name))
+			r.config.Log.Info("Excluded by blacklist", "package", v.Package, "name", v.FuncName)
 			continue
 		}
 		filtered = append(filtered, v)
@@ -230,10 +229,21 @@ func (r *Registry) applyExcludeGates(cfgPath string, gates []string) {
 	r.validators = filtered
 
 	if excludedCount > 0 {
-		r.config.Log.Info("Excluding tests from gates", "count", excludedCount, "gates", gates)
+		r.config.Log.Info("Blacklist removed tests", "count", excludedCount, "excluded_gates", gates)
 		r.config.Log.Debug("Excluded tests preview", "tests", excludedPrev)
 		r.config.Log.Debug("Validators filtered", "before", original, "after", len(filtered))
 	}
+}
+
+// packagePrefixBlacklisted returns true if pkg matches or is a subpackage of any blacklisted package entry.
+// It matches exact import path prefix on segment boundaries: A blocks A and A/sub, but not Afoo.
+func packagePrefixBlacklisted(pkg string, byPackage map[string]struct{}) bool {
+	for p := range byPackage {
+		if pkg == p || (strings.HasPrefix(pkg, p) && (len(pkg) == len(p) || pkg[len(p)] == '/')) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatRef(pkg string, name string) string {
