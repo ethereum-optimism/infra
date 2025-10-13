@@ -60,11 +60,11 @@ DEVNET_ENV_URL=kt://isthmus-devnet op-acceptor \
 ```
 
 ## Excluding tests via skip gates
-You can exclude tests that belong to one or more gates from every run.
+You can exclude tests that belong to one or more gates from every run. Excluded gates act as a global blacklist across all selection modes (gate and gateless). Any test/package listed in excluded gates will not run, even if included elsewhere or discovered via filesystem.
 
-- **Flag**: `--exclude-gates` (comma-separated gate IDs). Default: no exclusions.
+- **Flag**: `--exclude-gates` (comma-separated gate IDs). Default: no exclusions. If a selected `--gate` is also listed in `--exclude-gates`, an error is returned.
 - **Env var**: `ACCEPTOR_EXCLUDE_GATES` overrides the flag if set. Set to an empty string to disable all exclusions.
-- **Gateless note**: in gateless mode, exclusions are applied only if a validators YAML is provided (so gate membership can be resolved).
+- **Gateless note**: exclusions are applied using the provided validators YAML; package-only entries blacklist by import-path prefix segment match.
 
 Examples:
 

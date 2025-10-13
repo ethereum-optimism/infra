@@ -486,6 +486,16 @@ func (n *nat) runTests(ctx context.Context) error {
 			return NewRuntimeError(err)
 		}
 		n.result = result
+
+		// If blacklist removed all selected tests, report and exit successfully
+		if n.result != nil && n.result.Stats.Total == 0 {
+			n.config.Log.Info("No tests to run after applying blacklist")
+			// Complete the file logging to close writers
+			if n.fileLogger != nil {
+				_ = n.fileLogger.CompleteWithTiming(n.result.RunID, n.result.WallClockTime)
+			}
+			return nil
+		}
 	}
 
 	// We should have the same runID from the test run result (skip for flake-shake mode)
