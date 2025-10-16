@@ -451,7 +451,9 @@ def update_cluster_membership(network: str):
                 f"Successfully added {sequencer.sequencer_id} as {'voter' if sequencer.voting else 'non-voter'}"
             )
         except Exception as e:
-            print_warn(f"Failed to add {sequencer.sequencer_id} as voter: {e}")
+            print_warn(
+                f"Failed to add {sequencer.sequencer_id} as {'voter' if sequencer.voting else 'non-voter'}: {e}"
+            )
     if error:
         raise typer.Exit(code=1)
 
