@@ -103,6 +103,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 	defer backendServer.Close()
 
 	backend := NewBackend("test-backend", backendServer.URL, "", semaphore.NewWeighted(1))
+	require.Equal(t, []int{400, 413}, backend.allowedStatusCodes) // default allowed status codes
 	backendGroup := &BackendGroup{
 		Name:     "test-group",
 		Backends: []*Backend{backend},
