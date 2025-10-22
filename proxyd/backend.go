@@ -1583,6 +1583,7 @@ func stripXFF(xff string) string {
 	return strings.TrimSpace(ipList[0])
 }
 
+// getLastXFF extracts the last IP from X-Forwarded-For chain (e.g., "1.2.3.4, 5.6.7.8" -> "5.6.7.8")
 func getLastXFF(xff string) string {
 	if xff == "" {
 		return ""

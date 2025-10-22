@@ -33,7 +33,6 @@ type ServerConfig struct {
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
 	PublicAccess          bool `toml:"public_access"`
 	EnableTxHashLogging   bool `toml:"enable_tx_hash_logging"`
-	// EnableXFFVerification enables verification that the last entry in X-Forwarded-For matches the remote address
 	EnableXFFVerification bool `toml:"enable_xff_verification"`
 }
 
