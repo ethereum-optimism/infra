@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,6 +188,14 @@ func NewServer(
 	rateLimitHeader := defaultRateLimitHeader
 	if rateLimitConfig.IPHeaderOverride != "" {
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
+	}
+
+	if enableXFFVerification && strings.ToLower(rateLimitHeader) != "x-forwarded-for" {
+		log.Warn(
+			"X-Forwarded-For verification is enabled but rate limit header is not X-Forwarded-For, verification will be disabled",
+			"rate_limit_header", rateLimitHeader,
+		)
+		enableXFFVerification = false
 	}
 
 	return &Server{

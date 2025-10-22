@@ -50,51 +50,82 @@ func TestXFFVerification(t *testing.T) {
 	tests := []struct {
 		name                  string
 		enableXFFVerification bool
-		xffHeader             string
+		rateLimitHeader       string
+		headerValue           string
 		remoteAddr            string
 		expectedXFF           string
 	}{
 		{
 			name:                  "verification enabled - matching last XFF and remote addr",
 			enableXFFVerification: true,
-			xffHeader:             "1.2.3.4, 5.6.7.8",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "1.2.3.4, 5.6.7.8",
 			remoteAddr:            "5.6.7.8:12345",
 			expectedXFF:           "1.2.3.4, 5.6.7.8",
 		},
 		{
 			name:                  "verification enabled - non-matching last XFF and remote addr",
 			enableXFFVerification: true,
-			xffHeader:             "1.2.3.4, 5.6.7.8",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "1.2.3.4, 5.6.7.8",
 			remoteAddr:            "9.10.11.12:12345",
 			expectedXFF:           "9.10.11.12",
 		},
 		{
 			name:                  "verification disabled - non-matching last XFF and remote addr",
 			enableXFFVerification: false,
-			xffHeader:             "1.2.3.4, 5.6.7.8",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "1.2.3.4, 5.6.7.8",
 			remoteAddr:            "9.10.11.12:12345",
 			expectedXFF:           "1.2.3.4, 5.6.7.8",
 		},
 		{
 			name:                  "verification enabled - single IP XFF matching remote addr",
 			enableXFFVerification: true,
-			xffHeader:             "1.2.3.4",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "1.2.3.4",
 			remoteAddr:            "1.2.3.4:12345",
 			expectedXFF:           "1.2.3.4",
 		},
 		{
 			name:                  "verification enabled - single IP XFF not matching remote addr",
 			enableXFFVerification: true,
-			xffHeader:             "1.2.3.4",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "1.2.3.4",
 			remoteAddr:            "5.6.7.8:12345",
 			expectedXFF:           "5.6.7.8",
 		},
 		{
 			name:                  "no XFF header",
 			enableXFFVerification: true,
-			xffHeader:             "",
+			rateLimitHeader:       "X-Forwarded-For",
+			headerValue:           "",
 			remoteAddr:            "1.2.3.4:12345",
 			expectedXFF:           "1.2.3.4",
+		},
+		{
+			name:                  "verification disabled with CF-Connecting-IP",
+			enableXFFVerification: false,
+			rateLimitHeader:       "CF-Connecting-IP",
+			headerValue:           "1.2.3.4",
+			remoteAddr:            "5.6.7.8:12345",
+			expectedXFF:           "1.2.3.4",
+		},
+		{
+			name:                  "verification disabled with custom header",
+			enableXFFVerification: false,
+			rateLimitHeader:       "X-Real-IP",
+			headerValue:           "1.2.3.4",
+			remoteAddr:            "5.6.7.8:12345",
+			expectedXFF:           "1.2.3.4",
+		},
+		{
+			name:                  "verification enabled with lowercase x-forwarded-for - should verify",
+			enableXFFVerification: true,
+			rateLimitHeader:       "x-forwarded-for",
+			headerValue:           "1.2.3.4, 5.6.7.8",
+			remoteAddr:            "9.10.11.12:12345",
+			expectedXFF:           "9.10.11.12",
 		},
 	}
 
@@ -102,14 +133,14 @@ func TestXFFVerification(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := &Server{
 				enableXFFVerification: tt.enableXFFVerification,
-				rateLimitHeader:       "X-Forwarded-For",
+				rateLimitHeader:       tt.rateLimitHeader,
 				authenticatedPaths:    make(map[string]string),
 			}
 
 			req := httptest.NewRequest("POST", "/", nil)
 			req.RemoteAddr = tt.remoteAddr
-			if tt.xffHeader != "" {
-				req.Header.Set("X-Forwarded-For", tt.xffHeader)
+			if tt.headerValue != "" {
+				req.Header.Set(tt.rateLimitHeader, tt.headerValue)
 			}
 
 			w := httptest.NewRecorder()
