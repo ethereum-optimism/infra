@@ -21,6 +21,7 @@ import (
 	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/websocket"
@@ -33,6 +34,11 @@ const (
 	JSONRPCVersion       = "2.0"
 	JSONRPCErrorInternal = -32000
 	notFoundRpcError     = -32601
+)
+
+var (
+	// maxHexUint64 is used as a placeholder for "latest" block when validating block ranges
+	maxHexUint64 = hexutil.Uint64(math.MaxUint64)
 )
 
 var (
@@ -926,6 +932,7 @@ type BackendGroup struct {
 	FallbackBackends       map[string]bool
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
+	maxBlockRange          uint64
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -969,6 +976,9 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+	} else {
+		// For non-consensus-aware groups, still validate block range limits if configured
+		rpcReqs, overriddenResponses = bg.ValidateBlockRangeLimits(rpcReqs, overriddenResponses)
 	}
 
 	rpcRequestsTotal.Inc()
@@ -1737,4 +1747,109 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		}
 	}
 	return rewrittenReqs, overriddenResponses
+}
+
+// ValidateBlockRangeLimits validates eth_getLogs and eth_newFilter requests against maxBlockRange
+// This method works for all backend groups regardless of consensus awareness
+func (bg *BackendGroup) ValidateBlockRangeLimits(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes) ([]*RPCReq, []*indexedReqRes) {
+	if bg.maxBlockRange == 0 {
+		// No limit configured, allow all requests through
+		return rpcReqs, overriddenResponses
+	}
+
+	validReqs := make([]*RPCReq, 0, len(rpcReqs))
+
+	for i, req := range rpcReqs {
+		// Only validate eth_getLogs and eth_newFilter
+		if req.Method != "eth_getLogs" && req.Method != "eth_newFilter" {
+			validReqs = append(validReqs, req)
+			continue
+		}
+
+		// Parse the request parameters
+		var params []map[string]interface{}
+		if err := json.Unmarshal(req.Params, &params); err != nil || len(params) == 0 {
+			// Invalid params, let it through so backend can return proper error
+			validReqs = append(validReqs, req)
+			continue
+		}
+
+		// Extract fromBlock and toBlock
+		fromBlockRaw, hasFrom := params[0]["fromBlock"]
+		toBlockRaw, hasTo := params[0]["toBlock"]
+
+		// If neither is specified, let it through (will use backend's defaults)
+		if !hasFrom && !hasTo {
+			validReqs = append(validReqs, req)
+			continue
+		}
+
+		// Convert to block numbers
+		// Use a very large number (10 billion) as "latest" for range calculation purposes
+		// This is safe because we only care about the range, not the actual block numbers
+		maxBlock := uint64(10000000000)
+
+		fromBlock := uint64(0)
+		if hasFrom {
+			if fromStr, ok := fromBlockRaw.(string); ok {
+				if fromStr == "latest" || fromStr == "pending" || fromStr == "safe" || fromStr == "finalized" {
+					fromBlock = maxBlock
+				} else if fromStr == "earliest" {
+					fromBlock = 0
+				} else {
+					decoded, err := hexutil.DecodeUint64(fromStr)
+					if err == nil {
+						fromBlock = decoded
+					}
+				}
+			}
+		}
+
+		toBlock := maxBlock
+		if hasTo {
+			if toStr, ok := toBlockRaw.(string); ok {
+				if toStr == "latest" || toStr == "pending" || toStr == "safe" || toStr == "finalized" {
+					toBlock = maxBlock
+				} else if toStr == "earliest" {
+					toBlock = 0
+				} else {
+					decoded, err := hexutil.DecodeUint64(toStr)
+					if err == nil {
+						toBlock = decoded
+					}
+				}
+			}
+		}
+
+		// Check if range exceeds limit
+		var blockRange uint64
+		if toBlock >= fromBlock {
+			blockRange = toBlock - fromBlock
+		} else {
+			// Invalid range (toBlock < fromBlock), let backend handle it
+			validReqs = append(validReqs, req)
+			continue
+		}
+
+		if blockRange > bg.maxBlockRange {
+			// Range exceeds limit, reject request
+			res := RPCRes{
+				JSONRPC: JSONRPCVersion,
+				ID:      req.ID,
+				Error: ErrInvalidParams(
+					fmt.Sprintf("block range greater than %d max", bg.maxBlockRange),
+				),
+			}
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+		} else {
+			// Range is within limit
+			validReqs = append(validReqs, req)
+		}
+	}
+
+	return validReqs, overriddenResponses
 }

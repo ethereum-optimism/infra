@@ -298,6 +298,12 @@ func Start(config *Config) (*Server, func(), error) {
 				)
 		}
 
+		// Use MaxBlockRange if set, otherwise fall back to ConsensusMaxBlockRange for backward compatibility
+		maxBlockRange := bg.MaxBlockRange
+		if maxBlockRange == 0 && bg.ConsensusMaxBlockRange > 0 {
+			maxBlockRange = bg.ConsensusMaxBlockRange
+		}
+
 		backendGroups[bgName] = &BackendGroup{
 			Name:                   bgName,
 			Backends:               backends,
@@ -305,6 +311,7 @@ func Start(config *Config) (*Server, func(), error) {
 			FallbackBackends:       fallbackBackends,
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
+			maxBlockRange:          maxBlockRange,
 		}
 	}
 
