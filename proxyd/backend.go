@@ -1583,6 +1583,27 @@ func stripXFF(xff string) string {
 	return strings.TrimSpace(ipList[0])
 }
 
+func getLastXFF(xff string) string {
+	if xff == "" {
+		return ""
+	}
+	ipList := strings.Split(xff, ",")
+	return strings.TrimSpace(ipList[len(ipList)-1])
+}
+
+// extractIPFromAddr extracts IP from address string (e.g., "1.2.3.4:8080" -> "1.2.3.4")
+func extractIPFromAddr(addr string) string {
+	if addr == "" {
+		return ""
+	}
+	// Split by last colon to handle IPv6 addresses
+	lastColon := strings.LastIndex(addr, ":")
+	if lastColon == -1 {
+		return addr
+	}
+	return addr[:lastColon]
+}
+
 type BackendGroupRPCResponse struct {
 	RPCRes   []*RPCRes
 	ServedBy string

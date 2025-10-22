@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -88,6 +87,7 @@ type Server struct {
 	interopStrategy         InteropStrategy
 	publicAccess            bool
 	enableTxHashLogging     bool
+	enableXFFVerification   bool
 }
 
 type limiterFunc func(method string) bool
@@ -116,6 +116,7 @@ func NewServer(
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
 	enableTxHashLogging bool,
+	enableXFFVerification bool,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -218,6 +219,7 @@ func NewServer(
 		interopValidatingConfig: interopValidatingConfig,
 		interopStrategy:         interopStrategy,
 		enableTxHashLogging:     enableTxHashLogging,
+		enableXFFVerification:   enableXFFVerification,
 	}, nil
 }
 
@@ -726,11 +728,22 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
-	if xff == "" {
-		ipPort := strings.Split(r.RemoteAddr, ":")
-		if len(ipPort) == 2 {
-			xff = ipPort[0]
+	remoteIP := extractIPFromAddr(r.RemoteAddr)
+
+	if s.enableXFFVerification && xff != "" {
+		lastXFF := getLastXFF(xff)
+		if lastXFF != remoteIP {
+			// Possible spoofing attempt detected
+			log.Warn(
+				"X-Forwarded-For verification failed, using remote address",
+				"xff", xff,
+				"last_xff", lastXFF,
+				"remote_addr", remoteIP,
+			)
+			xff = remoteIP
 		}
+	} else if xff == "" {
+		xff = remoteIP
 	}
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck

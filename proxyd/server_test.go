@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -43,4 +44,80 @@ func TestConvertSendReqToSendTx_Fusaka(t *testing.T) {
 	}
 	t.Run("blob without cell proofs", tfn(txs.OffchainTxV0, 2))
 	t.Run("blob with cell proofs", tfn(txs.OffchainTxV1, 256))
+}
+
+func TestXFFVerification(t *testing.T) {
+	tests := []struct {
+		name                  string
+		enableXFFVerification bool
+		xffHeader             string
+		remoteAddr            string
+		expectedXFF           string
+	}{
+		{
+			name:                  "verification enabled - matching last XFF and remote addr",
+			enableXFFVerification: true,
+			xffHeader:             "1.2.3.4, 5.6.7.8",
+			remoteAddr:            "5.6.7.8:12345",
+			expectedXFF:           "1.2.3.4, 5.6.7.8",
+		},
+		{
+			name:                  "verification enabled - non-matching last XFF and remote addr",
+			enableXFFVerification: true,
+			xffHeader:             "1.2.3.4, 5.6.7.8",
+			remoteAddr:            "9.10.11.12:12345",
+			expectedXFF:           "9.10.11.12",
+		},
+		{
+			name:                  "verification disabled - non-matching last XFF and remote addr",
+			enableXFFVerification: false,
+			xffHeader:             "1.2.3.4, 5.6.7.8",
+			remoteAddr:            "9.10.11.12:12345",
+			expectedXFF:           "1.2.3.4, 5.6.7.8",
+		},
+		{
+			name:                  "verification enabled - single IP XFF matching remote addr",
+			enableXFFVerification: true,
+			xffHeader:             "1.2.3.4",
+			remoteAddr:            "1.2.3.4:12345",
+			expectedXFF:           "1.2.3.4",
+		},
+		{
+			name:                  "verification enabled - single IP XFF not matching remote addr",
+			enableXFFVerification: true,
+			xffHeader:             "1.2.3.4",
+			remoteAddr:            "5.6.7.8:12345",
+			expectedXFF:           "5.6.7.8",
+		},
+		{
+			name:                  "no XFF header",
+			enableXFFVerification: true,
+			xffHeader:             "",
+			remoteAddr:            "1.2.3.4:12345",
+			expectedXFF:           "1.2.3.4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &Server{
+				enableXFFVerification: tt.enableXFFVerification,
+				rateLimitHeader:       "X-Forwarded-For",
+				authenticatedPaths:    make(map[string]string),
+			}
+
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.xffHeader != "" {
+				req.Header.Set("X-Forwarded-For", tt.xffHeader)
+			}
+
+			w := httptest.NewRecorder()
+			ctx := server.populateContext(w, req)
+			require.NotNil(t, ctx)
+
+			actualXFF := GetXForwardedFor(ctx)
+			require.Equal(t, tt.expectedXFF, actualXFF)
+		})
+	}
 }

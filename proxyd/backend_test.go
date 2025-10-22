@@ -29,6 +29,39 @@ func TestStripXFF(t *testing.T) {
 	}
 }
 
+func TestGetLastXFF(t *testing.T) {
+	tests := []struct {
+		in, out string
+	}{
+		{"1.2.3, 4.5.6, 7.8.9", "7.8.9"},
+		{"1.2.3,4.5.6", "4.5.6"},
+		{" 1.2.3 , 4.5.6 ", "4.5.6"},
+		{"192.168.1.1", "192.168.1.1"},
+		{"", ""},
+	}
+
+	for _, test := range tests {
+		actual := getLastXFF(test.in)
+		assert.Equal(t, test.out, actual)
+	}
+}
+
+func TestExtractIPFromAddr(t *testing.T) {
+	tests := []struct {
+		in, out string
+	}{
+		{"192.168.1.1:8080", "192.168.1.1"},
+		{"192.168.1.1", "192.168.1.1"},
+		{"[::1]:8080", "[::1]"},
+		{"", ""},
+	}
+
+	for _, test := range tests {
+		actual := extractIPFromAddr(test.in)
+		assert.Equal(t, test.out, actual)
+	}
+}
+
 func TestLimitedHTTPClientDoLimited(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -136,6 +169,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		InteropValidationConfig{},              // interopValidatingConfig
 		NewFirstSupervisorStrategy([]string{}), // interopStrategy
 		false,                                  // enableTxHashLogging
+		false,                                  // enableXFFVerification
 	)
 	require.NoError(t, err)
 
