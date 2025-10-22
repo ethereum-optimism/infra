@@ -37,11 +37,6 @@ const (
 )
 
 var (
-	// maxHexUint64 is used as a placeholder for "latest" block when validating block ranges
-	maxHexUint64 = hexutil.Uint64(math.MaxUint64)
-)
-
-var (
 	ErrParseErr = &RPCErr{
 		Code:          -32700,
 		Message:       "parse error",
@@ -977,7 +972,6 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	if bg.Consensus != nil {
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	} else {
-		// For non-consensus-aware groups, still validate block range limits if configured
 		rpcReqs, overriddenResponses = bg.ValidateBlockRangeLimits(rpcReqs, overriddenResponses)
 	}
 
@@ -1749,90 +1743,89 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 	return rewrittenReqs, overriddenResponses
 }
 
-// ValidateBlockRangeLimits validates eth_getLogs and eth_newFilter requests against maxBlockRange
-// This method works for all backend groups regardless of consensus awareness
+// ValidateBlockRangeLimits validates eth_getLogs and eth_newFilter requests against maxBlockRange.
+// When maxBlockRange is configured, only numeric block parameters (hex numbers or "earliest") are allowed.
+// Requests with block tags (latest/pending/safe/finalized) are rejected to prevent unbounded queries.
 func (bg *BackendGroup) ValidateBlockRangeLimits(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes) ([]*RPCReq, []*indexedReqRes) {
 	if bg.maxBlockRange == 0 {
-		// No limit configured, allow all requests through
 		return rpcReqs, overriddenResponses
 	}
 
 	validReqs := make([]*RPCReq, 0, len(rpcReqs))
 
 	for i, req := range rpcReqs {
-		// Only validate eth_getLogs and eth_newFilter
 		if req.Method != "eth_getLogs" && req.Method != "eth_newFilter" {
 			validReqs = append(validReqs, req)
 			continue
 		}
 
-		// Parse the request parameters
 		var params []map[string]interface{}
 		if err := json.Unmarshal(req.Params, &params); err != nil || len(params) == 0 {
-			// Invalid params, let it through so backend can return proper error
 			validReqs = append(validReqs, req)
 			continue
 		}
 
-		// Extract fromBlock and toBlock
 		fromBlockRaw, hasFrom := params[0]["fromBlock"]
 		toBlockRaw, hasTo := params[0]["toBlock"]
 
-		// If neither is specified, let it through (will use backend's defaults)
-		if !hasFrom && !hasTo {
-			validReqs = append(validReqs, req)
-			continue
-		}
+		var fromBlock, toBlock uint64
+		var err error
 
-		// Convert to block numbers
-		// Use a very large number (10 billion) as "latest" for range calculation purposes
-		// This is safe because we only care about the range, not the actual block numbers
-		maxBlock := uint64(10000000000)
-
-		fromBlock := uint64(0)
 		if hasFrom {
-			if fromStr, ok := fromBlockRaw.(string); ok {
-				if fromStr == "latest" || fromStr == "pending" || fromStr == "safe" || fromStr == "finalized" {
-					fromBlock = maxBlock
-				} else if fromStr == "earliest" {
-					fromBlock = 0
-				} else {
-					decoded, err := hexutil.DecodeUint64(fromStr)
-					if err == nil {
-						fromBlock = decoded
-					}
+			fromBlock, err = parseBlockParam(fromBlockRaw)
+			if err != nil {
+				res := RPCRes{
+					JSONRPC: JSONRPCVersion,
+					ID:      req.ID,
+					Error:   ErrInvalidParams(fmt.Sprintf("invalid fromBlock: %s", err.Error())),
 				}
+				overriddenResponses = append(overriddenResponses, &indexedReqRes{
+					index: i,
+					req:   req,
+					res:   &res,
+				})
+				continue
 			}
-		}
-
-		toBlock := maxBlock
-		if hasTo {
-			if toStr, ok := toBlockRaw.(string); ok {
-				if toStr == "latest" || toStr == "pending" || toStr == "safe" || toStr == "finalized" {
-					toBlock = maxBlock
-				} else if toStr == "earliest" {
-					toBlock = 0
-				} else {
-					decoded, err := hexutil.DecodeUint64(toStr)
-					if err == nil {
-						toBlock = decoded
-					}
-				}
-			}
-		}
-
-		// Check if range exceeds limit
-		var blockRange uint64
-		if toBlock >= fromBlock {
-			blockRange = toBlock - fromBlock
 		} else {
-			// Invalid range (toBlock < fromBlock), let backend handle it
+			fromBlock = 0
+		}
+
+		if hasTo {
+			toBlock, err = parseBlockParam(toBlockRaw)
+			if err != nil {
+				res := RPCRes{
+					JSONRPC: JSONRPCVersion,
+					ID:      req.ID,
+					Error:   ErrInvalidParams(fmt.Sprintf("invalid toBlock: %s", err.Error())),
+				}
+				overriddenResponses = append(overriddenResponses, &indexedReqRes{
+					index: i,
+					req:   req,
+					res:   &res,
+				})
+				continue
+			}
+		} else {
+			res := RPCRes{
+				JSONRPC: JSONRPCVersion,
+				ID:      req.ID,
+				Error:   ErrInvalidParams("toBlock must be specified when max_block_range is configured"),
+			}
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			continue
+		}
+
+		if toBlock < fromBlock {
 			validReqs = append(validReqs, req)
 			continue
 		}
 
+		blockRange := toBlock - fromBlock
 		if blockRange > bg.maxBlockRange {
-			// Range exceeds limit, reject request
 			res := RPCRes{
 				JSONRPC: JSONRPCVersion,
 				ID:      req.ID,
@@ -1846,10 +1839,31 @@ func (bg *BackendGroup) ValidateBlockRangeLimits(rpcReqs []*RPCReq, overriddenRe
 				res:   &res,
 			})
 		} else {
-			// Range is within limit
 			validReqs = append(validReqs, req)
 		}
 	}
 
 	return validReqs, overriddenResponses
+}
+
+func parseBlockParam(raw interface{}) (uint64, error) {
+	str, ok := raw.(string)
+	if !ok {
+		return 0, fmt.Errorf("block parameter must be a string")
+	}
+
+	if str == "earliest" {
+		return 0, nil
+	}
+
+	if str == "latest" || str == "pending" || str == "safe" || str == "finalized" {
+		return 0, fmt.Errorf("block tags (latest/pending/safe/finalized) are not allowed when max_block_range is configured")
+	}
+
+	decoded, err := hexutil.DecodeUint64(str)
+	if err != nil {
+		return 0, fmt.Errorf("invalid hex block number")
+	}
+
+	return decoded, nil
 }

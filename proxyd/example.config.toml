@@ -100,11 +100,8 @@ consensus_receipts_target = "alchemy_getTransactionReceipts"
 [backend_groups]
 [backend_groups.main]
 backends = ["infura"]
-# Maximum block range allowed for eth_getLogs and eth_newFilter calls
-# This applies to ALL backend groups regardless of routing strategy
-# Prevents timeout exploitation by limiting the block range that can be queried
-# Industry standard limits: Alchemy/Infura typically use 2000-10000 blocks
-# If not set, no limit is enforced (not recommended for production)
+# Maximum block range for eth_getLogs and eth_newFilter (applies to all routing strategies)
+# Industry standard: Alchemy/Infura use 2000-10000 blocks
 max_block_range = 5000
 
 # Enable consensus awareness for backend group, making it act as a load balancer, default false

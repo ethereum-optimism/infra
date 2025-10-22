@@ -67,23 +67,58 @@ func TestEthGetLogsBlockRangeLimit(t *testing.T) {
 			errorMessage: "block range greater than 100 max",
 		},
 		{
-			name:         "eth_getLogs with only fromBlock (defaults toBlock to latest, exceeds limit)",
+			name:         "eth_getLogs with only fromBlock (toBlock required)",
 			method:       "eth_getLogs",
 			params:       `[{"fromBlock":"0x0"}]`,
 			expectError:  true,
-			errorMessage: "block range greater than 100 max",
+			errorMessage: "toBlock must be specified",
 		},
 		{
-			name:        "eth_getLogs with only toBlock (should default fromBlock to latest)",
+			name:        "eth_getLogs with only toBlock (fromBlock defaults to 0)",
 			method:      "eth_getLogs",
 			params:      `[{"toBlock":"0x64"}]`,
 			expectError: false,
 		},
 		{
-			name:        "eth_getLogs with no block params (should work)",
+			name:         "eth_getLogs with no block params (toBlock required)",
+			method:       "eth_getLogs",
+			params:       `[{}]`,
+			expectError:  true,
+			errorMessage: "toBlock must be specified",
+		},
+		{
+			name:         "eth_getLogs with latest tag (rejected)",
+			method:       "eth_getLogs",
+			params:       `[{"fromBlock":"0x0","toBlock":"latest"}]`,
+			expectError:  true,
+			errorMessage: "block tags (latest/pending/safe/finalized) are not allowed",
+		},
+		{
+			name:         "eth_getLogs with pending tag (rejected)",
+			method:       "eth_getLogs",
+			params:       `[{"fromBlock":"earliest","toBlock":"pending"}]`,
+			expectError:  true,
+			errorMessage: "block tags (latest/pending/safe/finalized) are not allowed",
+		},
+		{
+			name:        "eth_getLogs with earliest to earliest (0 range)",
 			method:      "eth_getLogs",
-			params:      `[{}]`,
+			params:      `[{"fromBlock":"earliest","toBlock":"earliest"}]`,
 			expectError: false,
+		},
+		{
+			name:         "eth_getLogs with safe tag (rejected)",
+			method:       "eth_getLogs",
+			params:       `[{"fromBlock":"0x0","toBlock":"safe"}]`,
+			expectError:  true,
+			errorMessage: "block tags (latest/pending/safe/finalized) are not allowed",
+		},
+		{
+			name:         "eth_getLogs with finalized tag (rejected)",
+			method:       "eth_getLogs",
+			params:       `[{"fromBlock":"0x0","toBlock":"finalized"}]`,
+			expectError:  true,
+			errorMessage: "block tags (latest/pending/safe/finalized) are not allowed",
 		},
 	}
 
@@ -94,13 +129,10 @@ func TestEthGetLogsBlockRangeLimit(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.expectError {
-				// Should receive error response
 				require.Contains(t, string(res), tt.errorMessage)
-				// Invalid params errors return 400 status
 				require.Equal(t, 400, code)
 			} else {
-				// Should succeed (either processed by backend or passed through)
-				// We don't check the exact response since the mock backend will handle it
+				require.NotContains(t, string(res), "invalid")
 				require.NotContains(t, string(res), "block range greater than")
 			}
 		})
