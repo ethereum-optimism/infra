@@ -2173,3 +2173,76 @@ gates:
 	require.NotEmpty(t, singleRes.Stdout)
 	assert.Contains(t, singleRes.Stdout, "alpha")
 }
+
+// Verifies that specifying a package glob ("./parent/...") in a gate includes sub-packages
+func TestGate_PackageGlobIncludesSubpackages(t *testing.T) {
+	ctx := context.Background()
+
+	// Gate config uses a glob to include all sub-packages under ./parent
+	configContent := []byte(`
+gates:
+  - id: glob-gate
+    description: "Gate with glob package"
+    suites:
+      glob-suite:
+        description: "Suite with globbed packages"
+        tests:
+          - package: "./parent/..."
+            run_all: true
+`)
+
+	// Initialize runner
+	r := setupTestRunner(t, nil, configContent)
+
+	// Create parent and child packages with tests
+	parentPkg := filepath.Join(r.workDir, "parent", "pkg1")
+	childPkg := filepath.Join(r.workDir, "parent", "child", "pkg2")
+	require.NoError(t, os.MkdirAll(parentPkg, 0755))
+	require.NoError(t, os.MkdirAll(childPkg, 0755))
+
+	parentTest := []byte(`package pkg1_test
+
+import "testing"
+
+func TestParentPkg(t *testing.T) { t.Log("parent ok") }
+`)
+	childTest := []byte(`package pkg2_test
+
+import "testing"
+
+func TestChildPkg(t *testing.T) { t.Log("child ok") }
+`)
+
+	require.NoError(t, os.WriteFile(filepath.Join(parentPkg, "pkg1_test.go"), parentTest, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(childPkg, "pkg2_test.go"), childTest, 0644))
+
+	// Execute
+	result, err := r.RunAllTests(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify gate and suite
+	require.Contains(t, result.Gates, "glob-gate")
+	gate := result.Gates["glob-gate"]
+	require.Contains(t, gate.Suites, "glob-suite")
+	suite := gate.Suites["glob-suite"]
+
+	// Should have exactly one package-level test entry (the glob), with subtests from both packages
+	require.Len(t, suite.Tests, 1)
+	var pkgTest *types.TestResult
+	for _, tRes := range suite.Tests {
+		pkgTest = tRes
+		break
+	}
+	require.NotNil(t, pkgTest)
+	assert.True(t, pkgTest.Metadata.RunAll)
+	assert.Equal(t, types.TestStatusPass, pkgTest.Status)
+
+	// The package-mode subtests should include both TestParentPkg and TestChildPkg
+	// Count should be 2 and both should be present
+	require.Len(t, pkgTest.SubTests, 2)
+	_, hasParent := pkgTest.SubTests["TestParentPkg"]
+	_, hasChild := pkgTest.SubTests["TestChildPkg"]
+	assert.True(t, hasParent, "should contain TestParentPkg from parent package")
+	assert.True(t, hasChild, "should contain TestChildPkg from child subpackage")
+}

@@ -540,7 +540,9 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 
 	// Check if the path is available locally
 	if isLocalPath(metadata.Package) {
-		fullPath := filepath.Join(r.workDir, metadata.Package)
+		// Support Go's recursive package pattern "..." by validating the base directory exists
+		basePkg := strings.TrimSuffix(metadata.Package, "/...")
+		fullPath := filepath.Join(r.workDir, basePkg)
 		if _, statErr := os.Stat(fullPath); os.IsNotExist(statErr) {
 			r.log.Error("Local package path does not exist, failing test", "validator", metadata.ID, "package", metadata.Package, "fullPath", fullPath)
 			return &types.TestResult{
