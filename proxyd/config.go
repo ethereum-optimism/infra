@@ -177,6 +177,9 @@ type BackendGroupConfig struct {
 
 	MulticallRPCErrorCheck bool `toml:"multicall_rpc_error_check"`
 
+	// MaxBlockRange sets the maximum block range for eth_getLogs and eth_newFilter (applies to all routing strategies, 0 = no limit)
+	MaxBlockRange uint64 `toml:"max_block_range"`
+
 	/*
 		Deprecated: Use routing_strategy config to create a consensus_aware proxyd instance
 	*/

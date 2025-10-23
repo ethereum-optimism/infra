@@ -100,6 +100,10 @@ consensus_receipts_target = "alchemy_getTransactionReceipts"
 [backend_groups]
 [backend_groups.main]
 backends = ["infura"]
+# Maximum block range for eth_getLogs and eth_newFilter (applies to all routing strategies)
+# Industry standard: Alchemy/Infura use 2000-10000 blocks
+max_block_range = 5000
+
 # Enable consensus awareness for backend group, making it act as a load balancer, default false
 # consensus_aware = true
 # Period in which the backend wont serve requests if banned, default 5m
@@ -108,7 +112,7 @@ backends = ["infura"]
 # consensus_max_update_threshold = "20s"
 # Maximum block lag, default 8
 # consensus_max_block_lag = 16
-# Maximum block range (for eth_getLogs method), no default
+# Maximum block range (for eth_getLogs method), only works with consensus_aware routing
 # consensus_max_block_range = 20000
 # Minimum peer count, default 3
 # consensus_min_peer_count = 4

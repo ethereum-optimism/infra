@@ -6,4 +6,6 @@ coverage.out
 bin/
 
 # Local AWS config
-.aws 
+.aws
+
+.claude

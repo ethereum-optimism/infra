@@ -305,6 +305,7 @@ func Start(config *Config) (*Server, func(), error) {
 			FallbackBackends:       fallbackBackends,
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
+			maxBlockRange:          bg.MaxBlockRange,
 		}
 	}
 
