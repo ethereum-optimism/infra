@@ -91,7 +91,8 @@ jobs:
     environment:
       CURRENT_TAG: << pipeline.git.tag >>
     steps:
-      - checkout
+      - checkout:
+          method: blobless
       - run:
           name: Log Configuration Results
           command: |
@@ -196,7 +197,8 @@ jobs:
     machine:
       image: <<pipeline.parameters.vm-image>>
     steps:
-      - checkout
+      - checkout:
+          method: blobless
       - run:
           command: mkdir -p /tmp/docker_images
       - run:
@@ -308,7 +310,8 @@ jobs:
     steps:
       - gcp-cli/install
       - gcp-oidc-authenticate
-      - checkout
+      - checkout:
+          method: blobless
       - run:
           name: Tag
           command: |
@@ -417,7 +420,8 @@ jobs:
       - gcp-oidc-authenticate:
           gcp_cred_config_file_path: /root/gcp_cred_config.json
           oidc_token_file_path: /root/oidc_token.json
-      - checkout
+      - checkout:
+          method: blobless
       - run:
           name: Setup mise
           command: |
@@ -467,7 +471,8 @@ jobs:
     docker:
       - image: cimg/python:3.12
     steps:
-      - checkout # Checks out code to ~/project
+      - checkout: # Checks out code to ~/project
+          method: blobless
       - restore_cache:
           keys:
             # Checksum relative to the root of the project
