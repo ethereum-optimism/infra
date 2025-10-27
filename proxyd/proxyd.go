@@ -298,6 +298,11 @@ func Start(config *Config) (*Server, func(), error) {
 				)
 		}
 
+		maxBlockRange := bg.ConsensusMaxBlockRange
+		if bg.MaxBlockRange > 0 {
+			maxBlockRange = bg.MaxBlockRange
+		}
+
 		backendGroups[bgName] = &BackendGroup{
 			Name:                   bgName,
 			Backends:               backends,
@@ -305,6 +310,7 @@ func Start(config *Config) (*Server, func(), error) {
 			FallbackBackends:       fallbackBackends,
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
+			maxBlockRange:          maxBlockRange,
 		}
 	}
 
@@ -511,8 +517,8 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusMinPeerCount > 0 {
 				copts = append(copts, WithMinPeerCount(uint64(bgcfg.ConsensusMinPeerCount)))
 			}
-			if bgcfg.ConsensusMaxBlockRange > 0 {
-				copts = append(copts, WithMaxBlockRange(bgcfg.ConsensusMaxBlockRange))
+			if bg.maxBlockRange > 0 {
+				copts = append(copts, WithMaxBlockRange(bg.maxBlockRange))
 			}
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
