@@ -200,6 +200,25 @@ If a package is provided and no name is provided, op-acceptor runs all tests in 
 - package: github.com/ethereum-optimism/optimism/kurtosis-devnet/tests/interop
 ```
 
+#### Package path semantics (sub-packages)
+
+When you specify a `package` in a gate, op-acceptor passes it directly to `go test`. This means:
+
+- A plain package path (e.g., `./pkg`) runs tests in that package only.
+- To include sub-packages, use Go's glob notation with `...` (e.g., `./pkg/...`).
+
+Examples:
+
+```yaml
+# Only runs tests in ./parent (not sub-packages)
+tests:
+  - package: ./parent
+
+# Runs tests in ./parent and all nested sub-packages
+tests:
+  - package: ./parent/...
+```
+
 ## Development
 
 ### Prerequisites
