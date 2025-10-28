@@ -13,6 +13,7 @@ type RewriteContext struct {
 	safe          hexutil.Uint64
 	finalized     hexutil.Uint64
 	maxBlockRange uint64
+	consensusMode bool
 }
 
 type RewriteResult uint8
@@ -156,25 +157,24 @@ func rewriteRange(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int) (Rewri
 	_, hasFrom := p[pos]["fromBlock"]
 	_, hasTo := p[pos]["toBlock"]
 
-	nonConsensusMode := rctx.latest == 0
 	defaultsSet := false
 
-	if nonConsensusMode {
-		if rctx.maxBlockRange > 0 && !hasTo {
-			return RewriteOverrideError, errors.New("toBlock must be specified when max_block_range is configured")
-		}
-		if !hasFrom {
-			p[pos]["fromBlock"] = "earliest"
-			hasFrom = true
-			defaultsSet = true
-		}
-	} else {
+	if rctx.consensusMode {
 		if hasFrom && !hasTo {
 			p[pos]["toBlock"] = "latest"
 			hasTo = true
 			defaultsSet = true
 		} else if hasTo && !hasFrom {
 			p[pos]["fromBlock"] = "latest"
+			hasFrom = true
+			defaultsSet = true
+		}
+	} else {
+		if rctx.maxBlockRange > 0 && !hasTo {
+			return RewriteOverrideError, errors.New("toBlock must be specified when max_block_range is configured")
+		}
+		if !hasFrom {
+			p[pos]["fromBlock"] = "earliest"
 			hasFrom = true
 			defaultsSet = true
 		}
@@ -279,13 +279,11 @@ func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
 		return current, false, nil
 	}
 
-	nonConsensusMode := rctx.latest == 0
-
 	switch *bnh.BlockNumber {
 	case rpc.EarliestBlockNumber:
 		return current, false, nil
 	case rpc.PendingBlockNumber, rpc.FinalizedBlockNumber, rpc.SafeBlockNumber, rpc.LatestBlockNumber:
-		if nonConsensusMode {
+		if !rctx.consensusMode {
 			return "", false, errors.New("block tags (latest/pending/safe/finalized) are not allowed when max_block_range is configured")
 		}
 		switch *bnh.BlockNumber {

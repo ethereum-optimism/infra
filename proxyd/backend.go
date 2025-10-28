@@ -1708,6 +1708,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		safe:          bg.Consensus.GetSafeBlockNumber(),
 		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
 		maxBlockRange: bg.Consensus.maxBlockRange,
+		consensusMode: true,
 	}
 
 	for i, req := range rpcReqs {
@@ -1748,6 +1749,7 @@ func (bg *BackendGroup) OverwriteNonConsensusRequests(rpcReqs []*RPCReq, overrid
 		safe:          0,
 		finalized:     0,
 		maxBlockRange: bg.maxBlockRange,
+		consensusMode: false,
 	}
 
 	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
