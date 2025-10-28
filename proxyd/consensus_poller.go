@@ -581,7 +581,7 @@ func (cp *ConsensusPoller) IsBanned(be *Backend) bool {
 	return bs.IsBanned()
 }
 
-// IsBanned checks if a specific backend is banned
+// BannedUntil returns the time until which a specific backend is banned
 func (cp *ConsensusPoller) BannedUntil(be *Backend) time.Time {
 	bs := cp.backendState[be]
 	defer bs.backendStateMux.Unlock()
@@ -741,7 +741,7 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 	return cp.FilterCandidates(cp.backendGroup.Fallbacks())
 }
 
-// filterCandidates find out what backends are the candidates to be in the consensus group
+// FilterCandidates find out what backends are the candidates to be in the consensus group
 // and create a copy of current their state
 //
 // a candidate is a serving node within the following conditions:
