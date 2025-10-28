@@ -189,7 +189,9 @@ type BackendGroupConfig struct {
 	ConsensusMaxBlockLag        uint64       `toml:"consensus_max_block_lag"`
 	ConsensusMaxBlockRange      uint64       `toml:"consensus_max_block_range"`
 	ConsensusMinPeerCount       int          `toml:"consensus_min_peer_count"`
-	MaxBlockRange               uint64       `toml:"max_block_range"`
+	// Will set Max Block Range for non-consensus eth_getLogs and eth_newFilter
+	// Will override consensus_max_block_range if consensus_max_block range is also set
+	MaxBlockRange uint64 `toml:"max_block_range"`
 
 	ConsensusHA                  bool         `toml:"consensus_ha"`
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`

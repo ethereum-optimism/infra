@@ -300,6 +300,7 @@ func Start(config *Config) (*Server, func(), error) {
 
 		maxBlockRange := bg.ConsensusMaxBlockRange
 		if bg.MaxBlockRange > 0 {
+			log.Info("Overridding consensus max block range with max block range")
 			maxBlockRange = bg.MaxBlockRange
 		}
 
