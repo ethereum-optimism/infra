@@ -13,6 +13,7 @@ type RewriteContext struct {
 	safe          hexutil.Uint64
 	finalized     hexutil.Uint64
 	maxBlockRange uint64
+	consensusMode bool
 }
 
 type RewriteResult uint8
@@ -153,13 +154,30 @@ func rewriteRange(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int) (Rewri
 		return RewriteOverrideError, err
 	}
 
-	// if either fromBlock or toBlock is defined, default the other to "latest" if unset
 	_, hasFrom := p[pos]["fromBlock"]
 	_, hasTo := p[pos]["toBlock"]
-	if hasFrom && !hasTo {
-		p[pos]["toBlock"] = "latest"
-	} else if hasTo && !hasFrom {
-		p[pos]["fromBlock"] = "latest"
+
+	defaultsSet := false
+
+	if rctx.consensusMode {
+		if hasFrom && !hasTo {
+			p[pos]["toBlock"] = "latest"
+			hasTo = true
+			defaultsSet = true
+		} else if hasTo && !hasFrom {
+			p[pos]["fromBlock"] = "latest"
+			hasFrom = true
+			defaultsSet = true
+		}
+	} else {
+		if rctx.maxBlockRange > 0 && !hasTo {
+			return RewriteOverrideError, errors.New("toBlock must be specified when max_block_range is configured")
+		}
+		if !hasFrom {
+			p[pos]["fromBlock"] = "earliest"
+			hasFrom = true
+			defaultsSet = true
+		}
 	}
 
 	modifiedFrom, err := rewriteTagMap(rctx, p[pos], "fromBlock")
@@ -186,8 +204,7 @@ func rewriteRange(rctx RewriteContext, req *RPCReq, res *RPCRes, pos int) (Rewri
 		}
 	}
 
-	// if any of the fields the request have been changed, re-marshal the params
-	if modifiedFrom || modifiedTo {
+	if modifiedFrom || modifiedTo || defaultsSet {
 		paramsRaw, err := json.Marshal(p)
 		req.Params = paramsRaw
 		if err != nil {
@@ -263,17 +280,24 @@ func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
 	}
 
 	switch *bnh.BlockNumber {
-	case rpc.PendingBlockNumber,
-		rpc.EarliestBlockNumber:
+	case rpc.EarliestBlockNumber:
 		return current, false, nil
-	case rpc.FinalizedBlockNumber:
-		return rctx.finalized.String(), true, nil
-	case rpc.SafeBlockNumber:
-		return rctx.safe.String(), true, nil
-	case rpc.LatestBlockNumber:
-		return rctx.latest.String(), true, nil
+	case rpc.PendingBlockNumber, rpc.FinalizedBlockNumber, rpc.SafeBlockNumber, rpc.LatestBlockNumber:
+		if !rctx.consensusMode {
+			return "", false, errors.New("block tags (latest/pending/safe/finalized) are not allowed when max_block_range is configured")
+		}
+		switch *bnh.BlockNumber {
+		case rpc.PendingBlockNumber:
+			return current, false, nil
+		case rpc.FinalizedBlockNumber:
+			return rctx.finalized.String(), true, nil
+		case rpc.SafeBlockNumber:
+			return rctx.safe.String(), true, nil
+		case rpc.LatestBlockNumber:
+			return rctx.latest.String(), true, nil
+		}
 	default:
-		if bnh.BlockNumber.Int64() > int64(rctx.latest) {
+		if rctx.latest > 0 && bnh.BlockNumber.Int64() > int64(rctx.latest) {
 			return "", false, ErrRewriteBlockOutOfRange
 		}
 	}

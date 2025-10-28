@@ -926,6 +926,7 @@ type BackendGroup struct {
 	FallbackBackends       map[string]bool
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
+	maxBlockRange          uint64
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -969,6 +970,8 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
 		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+	} else if bg.maxBlockRange > 0 {
+		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
 
 	rpcRequestsTotal.Inc()
@@ -1705,6 +1708,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		safe:          bg.Consensus.GetSafeBlockNumber(),
 		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
 		maxBlockRange: bg.Consensus.maxBlockRange,
+		consensusMode: true,
 	}
 
 	for i, req := range rpcReqs {
@@ -1725,6 +1729,47 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 				)
 			} else {
 				res.Error = ErrParseErr
+			}
+		case RewriteOverrideResponse:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+		case RewriteOverrideRequest, RewriteNone:
+			rewrittenReqs = append(rewrittenReqs, req)
+		}
+	}
+	return rewrittenReqs, overriddenResponses
+}
+
+func (bg *BackendGroup) OverwriteNonConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes) ([]*RPCReq, []*indexedReqRes) {
+	rctx := RewriteContext{
+		latest:        0,
+		safe:          0,
+		finalized:     0,
+		maxBlockRange: bg.maxBlockRange,
+		consensusMode: false,
+	}
+
+	rewrittenReqs := make([]*RPCReq, 0, len(rpcReqs))
+
+	for i, req := range rpcReqs {
+		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
+		result, err := RewriteTags(rctx, req, &res)
+		switch result {
+		case RewriteOverrideError:
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			if errors.Is(err, ErrRewriteRangeTooLarge) {
+				res.Error = ErrInvalidParams(
+					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
+				)
+			} else {
+				res.Error = ErrInvalidParams(err.Error())
 			}
 		case RewriteOverrideResponse:
 			overriddenResponses = append(overriddenResponses, &indexedReqRes{

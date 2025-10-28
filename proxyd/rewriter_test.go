@@ -31,7 +31,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest"}})},
 				res:  nil,
 			},
@@ -46,7 +46,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String()}})},
 				res:  nil,
 			},
@@ -61,7 +61,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String()}})},
 				res:  nil,
 			},
@@ -71,7 +71,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
 				res:  nil,
 			},
@@ -86,7 +86,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(55).String()}})},
 				res:  nil,
 			},
@@ -101,7 +101,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs toBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(111).String()}})},
 				res:  nil,
 			},
@@ -111,7 +111,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest", "toBlock": "latest"}})},
 				res:  nil,
 			},
@@ -127,7 +127,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(55).String(), "toBlock": hexutil.Uint64(77).String()}})},
 				res:  nil,
 			},
@@ -143,7 +143,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock, toBlock out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String(), "toBlock": hexutil.Uint64(222).String()}})},
 				res:  nil,
 			},
@@ -153,7 +153,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs fromBlock -> toBlock above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30, consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(20).String(), "toBlock": hexutil.Uint64(80).String()}})},
 				res:  nil,
 			},
@@ -163,7 +163,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> latest above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30, consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "latest"}})},
 				res:  nil,
 			},
@@ -173,7 +173,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> pending above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30, consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest", "toBlock": "pending"}})},
 				res:  nil,
 			},
@@ -183,7 +183,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs earliest -> default above max range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30, consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "earliest"}})},
 				res:  nil,
 			},
@@ -193,7 +193,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getLogs default -> latest within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), maxBlockRange: 30, consensusMode: true},
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": "latest"}})},
 				res:  nil,
 			},
@@ -210,7 +210,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"latest"})},
 				res:  nil,
 			},
@@ -226,7 +226,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
 				res:  nil,
 			},
@@ -242,7 +242,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
@@ -252,7 +252,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts missing parameter",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{})},
 				res:  nil,
 			},
@@ -261,7 +261,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "debug_getRawReceipts with block hash",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{"0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b"})},
 				res:  nil,
 			},
@@ -278,7 +278,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123"})},
 				res:  nil,
 			},
@@ -297,7 +297,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode not enough params, should do nothing",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{})},
 				res:  nil,
 			},
@@ -312,7 +312,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", "latest"})},
 				res:  nil,
 			},
@@ -331,7 +331,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(55).String()})},
 				res:  nil,
 			},
@@ -348,7 +348,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getCode out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
@@ -359,7 +359,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5"})},
 				res:  nil,
 			},
@@ -379,7 +379,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", "latest"})},
 				res:  nil,
 			},
@@ -399,7 +399,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(55).String()})},
 				res:  nil,
 			},
@@ -417,7 +417,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
@@ -428,7 +428,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber omit block, should add",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{})},
 				res:  nil,
 			},
@@ -444,7 +444,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"latest"})},
 				res:  nil,
 			},
@@ -460,7 +460,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber finalized",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), finalized: hexutil.Uint64(55)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), finalized: hexutil.Uint64(55), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"finalized"})},
 				res:  nil,
 			},
@@ -476,7 +476,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber safe",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100), safe: hexutil.Uint64(50)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), safe: hexutil.Uint64(50), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{"safe"})},
 				res:  nil,
 			},
@@ -492,7 +492,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber within range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(55).String()})},
 				res:  nil,
 			},
@@ -508,7 +508,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getBlockByNumber out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
@@ -518,7 +518,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"0x65a7ed542fb37fe237fdfbdd70b31598523fe5b32879e307bae27a0bd9581c08",
@@ -531,7 +531,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash at genesis (blockNumber)",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"10",
@@ -545,7 +545,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash at genesis (hash)",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"10",
@@ -572,7 +572,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash at latest (blockNumber)",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"10",
@@ -597,7 +597,7 @@ func TestRewriteRequest(t *testing.T) {
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash out of range",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
 					"0xae851f927ee40de99aabb7461c00f9622ab91d60",
 					"10",
@@ -694,7 +694,7 @@ func TestRewriteResponse(t *testing.T) {
 		{
 			name: "eth_blockNumber latest",
 			args: args{
-				rctx: RewriteContext{latest: hexutil.Uint64(100)},
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_blockNumber"},
 				res:  &RPCRes{Result: hexutil.Uint64(200)},
 			},
@@ -708,6 +708,98 @@ func TestRewriteResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := RewriteResponse(tt.args.rctx, tt.args.req, tt.args.res)
 			require.Nil(t, err)
+			require.Equal(t, tt.expected, result)
+			if tt.check != nil {
+				tt.check(t, tt.args)
+			}
+		})
+	}
+}
+
+func TestRewriteRequest_NonConsensusMode(t *testing.T) {
+	tests := []rewriteTest{
+		{
+			name: "eth_getLogs with latest tag should error",
+			args: args{
+				rctx: RewriteContext{consensusMode: false},
+				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": "latest"}})},
+				res:  nil,
+			},
+			expected: RewriteOverrideError,
+		},
+		{
+			name: "eth_getLogs missing toBlock with maxBlockRange should error",
+			args: args{
+				rctx: RewriteContext{consensusMode: false, maxBlockRange: 100},
+				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(50).String()}})},
+				res:  nil,
+			},
+			expected: RewriteOverrideError,
+		},
+		{
+			name: "eth_getLogs with valid range should work",
+			args: args{
+				rctx: RewriteContext{consensusMode: false, maxBlockRange: 100},
+				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(50).String(), "toBlock": hexutil.Uint64(100).String()}})},
+				res:  nil,
+			},
+			expected: RewriteNone,
+		},
+		{
+			name: "eth_getLogs with range exceeding maxBlockRange should error",
+			args: args{
+				rctx: RewriteContext{consensusMode: false, maxBlockRange: 10},
+				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(50).String(), "toBlock": hexutil.Uint64(100).String()}})},
+				res:  nil,
+			},
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteRangeTooLarge,
+		},
+		{
+			name: "eth_getLogs missing fromBlock should default to earliest",
+			args: args{
+				rctx: RewriteContext{consensusMode: false, maxBlockRange: 100},
+				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(50).String()}})},
+				res:  nil,
+			},
+			expected: RewriteOverrideRequest,
+			check: func(t *testing.T, args args) {
+				var p []map[string]interface{}
+				err := json.Unmarshal(args.req.Params, &p)
+				require.Nil(t, err)
+				require.Equal(t, "earliest", p[0]["fromBlock"])
+			},
+		},
+		{
+			name: "eth_getBlockByNumber with latest tag should error",
+			args: args{
+				rctx: RewriteContext{consensusMode: false},
+				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]interface{}{"latest", true})},
+				res:  nil,
+			},
+			expected: RewriteOverrideError,
+		},
+		{
+			name: "eth_getBlockByNumber with block number should work",
+			args: args{
+				rctx: RewriteContext{consensusMode: false},
+				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]interface{}{hexutil.Uint64(100).String(), true})},
+				res:  nil,
+			},
+			expected: RewriteNone,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := RewriteRequest(tt.args.rctx, tt.args.req, tt.args.res)
+			if tt.expectedErr != nil {
+				require.NotNil(t, err)
+				require.Equal(t, tt.expectedErr.Error(), err.Error())
+			} else if tt.expected == RewriteOverrideError {
+				require.NotNil(t, err)
+			} else {
+				require.Nil(t, err)
+			}
 			require.Equal(t, tt.expected, result)
 			if tt.check != nil {
 				tt.check(t, tt.args)
