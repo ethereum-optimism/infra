@@ -115,22 +115,21 @@ type TestRunnerWithFileLogger interface {
 
 // runner struct implements TestRunner interface
 type runner struct {
-	registry              *registry.Registry
-	validators            []types.ValidatorMetadata
-	workDir               string // Directory for running tests
-	log                   log.Logger
-	runID                 string
-	goBinary              string              // Path to the Go binary
-	allowSkips            bool                // Whether to allow skipping tests when preconditions are not met
-	outputRealtimeLogs    bool                // If enabled, test logs will be outputted in realtime
-	stripFileLinePrefixes bool                // If enabled, strip file:line prefixes from test output logs
-	testLogLevel          string              // Log level to be used for the tests
-	fileLogger            *logging.FileLogger // Logger for storing test results
-	networkName           string              // Name of the network being tested
-	env                   *env.DevnetEnv
-	tracer                trace.Tracer
-	serial                bool // Whether to run tests serially instead of in parallel
-	concurrency           int  // Number of concurrent test workers (0 = auto-determine)
+	registry           *registry.Registry
+	validators         []types.ValidatorMetadata
+	workDir            string // Directory for running tests
+	log                log.Logger
+	runID              string
+	goBinary           string              // Path to the Go binary
+	allowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	outputRealtimeLogs bool                // If enabled, test logs will be outputted in realtime
+	testLogLevel       string              // Log level to be used for the tests
+	fileLogger         *logging.FileLogger // Logger for storing test results
+	networkName        string              // Name of the network being tested
+	env                *env.DevnetEnv
+	tracer             trace.Tracer
+	serial             bool // Whether to run tests serially instead of in parallel
+	concurrency        int  // Number of concurrent test workers (0 = auto-determine)
 
 	// New component fields
 	executor     TestExecutor
@@ -138,26 +137,28 @@ type runner struct {
 	collector    ResultCollector
 	outputParser OutputParser
 	jsonStore    JSONStore
+	
+	stripFileLinePrefixes bool // If enabled, strip file:line prefixes from test output logs
 }
 
 // Config holds configuration for creating a new runner
 type Config struct {
-	Registry              *registry.Registry
-	TargetGate            string
-	WorkDir               string
-	Log                   log.Logger
-	GoBinary              string              // path to the Go binary
-	AllowSkips            bool                // Whether to allow skipping tests when preconditions are not met
-	OutputRealtimeLogs    bool                // Whether to output test logs to the console
-	StripFileLinePrefixes bool                // Whether to strip file:line prefixes from test output logs
-	TestLogLevel          string              // Log level to be used for the tests
-	FileLogger            *logging.FileLogger // Logger for storing test results
-	NetworkName           string              // Name of the network being tested
-	DevnetEnv             *env.DevnetEnv
-	Serial                bool          // Whether to run tests serially instead of in parallel
-	Concurrency           int           // Number of concurrent test workers (0 = auto-determine)
-	ShowProgress          bool          // Whether to show periodic progress updates during test execution
-	ProgressInterval      time.Duration // Interval between progress updates when ShowProgress is 'true'
+	Registry           *registry.Registry
+	TargetGate         string
+	WorkDir            string
+	Log                log.Logger
+	GoBinary           string              // path to the Go binary
+	AllowSkips         bool                // Whether to allow skipping tests when preconditions are not met
+	OutputRealtimeLogs bool                // Whether to output test logs to the console
+	TestLogLevel       string              // Log level to be used for the tests
+	FileLogger         *logging.FileLogger // Logger for storing test results
+	NetworkName        string              // Name of the network being tested
+	DevnetEnv          *env.DevnetEnv
+	Serial             bool          // Whether to run tests serially instead of in parallel
+	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
+	ShowProgress       bool          // Whether to show periodic progress updates during test execution
+	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
+	StripFileLinePrefixes bool       // Whether to strip file:line prefixes from test output logs
 }
 
 // NewTestRunner creates a new test runner instance
@@ -194,21 +195,21 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName, "serial", cfg.Serial)
 
 	r := &runner{
-		registry:              cfg.Registry,
-		validators:            validators,
-		workDir:               cfg.WorkDir,
-		log:                   cfg.Log,
-		goBinary:              cfg.GoBinary,
-		allowSkips:            cfg.AllowSkips,
-		outputRealtimeLogs:    cfg.OutputRealtimeLogs,
+		registry:           cfg.Registry,
+		validators:         validators,
+		workDir:            cfg.WorkDir,
+		log:                cfg.Log,
+		goBinary:           cfg.GoBinary,
+		allowSkips:         cfg.AllowSkips,
+		outputRealtimeLogs: cfg.OutputRealtimeLogs,
+		testLogLevel:       cfg.TestLogLevel,
+		fileLogger:         cfg.FileLogger,
+		networkName:        networkName,
+		env:                cfg.DevnetEnv,
+		tracer:             otel.Tracer("test runner"),
+		serial:             cfg.Serial,
+		concurrency:        cfg.Concurrency,
 		stripFileLinePrefixes: cfg.StripFileLinePrefixes,
-		testLogLevel:          cfg.TestLogLevel,
-		fileLogger:            cfg.FileLogger,
-		networkName:           networkName,
-		env:                   cfg.DevnetEnv,
-		tracer:                otel.Tracer("test runner"),
-		serial:                cfg.Serial,
-		concurrency:           cfg.Concurrency,
 	}
 
 	// Initialize new components
@@ -1409,15 +1410,15 @@ type logWriter struct {
 func cleanTestOutput(output string, stripFileLinePrefixes bool) string {
 	// Strip ANSI escape codes
 	cleaned := stripansi.Strip(output)
-	
+
 	// Trim leading and trailing whitespace (including newlines)
 	cleaned = strings.TrimSpace(cleaned)
-	
+
 	// Skip empty lines
 	if cleaned == "" {
 		return cleaned
 	}
-	
+
 	// Optionally remove file:line: prefixes (e.g., "system.go:28:" or "    l2.go:420:")
 	if stripFileLinePrefixes {
 		// Pattern: optional whitespace, filename.go:number:, then more whitespace
@@ -1433,7 +1434,7 @@ func cleanTestOutput(output string, stripFileLinePrefixes bool) string {
 			}
 		}
 	}
-	
+
 	return cleaned
 }
 

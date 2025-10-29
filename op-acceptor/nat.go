@@ -169,7 +169,6 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		GoBinary:              config.GoBinary,
 		AllowSkips:            config.AllowSkips,
 		OutputRealtimeLogs:    config.OutputRealtimeLogs,
-		StripFileLinePrefixes: config.StripFileLinePrefixes,
 		TestLogLevel:          config.TestLogLevel,
 		NetworkName:           networkName,
 		DevnetEnv:             devnetEnv,
@@ -177,6 +176,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Concurrency:           config.Concurrency,
 		ShowProgress:          config.ShowProgress,
 		ProgressInterval:      config.ProgressInterval,
+		StripFileLinePrefixes: config.StripFileLinePrefixes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
