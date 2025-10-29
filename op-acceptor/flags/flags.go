@@ -121,6 +121,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "OUTPUT_REALTIME_LOGS"),
 		Usage:   "If enabled, test logs will be outputted to the console in realtime. Defaults to false.",
 	}
+	StripFileLinePrefixes = &cli.BoolFlag{
+		Name:    "strip-file-line-prefixes",
+		Value:   true,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "STRIP_FILE_LINE_PREFIXES"),
+		Usage:   "Strip file:line prefixes (e.g., 'system.go:28:') from test output logs. Defaults to true.",
+	}
 	ShowProgress = &cli.BoolFlag{
 		Name:    "show-progress",
 		Value:   false,
@@ -196,6 +202,7 @@ var optionalFlags = []cli.Flag{
 	LogDir,
 	TestLogLevel,
 	OutputRealtimeLogs,
+	StripFileLinePrefixes,
 	ShowProgress,
 	ProgressInterval,
 	Orchestrator,
