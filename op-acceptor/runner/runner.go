@@ -1420,8 +1420,8 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 			// It's a valid test event JSON
 			if event.Action == ActionOutput {
 				// Only log the actual test output content
-				// Don't collapse whitespace for test output to preserve formatting
-				cleaned := logging.CleanLogOutput(event.Output, w.stripCodeLinePrefixes, false)
+				// Collapse whitespace to clean up structured logging output
+				cleaned := logging.CleanLogOutput(event.Output, w.stripCodeLinePrefixes, true)
 				if cleaned != "" {
 					w.logFn(cleaned)
 				}
@@ -1430,8 +1430,8 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 			// These are metadata used for parsing but not useful in realtime logs
 		} else {
 			// Not a valid test event JSON - it's a raw line (e.g., direct stderr)
-			// Clean up and log it - don't collapse whitespace to preserve formatting
-			cleaned := logging.CleanLogOutput(string(line), w.stripCodeLinePrefixes, false)
+			// Clean up and log it - collapse whitespace to clean up structured logging output
+			cleaned := logging.CleanLogOutput(string(line), w.stripCodeLinePrefixes, true)
 			if cleaned != "" {
 				w.logFn(cleaned)
 			}

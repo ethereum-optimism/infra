@@ -37,7 +37,8 @@ var (
 
 // CleanLogOutput cleans up log output by removing ANSI codes, escape sequences,
 // optionally removing file:line prefixes, optionally collapsing whitespace, and trimming.
-// When collapseWhitespace is false, formatting in structured output (like test results) is preserved.
+// When collapseWhitespace is true, multiple consecutive whitespace characters (spaces, tabs,
+// newlines) are collapsed into single spaces, which cleans up structured logging output.
 func CleanLogOutput(s string, stripCodeLinePrefixes bool, collapseWhitespace bool) string {
 	// Strip ANSI escape codes
 	cleaned := stripansi.Strip(s)
@@ -854,8 +855,8 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 		parser := NewJSONOutputParser(result.Stdout)
 		parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
 			// Clean the output (strip ANSI codes, optionally file:line prefixes)
-			// Don't collapse whitespace for test output to preserve formatting
-			cleaned := CleanLogOutput(outputText, s.logger.stripCodeLinePrefixes, false)
+			// Collapse whitespace to clean up structured logging output
+			cleaned := CleanLogOutput(outputText, s.logger.stripCodeLinePrefixes, true)
 			if cleaned != "" {
 				plaintext.WriteString(cleaned)
 				plaintext.WriteString("\n")
@@ -866,7 +867,7 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 		// (e.g., for subtests extracted from a package run)
 		if plaintext.Len() == 0 && strings.Contains(result.Stdout, "===") {
 			// It's already plain text, clean it and use it
-			plaintext.WriteString(CleanLogOutput(result.Stdout, s.logger.stripCodeLinePrefixes, false))
+			plaintext.WriteString(CleanLogOutput(result.Stdout, s.logger.stripCodeLinePrefixes, true))
 		}
 	}
 
