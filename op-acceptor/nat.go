@@ -169,6 +169,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		GoBinary:              config.GoBinary,
 		AllowSkips:            config.AllowSkips,
 		OutputRealtimeLogs:    config.OutputRealtimeLogs,
+		StripCodeLinePrefixes: config.StripCodeLinePrefixes,
 		TestLogLevel:          config.TestLogLevel,
 		NetworkName:           networkName,
 		DevnetEnv:             devnetEnv,
@@ -176,7 +177,6 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Concurrency:           config.Concurrency,
 		ShowProgress:          config.ShowProgress,
 		ProgressInterval:      config.ProgressInterval,
-		StripFileLinePrefixes: config.StripFileLinePrefixes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -390,7 +390,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Debug("Generated new runID for test run", "runID", runID)
 
 	// Create a new file logger with the runID
-	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate, n.config.StripCodeLinePrefixes)
 	if err != nil {
 		n.config.Log.Error("Error creating file logger", "error", err)
 		return fmt.Errorf("failed to create file logger: %w", err)
@@ -608,11 +608,11 @@ func (n *nat) runTests(ctx context.Context) error {
 			)
 
 			// Record duration histogram
-			metrics.RecordTestDurationHistogram(n.networkName, gate.ID, "", test.Duration)
+			metrics.RecordTestDurationHistogram(n.networkName, testName, gate.ID, "", test.Duration)
 
 			// Check for timeout in error message
 			if test.Error != nil && strings.Contains(test.Error.Error(), "timeout") {
-				metrics.RecordTestTimeout(n.networkName, n.result.RunID, gate.ID, "")
+				metrics.RecordTestTimeout(n.networkName, n.result.RunID, testName, gate.ID, "")
 			}
 
 			// Record subtests if present
@@ -628,11 +628,11 @@ func (n *nat) runTests(ctx context.Context) error {
 				)
 
 				// Record subtest duration histogram
-				metrics.RecordTestDurationHistogram(n.networkName, gate.ID, "", subTest.Duration)
+				metrics.RecordTestDurationHistogram(n.networkName, subTestName, gate.ID, "", subTest.Duration)
 
 				// Check for timeout in subtest
 				if subTest.Error != nil && strings.Contains(subTest.Error.Error(), "timeout") {
-					metrics.RecordTestTimeout(n.networkName, n.result.RunID, gate.ID, "")
+					metrics.RecordTestTimeout(n.networkName, n.result.RunID, subTestName, gate.ID, "")
 				}
 			}
 		}
@@ -668,11 +668,11 @@ func (n *nat) runTests(ctx context.Context) error {
 				)
 
 				// Record duration histogram
-				metrics.RecordTestDurationHistogram(n.networkName, gate.ID, suiteName, test.Duration)
+				metrics.RecordTestDurationHistogram(n.networkName, testName, gate.ID, suiteName, test.Duration)
 
 				// Check for timeout
 				if test.Error != nil && strings.Contains(test.Error.Error(), "timeout") {
-					metrics.RecordTestTimeout(n.networkName, n.result.RunID, gate.ID, suiteName)
+					metrics.RecordTestTimeout(n.networkName, n.result.RunID, testName, gate.ID, suiteName)
 				}
 
 				// Record subtests if present
@@ -688,11 +688,11 @@ func (n *nat) runTests(ctx context.Context) error {
 					)
 
 					// Record subtest duration histogram
-					metrics.RecordTestDurationHistogram(n.networkName, gate.ID, suiteName, subTest.Duration)
+					metrics.RecordTestDurationHistogram(n.networkName, subTestName, gate.ID, suiteName, subTest.Duration)
 
 					// Check for timeout in subtest
 					if subTest.Error != nil && strings.Contains(subTest.Error.Error(), "timeout") {
-						metrics.RecordTestTimeout(n.networkName, n.result.RunID, gate.ID, suiteName)
+						metrics.RecordTestTimeout(n.networkName, n.result.RunID, subTestName, gate.ID, suiteName)
 					}
 				}
 			}

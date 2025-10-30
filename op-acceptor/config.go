@@ -27,6 +27,7 @@ type Config struct {
 	Timeout               time.Duration          // Timeout for gateless mode tests (if specified)
 	LogDir                string                 // Directory to store test logs
 	OutputRealtimeLogs    bool                   // If enabled, test logs will be outputted in realtime
+	StripCodeLinePrefixes bool                   // If enabled, file:line prefixes will be stripped from test logs
 	TestLogLevel          string                 // Log level to be used for the tests
 	Orchestrator          flags.OrchestratorType // Devstack orchestrator type
 	DevnetEnvURL          string                 // URL or path to the devnet environment file
@@ -38,7 +39,6 @@ type Config struct {
 	FlakeShakeIterations  int                    // Number of times to run each test in flake-shake mode
 	Log                   log.Logger
 	ExcludeGates          []string // List of gate IDs whose tests should be excluded
-	StripFileLinePrefixes bool     // If enabled, strip file:line prefixes from test output logs
 }
 
 // NewConfig creates a new Config from cli context
@@ -126,6 +126,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		DefaultTimeout:        ctx.Duration(flags.DefaultTimeout.Name),
 		Timeout:               ctx.Duration(flags.Timeout.Name),
 		OutputRealtimeLogs:    ctx.Bool(flags.OutputRealtimeLogs.Name),
+		StripCodeLinePrefixes: ctx.Bool(flags.StripCodeLinePrefixes.Name),
 		TestLogLevel:          ctx.String(flags.TestLogLevel.Name),
 		Orchestrator:          orchestrator,
 		DevnetEnvURL:          devnetEnvURL,
@@ -138,7 +139,6 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		LogDir:                logDir,
 		Log:                   log,
 		ExcludeGates:          excludeGates,
-		StripFileLinePrefixes: ctx.Bool(flags.StripFileLinePrefixes.Name),
 	}, nil
 }
 

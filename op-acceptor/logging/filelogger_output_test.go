@@ -15,7 +15,7 @@ import (
 func TestPlaintextFileCreation(t *testing.T) {
 	// Setup
 	tempDir := t.TempDir()
-	logger, err := NewFileLogger(tempDir, "test-run", "test-network", "test-gate")
+	logger, err := NewFileLogger(tempDir, "test-run", "test-network", "test-gate", true)
 	require.NoError(t, err)
 
 	sink := &PerTestFileSink{logger: logger}
@@ -116,7 +116,7 @@ func TestPlaintextFileCreation(t *testing.T) {
 func TestSubtestOutputHandling(t *testing.T) {
 	// Setup
 	tempDir := t.TempDir()
-	logger, err := NewFileLogger(tempDir, "test-run", "test-network", "test-gate")
+	logger, err := NewFileLogger(tempDir, "test-run", "test-network", "test-gate", true)
 	require.NoError(t, err)
 
 	sink := &PerTestFileSink{logger: logger}

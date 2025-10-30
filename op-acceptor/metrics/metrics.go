@@ -166,6 +166,7 @@ var (
 		Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600}, // 100ms to 10min
 	}, []string{
 		"network_name",
+		"test_name",
 		"gate",
 		"suite",
 	})
@@ -178,6 +179,7 @@ var (
 	}, []string{
 		"network_name",
 		"run_id",
+		"test_name",
 		"gate",
 		"suite",
 	})
@@ -365,13 +367,13 @@ func isValidResult(result types.TestStatus) bool {
 }
 
 // RecordTestDurationHistogram records test duration in a histogram for distribution analysis
-func RecordTestDurationHistogram(network string, gate string, suite string, duration time.Duration) {
-	testDurationHistogram.WithLabelValues(network, gate, suite).Observe(duration.Seconds())
+func RecordTestDurationHistogram(network string, testName string, gate string, suite string, duration time.Duration) {
+	testDurationHistogram.WithLabelValues(network, testName, gate, suite).Observe(duration.Seconds())
 }
 
 // RecordTestTimeout records when a test times out
-func RecordTestTimeout(network string, runID string, gate string, suite string) {
-	testTimeouts.WithLabelValues(network, runID, gate, suite).Inc()
+func RecordTestTimeout(network string, runID string, testName string, gate string, suite string) {
+	testTimeouts.WithLabelValues(network, runID, testName, gate, suite).Inc()
 }
 
 // RecordGateMetrics records aggregated metrics for a gate

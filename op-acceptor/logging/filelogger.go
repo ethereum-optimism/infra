@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,40 @@ const (
 	RunDirectoryPrefix  = "testrun-" // Standardized prefix for run directories
 )
 
+// Regex patterns for log cleanup
+var (
+	// Collapse multiple whitespace characters into a single space
+	multipleWhitespaceRegex = regexp.MustCompile(`\s+`)
+
+	// Match file:line prefixes like "file.go:123:" or "file_test.go:456:"
+	// This captures test output file:line prefixes from geth logger and similar
+	fileLinePrefixRegex = regexp.MustCompile(`^\s*[a-zA-Z0-9_\-]+\.go:\d+:\s*`)
+)
+
+// CleanLogOutput cleans up log output by removing ANSI codes, escape sequences,
+// optionally removing file:line prefixes, optionally collapsing whitespace, and trimming.
+// When collapseWhitespace is false, formatting in structured output (like test results) is preserved.
+func CleanLogOutput(s string, stripCodeLinePrefixes bool, collapseWhitespace bool) string {
+	// Strip ANSI escape codes
+	cleaned := stripansi.Strip(s)
+
+	// Optionally remove file:line prefixes (e.g., "da_footprint_test.go:188: ")
+	if stripCodeLinePrefixes {
+		cleaned = fileLinePrefixRegex.ReplaceAllString(cleaned, "")
+	}
+
+	// Optionally collapse multiple whitespace characters into single spaces
+	if collapseWhitespace {
+		// Collapse all consecutive whitespace (spaces, tabs, newlines) into single spaces
+		cleaned = multipleWhitespaceRegex.ReplaceAllString(cleaned, " ")
+	}
+
+	// Trim leading and trailing whitespace
+	cleaned = strings.TrimSpace(cleaned)
+
+	return cleaned
+}
+
 // ResultSink is an interface for different ways of consuming test results
 type ResultSink interface {
 	// Consume processes a single test result
@@ -34,15 +69,16 @@ type ResultSink interface {
 
 // FileLogger handles writing test output to files
 type FileLogger struct {
-	baseDir      string                // Base directory for logs
-	logDir       string                // Root log directory
-	failedDir    string                // Directory for failed tests
-	summaryFile  string                // Path to the summary file
-	allLogsFile  string                // Path to the combined log file
-	mu           sync.Mutex            // Protects concurrent file operations
-	sinks        []ResultSink          // Collection of result consumers
-	asyncWriters map[string]*AsyncFile // Map of async file writers
-	runID        string                // Current run ID
+	baseDir               string                // Base directory for logs
+	logDir                string                // Root log directory
+	failedDir             string                // Directory for failed tests
+	summaryFile           string                // Path to the summary file
+	allLogsFile           string                // Path to the combined log file
+	mu                    sync.Mutex            // Protects concurrent file operations
+	sinks                 []ResultSink          // Collection of result consumers
+	asyncWriters          map[string]*AsyncFile // Map of async file writers
+	runID                 string                // Current run ID
+	stripCodeLinePrefixes bool                  // Whether to strip file:line prefixes from logs
 }
 
 // AsyncFile provides non-blocking file writing capabilities
@@ -119,7 +155,7 @@ func (af *AsyncFile) Close() error {
 }
 
 // NewFileLogger creates a new FileLogger with given configuration
-func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*FileLogger, error) {
+func NewFileLogger(baseDir string, runID string, networkName, gateRun string, stripCodeLinePrefixes bool) (*FileLogger, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("runID cannot be empty")
 	}
@@ -150,14 +186,15 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 
 	// Initialize all sinks
 	logger := &FileLogger{
-		baseDir:      baseDir,
-		logDir:       logDir,
-		failedDir:    failedDir,
-		summaryFile:  summaryFile,
-		allLogsFile:  allLogsFile,
-		sinks:        make([]ResultSink, 0),
-		asyncWriters: make(map[string]*AsyncFile),
-		runID:        runID,
+		baseDir:               baseDir,
+		logDir:                logDir,
+		failedDir:             failedDir,
+		summaryFile:           summaryFile,
+		allLogsFile:           allLogsFile,
+		sinks:                 make([]ResultSink, 0),
+		asyncWriters:          make(map[string]*AsyncFile),
+		runID:                 runID,
+		stripCodeLinePrefixes: stripCodeLinePrefixes,
 	}
 
 	// Initialize the AllLogsFileSink
@@ -816,15 +853,20 @@ func (s *PerTestFileSink) createPlaintextFile(result *types.TestResult, filePath
 		// First, try to parse as JSON (go test -json output)
 		parser := NewJSONOutputParser(result.Stdout)
 		parser.ProcessJSONOutput(func(_ map[string]interface{}, outputText string) {
-			// Strip ANSI escape sequences from the output
-			plaintext.WriteString(stripansi.Strip(outputText))
+			// Clean the output (strip ANSI codes, optionally file:line prefixes)
+			// Don't collapse whitespace for test output to preserve formatting
+			cleaned := CleanLogOutput(outputText, s.logger.stripCodeLinePrefixes, false)
+			if cleaned != "" {
+				plaintext.WriteString(cleaned)
+				plaintext.WriteString("\n")
+			}
 		})
 
 		// If JSON parsing produced no output, the Stdout might already be plain text
 		// (e.g., for subtests extracted from a package run)
 		if plaintext.Len() == 0 && strings.Contains(result.Stdout, "===") {
-			// It's already plain text, strip ANSI sequences and use it
-			plaintext.WriteString(stripansi.Strip(result.Stdout))
+			// It's already plain text, clean it and use it
+			plaintext.WriteString(CleanLogOutput(result.Stdout, s.logger.stripCodeLinePrefixes, false))
 		}
 	}
 
