@@ -162,20 +162,21 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	workDir := strings.TrimSuffix(config.TestDir, "/...")
 
 	testRunner, err := runner.NewTestRunner(runner.Config{
-		Registry:           reg,
-		WorkDir:            workDir,
-		Log:                config.Log,
-		TargetGate:         targetGate,
-		GoBinary:           config.GoBinary,
-		AllowSkips:         config.AllowSkips,
-		OutputRealtimeLogs: config.OutputRealtimeLogs,
-		TestLogLevel:       config.TestLogLevel,
-		NetworkName:        networkName,
-		DevnetEnv:          devnetEnv,
-		Serial:             config.Serial,
-		Concurrency:        config.Concurrency,
-		ShowProgress:       config.ShowProgress,
-		ProgressInterval:   config.ProgressInterval,
+		Registry:              reg,
+		WorkDir:               workDir,
+		Log:                   config.Log,
+		TargetGate:            targetGate,
+		GoBinary:              config.GoBinary,
+		AllowSkips:            config.AllowSkips,
+		OutputRealtimeLogs:    config.OutputRealtimeLogs,
+		StripCodeLinePrefixes: config.StripCodeLinePrefixes,
+		TestLogLevel:          config.TestLogLevel,
+		NetworkName:           networkName,
+		DevnetEnv:             devnetEnv,
+		Serial:                config.Serial,
+		Concurrency:           config.Concurrency,
+		ShowProgress:          config.ShowProgress,
+		ProgressInterval:      config.ProgressInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -389,7 +390,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Debug("Generated new runID for test run", "runID", runID)
 
 	// Create a new file logger with the runID
-	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate, n.config.StripCodeLinePrefixes)
 	if err != nil {
 		n.config.Log.Error("Error creating file logger", "error", err)
 		return fmt.Errorf("failed to create file logger: %w", err)
@@ -577,10 +578,25 @@ func (n *nat) runTests(ctx context.Context) error {
 		n.result.Duration,
 	)
 
-	// Record metrics for individual tests
+	// Record metrics for individual tests and aggregated gate/suite metrics
 	for _, gate := range n.result.Gates {
+		// Calculate gate-level aggregates
+		gateTotal := 0
+		gatePassed := 0
+		gateFailed := 0
+		var gateDuration time.Duration
+
 		// Record direct gate tests
 		for testName, test := range gate.Tests {
+			gateTotal++
+			gateDuration += test.Duration
+
+			if test.Status == types.TestStatusPass {
+				gatePassed++
+			} else if test.Status == types.TestStatusFail {
+				gateFailed++
+			}
+
 			metrics.RecordIndividualTest(
 				n.networkName,
 				n.result.RunID,
@@ -590,6 +606,14 @@ func (n *nat) runTests(ctx context.Context) error {
 				test.Status,
 				test.Duration,
 			)
+
+			// Record duration histogram
+			metrics.RecordTestDurationHistogram(n.networkName, testName, gate.ID, "", test.Duration)
+
+			// Check for timeout in error message
+			if test.Error != nil && strings.Contains(test.Error.Error(), "timeout") {
+				metrics.RecordTestTimeout(n.networkName, n.result.RunID, testName, gate.ID, "")
+			}
 
 			// Record subtests if present
 			for subTestName, subTest := range test.SubTests {
@@ -602,12 +626,37 @@ func (n *nat) runTests(ctx context.Context) error {
 					subTest.Status,
 					subTest.Duration,
 				)
+
+				// Record subtest duration histogram
+				metrics.RecordTestDurationHistogram(n.networkName, subTestName, gate.ID, "", subTest.Duration)
+
+				// Check for timeout in subtest
+				if subTest.Error != nil && strings.Contains(subTest.Error.Error(), "timeout") {
+					metrics.RecordTestTimeout(n.networkName, n.result.RunID, subTestName, gate.ID, "")
+				}
 			}
 		}
 
 		// Record suite tests
 		for suiteName, suite := range gate.Suites {
+			// Calculate suite-level aggregates
+			suiteTotal := 0
+			suitePassed := 0
+			suiteFailed := 0
+
 			for testName, test := range suite.Tests {
+				gateTotal++
+				suiteTotal++
+				gateDuration += test.Duration
+
+				if test.Status == types.TestStatusPass {
+					gatePassed++
+					suitePassed++
+				} else if test.Status == types.TestStatusFail {
+					gateFailed++
+					suiteFailed++
+				}
+
 				metrics.RecordIndividualTest(
 					n.networkName,
 					n.result.RunID,
@@ -617,6 +666,14 @@ func (n *nat) runTests(ctx context.Context) error {
 					test.Status,
 					test.Duration,
 				)
+
+				// Record duration histogram
+				metrics.RecordTestDurationHistogram(n.networkName, testName, gate.ID, suiteName, test.Duration)
+
+				// Check for timeout
+				if test.Error != nil && strings.Contains(test.Error.Error(), "timeout") {
+					metrics.RecordTestTimeout(n.networkName, n.result.RunID, testName, gate.ID, suiteName)
+				}
 
 				// Record subtests if present
 				for subTestName, subTest := range test.SubTests {
@@ -629,8 +686,26 @@ func (n *nat) runTests(ctx context.Context) error {
 						subTest.Status,
 						subTest.Duration,
 					)
+
+					// Record subtest duration histogram
+					metrics.RecordTestDurationHistogram(n.networkName, subTestName, gate.ID, suiteName, subTest.Duration)
+
+					// Check for timeout in subtest
+					if subTest.Error != nil && strings.Contains(subTest.Error.Error(), "timeout") {
+						metrics.RecordTestTimeout(n.networkName, n.result.RunID, subTestName, gate.ID, suiteName)
+					}
 				}
 			}
+
+			// Record suite-level metrics
+			if suiteTotal > 0 {
+				metrics.RecordSuiteMetrics(n.networkName, gate.ID, suiteName, suiteTotal, suitePassed, suiteFailed)
+			}
+		}
+
+		// Record gate-level metrics
+		if gateTotal > 0 {
+			metrics.RecordGateMetrics(n.networkName, n.result.RunID, gate.ID, gateTotal, gatePassed, gateFailed, gateDuration)
 		}
 	}
 

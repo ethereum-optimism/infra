@@ -114,21 +114,22 @@ type TestRunnerWithFileLogger interface {
 
 // runner struct implements TestRunner interface
 type runner struct {
-	registry           *registry.Registry
-	validators         []types.ValidatorMetadata
-	workDir            string // Directory for running tests
-	log                log.Logger
-	runID              string
-	goBinary           string              // Path to the Go binary
-	allowSkips         bool                // Whether to allow skipping tests when preconditions are not met
-	outputRealtimeLogs bool                // If enabled, test logs will be outputted in realtime
-	testLogLevel       string              // Log level to be used for the tests
-	fileLogger         *logging.FileLogger // Logger for storing test results
-	networkName        string              // Name of the network being tested
-	env                *env.DevnetEnv
-	tracer             trace.Tracer
-	serial             bool // Whether to run tests serially instead of in parallel
-	concurrency        int  // Number of concurrent test workers (0 = auto-determine)
+	registry              *registry.Registry
+	validators            []types.ValidatorMetadata
+	workDir               string // Directory for running tests
+	log                   log.Logger
+	runID                 string
+	goBinary              string              // Path to the Go binary
+	allowSkips            bool                // Whether to allow skipping tests when preconditions are not met
+	outputRealtimeLogs    bool                // If enabled, test logs will be outputted in realtime
+	stripCodeLinePrefixes bool                // Whether to strip file:line prefixes from test logs
+	testLogLevel          string              // Log level to be used for the tests
+	fileLogger            *logging.FileLogger // Logger for storing test results
+	networkName           string              // Name of the network being tested
+	env                   *env.DevnetEnv
+	tracer                trace.Tracer
+	serial                bool // Whether to run tests serially instead of in parallel
+	concurrency           int  // Number of concurrent test workers (0 = auto-determine)
 
 	// New component fields
 	executor     TestExecutor
@@ -140,21 +141,22 @@ type runner struct {
 
 // Config holds configuration for creating a new runner
 type Config struct {
-	Registry           *registry.Registry
-	TargetGate         string
-	WorkDir            string
-	Log                log.Logger
-	GoBinary           string              // path to the Go binary
-	AllowSkips         bool                // Whether to allow skipping tests when preconditions are not met
-	OutputRealtimeLogs bool                // Whether to output test logs to the console
-	TestLogLevel       string              // Log level to be used for the tests
-	FileLogger         *logging.FileLogger // Logger for storing test results
-	NetworkName        string              // Name of the network being tested
-	DevnetEnv          *env.DevnetEnv
-	Serial             bool          // Whether to run tests serially instead of in parallel
-	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
-	ShowProgress       bool          // Whether to show periodic progress updates during test execution
-	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
+	Registry              *registry.Registry
+	TargetGate            string
+	WorkDir               string
+	Log                   log.Logger
+	GoBinary              string              // path to the Go binary
+	AllowSkips            bool                // Whether to allow skipping tests when preconditions are not met
+	OutputRealtimeLogs    bool                // Whether to output test logs to the console
+	StripCodeLinePrefixes bool                // Whether to strip file:line prefixes from test logs
+	TestLogLevel          string              // Log level to be used for the tests
+	FileLogger            *logging.FileLogger // Logger for storing test results
+	NetworkName           string              // Name of the network being tested
+	DevnetEnv             *env.DevnetEnv
+	Serial                bool          // Whether to run tests serially instead of in parallel
+	Concurrency           int           // Number of concurrent test workers (0 = auto-determine)
+	ShowProgress          bool          // Whether to show periodic progress updates during test execution
+	ProgressInterval      time.Duration // Interval between progress updates when ShowProgress is 'true'
 }
 
 // NewTestRunner creates a new test runner instance
@@ -191,20 +193,21 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		"allowSkips", cfg.AllowSkips, "goBinary", cfg.GoBinary, "networkName", networkName, "serial", cfg.Serial)
 
 	r := &runner{
-		registry:           cfg.Registry,
-		validators:         validators,
-		workDir:            cfg.WorkDir,
-		log:                cfg.Log,
-		goBinary:           cfg.GoBinary,
-		allowSkips:         cfg.AllowSkips,
-		outputRealtimeLogs: cfg.OutputRealtimeLogs,
-		testLogLevel:       cfg.TestLogLevel,
-		fileLogger:         cfg.FileLogger,
-		networkName:        networkName,
-		env:                cfg.DevnetEnv,
-		tracer:             otel.Tracer("test runner"),
-		serial:             cfg.Serial,
-		concurrency:        cfg.Concurrency,
+		registry:              cfg.Registry,
+		validators:            validators,
+		workDir:               cfg.WorkDir,
+		log:                   cfg.Log,
+		goBinary:              cfg.GoBinary,
+		allowSkips:            cfg.AllowSkips,
+		outputRealtimeLogs:    cfg.OutputRealtimeLogs,
+		stripCodeLinePrefixes: cfg.StripCodeLinePrefixes,
+		testLogLevel:          cfg.TestLogLevel,
+		fileLogger:            cfg.FileLogger,
+		networkName:           networkName,
+		env:                   cfg.DevnetEnv,
+		tracer:                otel.Tracer("test runner"),
+		serial:                cfg.Serial,
+		concurrency:           cfg.Concurrency,
 	}
 
 	// Initialize new components
@@ -766,12 +769,18 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	var testStartTime = time.Now()
 
 	if r.outputRealtimeLogs {
-		stdoutLogger := &logWriter{logFn: func(msg string) {
-			r.log.Info("Test output", "test", metadata.FuncName, "output", msg)
-		}}
-		stderrLogger := &logWriter{logFn: func(msg string) {
-			r.log.Error("Test error output", "test", metadata.FuncName, "error", msg)
-		}}
+		stdoutLogger := &logWriter{
+			logFn: func(msg string) {
+				r.log.Info("Test output", "test", metadata.FuncName, "output", msg)
+			},
+			stripCodeLinePrefixes: r.stripCodeLinePrefixes,
+		}
+		stderrLogger := &logWriter{
+			logFn: func(msg string) {
+				r.log.Error("Test error output", "test", metadata.FuncName, "error", msg)
+			},
+			stripCodeLinePrefixes: r.stripCodeLinePrefixes,
+		}
 
 		cmd.Stdout = io.MultiWriter(&stdout, stdoutLogger)
 		cmd.Stderr = io.MultiWriter(&stderr, stderrLogger)
@@ -1381,8 +1390,9 @@ var _ TestRunner = &runner{}
 var _ TestRunnerWithFileLogger = &runner{}
 
 type logWriter struct {
-	logFn func(msg string)
-	buf   []byte
+	logFn                 func(msg string)
+	buf                   []byte
+	stripCodeLinePrefixes bool
 }
 
 func (w *logWriter) Write(p []byte) (n int, err error) {
@@ -1397,12 +1407,25 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 
 		// Try to parse as a test event
 		event, err := parseTestEvent(line)
-		if err == nil && event.Action == ActionOutput {
-			// If it's a valid test event with output action, use the Output field
-			w.logFn(event.Output)
+		if err == nil {
+			// It's a valid test event JSON
+			if event.Action == ActionOutput {
+				// Only log the actual test output content
+				// Collapse whitespace to clean up structured logging output
+				cleaned := logging.CleanLogOutput(event.Output, w.stripCodeLinePrefixes, true)
+				if cleaned != "" {
+					w.logFn(cleaned)
+				}
+			}
+			// Skip logging other test events (start, run, pass, fail, skip)
+			// These are metadata used for parsing but not useful in realtime logs
 		} else {
-			// If not a valid test event or not an output action, use the raw line
-			w.logFn(string(line))
+			// Not a valid test event JSON - it's a raw line (e.g., direct stderr)
+			// Clean up and log it - collapse whitespace to clean up structured logging output
+			cleaned := logging.CleanLogOutput(string(line), w.stripCodeLinePrefixes, true)
+			if cleaned != "" {
+				w.logFn(cleaned)
+			}
 		}
 	}
 	return len(p), nil
