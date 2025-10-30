@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -115,7 +116,41 @@ func TestOutputParser_ParseWithTimeout(t *testing.T) {
 	assert.Equal(t, types.TestStatusFail, result.Status, "Should be marked as failed due to timeout")
 	assert.True(t, result.TimedOut, "Should be marked as timed out")
 	assert.NotNil(t, result.Error, "Should have timeout error")
-	assert.Contains(t, result.Error.Error(), "timeout", "Error should mention timeout")
+	assert.Contains(t, strings.ToLower(result.Error.Error()), "timed out", "Error should mention timed out")
+}
+
+func TestOutputParser_ParseWithTimeout_PreservesCompletedSubtests(t *testing.T) {
+	parser := NewOutputParser()
+	timeout := 500 * time.Millisecond
+
+	// SubTest1 passes, SubTest2 starts but never completes
+	output := `{"Time":"2023-05-01T12:00:00Z","Action":"start","Package":"example/pkg","Test":"TestExample"}
+{"Time":"2023-05-01T12:00:00.10Z","Action":"start","Package":"example/pkg","Test":"TestExample/SubTest1"}
+{"Time":"2023-05-01T12:00:00.20Z","Action":"pass","Package":"example/pkg","Test":"TestExample/SubTest1","Elapsed":0.10}
+{"Time":"2023-05-01T12:00:00.30Z","Action":"start","Package":"example/pkg","Test":"TestExample/SubTest2"}`
+
+	metadata := types.ValidatorMetadata{
+		FuncName: "TestExample",
+		Package:  "example/pkg",
+	}
+
+	result := parser.ParseWithTimeout([]byte(output), metadata, timeout)
+	require.NotNil(t, result)
+	assert.True(t, result.TimedOut)
+
+	// SubTest1 remains Pass
+	sub1, ok := result.SubTests["TestExample/SubTest1"]
+	require.True(t, ok)
+	assert.Equal(t, types.TestStatusPass, sub1.Status)
+	assert.False(t, sub1.TimedOut)
+
+	// SubTest2 marked as timed out (started but did not complete)
+	sub2, ok := result.SubTests["TestExample/SubTest2"]
+	require.True(t, ok)
+	assert.Equal(t, types.TestStatusFail, sub2.Status)
+	assert.True(t, sub2.TimedOut)
+	require.NotNil(t, sub2.Error)
+	assert.Contains(t, sub2.Error.Error(), "SUBTEST TIMEOUT")
 }
 
 func TestCalculateTestDuration(t *testing.T) {

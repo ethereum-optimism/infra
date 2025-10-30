@@ -77,20 +77,103 @@ func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *t
 
 // ParseWithTimeout parses test output for tests that exceeded timeout
 func (p *outputParser) ParseWithTimeout(output []byte, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult {
-	result := p.Parse(output, metadata)
+	// If no output, return a minimal timeout result
+	if len(output) == 0 {
+		return &types.TestResult{
+			Metadata: metadata,
+			Status:   types.TestStatusFail,
+			Error:    fmt.Errorf("TIMEOUT: Test timed out after %v", timeout),
+			SubTests: make(map[string]*types.TestResult),
+			TimedOut: true,
+		}
+	}
 
-	// Mark as timeout if duration exceeds timeout
-	if result.Duration >= timeout {
-		result.Status = types.TestStatusFail
-		result.Error = fmt.Errorf("test exceeded timeout of %v", timeout)
-		result.TimedOut = true
+	// Build a timeout-focused parse that preserves completed subtests
+	result := &types.TestResult{
+		Metadata: metadata,
+		Status:   types.TestStatusFail,
+		SubTests: make(map[string]*types.TestResult),
+		Error:    fmt.Errorf("TIMEOUT: Test timed out after %v", timeout),
+		TimedOut: true,
+	}
 
-		// Mark all incomplete subtests as timed out
-		for _, subTest := range result.SubTests {
-			if subTest.Status == types.TestStatusPass {
-				subTest.Status = types.TestStatusFail
-				subTest.Error = fmt.Errorf("subtest timed out")
-				subTest.TimedOut = true
+	subTestStatuses := make(map[string]types.TestStatus)
+	subTestStartTimes := make(map[string]time.Time)
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		event, err := parseTestEvent(line)
+		if err != nil {
+			// Be lenient on JSON parsing during timeout scenarios
+			continue
+		}
+
+		// Attach any main test output to the error for context
+		if isMainTestEvent(event, metadata.FuncName) {
+			if event.Action == ActionOutput {
+				output := strings.TrimSpace(event.Output)
+				if output != "" && result.Error != nil {
+					result.Error = fmt.Errorf("%w\nOutput: %s", result.Error, output)
+				}
+			}
+			continue
+		}
+
+		// Handle subtests
+		subTest, exists := result.SubTests[event.Test]
+		if !exists {
+			funcName := event.Test
+			parts := strings.Split(event.Test, "/")
+			if len(parts) > 1 {
+				funcName = strings.Join(parts[1:], "/")
+			}
+
+			subTest = &types.TestResult{
+				Metadata: types.ValidatorMetadata{
+					FuncName: funcName,
+					Package:  result.Metadata.Package,
+				},
+				Status: types.TestStatusFail, // default to fail in timeout scenarios until proven otherwise
+			}
+			result.SubTests[event.Test] = subTest
+		}
+
+		switch event.Action {
+		case ActionStart, ActionRun:
+			subTestStartTimes[event.Test] = event.Time
+		case ActionPass:
+			subTest.Status = types.TestStatusPass
+			subTestStatuses[event.Test] = types.TestStatusPass
+			calculateSubTestDuration(subTest, event, subTestStartTimes)
+		case ActionFail:
+			subTest.Status = types.TestStatusFail
+			subTestStatuses[event.Test] = types.TestStatusFail
+			calculateSubTestDuration(subTest, event, subTestStartTimes)
+		case ActionSkip:
+			subTest.Status = types.TestStatusSkip
+			subTestStatuses[event.Test] = types.TestStatusSkip
+			calculateSubTestDuration(subTest, event, subTestStartTimes)
+		case ActionOutput:
+			updateSubTestError(subTest, event.Output)
+		}
+	}
+
+	// Only mark subtests that started but never completed as timed out
+	for name, sub := range result.SubTests {
+		if _, completed := subTestStatuses[name]; !completed {
+			sub.Status = types.TestStatusFail
+			sub.TimedOut = true
+			if sub.Error == nil {
+				sub.Error = fmt.Errorf("SUBTEST TIMEOUT: Test timed out during execution")
+			} else {
+				sub.Error = fmt.Errorf("%w (TIMED OUT)", sub.Error)
+			}
+			if start, ok := subTestStartTimes[name]; ok {
+				sub.Duration = start.Add(timeout).Sub(start)
+			} else {
+				// No start time observed; use full timeout to avoid understating runtime
+				sub.Duration = timeout
 			}
 		}
 	}
