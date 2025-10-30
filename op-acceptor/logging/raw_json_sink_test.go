@@ -25,7 +25,7 @@ func TestRawJSONSink(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-raw-json"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate", true)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink from the logger
@@ -227,7 +227,7 @@ func TestFail(t *testing.T) {
 
 	// Create a test result and file logger
 	runID := "real-go-test-run"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate", true)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink
@@ -404,7 +404,7 @@ func TestRawJSONSink_ComprehensiveLogging(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "comprehensive-test-run"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate", true)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink from the logger
@@ -663,7 +663,7 @@ func TestSkippedIntegration(t *testing.T) {
 
 	// Create a file logger to test our raw JSON sink
 	runID := "integration-test-run"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate", true)
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Get the RawJSONSink

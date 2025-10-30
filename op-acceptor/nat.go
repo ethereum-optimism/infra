@@ -162,21 +162,20 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	workDir := strings.TrimSuffix(config.TestDir, "/...")
 
 	testRunner, err := runner.NewTestRunner(runner.Config{
-		Registry:              reg,
-		WorkDir:               workDir,
-		Log:                   config.Log,
-		TargetGate:            targetGate,
-		GoBinary:              config.GoBinary,
-		AllowSkips:            config.AllowSkips,
-		OutputRealtimeLogs:    config.OutputRealtimeLogs,
-		StripCodeLinePrefixes: config.StripCodeLinePrefixes,
-		TestLogLevel:          config.TestLogLevel,
-		NetworkName:           networkName,
-		DevnetEnv:             devnetEnv,
-		Serial:                config.Serial,
-		Concurrency:           config.Concurrency,
-		ShowProgress:          config.ShowProgress,
-		ProgressInterval:      config.ProgressInterval,
+		Registry:           reg,
+		WorkDir:            workDir,
+		Log:                config.Log,
+		TargetGate:         targetGate,
+		GoBinary:           config.GoBinary,
+		AllowSkips:         config.AllowSkips,
+		OutputRealtimeLogs: config.OutputRealtimeLogs,
+		TestLogLevel:       config.TestLogLevel,
+		NetworkName:        networkName,
+		DevnetEnv:          devnetEnv,
+		Serial:             config.Serial,
+		Concurrency:        config.Concurrency,
+		ShowProgress:       config.ShowProgress,
+		ProgressInterval:   config.ProgressInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -390,7 +389,7 @@ func (n *nat) runTests(ctx context.Context) error {
 	n.config.Log.Debug("Generated new runID for test run", "runID", runID)
 
 	// Create a new file logger with the runID
-	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate, n.config.StripCodeLinePrefixes)
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
 	if err != nil {
 		n.config.Log.Error("Error creating file logger", "error", err)
 		return fmt.Errorf("failed to create file logger: %w", err)

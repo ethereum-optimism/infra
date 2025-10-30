@@ -16,7 +16,7 @@ func TestIntegrationSubtestOutputCapture(t *testing.T) {
 	// Setup
 	tempDir := t.TempDir()
 	runID := "test-run-" + time.Now().Format("20060102-150405")
-	logger, err := NewFileLogger(tempDir, runID, "test-network", "test-gate", true)
+	logger, err := NewFileLogger(tempDir, runID, "test-network", "test-gate")
 	require.NoError(t, err)
 
 	// Create a main test result with subtests that have plain text output
@@ -120,7 +120,7 @@ func TestRealTestOutputCapture(t *testing.T) {
 	// Setup
 	tempDir := t.TempDir()
 	runID := "real-test-run"
-	logger, err := NewFileLogger(tempDir, runID, "optimism", "connectivity", true)
+	logger, err := NewFileLogger(tempDir, runID, "optimism", "connectivity")
 	require.NoError(t, err)
 
 	// Simulate a test result for TestRPCConnectivity with actual logger output
