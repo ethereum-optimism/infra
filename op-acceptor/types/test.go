@@ -20,7 +20,7 @@ const (
 type TestResult struct {
 	Metadata ValidatorMetadata
 	Status   TestStatus
-	Error    error                  // Changed from string to error
+	Error    error                  // Error message for the test
 	Duration time.Duration          // Track test execution time
 	SubTests map[string]*TestResult // Store individual test results when running a package
 	Stdout   string                 // Capture stdout for failing tests
