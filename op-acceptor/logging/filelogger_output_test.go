@@ -33,7 +33,7 @@ func TestPlaintextFileCreation(t *testing.T) {
 {"Time":"2025-09-23T10:00:01Z","Action":"output","Package":"test/pkg","Test":"TestExample","Output":"    test.go:10: Log message\n"}
 {"Time":"2025-09-23T10:00:02Z","Action":"output","Package":"test/pkg","Test":"TestExample","Output":"--- PASS: TestExample (1.00s)\n"}`,
 			shouldContain: []string{
-				"=== RUN   TestExample",
+				"=== RUN TestExample", // Whitespace collapsed
 				"Log message",
 				"--- PASS: TestExample",
 			},
@@ -45,7 +45,7 @@ func TestPlaintextFileCreation(t *testing.T) {
     test.go:10: Log message
 --- PASS: TestExample (1.00s)`,
 			shouldContain: []string{
-				"=== RUN   TestExample",
+				"=== RUN TestExample", // Whitespace collapsed
 				"Log message",
 				"--- PASS: TestExample",
 			},

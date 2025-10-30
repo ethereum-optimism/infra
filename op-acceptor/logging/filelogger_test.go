@@ -465,7 +465,7 @@ func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
 	passedTxtContent, err := os.ReadFile(passedTxtPath)
 	require.NoError(t, err, "Should be able to read the passing test plaintext file")
 	passedTxtStr := string(passedTxtContent)
-	assert.Contains(t, passedTxtStr, "=== RUN   TestPass")
+	assert.Contains(t, passedTxtStr, "=== RUN TestPass") // Whitespace collapsed
 	assert.Contains(t, passedTxtStr, "--- PASS: TestPass (1.00s)")
 	// Should NOT contain headers since this is a separate file
 	assert.NotContains(t, passedTxtStr, "PLAINTEXT OUTPUT:")
@@ -497,11 +497,11 @@ func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
 	failedTxtContent, err := os.ReadFile(failedTxtPath)
 	require.NoError(t, err, "Should be able to read the failing test plaintext file")
 	failedTxtStr := string(failedTxtContent)
-	assert.Contains(t, failedTxtStr, "=== RUN   TestFail")
+	assert.Contains(t, failedTxtStr, "=== RUN TestFail") // Whitespace collapsed
 	assert.Contains(t, failedTxtStr, "Error Trace:")
 	assert.Contains(t, failedTxtStr, "Error:")
 	assert.Contains(t, failedTxtStr, "expected: int(42)")
-	assert.Contains(t, failedTxtStr, "actual  : int(43)")
+	assert.Contains(t, failedTxtStr, "actual : int(43)") // Whitespace collapsed
 	assert.Contains(t, failedTxtStr, "Messages:")
 	// Should NOT contain headers since this is a separate file
 	assert.NotContains(t, failedTxtStr, "PLAINTEXT OUTPUT:")
