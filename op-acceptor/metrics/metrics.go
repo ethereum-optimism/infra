@@ -107,6 +107,9 @@ var (
 		Help:      "Total number of tests run (aggregate counter without run_id)",
 	}, []string{
 		"network_name",
+		"test_name",
+		"gate",
+		"suite",
 	})
 
 	testsPassed = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -115,6 +118,9 @@ var (
 		Help:      "Total number of passed tests (aggregate counter without run_id)",
 	}, []string{
 		"network_name",
+		"test_name",
+		"gate",
+		"suite",
 	})
 
 	testsFailed = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -123,6 +129,9 @@ var (
 		Help:      "Total number of failed tests (aggregate counter without run_id)",
 	}, []string{
 		"network_name",
+		"test_name",
+		"gate",
+		"suite",
 	})
 
 	testsSkipped = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -131,6 +140,9 @@ var (
 		Help:      "Total number of skipped tests (aggregate counter without run_id)",
 	}, []string{
 		"network_name",
+		"test_name",
+		"gate",
+		"suite",
 	})
 
 	// Metrics for individual test tracking
@@ -154,6 +166,101 @@ var (
 		"network_name",
 		"run_id",
 		"test_name",
+		"gate",
+		"suite",
+	})
+
+	// Test duration histogram to track distribution of test execution times
+	testDurationHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "test_duration_histogram_seconds",
+		Help:      "Histogram of test execution durations in seconds",
+		Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600}, // 100ms to 10min
+	}, []string{
+		"network_name",
+		"test_name",
+		"gate",
+		"suite",
+	})
+
+	// Test timeout tracking
+	testTimeouts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "test_timeouts_total",
+		Help:      "Total number of tests that timed out",
+	}, []string{
+		"network_name",
+		"run_id",
+		"test_name",
+		"gate",
+		"suite",
+	})
+
+	// Gate-level aggregated metrics
+	gateTestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "gate_tests_total",
+		Help:      "Total number of tests per gate",
+	}, []string{
+		"network_name",
+		"gate",
+	})
+
+	gateTestsPassed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "gate_tests_passed_total",
+		Help:      "Total number of passed tests per gate",
+	}, []string{
+		"network_name",
+		"gate",
+	})
+
+	gateTestsFailed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "gate_tests_failed_total",
+		Help:      "Total number of failed tests per gate",
+	}, []string{
+		"network_name",
+		"gate",
+	})
+
+	gateDurationSeconds = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "gate_duration_seconds",
+		Help:      "Duration of gate execution in seconds",
+	}, []string{
+		"network_name",
+		"run_id",
+		"gate",
+	})
+
+	// Suite-level metrics
+	suiteTestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "suite_tests_total",
+		Help:      "Total number of tests per suite",
+	}, []string{
+		"network_name",
+		"gate",
+		"suite",
+	})
+
+	suiteTestsPassed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "suite_tests_passed_total",
+		Help:      "Total number of passed tests per suite",
+	}, []string{
+		"network_name",
+		"gate",
+		"suite",
+	})
+
+	suiteTestsFailed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "suite_tests_failed_total",
+		Help:      "Total number of failed tests per suite",
+	}, []string{
+		"network_name",
 		"gate",
 		"suite",
 	})
@@ -232,14 +339,6 @@ func RecordAcceptance(
 	}
 
 	testRunDurationSeconds.WithLabelValues(network, runID).Set(duration.Seconds())
-
-	// Also record to the continuous counters without run_id
-	testsTotal.WithLabelValues(network).Add(float64(total))
-	testsPassed.WithLabelValues(network).Add(float64(passed))
-	testsFailed.WithLabelValues(network).Add(float64(failed))
-	if skipped > 0 {
-		testsSkipped.WithLabelValues(network).Add(float64(skipped))
-	}
 }
 
 // RecordIndividualTest records metrics for an individual test
@@ -265,8 +364,44 @@ func RecordIndividualTest(
 
 	testStatus.WithLabelValues(network, runID, testName, gate, suite).Set(statusValue)
 	testDurationSeconds.WithLabelValues(network, runID, testName, gate, suite).Set(duration.Seconds())
+
+	// Also record to the continuous counters without run_id for time-based aggregation
+	testsTotal.WithLabelValues(network, testName, gate, suite).Inc()
+	switch status {
+	case types.TestStatusPass:
+		testsPassed.WithLabelValues(network, testName, gate, suite).Inc()
+	case types.TestStatusFail:
+		testsFailed.WithLabelValues(network, testName, gate, suite).Inc()
+	case types.TestStatusSkip:
+		testsSkipped.WithLabelValues(network, testName, gate, suite).Inc()
+	}
 }
 
 func isValidResult(result types.TestStatus) bool {
 	return slices.Contains(validResults, result)
+}
+
+// RecordTestDurationHistogram records test duration in a histogram for distribution analysis
+func RecordTestDurationHistogram(network string, testName string, gate string, suite string, duration time.Duration) {
+	testDurationHistogram.WithLabelValues(network, testName, gate, suite).Observe(duration.Seconds())
+}
+
+// RecordTestTimeout records when a test times out
+func RecordTestTimeout(network string, runID string, testName string, gate string, suite string) {
+	testTimeouts.WithLabelValues(network, runID, testName, gate, suite).Inc()
+}
+
+// RecordGateMetrics records aggregated metrics for a gate
+func RecordGateMetrics(network string, runID string, gate string, total int, passed int, failed int, duration time.Duration) {
+	gateTestsTotal.WithLabelValues(network, gate).Add(float64(total))
+	gateTestsPassed.WithLabelValues(network, gate).Add(float64(passed))
+	gateTestsFailed.WithLabelValues(network, gate).Add(float64(failed))
+	gateDurationSeconds.WithLabelValues(network, runID, gate).Set(duration.Seconds())
+}
+
+// RecordSuiteMetrics records aggregated metrics for a suite
+func RecordSuiteMetrics(network string, gate string, suite string, total int, passed int, failed int) {
+	suiteTestsTotal.WithLabelValues(network, gate, suite).Add(float64(total))
+	suiteTestsPassed.WithLabelValues(network, gate, suite).Add(float64(passed))
+	suiteTestsFailed.WithLabelValues(network, gate, suite).Add(float64(failed))
 }
