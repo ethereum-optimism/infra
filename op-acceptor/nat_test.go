@@ -100,7 +100,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	logger := log.New()
 
 	// Set up a mock file logger
-	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", "test-gate")
+	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", "test-gate", true)
 	require.NoError(t, err)
 
 	// Create service with the mock
@@ -385,7 +385,7 @@ gates:
 			"name": "%s",
 			"l1": {
 				"name": "test-l1",
-				"id": "1", 
+				"id": "1",
 				"nodes": [],
 				"addresses": {},
 				"wallets": {}
