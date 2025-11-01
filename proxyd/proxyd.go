@@ -215,6 +215,9 @@ func Start(config *Config) (*Server, func(), error) {
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
+		if len(cfg.AllowedStatusCodes) > 0 {
+			opts = append(opts, WithAllowedStatusCodes(cfg.AllowedStatusCodes))
+		}
 
 		receiptsTarget, err := ReadFromEnvOrConfig(cfg.ConsensusReceiptsTarget)
 		if err != nil {

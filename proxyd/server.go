@@ -700,7 +700,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	clientConn.SetReadLimit(s.maxBodySize)
 
-	proxier, err := s.wsBackendGroup.ProxyWS(ctx, clientConn, s.wsMethodWhitelist)
+	proxier, err := s.wsBackendGroup.ProxyWS(ctx, clientConn, s.wsMethodWhitelist, s.maxBodySize)
 	if err != nil {
 		if errors.Is(err, ErrNoBackends) {
 			RecordUnserviceableRequest(ctx, RPCRequestSourceWS)

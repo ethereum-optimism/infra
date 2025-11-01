@@ -103,6 +103,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 	defer backendServer.Close()
 
 	backend := NewBackend("test-backend", backendServer.URL, "", semaphore.NewWeighted(1))
+	require.Equal(t, []int{400, 413}, backend.allowedStatusCodes) // default allowed status codes
 	backendGroup := &BackendGroup{
 		Name:     "test-group",
 		Backends: []*Backend{backend},
@@ -165,6 +166,46 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 	finalCount := getHttpResponseCodeCount("499")
 
 	assert.Greater(t, finalCount, initialCount, "httpResponseCodesTotal should be incremented for 499 status code")
+}
+
+func TestAllowedStatusCodes(t *testing.T) {
+	unhealthyBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32000,"message":"backend has a foo problem"},"id":1}`))
+	}))
+	defer unhealthyBackendServer.Close()
+
+	healthyBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1","id":1}`))
+	}))
+	defer healthyBackendServer.Close()
+
+	unhealthyBackend := NewBackend("test-backend-healthy", unhealthyBackendServer.URL, "", semaphore.NewWeighted(1))
+	healthyBackend := NewBackend("test-backend-unhealthy", healthyBackendServer.URL, "", semaphore.NewWeighted(1))
+
+	require.Equal(t, []int{400, 413}, healthyBackend.allowedStatusCodes) // default allowed status codes
+
+	healthyBackend.allowedStatusCodes = []int{} // no need to explicitly allow 200
+	res, err := healthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Nil(t, res[0].Error) // denoting a successful RPC response
+
+	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	require.Error(t, err)
+	require.Nil(t, res)
+	require.ErrorContains(t, err, "response code 503")
+
+	unhealthyBackend.allowedStatusCodes = []int{503}
+	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	// denotes the RPC response holding the error
+	require.NotNil(t, res[0].Error)
+	require.Equal(t, -32000, res[0].Error.Code)
+	require.Equal(t, "backend has a foo problem", res[0].Error.Message)
+	require.Equal(t, http.StatusServiceUnavailable, res[0].Error.HTTPErrorCode)
 }
 
 func getHttpResponseCodeCount(statusCode string) float64 {
