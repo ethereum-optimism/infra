@@ -637,12 +637,16 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 	return nil, wrapErr(lastError, "permanent error forwarding request")
 }
 
-func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet, readLimit int64) (*WSProxier, error) {
+func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
 	backendConn, _, err := b.dialer.Dial(b.wsURL, nil) // nolint:bodyclose
 	if err != nil {
 		return nil, wrapErr(err, "error dialing backend")
 	}
-	backendConn.SetReadLimit(readLimit)
+	if b.maxResponseSize != 0 {
+		backendConn.SetReadLimit(b.maxResponseSize)
+	} else {
+		backendConn.SetReadLimit(serverReadLimit)
+	}
 
 	activeBackendWsConnsGauge.WithLabelValues(b.Name).Inc()
 	return NewWSProxier(b, clientConn, backendConn, methodWhitelist), nil
@@ -1157,9 +1161,9 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 	}
 }
 
-func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet, readLimit int64) (*WSProxier, error) {
+func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
 	for _, back := range bg.Backends {
-		proxier, err := back.ProxyWS(clientConn, methodWhitelist, readLimit)
+		proxier, err := back.ProxyWS(clientConn, methodWhitelist, serverReadLimit)
 		if errors.Is(err, ErrBackendOffline) {
 			log.Warn(
 				"skipping offline backend",
