@@ -11,7 +11,7 @@ RUN make build
 
 FROM golang:1.23.5-alpine3.21
 
-RUN apk add --no-cache ca-certificates build-base git
+RUN apk add --no-cache ca-certificates build-base git zstd
 
 # Install Go binary
 # (we copy Go directly from the builder stage for simplicity and consistency)
