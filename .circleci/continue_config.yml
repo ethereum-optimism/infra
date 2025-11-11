@@ -430,7 +430,7 @@ jobs:
             echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
             source $BASH_ENV
             # Install tools from mise.toml
-            mise install
+            mise install --verbose
       - run:
           name: Install goreleaser pro
           command: |
