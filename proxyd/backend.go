@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -319,7 +320,8 @@ type Backend struct {
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
 	intermittentErrorsSlidingWindow *sw.AvgSlidingWindow
 
-	weight int
+	weight             int
+	allowedStatusCodes []int
 }
 
 type BackendOpt func(b *Backend)
@@ -328,6 +330,12 @@ func WithBasicAuth(username, password string) BackendOpt {
 	return func(b *Backend) {
 		b.authUsername = username
 		b.authPassword = password
+	}
+}
+
+func WithAllowedStatusCodes(allowedStatusCodes []int) BackendOpt {
+	return func(b *Backend) {
+		b.allowedStatusCodes = allowedStatusCodes
 	}
 }
 
@@ -512,6 +520,7 @@ func NewBackend(
 		latencySlidingWindow:            sw.NewSlidingWindow(),
 		networkRequestsSlidingWindow:    sw.NewSlidingWindow(),
 		intermittentErrorsSlidingWindow: sw.NewSlidingWindow(),
+		allowedStatusCodes:              []int{400, 413}, // Alchemy returns a 400 on bad JSONs, and Quicknode returns a 413 on too large requests
 	}
 
 	backend.Override(opts...)
@@ -628,10 +637,15 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 	return nil, wrapErr(lastError, "permanent error forwarding request")
 }
 
-func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet) (*WSProxier, error) {
+func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
 	backendConn, _, err := b.dialer.Dial(b.wsURL, nil) // nolint:bodyclose
 	if err != nil {
 		return nil, wrapErr(err, "error dialing backend")
+	}
+	if b.maxResponseSize != 0 {
+		backendConn.SetReadLimit(b.maxResponseSize)
+	} else {
+		backendConn.SetReadLimit(serverReadLimit)
 	}
 
 	activeBackendWsConnsGauge.WithLabelValues(b.Name).Inc()
@@ -768,6 +782,9 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	start := time.Now()
 	httpRes, err := b.client.DoLimited(httpReq)
+	if httpRes != nil && httpRes.Body != nil {
+		defer httpRes.Body.Close()
+	}
 	if err != nil {
 		if !(errors.Is(err, context.Canceled) || errors.Is(err, ErrTooManyRequests)) {
 			b.intermittentErrorsSlidingWindow.Incr()
@@ -791,14 +808,13 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		strconv.FormatBool(isBatch),
 	).Inc()
 
-	// Alchemy returns a 400 on bad JSONs, so handle that case
-	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
+	// if the response in unsuccessful and its status code is unexpected, consider that as an unhealthy backend
+	if httpRes.StatusCode != 200 && !slices.Contains(b.allowedStatusCodes, httpRes.StatusCode) {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
-	defer httpRes.Body.Close()
 	resB, err := io.ReadAll(LimitReader(httpRes.Body, b.maxResponseSize))
 	if errors.Is(err, ErrLimitReaderOverLimit) {
 		return nil, ErrBackendResponseTooLarge
@@ -1148,9 +1164,9 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 	}
 }
 
-func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet) (*WSProxier, error) {
+func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
 	for _, back := range bg.Backends {
-		proxier, err := back.ProxyWS(clientConn, methodWhitelist)
+		proxier, err := back.ProxyWS(clientConn, methodWhitelist, serverReadLimit)
 		if errors.Is(err, ErrBackendOffline) {
 			log.Warn(
 				"skipping offline backend",
