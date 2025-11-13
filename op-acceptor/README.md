@@ -365,7 +365,7 @@ git tag -l --sort=-v:refname | grep op-acceptor
 
 # Set you target version (increase the latest appropriately)
 # and add a useful summary
-VERSION=v0.1.6
+VERSION=v3.1.6
 SUMMARY="Some useful summary of changes"
 
 # Tag your release
