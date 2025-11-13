@@ -20,4 +20,3 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-
