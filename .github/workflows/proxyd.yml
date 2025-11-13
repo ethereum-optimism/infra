@@ -13,7 +13,7 @@ jobs:
       image_name: proxyd
       context: .
       dockerfile: proxyd/Dockerfile
-      platforms: linux/amd64
+      platforms: linux/amd64,linux/arm64
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       gcp_registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
     permissions:
