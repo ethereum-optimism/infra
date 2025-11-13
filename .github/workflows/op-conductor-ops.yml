@@ -18,7 +18,6 @@ jobs:
       platforms: linux/amd64
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       gcp_registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
-      extraTags: type=raw,value=latest
     permissions:
       contents: read
       id-token: write
