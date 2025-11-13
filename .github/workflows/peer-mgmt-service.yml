@@ -1,0 +1,22 @@
+name: peer-mgmt-service
+
+on:
+  push:
+    paths:
+      - 'peer-mgmt-service/**'
+      - '.github/workflows/peer-mgmt-service.yml'
+
+jobs:
+  build:
+    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@8a71ef009f8cc2b5284da3ed7642e1fffb59b01e
+    with:
+      image_name: peer-mgmt-service
+      context: .
+      dockerfile: peer-mgmt-service/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
+      gcp_registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write

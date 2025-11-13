@@ -1,0 +1,22 @@
+name: cci-stats
+
+on:
+  push:
+    paths:
+      - 'cci-stats/**'
+      - '.github/workflows/cci-stats.yml'
+
+jobs:
+  build:
+    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@8a71ef009f8cc2b5284da3ed7642e1fffb59b01e
+    with:
+      image_name: cci-stats
+      context: .
+      dockerfile: cci-stats/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
+      gcp_registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
