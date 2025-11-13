@@ -2,11 +2,15 @@ name: op-txproxy
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'op-txproxy/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'op-txproxy/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

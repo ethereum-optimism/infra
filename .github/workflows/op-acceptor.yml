@@ -2,11 +2,15 @@ name: op-acceptor
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'op-acceptor/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'op-acceptor/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

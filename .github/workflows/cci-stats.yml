@@ -2,11 +2,15 @@ name: cci-stats
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'cci-stats/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'cci-stats/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

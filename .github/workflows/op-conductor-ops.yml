@@ -2,11 +2,15 @@ name: op-conductor-ops
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'op-conductor-ops/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'op-conductor-ops/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

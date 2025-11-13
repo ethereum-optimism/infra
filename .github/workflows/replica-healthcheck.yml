@@ -2,11 +2,15 @@ name: replica-healthcheck
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'replica-healthcheck/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'replica-healthcheck/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

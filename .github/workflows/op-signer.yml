@@ -2,11 +2,15 @@ name: op-signer
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'op-signer/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'op-signer/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

@@ -2,11 +2,15 @@ name: peer-mgmt-service
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'peer-mgmt-service/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'peer-mgmt-service/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

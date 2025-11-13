@@ -2,11 +2,15 @@ name: op-ufm
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'op-ufm/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'op-ufm/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:

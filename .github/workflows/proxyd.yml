@@ -2,11 +2,15 @@ name: proxyd
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'proxyd/**'
+      - '.circleci/**'
+      - '.github/**'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'proxyd/**'
+      - '.circleci/**'
+      - '.github/**'
 
 jobs:
   build:
