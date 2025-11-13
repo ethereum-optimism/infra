@@ -5,10 +5,6 @@ on:
     paths:
       - 'op-ufm/**'
       - '.github/workflows/op-ufm.yml'
-  pull_request:
-    paths:
-      - 'op-ufm/**'
-      - '.github/workflows/op-ufm.yml'
 
 jobs:
   build:

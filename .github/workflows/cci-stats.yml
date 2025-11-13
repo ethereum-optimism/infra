@@ -5,10 +5,6 @@ on:
     paths:
       - 'cci-stats/**'
       - '.github/workflows/cci-stats.yml'
-  pull_request:
-    paths:
-      - 'cci-stats/**'
-      - '.github/workflows/cci-stats.yml'
 
 jobs:
   build:

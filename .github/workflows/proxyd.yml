@@ -5,10 +5,6 @@ on:
     paths:
       - 'proxyd/**'
       - '.github/workflows/proxyd.yml'
-  pull_request:
-    paths:
-      - 'proxyd/**'
-      - '.github/workflows/proxyd.yml'
 
 jobs:
   build:

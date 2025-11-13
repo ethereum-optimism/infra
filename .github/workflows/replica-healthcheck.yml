@@ -5,10 +5,6 @@ on:
     paths:
       - 'replica-healthcheck/**'
       - '.github/workflows/replica-healthcheck.yml'
-  pull_request:
-    paths:
-      - 'replica-healthcheck/**'
-      - '.github/workflows/replica-healthcheck.yml'
 
 jobs:
   build:

@@ -5,10 +5,6 @@ on:
     paths:
       - 'peer-mgmt-service/**'
       - '.github/workflows/peer-mgmt-service.yml'
-  pull_request:
-    paths:
-      - 'peer-mgmt-service/**'
-      - '.github/workflows/peer-mgmt-service.yml'
 
 jobs:
   build:

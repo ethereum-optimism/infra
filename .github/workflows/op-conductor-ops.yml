@@ -5,10 +5,6 @@ on:
     paths:
       - 'op-conductor-ops/**'
       - '.github/workflows/op-conductor-ops.yml'
-  pull_request:
-    paths:
-      - 'op-conductor-ops/**'
-      - '.github/workflows/op-conductor-ops.yml'
 
 jobs:
   build:
