@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'op-signer/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-signer.yml'
   pull_request:
     paths:
       - 'op-signer/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-signer.yml'
 
 jobs:
   build:

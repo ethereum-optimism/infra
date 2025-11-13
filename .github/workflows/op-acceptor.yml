@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'op-acceptor/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-acceptor.yml'
   pull_request:
     paths:
       - 'op-acceptor/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-acceptor.yml'
 
 jobs:
   build:

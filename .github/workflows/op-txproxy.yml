@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'op-txproxy/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-txproxy.yml'
   pull_request:
     paths:
       - 'op-txproxy/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-txproxy.yml'
 
 jobs:
   build:

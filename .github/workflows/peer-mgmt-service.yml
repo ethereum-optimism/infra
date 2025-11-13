@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'peer-mgmt-service/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/peer-mgmt-service.yml'
   pull_request:
     paths:
       - 'peer-mgmt-service/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/peer-mgmt-service.yml'
 
 jobs:
   build:

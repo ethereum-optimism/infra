@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'proxyd/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/proxyd.yml'
   pull_request:
     paths:
       - 'proxyd/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/proxyd.yml'
 
 jobs:
   build:

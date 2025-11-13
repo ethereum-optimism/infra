@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'cci-stats/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/cci-stats.yml'
   pull_request:
     paths:
       - 'cci-stats/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/cci-stats.yml'
 
 jobs:
   build:

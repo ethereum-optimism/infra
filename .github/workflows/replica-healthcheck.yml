@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'replica-healthcheck/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/replica-healthcheck.yml'
   pull_request:
     paths:
       - 'replica-healthcheck/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/replica-healthcheck.yml'
 
 jobs:
   build:

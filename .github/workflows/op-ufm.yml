@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'op-ufm/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-ufm.yml'
   pull_request:
     paths:
       - 'op-ufm/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-ufm.yml'
 
 jobs:
   build:

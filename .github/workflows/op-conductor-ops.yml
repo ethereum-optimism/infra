@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'op-conductor-ops/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-conductor-ops.yml'
   pull_request:
     paths:
       - 'op-conductor-ops/**'
-      - '.circleci/**'
-      - '.github/**'
+      - '.github/workflows/op-conductor-ops.yml'
 
 jobs:
   build:
