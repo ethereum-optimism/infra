@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/infra/cci-stats
 
-go 1.23.1
+go 1.24.0
 
 require (
 	github.com/axelKingsley/go-circleci v0.9.1
@@ -15,7 +15,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 )
