@@ -127,8 +127,9 @@ type runner struct {
 	networkName        string              // Name of the network being tested
 	env                *env.DevnetEnv
 	tracer             trace.Tracer
-	serial             bool // Whether to run tests serially instead of in parallel
-	concurrency        int  // Number of concurrent test workers (0 = auto-determine)
+	serial             bool     // Whether to run tests serially instead of in parallel
+	concurrency        int      // Number of concurrent test workers (0 = auto-determine)
+	targetGates        []string // Target gates specified for this run
 
 	// New component fields
 	executor     TestExecutor
@@ -141,7 +142,7 @@ type runner struct {
 // Config holds configuration for creating a new runner
 type Config struct {
 	Registry           *registry.Registry
-	TargetGate         string
+	TargetGate         []string
 	WorkDir            string
 	Log                log.Logger
 	GoBinary           string              // path to the Go binary
@@ -172,7 +173,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 
 	var validators []types.ValidatorMetadata
 	if len(cfg.TargetGate) > 0 {
-		validators = cfg.Registry.GetValidatorsByGate(cfg.TargetGate)
+		validators = cfg.Registry.GetValidatorsByGates(cfg.TargetGate)
 	} else {
 		validators = cfg.Registry.GetValidators()
 	}
@@ -205,6 +206,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		tracer:             otel.Tracer("test runner"),
 		serial:             cfg.Serial,
 		concurrency:        cfg.Concurrency,
+		targetGates:        cfg.TargetGate,
 	}
 
 	// Initialize new components
@@ -359,7 +361,9 @@ func (r *runner) processAllGates(ctx context.Context, result *RunnerResult) erro
 	// Group validators by gate
 	gateValidators := r.groupValidatorsByGate()
 
-	// Process each gate
+	// Process all gates separately (including inherited gates like "base")
+	// This shows each gate with its own tests, including inherited tests
+	// that appear under both the inheriting gate and the original gate
 	for gateName, validators := range gateValidators {
 		if err := r.processGate(ctx, gateName, validators, result); err != nil {
 			return fmt.Errorf("processing gate %s: %w", gateName, err)
@@ -369,11 +373,48 @@ func (r *runner) processAllGates(ctx context.Context, result *RunnerResult) erro
 }
 
 // groupValidatorsByGate organizes validators into their respective gates
+// For each gate, includes:
+// - Direct tests (where validator.Gate == gateID)
+// - Tests from directly inherited gates (if the inherited gate is not a target gate)
 func (r *runner) groupValidatorsByGate() map[string][]types.ValidatorMetadata {
 	gateValidators := make(map[string][]types.ValidatorMetadata)
+
+	validatorsByOriginalGate := make(map[string][]types.ValidatorMetadata)
 	for _, validator := range r.validators {
-		gateValidators[validator.Gate] = append(gateValidators[validator.Gate], validator)
+		validatorsByOriginalGate[validator.Gate] = append(validatorsByOriginalGate[validator.Gate], validator)
 	}
+
+	targetGateSet := make(map[string]bool)
+	for _, gateID := range r.targetGates {
+		targetGateSet[gateID] = true
+	}
+
+	gatesShownSeparately := make(map[string]bool)
+	for gateID := range validatorsByOriginalGate {
+		gatesShownSeparately[gateID] = true
+	}
+
+	// For each gate that has validators, include its direct tests
+	// and tests from gates it directly inherits from (if inherited gate is not shown separately)
+	for gateID := range validatorsByOriginalGate {
+		var validators []types.ValidatorMetadata
+
+		validators = append(validators, validatorsByOriginalGate[gateID]...)
+
+		if r.registry != nil {
+			inheritedGates := r.registry.GetGateInherits(gateID)
+			for _, inheritedGateID := range inheritedGates {
+				if !gatesShownSeparately[inheritedGateID] {
+					if inheritedValidators, exists := validatorsByOriginalGate[inheritedGateID]; exists {
+						validators = append(validators, inheritedValidators...)
+					}
+				}
+			}
+		}
+
+		gateValidators[gateID] = validators
+	}
+
 	return gateValidators
 }
 
@@ -381,6 +422,10 @@ func (r *runner) groupValidatorsByGate() map[string][]types.ValidatorMetadata {
 func (r *runner) processGate(ctx context.Context, gateName string, validators []types.ValidatorMetadata, result *RunnerResult) error {
 	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("gate %s", gateName))
 	defer span.End()
+
+	if r.GetUI() != nil {
+		r.GetUI().StartGate(gateName, len(validators))
+	}
 
 	gateStart := time.Now()
 	gateResult := &GateResult{
@@ -407,6 +452,10 @@ func (r *runner) processGate(ctx context.Context, gateName string, validators []
 	gateResult.Duration = time.Since(gateStart)
 	gateResult.Status = determineGateStatus(gateResult)
 	gateResult.Stats.EndTime = time.Now()
+
+	if r.GetUI() != nil {
+		r.GetUI().CompleteGate(gateName)
+	}
 
 	return nil
 }
@@ -438,6 +487,9 @@ func (r *runner) processSuites(ctx context.Context, suiteValidators map[string][
 
 // processSuite handles the execution of a single suite
 func (r *runner) processSuite(ctx context.Context, suiteName string, suiteTests []types.ValidatorMetadata, gateResult *GateResult, result *RunnerResult) error {
+	if r.GetUI() != nil {
+		r.GetUI().StartSuite(suiteName, len(suiteTests))
+	}
 	ctx, span := r.tracer.Start(ctx, fmt.Sprintf("suite %s", suiteName))
 	defer span.End()
 
@@ -460,6 +512,11 @@ func (r *runner) processSuite(ctx context.Context, suiteName string, suiteTests 
 	suiteResult.Status = determineSuiteStatus(suiteResult)
 	suiteResult.Stats.EndTime = time.Now()
 
+	// Complete suite progress if UI is available
+	if r.GetUI() != nil {
+		r.GetUI().CompleteSuite(suiteName)
+	}
+
 	return nil
 }
 
@@ -475,9 +532,17 @@ func (r *runner) processDirectTests(ctx context.Context, directTests []types.Val
 
 // processTestAndAddToResults runs a single test and adds its results to the appropriate result containers
 func (r *runner) processTestAndAddToResults(ctx context.Context, validator types.ValidatorMetadata, gateResult *GateResult, suiteResult *SuiteResult, result *RunnerResult) error {
+	if r.GetUI() != nil {
+		r.GetUI().StartTest(validator.GetName())
+	}
+
 	testResult, err := r.RunTest(ctx, validator)
 	if err != nil {
 		return fmt.Errorf("running test %s: %w", validator.ID, err)
+	}
+
+	if r.GetUI() != nil {
+		r.GetUI().UpdateTest(validator.GetName(), testResult.Status)
 	}
 
 	// Get the appropriate key for the test

@@ -100,7 +100,7 @@ func setupTest(t *testing.T) (*trackedMockRunner, *nat, context.Context, context
 	logger := log.New()
 
 	// Set up a mock file logger
-	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", "test-gate")
+	mockFileLogger, err := logging.NewFileLogger(t.TempDir(), "test-run-id", "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Create service with the mock
@@ -404,7 +404,8 @@ gates:
 			Log:             logger,
 			ValidatorConfig: validatorConfigFile,
 			TestDir:         t.TempDir(),
-			TargetGate:      "test-gate",
+			TargetGate:      []string{"test-gate"},
+			GatelessMode:    false,
 			Orchestrator:    orchestrator,
 			DevnetEnvURL:    devnetURL,
 		}

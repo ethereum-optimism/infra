@@ -17,9 +17,10 @@ import (
 
 // Registry manages test sources and their configurations
 type Registry struct {
-	config     Config
-	validators []types.ValidatorMetadata
-	mu         sync.RWMutex
+	config       Config
+	validators   []types.ValidatorMetadata
+	gateInherits map[string][]string // gateID -> list of directly inherited gate IDs
+	mu           sync.RWMutex
 }
 
 // Config contains registry configuration
@@ -264,13 +265,28 @@ func (r *Registry) loadValidators(cfgPath string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Create a deep copy of gates before inheritance resolution to preserve direct tests
+	originalGates := make([]types.GateConfig, len(validatorConfig.Gates))
+	r.gateInherits = make(map[string][]string)
+	for i := range validatorConfig.Gates {
+		originalGates[i] = validatorConfig.Gates[i]
+		originalGates[i].Tests = make([]types.TestConfig, len(validatorConfig.Gates[i].Tests))
+		copy(originalGates[i].Tests, validatorConfig.Gates[i].Tests)
+		originalGates[i].Suites = make(map[string]types.SuiteConfig)
+		for k, v := range validatorConfig.Gates[i].Suites {
+			originalGates[i].Suites[k] = v
+		}
+		r.gateInherits[validatorConfig.Gates[i].ID] = validatorConfig.Gates[i].Inherits
+	}
+
 	// Resolve gate inheritance
 	if err := r.validateGateInheritance(validatorConfig); err != nil {
 		return fmt.Errorf("failed to resolve gate inheritance: %w", err)
 	}
 
-	// Convert config into test metadata (moved from discovery)
-	validators, err := r.discoverTests(validatorConfig)
+	// Convert config into test metadata using resolved gates (for running all tests)
+	// but track which gates originally defined each test
+	validators, err := r.discoverTestsWithOriginalGates(validatorConfig, originalGates)
 	if err != nil {
 		return fmt.Errorf("failed to discover tests: %w", err)
 	}
@@ -352,9 +368,64 @@ func (r *Registry) GetValidatorsByGate(gateID string) []types.ValidatorMetadata 
 	return validators
 }
 
+// GetValidatorsByGates returns validators for multiple gates, including validators from inherited gates
+func (r *Registry) GetValidatorsByGates(gateIDs []string) []types.ValidatorMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var validators []types.ValidatorMetadata
+	gateSet := make(map[string]bool)
+	for _, gateID := range gateIDs {
+		gateSet[gateID] = true
+	}
+
+	// Also include gates that are inherited by the target gates
+	inheritedGateSet := make(map[string]bool)
+	for _, gateID := range gateIDs {
+		inheritedGates := r.gateInherits[gateID]
+		for _, inheritedGateID := range inheritedGates {
+			r.collectInheritedGates(inheritedGateID, inheritedGateSet)
+			inheritedGateSet[inheritedGateID] = true
+		}
+	}
+
+	for gateID := range gateSet {
+		inheritedGateSet[gateID] = true
+	}
+	for gateID := range inheritedGateSet {
+		gateSet[gateID] = true
+	}
+
+	for _, validator := range r.validators {
+		if gateSet[validator.Gate] {
+			validators = append(validators, validator)
+		}
+	}
+	return validators
+}
+
+// collectInheritedGates recursively collects all gates inherited by a gate
+func (r *Registry) collectInheritedGates(gateID string, collected map[string]bool) {
+	if collected[gateID] {
+		return
+	}
+	inheritedGates := r.gateInherits[gateID]
+	for _, inheritedGateID := range inheritedGates {
+		collected[inheritedGateID] = true
+		r.collectInheritedGates(inheritedGateID, collected)
+	}
+}
+
 // GetConfig returns the registry configuration
 func (r *Registry) GetConfig() Config {
 	return r.config
+}
+
+// GetGateInherits returns the list of gates that a gate directly inherits from
+func (r *Registry) GetGateInherits(gateID string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.gateInherits[gateID]
 }
 
 // loadConfig loads a validator config from a file
@@ -374,27 +445,76 @@ func loadConfig(path string) (*types.ValidatorConfig, error) {
 	return &cfg, nil
 }
 
-// Move discovery.DiscoverTests to be a private method
-func (r *Registry) discoverTests(validatorConfig *types.ValidatorConfig) ([]types.ValidatorMetadata, error) {
+// discoverTestsWithOriginalGates creates validators from resolved gates but tracks original gate ownership
+func (r *Registry) discoverTestsWithOriginalGates(validatorConfig *types.ValidatorConfig, originalGates []types.GateConfig) ([]types.ValidatorMetadata, error) {
 	var validators []types.ValidatorMetadata
 
+	// Create maps of original gate tests and suites for quick lookup
+	originalGateTests := make(map[string]map[string]bool)
+	originalGateSuites := make(map[string]map[string]map[string]bool)
+	for _, gate := range originalGates {
+		testSet := make(map[string]bool)
+		for _, test := range gate.Tests {
+			key := test.Package
+			if test.Name != "" {
+				key += ":" + test.Name
+			}
+			testSet[key] = true
+		}
+		originalGateTests[gate.ID] = testSet
+
+		suiteMap := make(map[string]map[string]bool)
+		for suiteID, suite := range gate.Suites {
+			suiteTestSet := make(map[string]bool)
+			for _, test := range suite.Tests {
+				key := test.Package
+				if test.Name != "" {
+					key += ":" + test.Name
+				}
+				suiteTestSet[key] = true
+			}
+			suiteMap[suiteID] = suiteTestSet
+		}
+		originalGateSuites[gate.ID] = suiteMap
+	}
+
+	// Process resolved gates - create validators with original gate IDs
+	// For each resolved gate, create validators for tests that were originally defined in that gate
 	for i := range validatorConfig.Gates {
 		gate := &validatorConfig.Gates[i]
 
-		// Process direct gate tests
-		tests, err := r.discoverTestsInConfig(gate.Tests, gate.ID, "")
-		if err != nil {
-			return nil, err
-		}
-		validators = append(validators, tests...)
-
-		// Process suites
-		for suiteID, suite := range gate.Suites {
-			tests, err := r.discoverTestsInConfig(suite.Tests, gate.ID, suiteID)
-			if err != nil {
-				return nil, err
+		for _, test := range gate.Tests {
+			testKey := test.Package
+			if test.Name != "" {
+				testKey += ":" + test.Name
 			}
-			validators = append(validators, tests...)
+
+			if testSet, exists := originalGateTests[gate.ID]; exists && testSet[testKey] {
+				tests, err := r.discoverTestsInConfig([]types.TestConfig{test}, gate.ID, "")
+				if err != nil {
+					return nil, err
+				}
+				validators = append(validators, tests...)
+			}
+		}
+
+		for suiteID, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				testKey := test.Package
+				if test.Name != "" {
+					testKey += ":" + test.Name
+				}
+
+				if suiteMap, exists := originalGateSuites[gate.ID]; exists {
+					if suiteTestSet, exists := suiteMap[suiteID]; exists && suiteTestSet[testKey] {
+						tests, err := r.discoverTestsInConfig([]types.TestConfig{test}, gate.ID, suiteID)
+						if err != nil {
+							return nil, err
+						}
+						validators = append(validators, tests...)
+					}
+				}
+			}
 		}
 	}
 

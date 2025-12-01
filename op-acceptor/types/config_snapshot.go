@@ -39,7 +39,7 @@ type ExecutionConfigSnapshot struct {
 	RunInterval time.Duration `json:"runInterval"`
 	RunOnce     bool          `json:"runOnce"`
 	GoBinary    string        `json:"goBinary"`
-	TargetGate  string        `json:"targetGate"`
+	TargetGate  []string      `json:"targetGate"`
 	Gateless    bool          `json:"gatelessMode"`
 }
 

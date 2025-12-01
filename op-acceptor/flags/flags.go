@@ -133,6 +133,12 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "PROGRESS_INTERVAL"),
 		Usage:   "Interval between progress updates when --show-progress is enabled. Defaults to 30s.",
 	}
+	DryRun = &cli.BoolFlag{
+		Name:    "dry-run",
+		Value:   false,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "DRY_RUN"),
+		Usage:   "Show what tests would be run without actually executing them. Defaults to false.",
+	}
 	Orchestrator = &cli.StringFlag{
 		Name:    "orchestrator",
 		Value:   OrchestratorSysext.String(),
@@ -205,6 +211,7 @@ var optionalFlags = []cli.Flag{
 	FlakeShake,
 	FlakeShakeIterations,
 	ExcludeGates,
+	DryRun,
 }
 var Flags []cli.Flag
 

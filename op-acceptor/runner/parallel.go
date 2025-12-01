@@ -256,6 +256,9 @@ func (r *runner) collectTestWork() []TestWork {
 	// Group validators by gate
 	gateValidators := r.groupValidatorsByGate()
 
+	// Process all gates (including inherited gates like "base")
+	// This allows inherited tests to appear under both the inheriting gate
+	// and the original gate in the results
 	for gateName, validators := range gateValidators {
 		// Split validators into suites and direct tests
 		suiteValidators, directTests := r.categorizeValidators(validators)

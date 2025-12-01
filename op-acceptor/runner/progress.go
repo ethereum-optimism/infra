@@ -168,9 +168,13 @@ func (c *consoleProgressIndicator) reportProgress() {
 	}
 
 	// Create structured log with JSON fields
+	suiteDisplay := c.currentSuite
+	if suiteDisplay == "" {
+		suiteDisplay = "-" // Show "-" when there's no suite instead of empty string
+	}
 	logFields := []interface{}{
 		"gate", c.currentGate,
-		"suite", c.currentSuite,
+		"suite", suiteDisplay,
 		"completed", c.completedTests,
 		"total", c.totalTests,
 		"percent", fmt.Sprintf("%.1f%%", percentComplete),

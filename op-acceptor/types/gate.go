@@ -19,7 +19,7 @@ type GateConfig struct {
 // is recursive, so if gate C inherits from B, and B inherits from A, then C will
 // get configurations from both B and A. The inheritance rules are:
 // - Suites: Parent suites are only inherited if they don't exist in the child gate
-// - Tests: All parent tests are appended to the child gate's tests
+// - Tests: Parent tests are merged with deduplication by package:name key
 // - Inheritance is depth-first: more distant ancestors are processed first
 func (g *GateConfig) ResolveInherited(gates map[string]GateConfig) error {
 	// Track processed gates to prevent infinite recursion
@@ -35,13 +35,24 @@ func (g *GateConfig) resolveInheritedRecursive(gates map[string]GateConfig, proc
 	// Create new collections to store the merged configurations
 	mergedSuites := make(map[string]SuiteConfig)
 	var mergedTests []TestConfig
+	seenTests := make(map[string]bool)
 
 	// First copy the current gate's own configurations
 	// This ensures the current gate's configs take precedence
 	for k, v := range g.Suites {
 		mergedSuites[k] = v
 	}
-	mergedTests = append(mergedTests, g.Tests...)
+	// Add current gate's tests first (child takes precedence)
+	for _, test := range g.Tests {
+		key := test.Package
+		if test.Name != "" {
+			key += ":" + test.Name
+		}
+		if !seenTests[key] {
+			mergedTests = append(mergedTests, test)
+			seenTests[key] = true
+		}
+	}
 
 	// Process each parent gate specified in the Inherits field
 	for _, inheritFrom := range g.Inherits {
@@ -71,15 +82,22 @@ func (g *GateConfig) resolveInheritedRecursive(gates map[string]GateConfig, proc
 			}
 		}
 
-		// Append all tests from the parent
-		// Unlike suites, all parent tests are included
-		mergedTests = append(mergedTests, parent.Tests...)
+		// Add parent tests, but deduplicate by package:name
+		for _, test := range parent.Tests {
+			key := test.Package
+			if test.Name != "" {
+				key += ":" + test.Name
+			}
+			if !seenTests[key] {
+				mergedTests = append(mergedTests, test)
+				seenTests[key] = true
+			}
+		}
 
 		// Unmark this gate after processing
 		processed[inheritFrom] = false
 	}
 
-	// Update the gate's configuration with the merged results
 	g.Suites = mergedSuites
 	g.Tests = mergedTests
 	return nil
