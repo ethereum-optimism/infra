@@ -21,7 +21,7 @@ func TestFileLogger(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "test-run-123"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Get the directory with the testrun- prefix
@@ -153,12 +153,12 @@ func TestLoggerWithEmptyRunID(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Test that an error is returned when an empty runID is provided to NewFileLogger
-	_, err = NewFileLogger(tmpDir, "", "test-network", "test-gate")
+	_, err = NewFileLogger(tmpDir, "", "test-network", []string{"test-gate"})
 	assert.Error(t, err, "Expected error when creating logger with empty runID")
 	assert.Contains(t, err.Error(), "runID cannot be empty")
 
 	// Create a valid logger to test the LogTestResult with empty runID
-	logger, err := NewFileLogger(tmpDir, "valid-run-id", "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, "valid-run-id", "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Create a test result
@@ -193,7 +193,7 @@ func TestLoggingWithRunID(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	defaultRunID := "default-run-id"
-	logger, err := NewFileLogger(tmpDir, defaultRunID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, defaultRunID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// We'll use a different runID for this test
@@ -333,7 +333,7 @@ func TestCustomResultSink(t *testing.T) {
 
 	// Create a new FileLogger with a valid runID
 	runID := "custom-sink-test"
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Create a custom sink for testing
@@ -390,7 +390,7 @@ func TestPerTestFileSink_WritesTestOutput(t *testing.T) {
 	runID := "test-pertest-sink"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Access the PerTestFileSink directly
@@ -533,7 +533,7 @@ func TestHTMLSummarySink_GeneratesHTMLReport(t *testing.T) {
 	runID := "test-html-summary"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Create a mix of test results
@@ -645,7 +645,7 @@ func TestHTMLSummarySink_WithSubtestsAndNetworkInfo(t *testing.T) {
 	gateRun := "isthmus"
 
 	// Create a file logger with network and gate information
-	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
+	logger, err := NewFileLogger(tmpDir, runID, networkName, []string{gateRun})
 	require.NoError(t, err)
 
 	// Create subtests
@@ -758,7 +758,7 @@ func TestPerTestFileSink_CreatesSubtestFiles(t *testing.T) {
 	runID := "test-subtests"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(tmpDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Access the PerTestFileSink directly
@@ -859,7 +859,7 @@ func TestDuplicationFix(t *testing.T) {
 	runID := "duplication-test"
 
 	// Create a file logger
-	logger, err := NewFileLogger(logDir, runID, "test-network", "test-gate")
+	logger, err := NewFileLogger(logDir, runID, "test-network", []string{"test-gate"})
 	require.NoError(t, err)
 
 	// Create a test result that would have caused duplication before
@@ -953,7 +953,7 @@ func TestHTMLSink_TestsWithSubtestsAlwaysDisplayed(t *testing.T) {
 	gateRun := "test-gate"
 
 	// Create a file logger
-	logger, err := NewFileLogger(tmpDir, runID, networkName, gateRun)
+	logger, err := NewFileLogger(tmpDir, runID, networkName, []string{gateRun})
 	require.NoError(t, err)
 
 	// Simulate the fjord scenario: a test with subtests but minimal metadata

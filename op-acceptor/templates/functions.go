@@ -3,6 +3,7 @@ package templates
 import (
 	"fmt"
 	"html/template"
+	"strings"
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -40,6 +41,9 @@ func GetTemplateFunc() template.FuncMap {
 				return types.TestStatusSkip
 			}
 			return types.TestStatusError
+		},
+		"join": func(sep string, elems []string) string {
+			return strings.Join(elems, sep)
 		},
 	}
 }

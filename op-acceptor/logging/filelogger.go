@@ -119,7 +119,7 @@ func (af *AsyncFile) Close() error {
 }
 
 // NewFileLogger creates a new FileLogger with given configuration
-func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*FileLogger, error) {
+func NewFileLogger(baseDir string, runID string, networkName string, gateRuns []string) (*FileLogger, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("runID cannot be empty")
 	}
@@ -127,6 +127,8 @@ func NewFileLogger(baseDir string, runID string, networkName, gateRun string) (*
 	if baseDir == "" {
 		return nil, fmt.Errorf("baseDir cannot be empty")
 	}
+
+	gateRun := strings.Join(gateRuns, "_")
 
 	// Use the standardized prefix for the run directory
 	logDir := filepath.Join(baseDir, RunDirectoryPrefix+runID)

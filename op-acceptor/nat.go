@@ -124,20 +124,26 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	// Handle different orchestrator types
 	switch config.Orchestrator {
 	case flags.OrchestratorSysext:
-		// For sysext, we need DEVNET_ENV_URL
+		// For sysext, we need DEVNET_ENV_URL (unless in dry-run mode)
 		envURL := config.DevnetEnvURL
-		if envURL == "" {
+		if envURL == "" && !config.DryRun {
 			return nil, fmt.Errorf("devnet environment URL not provided: use --devnet-env-url flag or set DEVNET_ENV_URL environment variable for sysext orchestrator")
 		}
 
-		var err error
-		devnetEnv, err = env.LoadDevnetFromURL(envURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load devnet environment from %s: %w", envURL, err)
-		}
+		if envURL != "" {
+			var err error
+			devnetEnv, err = env.LoadDevnetFromURL(envURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load devnet environment from %s: %w", envURL, err)
+			}
 
-		networkName = extractNetworkName(devnetEnv)
-		config.Log.Info("Using sysext orchestrator with devnet environment", "network", networkName, "envURL", envURL)
+			networkName = extractNetworkName(devnetEnv)
+			config.Log.Info("Using sysext orchestrator with devnet environment", "network", networkName, "envURL", envURL)
+		} else {
+			// Dry-run mode without devnet env
+			networkName = "dry-run"
+			config.Log.Info("Using sysext orchestrator in dry-run mode (no devnet environment)")
+		}
 
 	case flags.OrchestratorSysgo:
 		// For sysgo, we don't need DEVNET_ENV_URL
@@ -155,7 +161,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	// Create runner with registry
 	targetGate := config.TargetGate
 	if config.GatelessMode {
-		targetGate = "gateless"
+		targetGate = []string{"gateless"}
 	}
 
 	// Set working directory for the runner
@@ -209,7 +215,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 	}
 
 	// Create addons manager (skip in dry-run)
-	if true {
+	if !config.DryRun {
 		addonsOpts := []addons.Option{}
 		if devnetEnv != nil {
 			features := devnetEnv.Env.Features
@@ -312,7 +318,17 @@ func (n *nat) Start(ctx context.Context) error {
 		"config.ValidatorConfig", n.config.ValidatorConfig,
 		"config.LogDir", n.config.LogDir)
 
-	// Run tests immediately on startup
+	// Run tests immediately on startup (or dry-run)
+	if n.config.DryRun {
+		err := n.dryRun(ctx)
+		if err != nil {
+			return err
+		}
+		go func() {
+			n.shutdownCallback(nil)
+		}()
+		return nil
+	}
 	err := n.runTests(ctx)
 	if err != nil {
 		// Check the error type and return appropriate error for exit code handling
@@ -382,6 +398,11 @@ func (n *nat) Start(ctx context.Context) error {
 
 // runTests runs all tests and processes the results
 func (n *nat) runTests(ctx context.Context) error {
+	if n.config.DryRun {
+		n.config.Log.Info("DRY RUN MODE: Showing what tests would be run without executing them...")
+		return n.dryRun(ctx)
+	}
+
 	n.config.Log.Info("Running all tests...")
 
 	// Generate a runID for this test run
@@ -426,7 +447,7 @@ func (n *nat) runTests(ctx context.Context) error {
 
 		flakeShakeRunner := runner.NewFlakeShakeRunner(n.runner, n.config.FlakeShakeIterations, n.config.Log)
 		// Ensure gate is set to "gateless" when running in gateless mode
-		gateForReport := n.config.TargetGate
+		gateForReport := strings.Join(n.config.TargetGate, ",")
 		if n.config.GatelessMode || gateForReport == "" {
 			gateForReport = "gateless"
 		}
@@ -937,6 +958,137 @@ func (n *nat) extractTestResultsFromRunnerResult(result *runner.RunnerResult) []
 		}
 	}
 	return testResults
+}
+
+// dryRun shows what tests would be run without executing them
+func (n *nat) dryRun(ctx context.Context) error {
+	n.config.Log.Info("DRY RUN: Analyzing what tests would be run...")
+
+	var validators []types.ValidatorMetadata
+	if len(n.config.TargetGate) > 0 {
+		validators = n.registry.GetValidatorsByGates(n.config.TargetGate)
+	} else {
+		validators = n.registry.GetValidators()
+	}
+
+	validatorsByOriginalGate := make(map[string][]types.ValidatorMetadata)
+	for _, validator := range validators {
+		validatorsByOriginalGate[validator.Gate] = append(validatorsByOriginalGate[validator.Gate], validator)
+	}
+
+	targetGateSet := make(map[string]bool)
+	for _, gateID := range n.config.TargetGate {
+		targetGateSet[gateID] = true
+	}
+
+	gatesShownSeparately := make(map[string]bool)
+	for gateID := range validatorsByOriginalGate {
+		gatesShownSeparately[gateID] = true
+	}
+
+	gateValidators := make(map[string][]types.ValidatorMetadata)
+	for gateID := range validatorsByOriginalGate {
+		var gateTests []types.ValidatorMetadata
+		gateTests = append(gateTests, validatorsByOriginalGate[gateID]...)
+
+		inheritedGates := n.registry.GetGateInherits(gateID)
+		for _, inheritedGateID := range inheritedGates {
+			if !gatesShownSeparately[inheritedGateID] {
+				if inheritedValidators, exists := validatorsByOriginalGate[inheritedGateID]; exists {
+					gateTests = append(gateTests, inheritedValidators...)
+				}
+			}
+		}
+		gateValidators[gateID] = gateTests
+	}
+
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SetTitle("DRY RUN: Planned Test Execution (network: " + n.networkName + ")")
+
+	headers := []interface{}{"TYPE", "ID", "TESTS", "STATUS"}
+	t.AppendHeader(table.Row(headers))
+
+	configs := []table.ColumnConfig{
+		{Name: "TYPE", AutoMerge: true},
+		{Name: "ID", WidthMax: 200, WidthMaxEnforcer: text.WrapSoft},
+		{Name: "TESTS", Align: text.AlignRight},
+		{Name: "STATUS", Align: text.AlignCenter},
+	}
+	t.SetColumnConfigs(configs)
+
+	totalTests := 0
+	gateOrder := []string{"base", "cgt", "flashblocks", "jovian", "isthmus"}
+	gateOrderMap := make(map[string]int)
+	for i, gate := range gateOrder {
+		gateOrderMap[gate] = i
+	}
+
+	// Sort gates: known gates first in order, then others alphabetically
+	var sortedGates []string
+	var otherGates []string
+	for gateName := range gateValidators {
+		if _, exists := gateOrderMap[gateName]; exists {
+			sortedGates = append(sortedGates, gateName)
+		} else {
+			otherGates = append(otherGates, gateName)
+		}
+	}
+	slices.Sort(sortedGates)
+	slices.Sort(otherGates)
+	sortedGates = append(sortedGates, otherGates...)
+
+	for _, gateName := range sortedGates {
+		gateTests := gateValidators[gateName]
+		gateTestCount := len(gateTests)
+
+		suiteTests := make(map[string][]types.ValidatorMetadata)
+		var directTests []types.ValidatorMetadata
+		for _, validator := range gateTests {
+			if validator.Suite != "" {
+				suiteTests[validator.Suite] = append(suiteTests[validator.Suite], validator)
+			} else {
+				directTests = append(directTests, validator)
+			}
+		}
+
+		t.AppendRow(table.Row{"Gate", gateName, gateTestCount, "PENDING"})
+		totalTests += gateTestCount
+
+		var sortedSuites []string
+		for suiteName := range suiteTests {
+			sortedSuites = append(sortedSuites, suiteName)
+		}
+		slices.Sort(sortedSuites)
+
+		for _, suiteName := range sortedSuites {
+			suiteTestList := suiteTests[suiteName]
+			t.AppendRow(table.Row{"  Suite", suiteName, len(suiteTestList), "PENDING"})
+
+			slices.SortFunc(suiteTestList, func(a, b types.ValidatorMetadata) int {
+				return strings.Compare(a.GetName(), b.GetName())
+			})
+			for _, validator := range suiteTestList {
+				testName := validator.GetName()
+				t.AppendRow(table.Row{"    Test", testName, 1, "PENDING"})
+			}
+		}
+
+		slices.SortFunc(directTests, func(a, b types.ValidatorMetadata) int {
+			return strings.Compare(a.GetName(), b.GetName())
+		})
+		for _, validator := range directTests {
+			testName := validator.GetName()
+			t.AppendRow(table.Row{"  Test", testName, 1, "PENDING"})
+		}
+	}
+
+	t.AppendFooter(table.Row{"TOTAL", "", totalTests, "PENDING"})
+	t.SetStyle(table.StyleDefault)
+	t.Render()
+
+	n.config.Log.Info("DRY RUN: Summary", "totalGates", len(gateValidators), "totalTests", totalTests)
+	return nil
 }
 
 // WaitForShutdown waits for all goroutines to finish

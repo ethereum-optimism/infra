@@ -26,7 +26,7 @@ func TestReportingHTMLSink(t *testing.T) {
 {{if .Config}}
 <div id="config">
   <div>Orchestrator: {{.Config.Orchestration.Orchestrator}}</div>
-  <div>TargetGate: {{.Config.Execution.TargetGate}}</div>
+  <div>TargetGate: {{join ", " .Config.Execution.TargetGate}}</div>
   <div>Concurrency: {{.Config.Runner.Concurrency}}</div>
   <div>TestLogLevel: {{.Config.Logging.TestLogLevel}}</div>
   <div>TestDir: {{.Config.Paths.TestDir}}</div>
@@ -83,7 +83,7 @@ func TestReportingHTMLSink(t *testing.T) {
 	// Provide a config snapshot and consume results
 	sink.SetConfigSnapshot(runID, &types.EffectiveConfigSnapshot{
 		Orchestration: types.OrchestrationConfigSnapshot{Orchestrator: "sysext", DevnetEnvURL: "file:///devnet.json"},
-		Execution:     types.ExecutionConfigSnapshot{TargetGate: "test-gate"},
+		Execution:     types.ExecutionConfigSnapshot{TargetGate: []string{"test-gate"}},
 		Runner:        types.RunnerConfigSnapshot{Concurrency: 2, ShowProgress: true, ProgressInterval: time.Second},
 		Logging:       types.LoggingConfigSnapshot{TestLogLevel: "info"},
 		Paths:         types.PathsConfigSnapshot{TestDir: "/tmp/tests"},

@@ -438,7 +438,7 @@
         <ul>
             <li><strong>Orchestrator:</strong> {{.Config.Orchestration.Orchestrator}}</li>
             {{if .Config.Orchestration.DevnetEnvURL}}<li><strong>Devnet Env URL:</strong> {{.Config.Orchestration.DevnetEnvURL}}</li>{{end}}
-            <li><strong>Target Gate:</strong> {{.Config.Execution.TargetGate}}</li>
+            <li><strong>Target Gate:</strong> {{join ", " .Config.Execution.TargetGate}}</li>
             <li><strong>Gateless Mode:</strong> {{.Config.Execution.Gateless}}</li>
             <li><strong>Run Once:</strong> {{.Config.Execution.RunOnce}}</li>
             {{if not .Config.Execution.RunOnce}}<li><strong>Run Interval:</strong> {{formatDuration .Config.Execution.RunInterval}}</li>{{end}}

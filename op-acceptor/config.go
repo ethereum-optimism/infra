@@ -17,7 +17,7 @@ import (
 type Config struct {
 	TestDir              string
 	ValidatorConfig      string
-	TargetGate           string
+	TargetGate           []string
 	GatelessMode         bool
 	GoBinary             string
 	RunInterval          time.Duration          // Interval between test runs
@@ -36,12 +36,30 @@ type Config struct {
 	ProgressInterval     time.Duration          // Interval between progress updates when ShowProgress is 'true'
 	FlakeShake           bool                   // Enable flake-shake mode for test stability validation
 	FlakeShakeIterations int                    // Number of times to run each test in flake-shake mode
+	DryRun               bool                   // If true, show what tests would be run without executing them
 	Log                  log.Logger
 	ExcludeGates         []string // List of gate IDs whose tests should be excluded
 }
 
 // NewConfig creates a new Config from cli context
+// parseGates parses a comma-separated string of gate IDs into a slice
+func parseGates(gateStr string) []string {
+	if gateStr == "" {
+		return nil
+	}
+	var gates []string
+	for _, g := range strings.Split(gateStr, ",") {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			gates = append(gates, g)
+		}
+	}
+	return gates
+}
+
+// NewConfig creates a new Config from cli context
 func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig string, gate string) (*Config, error) {
+	gates := parseGates(gate)
 	// Parse flags
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, fmt.Errorf("missing required flags: %w", err)
@@ -51,14 +69,14 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	}
 
 	// Determine if we're in gateless mode (gate not specified). Validator config is optional in gateless mode
-	gatelessMode := gate == ""
+	gatelessMode := len(gates) == 0
 
 	// In gateless mode, we don't require validator config or gate
 	if !gatelessMode {
 		if validatorConfig == "" {
 			return nil, errors.New("validator configuration file is required when not in gateless mode")
 		}
-		if gate == "" {
+		if len(gates) == 0 {
 			return nil, errors.New("gate is required when not in gateless mode")
 		}
 	}
@@ -104,11 +122,11 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 
 	excludeGates := parseExcludeGates(ctx.String(flags.ExcludeGates.Name))
 
-	// Conflict: selected gate is also excluded
-	if gate != "" {
+	// Conflict: selected gates are also excluded
+	for _, g := range gates {
 		for _, eg := range excludeGates {
-			if eg == gate {
-				return nil, fmt.Errorf("the selected gate '%s' is also specified in --exclude-gates; remove it from exclusions or choose a different gate", gate)
+			if eg == g {
+				return nil, fmt.Errorf("the selected gate '%s' is also specified in --exclude-gates; remove it from exclusions or choose a different gate", g)
 			}
 		}
 	}
@@ -116,7 +134,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 	return &Config{
 		TestDir:              absTestDir,
 		ValidatorConfig:      absValidatorConfig,
-		TargetGate:           gate,
+		TargetGate:           gates,
 		GatelessMode:         gatelessMode,
 		GoBinary:             ctx.String(flags.GoBinary.Name),
 		RunInterval:          runInterval,
@@ -134,6 +152,7 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		ProgressInterval:     ctx.Duration(flags.ProgressInterval.Name),
 		FlakeShake:           ctx.Bool(flags.FlakeShake.Name),
 		FlakeShakeIterations: ctx.Int(flags.FlakeShakeIterations.Name),
+		DryRun:               ctx.Bool(flags.DryRun.Name),
 		LogDir:               logDir,
 		Log:                  log,
 		ExcludeGates:         excludeGates,

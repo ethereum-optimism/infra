@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -110,7 +111,8 @@ func NewTableReporter(title string, showIndividualTests bool) *TableReporter {
 }
 
 // PrintTableFromTestResultsWithTiming generates and prints a table report to stdout with enhanced timing
-func (tr *TableReporter) PrintTableFromTestResultsWithTiming(testResults []*types.TestResult, runID, networkName, gateName string, wallClockTime time.Duration) error {
+func (tr *TableReporter) PrintTableFromTestResultsWithTiming(testResults []*types.TestResult, runID, networkName string, gateNames []string, wallClockTime time.Duration) error {
+	gateName := strings.Join(gateNames, ",")
 	content, err := tr.GenerateTableFromTestResultsWithTiming(testResults, runID, networkName, gateName, wallClockTime)
 	if err != nil {
 		return err

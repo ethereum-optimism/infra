@@ -58,6 +58,41 @@ func WithSerial(serial bool) TestRunnerOption {
 	}
 }
 
+func setupTestRunnerWithGates(t *testing.T, testContent, configContent []byte, targetGates []string) *runner {
+	testDir := t.TempDir()
+
+	initGoModule(t, testDir, "test")
+
+	featureDir := filepath.Join(testDir, "feature")
+	err := os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(featureDir, "example_test.go"), testContent, 0644)
+	require.NoError(t, err)
+
+	validatorConfigPath := filepath.Join(testDir, "validators.yaml")
+	err = os.WriteFile(validatorConfigPath, configContent, 0644)
+	require.NoError(t, err)
+
+	reg, err := registry.NewRegistry(registry.Config{
+		ValidatorConfigFile: validatorConfigPath,
+	})
+	require.NoError(t, err)
+
+	lgr := testlog.Logger(t, slog.LevelDebug)
+
+	config := Config{
+		Registry:   reg,
+		TargetGate: targetGates,
+		WorkDir:    testDir,
+		Log:        lgr,
+	}
+
+	r, err := NewTestRunner(config)
+	require.NoError(t, err)
+	return r.(*runner)
+}
+
 func setupTestRunner(t *testing.T, testContent, configContent []byte, opts ...TestRunnerOption) *runner {
 	// Create test directory and config file
 	testDir := t.TempDir()
@@ -358,10 +393,13 @@ func TestChild(t *testing.T) {
 		result, err := r.RunAllTests(ctx)
 		require.NoError(t, err)
 
-		// Verify inherited tests are present
+		// Verify both gates are present (parent-gate is shown separately because it has validators)
+		require.Contains(t, result.Gates, "parent-gate")
 		require.Contains(t, result.Gates, "child-gate")
+		parentGate := result.Gates["parent-gate"]
 		childGate := result.Gates["child-gate"]
-		assert.Len(t, childGate.Tests, 2, "should have both parent and child tests")
+		assert.Len(t, parentGate.Tests, 1, "parent-gate should have its own test")
+		assert.Len(t, childGate.Tests, 1, "child-gate should have its own test (parent-gate is shown separately)")
 	})
 }
 
@@ -1027,6 +1065,67 @@ gates:
 }
 
 // TestRunAllTests_PanicHandling verifies that the RunAllTests method properly handles tests that panic
+func TestRunAllTests_MultipleGates(t *testing.T) {
+	testContent := []byte(`
+package feature_test
+
+import "testing"
+
+func TestShared(t *testing.T) {
+	t.Log("Shared test running")
+}
+
+func TestGateA(t *testing.T) {
+	t.Log("Gate A specific test")
+}
+
+func TestGateB(t *testing.T) {
+	t.Log("Gate B specific test")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: gate-a
+    description: "Gate A"
+    tests:
+      - name: TestShared
+        package: "./feature"
+      - name: TestGateA
+        package: "./feature"
+  - id: gate-b
+    description: "Gate B"
+    tests:
+      - name: TestShared
+        package: "./feature"
+      - name: TestGateB
+        package: "./feature"
+`)
+
+	r := setupTestRunnerWithGates(t, testContent, configContent, []string{"gate-a", "gate-b"})
+
+	ctx := context.Background()
+	result, err := r.RunAllTests(ctx)
+	require.NoError(t, err)
+
+	// Should have separate gates, not a combined gate
+	require.Contains(t, result.Gates, "gate-a", "should have gate-a")
+	require.Contains(t, result.Gates, "gate-b", "should have gate-b")
+	assert.NotContains(t, result.Gates, "gate-a+gate-b", "should NOT have combined gate")
+
+	gateA := result.Gates["gate-a"]
+	assert.Equal(t, types.TestStatusPass, gateA.Status)
+	assert.Len(t, gateA.Tests, 2, "gate-a should have 2 tests")
+	assert.Contains(t, gateA.Tests, "TestShared", "gate-a should contain TestShared")
+	assert.Contains(t, gateA.Tests, "TestGateA", "gate-a should contain TestGateA")
+
+	gateB := result.Gates["gate-b"]
+	assert.Equal(t, types.TestStatusPass, gateB.Status)
+	assert.Len(t, gateB.Tests, 2, "gate-b should have 2 tests")
+	assert.Contains(t, gateB.Tests, "TestShared", "gate-b should contain TestShared")
+	assert.Contains(t, gateB.Tests, "TestGateB", "gate-b should contain TestGateB")
+}
+
 func TestRunAllTests_PanicHandling(t *testing.T) {
 	ctx := context.Background()
 	// Create a test runner with a mix of normal and panicking tests
@@ -1795,7 +1894,7 @@ gates:
 	// Create test runner
 	cfg := Config{
 		Registry:           registry,
-		TargetGate:         "test-gate",
+		TargetGate:         []string{"test-gate"},
 		WorkDir:            tempDir,
 		Log:                log.New(),
 		GoBinary:           "go",
