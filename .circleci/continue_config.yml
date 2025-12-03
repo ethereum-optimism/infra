@@ -671,7 +671,7 @@ workflows:
           docker_file: replica-healthcheck/Dockerfile
           docker_name: replica-healthcheck
           docker_tags: <<pipeline.git.revision>>,<<pipeline.git.branch>>
-          docker_context: replica-healthcheck
+          docker_context: .
   release:
     jobs:
       - log-config-results:
