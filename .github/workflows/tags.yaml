@@ -1,0 +1,30 @@
+name: tag build
+
+on:
+  push:
+    tags:
+      - '*/v*' # Match tags like proxyd/v1.2.3
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.parse-tag.outputs.image_name }}
+      version: ${{ steps.parse-tag.outputs.version }}
+    steps:
+      - uses: ethereum-optimism/factory/actions/parse-tag@240b16167a5f5aa789270fa9c0efbfa9f010b7e7
+        id: parse-tag
+  tag:
+    needs: prep
+    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@ae4dada9bf0951124892dbc6b63cebef44d35f91
+    with:
+      image_name: ${{ needs.prep.outputs.image_name }}
+      context: ${{ needs.prep.outputs.image_name }}
+      dockerfile: Dockerfile
+      tag: ${{ needs.prep.outputs.version }}
+      gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
