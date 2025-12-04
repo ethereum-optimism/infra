@@ -19,8 +19,8 @@ jobs:
     uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@ae4dada9bf0951124892dbc6b63cebef44d35f91
     with:
       image_name: ${{ needs.prep.outputs.image_name }}
-      context: ${{ needs.prep.outputs.image_name }}
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ${{ needs.prep.outputs.image_name }}/Dockerfile
       tag: ${{ needs.prep.outputs.version }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
