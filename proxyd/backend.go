@@ -832,6 +832,12 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// Determine if archive is required
 	archiveRequired := false
 	for _, req := range rpcReqs {
+		// All debug_* methods require archive nodes
+		if strings.HasPrefix(req.Method, "debug_") {
+			archiveRequired = true
+			break
+		}
+
 		idx, ok := blockParamIndex[req.Method]
 		if !ok {
 			continue
