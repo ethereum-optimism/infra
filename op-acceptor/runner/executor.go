@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"time"
 
@@ -37,16 +39,16 @@ type testExecutor struct {
 	jsonStore    JSONStore
 }
 
-// JSONStore handles storing and retrieving raw JSON output
+// JSONStore handles storing raw JSON output
 type JSONStore interface {
-	Store(testID string, rawJSON []byte)
-	Get(testID string) ([]byte, bool)
+	Store(testID string, rawJSON []byte) error
+	StoreFromFile(testID, path string) error
 }
 
 // OutputParser handles parsing test output
 type OutputParser interface {
-	Parse(output []byte, metadata types.ValidatorMetadata) *types.TestResult
-	ParseWithTimeout(output []byte, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult
+	Parse(output io.Reader, metadata types.ValidatorMetadata) *types.TestResult
+	ParseWithTimeout(output io.Reader, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult
 }
 
 // NewTestExecutor creates a new test executor
@@ -121,23 +123,46 @@ func (e *testExecutor) runSingleTest(ctx context.Context, metadata types.Validat
 	cmd, cleanup := e.cmdBuilder(ctx, e.goBinary, args...)
 	defer cleanup()
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
+	stdoutFile, err := os.CreateTemp("", "op-acceptor-exec-stdout-*.log")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout temp file: %w", err)
+	}
+	stdoutPath := stdoutFile.Name()
+	defer func() {
+		_ = stdoutFile.Close()
+		_ = os.Remove(stdoutPath)
+	}()
+
+	stdoutTail := newTailBuffer(defaultStdoutTailBytes)
+	var stderrBuf bytes.Buffer
+
+	cmd.Stdout = io.MultiWriter(stdoutFile, stdoutTail)
 	cmd.Stderr = &stderrBuf
 
 	startTime := time.Now()
-	err := cmd.Run()
+	runErr := cmd.Run()
 	duration := time.Since(startTime)
 
-	stdout := stdoutBuf.Bytes()
-	stderr := stderrBuf.Bytes()
+	_ = stdoutFile.Sync()
+	_ = stdoutFile.Close()
+
+	timeoutOccurred := e.timeout > 0 && duration >= e.timeout
+
+	openStdout := func() (*os.File, error) {
+		return os.Open(stdoutPath)
+	}
 
 	var result *types.TestResult
-	if e.timeout > 0 && duration >= e.timeout {
-		result = e.outputParser.ParseWithTimeout(stdout, metadata, e.timeout)
-	} else {
-		result = e.outputParser.Parse(stdout, metadata)
+	stdoutReader, readerErr := openStdout()
+	if readerErr != nil {
+		return nil, fmt.Errorf("failed to read stdout: %w", readerErr)
 	}
+	if timeoutOccurred {
+		result = e.outputParser.ParseWithTimeout(stdoutReader, metadata, e.timeout)
+	} else {
+		result = e.outputParser.Parse(stdoutReader, metadata)
+	}
+	_ = stdoutReader.Close()
 
 	if result == nil {
 		result = &types.TestResult{
@@ -147,34 +172,50 @@ func (e *testExecutor) runSingleTest(ctx context.Context, metadata types.Validat
 			Duration: duration,
 		}
 	}
+	result.Duration = duration
 
-	// Store raw JSON if available
+	stdoutSnippet := buildStdoutSnippet(stdoutTail)
+	if stdoutSnippet != "" {
+		result.Stdout = stdoutSnippet
+	}
+
+	// Store raw JSON without keeping it in memory
 	if e.jsonStore != nil {
-		e.jsonStore.Store(e.getTestKey(metadata), stdout)
+		if stdoutTail.TotalBytes() > 0 {
+			if err := e.jsonStore.StoreFromFile(e.getTestKey(metadata), stdoutPath); err != nil {
+				return nil, fmt.Errorf("failed to store raw JSON: %w", err)
+			}
+		} else if timeoutOccurred {
+			timeoutMarker := fmt.Sprintf(`{"Time":"%s","Action":"timeout","Package":"%s","Test":"%s","Output":"TEST TIMED OUT after %v - no JSON output captured\n"}`,
+				time.Now().Format(time.RFC3339), metadata.Package, metadata.FuncName, e.timeout)
+			if err := e.jsonStore.Store(e.getTestKey(metadata), []byte(timeoutMarker)); err != nil {
+				return nil, fmt.Errorf("failed to store timeout marker: %w", err)
+			}
+		}
 	}
 
 	// Handle execution errors
-	if err != nil {
+	if runErr != nil {
 		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
+		if errors.As(runErr, &exitErr) {
 			if exitErr.ExitCode() == 1 && result.Status != types.TestStatusPass {
-				// Test failed, which is expected
+				// Expected test failure
 			} else if exitErr.ExitCode() == 2 {
 				result.Status = types.TestStatusFail
-				result.Error = fmt.Errorf("test compilation failed: %s", string(stderr))
+				result.Error = fmt.Errorf("test compilation failed: %s", stderrBuf.String())
 			} else {
 				result.Status = types.TestStatusFail
-				result.Error = fmt.Errorf("test execution failed with exit code %d: %s", exitErr.ExitCode(), string(stderr))
+				result.Error = fmt.Errorf("test execution failed with exit code %d: %s", exitErr.ExitCode(), stderrBuf.String())
 			}
 		} else {
 			result.Status = types.TestStatusFail
-			result.Error = fmt.Errorf("failed to run test: %w", err)
+			result.Error = fmt.Errorf("failed to run test: %w", runErr)
 		}
 	}
 
 	// Add stderr to error if present
-	if len(stderr) > 0 && result.Error != nil {
-		result.Error = fmt.Errorf("%w\nstderr: %s", result.Error, string(stderr))
+	if stderrBuf.Len() > 0 && result.Error != nil {
+		result.Error = fmt.Errorf("%w\nstderr: %s", result.Error, stderrBuf.String())
 	}
 
 	return result, nil

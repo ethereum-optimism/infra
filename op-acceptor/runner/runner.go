@@ -672,7 +672,9 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	var totalDuration time.Duration
 	testResults := make(map[string]*types.TestResult)
 	var failedTestsStdout strings.Builder
-	var aggregatedRawJSON []byte          // Store aggregated raw JSON for the test list
+	var aggregatedRawFile *os.File // Store aggregated raw JSON on disk
+	var aggregatedRawPath string
+	var aggregatedRawUsed bool
 	var timeoutCount int                  // Track how many tests timed out
 	var timedOutTests = make([]string, 0) // Track which tests timed out
 
@@ -707,10 +709,23 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 				"error", testResult.Error.Error())
 		}
 
-		// Aggregate raw JSON from individual tests for the aggregated result
-		if individualRawJSON, exists := r.getRawJSON(testMetadata.ID); exists {
-			// Append this test's raw JSON to the aggregated JSON
-			aggregatedRawJSON = append(aggregatedRawJSON, individualRawJSON...)
+		// Aggregate raw JSON from individual tests for the aggregated result without duplicating in memory
+		if rawSink, ok := r.getRawJSONSink(); ok {
+			if aggregatedRawFile == nil {
+				tempFile, err := os.CreateTemp("", "op-acceptor-aggregated-raw-*.log")
+				if err != nil {
+					r.log.Error("Failed to create aggregated raw JSON file", "error", err)
+					return nil, fmt.Errorf("creating aggregated raw JSON file: %w", err)
+				}
+				aggregatedRawFile = tempFile
+				aggregatedRawPath = tempFile.Name()
+			}
+			if wrote, err := rawSink.WriteRawJSONTo(testMetadata.ID, aggregatedRawFile); err != nil {
+				return nil, fmt.Errorf("copying raw JSON for %s: %w", testName, err)
+			} else if wrote {
+				aggregatedRawUsed = true
+				rawSink.DeleteRawJSON(testMetadata.ID)
+			}
 		}
 
 		// Update overall status based on individual test result
@@ -734,8 +749,19 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	}
 
 	// Store the aggregated raw JSON for the package-level test result
-	if len(aggregatedRawJSON) > 0 {
-		r.storeRawJSON(metadata.ID, aggregatedRawJSON)
+	if aggregatedRawFile != nil {
+		if _, err := aggregatedRawFile.Seek(0, io.SeekStart); err != nil {
+			_ = aggregatedRawFile.Close()
+			_ = os.Remove(aggregatedRawPath)
+			return nil, fmt.Errorf("failed to rewind aggregated raw JSON file: %w", err)
+		}
+		if aggregatedRawUsed {
+			if err := r.storeRawJSONFromFile(metadata.ID, aggregatedRawPath); err != nil {
+				r.log.Error("Failed to store aggregated raw JSON", "package", metadata.Package, "error", err)
+			}
+		}
+		_ = aggregatedRawFile.Close()
+		_ = os.Remove(aggregatedRawPath)
 	}
 
 	// Create an appropriate error message that includes timeout information
@@ -826,9 +852,23 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, args...)
 	defer cleanup()
 
-	var stdout, stderr bytes.Buffer
+	stdoutFile, err := os.CreateTemp("", "op-acceptor-stdout-*.log")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout temp file: %w", err)
+	}
+	stdoutFilePath := stdoutFile.Name()
+	defer func() {
+		_ = stdoutFile.Close()
+		_ = os.Remove(stdoutFilePath)
+	}()
+
+	stdoutTail := newTailBuffer(defaultStdoutTailBytes)
+	var stderr bytes.Buffer
 	var timeoutOccurred bool
 	var testStartTime = time.Now()
+
+	var stdoutWriters []io.Writer
+	stdoutWriters = append(stdoutWriters, stdoutFile, stdoutTail)
 
 	if r.outputRealtimeLogs {
 		stdoutLogger := &logWriter{logFn: func(msg string) {
@@ -838,12 +878,12 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			r.log.Error("Test error output", "test", metadata.FuncName, "error", msg)
 		}}
 
-		cmd.Stdout = io.MultiWriter(&stdout, stdoutLogger)
+		stdoutWriters = append(stdoutWriters, stdoutLogger)
 		cmd.Stderr = io.MultiWriter(&stderr, stderrLogger)
 	} else {
-		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 	}
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
 
 	// If there's no function name use package name
 	testLabel := metadata.FuncName
@@ -861,8 +901,10 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		"allowSkips", r.allowSkips)
 
 	// Run the command
-	err := cmd.Run()
+	err = cmd.Run()
 	testDuration := time.Since(testStartTime)
+	_ = stdoutFile.Sync()
+	_ = stdoutFile.Close()
 
 	// Check for timeout first and set flag
 	if ctx.Err() == context.DeadlineExceeded {
@@ -871,15 +913,19 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			"test", metadata.FuncName,
 			"timeout", timeoutDuration,
 			"duration", testDuration,
-			"partialStdout", len(stdout.Bytes()),
+			"partialStdout", stdoutTail.TotalBytes(),
 			"partialStderr", len(stderr.Bytes()))
 	}
 
 	// ALWAYS store the raw JSON output for the RawJSONSink if we have a file logger
 	// This ensures partial output is captured even on timeout
-	if stdout.Len() > 0 {
-		r.storeRawJSON(metadata.ID, stdout.Bytes())
-		r.log.Debug("Stored partial output", "test", metadata.FuncName, "bytes", stdout.Len())
+	if stdoutTail.TotalBytes() > 0 {
+		if err := r.storeRawJSONFromFile(metadata.ID, stdoutFilePath); err != nil {
+			r.log.Error("Failed to persist raw JSON output",
+				"test", metadata.FuncName, "error", err)
+		} else {
+			r.log.Debug("Stored partial output", "test", metadata.FuncName, "bytes", stdoutTail.TotalBytes())
+		}
 	} else if timeoutOccurred {
 		// Even if no stdout, store a timeout marker in raw JSON for debugging
 		timeoutInfo := fmt.Sprintf(`{"Time":"%s","Action":"timeout","Package":"%s","Test":"%s","Output":"TEST TIMED OUT after %v - no JSON output captured\n"}`,
@@ -888,10 +934,21 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		r.log.Debug("Stored timeout marker", "test", metadata.FuncName)
 	}
 
+	stdoutSnippet := buildStdoutSnippet(stdoutTail)
+
+	openStdout := func() (*os.File, error) {
+		return os.Open(stdoutFilePath)
+	}
+
 	// Handle timeout case with enhanced error messaging
 	if timeoutOccurred {
 		// Delegate parsing of partial output
-		parsed := r.outputParser.ParseWithTimeout(stdout.Bytes(), metadata, timeoutDuration)
+		stdoutReader, readerErr := openStdout()
+		if readerErr != nil {
+			return nil, fmt.Errorf("failed to read stdout for timeout parsing: %w", readerErr)
+		}
+		parsed := r.outputParser.ParseWithTimeout(stdoutReader, metadata, timeoutDuration)
+		_ = stdoutReader.Close()
 		if parsed == nil {
 			parsed = &types.TestResult{
 				Metadata: metadata,
@@ -906,8 +963,8 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		if parsed.Error != nil && testDuration > 0 {
 			parsed.Error = fmt.Errorf("%w (actual duration: %v)", parsed.Error, testDuration)
 		}
-		if stdout.Len() > 0 {
-			parsed.Stdout = stdout.String()
+		if stdoutTail.TotalBytes() > 0 {
+			parsed.Stdout = stdoutSnippet
 		}
 		// Include stderr in the result if present
 		if stderr.Len() > 0 {
@@ -935,7 +992,12 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	}
 
 	// Parse the JSON output for non-timeout cases
-	parsedResult := r.parseTestOutput(stdout.Bytes(), metadata)
+	stdoutReader, readerErr := openStdout()
+	if readerErr != nil {
+		return nil, fmt.Errorf("failed to read stdout for parsing: %w", readerErr)
+	}
+	parsedResult := r.parseTestOutput(stdoutReader, metadata)
+	_ = stdoutReader.Close()
 
 	// If we couldn't parse the output for some reason, create a minimal failing result
 	if parsedResult == nil {
@@ -944,14 +1006,14 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			Metadata: metadata,
 			Status:   types.TestStatusFail,
 			Error:    fmt.Errorf("failed to parse test output"),
-			Stdout:   stdout.String(),
+			Stdout:   stdoutSnippet,
 			SubTests: make(map[string]*types.TestResult),
 		}
 	}
 
 	// Capture stdout in the test result for all tests
-	if stdout.Len() > 0 {
-		parsedResult.Stdout = stdout.String()
+	if stdoutTail.TotalBytes() > 0 {
+		parsedResult.Stdout = stdoutSnippet
 	}
 
 	// Add any stderr output to the error
@@ -974,8 +1036,21 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 }
 
 // parseTestOutput parses the JSON test output and extracts test result information
-func (r *runner) parseTestOutput(output []byte, metadata types.ValidatorMetadata) *types.TestResult {
+func (r *runner) parseTestOutput(output io.Reader, metadata types.ValidatorMetadata) *types.TestResult {
 	return r.outputParser.Parse(output, metadata)
+}
+
+func buildStdoutSnippet(buf *tailBuffer) string {
+	if buf == nil || buf.TotalBytes() == 0 {
+		return ""
+	}
+
+	snippet := string(buf.Bytes())
+	if buf.Truncated() {
+		return fmt.Sprintf("[showing last %d of %d bytes]\n%s",
+			len(snippet), buf.TotalBytes(), snippet)
+	}
+	return snippet
 }
 
 // buildTestArgs constructs the command line arguments for running a test
@@ -1328,19 +1403,28 @@ func (r *runner) getRawJSONSink() (*logging.RawJSONSink, bool) {
 
 // storeRawJSON is a helper method to store raw JSON for a test
 func (r *runner) storeRawJSON(testID string, rawJSON []byte) {
+	if len(rawJSON) == 0 {
+		return
+	}
 	if rawSink, ok := r.getRawJSONSink(); ok {
-		rawSink.StoreRawJSON(testID, rawJSON)
+		if err := rawSink.StoreRawJSON(testID, rawJSON); err != nil {
+			r.log.Error("Failed to store raw JSON", "test", testID, "error", err)
+		}
 	} else {
 		r.log.Debug("No raw JSON sink available, not storing raw JSON output")
 	}
 }
 
-// getRawJSON is a helper method to retrieve raw JSON for a test
-func (r *runner) getRawJSON(testID string) ([]byte, bool) {
-	if rawSink, ok := r.getRawJSONSink(); ok {
-		return rawSink.GetRawJSON(testID)
+func (r *runner) storeRawJSONFromFile(testID, path string) error {
+	rawSink, ok := r.getRawJSONSink()
+	if !ok {
+		r.log.Debug("No raw JSON sink available, not storing raw JSON output")
+		return nil
 	}
-	return nil, false
+	if err := rawSink.StoreRawJSONFromFile(testID, path); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *runner) testCommandContext(ctx context.Context, name string, arg ...string) (*exec.Cmd, func()) {

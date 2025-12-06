@@ -54,6 +54,17 @@ type AsyncFile struct {
 	stopped bool
 }
 
+type asyncFileWriterAdapter struct {
+	writer *AsyncFile
+}
+
+func (a asyncFileWriterAdapter) Write(p []byte) (int, error) {
+	if err := a.writer.Write(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // NewAsyncFile creates a new AsyncFile for non-blocking writes
 func NewAsyncFile(filepath string) (*AsyncFile, error) {
 	file, err := os.Create(filepath)

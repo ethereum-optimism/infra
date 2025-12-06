@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -36,7 +37,7 @@ func TestParserCapturesSubtestOutput(t *testing.T) {
 	}
 
 	parser := NewOutputParser()
-	result := parser.Parse(jsonOutput, metadata)
+	result := parser.Parse(bytes.NewReader(jsonOutput), metadata)
 
 	require.NotNil(t, result)
 	assert.Equal(t, types.TestStatusPass, result.Status)
@@ -87,7 +88,7 @@ func TestRealWorldTestOutput(t *testing.T) {
 	}
 
 	parser := NewOutputParser()
-	result := parser.Parse(jsonOutput, metadata)
+	result := parser.Parse(bytes.NewReader(jsonOutput), metadata)
 
 	require.NotNil(t, result)
 	assert.Equal(t, types.TestStatusPass, result.Status)

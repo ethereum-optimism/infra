@@ -1476,7 +1476,7 @@ func TestParseTestOutput(t *testing.T) {
 			// Convert events to JSON string
 			jsonOutput := eventToJSON(tt.events)
 
-			result := r.parseTestOutput([]byte(jsonOutput), tt.metadata)
+			result := r.parseTestOutput(strings.NewReader(jsonOutput), tt.metadata)
 
 			assert.NotNil(t, result, "result should not be nil")
 			assert.Equal(t, tt.wantStatus, result.Status, "unexpected status")
@@ -1571,7 +1571,7 @@ func TestSubTestDurationCalculation(t *testing.T) {
 	}
 
 	jsonOutput := eventToJSON(events)
-	result := r.parseTestOutput([]byte(jsonOutput), metadata)
+	result := r.parseTestOutput(strings.NewReader(jsonOutput), metadata)
 
 	// Verify subtests were created
 	require.Equal(t, 2, len(result.SubTests), "Expected 2 subtests")

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"testing"
 	"time"
@@ -270,18 +271,15 @@ func TestNewTestExecutor_DefaultGoBinaryBehavior(t *testing.T) {
 // Mock implementations for testing
 type mockOutputParser struct{}
 
-func (m *mockOutputParser) Parse(output []byte, metadata types.ValidatorMetadata) *types.TestResult {
+func (m *mockOutputParser) Parse(output io.Reader, metadata types.ValidatorMetadata) *types.TestResult {
 	return &types.TestResult{Metadata: metadata, Status: types.TestStatusPass}
 }
 
-func (m *mockOutputParser) ParseWithTimeout(output []byte, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult {
+func (m *mockOutputParser) ParseWithTimeout(output io.Reader, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult {
 	return &types.TestResult{Metadata: metadata, Status: types.TestStatusPass}
 }
 
 type mockJSONStore struct{}
 
-func (m *mockJSONStore) Store(testID string, rawJSON []byte) {}
-
-func (m *mockJSONStore) Get(testID string) ([]byte, bool) {
-	return nil, false
-}
+func (m *mockJSONStore) Store(testID string, rawJSON []byte) error { return nil }
+func (m *mockJSONStore) StoreFromFile(testID, path string) error   { return nil }

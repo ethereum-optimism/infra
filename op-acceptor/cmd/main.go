@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/honeycombio/otel-config-go/otelconfig"
@@ -83,6 +85,9 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 	oplog.SetGlobalLogHandler(log.Handler())
 	oplog.SetupDefaults()
 
+	stopSignalHandler := installShutdownSignalHandler(log, closeApp)
+	defer stopSignalHandler()
+
 	// Initialize the service with both paths
 	cfg, err := nat.NewConfig(
 		ctx,
@@ -106,4 +111,26 @@ func run(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, 
 	}
 
 	return natService, nil
+}
+
+func installShutdownSignalHandler(logger log.Logger, closeApp context.CancelCauseFunc) func() {
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+
+	done := make(chan struct{})
+	go func() {
+		defer signal.Stop(sigs)
+		select {
+		case sig := <-sigs:
+			logger.Warn("Received shutdown signal, attempting graceful stop", "signal", sig)
+			if closeApp != nil {
+				closeApp(fmt.Errorf("received shutdown signal: %s", sig))
+			}
+		case <-done:
+		}
+	}()
+
+	return func() {
+		close(done)
+	}
 }

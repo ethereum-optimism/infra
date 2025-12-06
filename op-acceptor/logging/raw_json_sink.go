@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,9 +19,9 @@ const rawGoEventsLog = "raw_go_events.log"
 type RawJSONSink struct {
 	logger *FileLogger
 
-	// Store the original raw JSON output from go test -json
+	// Store the original raw JSON output from go test -json on disk to avoid keeping it in memory.
 	mu            sync.Mutex
-	rawJSONEvents map[string][]byte // Map of [test-id] -> []raw JSON events
+	rawJSONEvents map[string]string // Map of [test-id] -> temp file path with raw JSON events
 }
 
 // GoTestEvent represents an event in the go test JSON output
@@ -51,18 +52,18 @@ func (s *RawJSONSink) Consume(result *types.TestResult, runID string) error {
 		return err
 	}
 
-	// Initialize if needed
-	s.mu.Lock()
-	if s.rawJSONEvents == nil {
-		s.rawJSONEvents = make(map[string][]byte)
-	}
-	// Get the raw JSON events for this test
-	rawJSON, exists := s.rawJSONEvents[result.Metadata.ID]
-	s.mu.Unlock()
+	// Retrieve the stored path for this test without removing it yet so other consumers can access it.
+	path := s.getPath(result.Metadata.ID)
+	if path != "" {
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open raw JSON file %s: %w", path, err)
+		}
+		defer func() {
+			_ = file.Close()
+		}()
 
-	if exists && len(rawJSON) > 0 {
-		// Write the raw JSON events directly to the file
-		if err := writer.Write(rawJSON); err != nil {
+		if _, err := io.Copy(asyncFileWriterAdapter{writer: writer}, file); err != nil {
 			return fmt.Errorf("failed to write raw JSON events: %w", err)
 		}
 	}
@@ -81,35 +82,95 @@ func (s *RawJSONSink) GetRawEventsFileForRunID(runID string) (string, error) {
 
 // StoreRawJSON stores the raw JSON output for a test
 // This must be called by the test runner to provide the original JSON data
-func (s *RawJSONSink) StoreRawJSON(testID string, rawJSON []byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.rawJSONEvents == nil {
-		s.rawJSONEvents = make(map[string][]byte)
+func (s *RawJSONSink) StoreRawJSON(testID string, rawJSON []byte) error {
+	if len(rawJSON) == 0 {
+		return nil
 	}
-	s.rawJSONEvents[testID] = rawJSON
+
+	tmpFile, err := s.createTempRawFile(testID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tmpFile.Write(rawJSON); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to write raw JSON: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to close raw JSON file: %w", err)
+	}
+
+	s.storePath(testID, tmpFile.Name())
+	return nil
+}
+
+// StoreRawJSONFromFile copies an existing file into the sink-managed storage.
+func (s *RawJSONSink) StoreRawJSONFromFile(testID, sourcePath string) error {
+	src, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open raw JSON source %s: %w", sourcePath, err)
+	}
+	defer func() {
+		_ = src.Close()
+	}()
+
+	tmpFile, err := s.createTempRawFile(testID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(tmpFile, src); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to copy raw JSON: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to close raw JSON file: %w", err)
+	}
+
+	s.storePath(testID, tmpFile.Name())
+	return nil
 }
 
 // GetRawJSON retrieves the raw JSON output for a test ID
 // Returns the raw JSON bytes and a boolean indicating if the test ID was found
 func (s *RawJSONSink) GetRawJSON(testID string) ([]byte, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.rawJSONEvents == nil {
+	path := s.getPath(testID)
+	if path == "" {
 		return nil, false
 	}
 
-	rawJSON, exists := s.rawJSONEvents[testID]
-	if !exists {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, false
 	}
+	return data, true
+}
 
-	// Return a copy to avoid race conditions
-	result := make([]byte, len(rawJSON))
-	copy(result, rawJSON)
-	return result, true
+// WriteRawJSONTo streams the stored raw JSON into the provided writer.
+func (s *RawJSONSink) WriteRawJSONTo(testID string, w io.Writer) (bool, error) {
+	path := s.getPath(testID)
+	if path == "" {
+		return false, nil
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to open raw JSON file %s: %w", path, err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	if _, err := io.Copy(w, file); err != nil {
+		return false, fmt.Errorf("failed to copy raw JSON: %w", err)
+	}
+	return true, nil
 }
 
 // Complete creates the results directory
@@ -125,5 +186,68 @@ func (s *RawJSONSink) Complete(runID string) error {
 		return fmt.Errorf("failed to create results directory: %w", err)
 	}
 
+	s.cleanupStoredFiles()
 	return nil
+}
+
+func (s *RawJSONSink) createTempRawFile(testID string) (*os.File, error) {
+	prefix := fmt.Sprintf("raw-json-%s-", safeFilename(testID))
+	tmpFile, err := os.CreateTemp("", prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp raw JSON file: %w", err)
+	}
+	return tmpFile, nil
+}
+
+func (s *RawJSONSink) storePath(testID, path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rawJSONEvents == nil {
+		s.rawJSONEvents = make(map[string]string)
+	}
+	s.rawJSONEvents[testID] = path
+}
+
+func (s *RawJSONSink) getPath(testID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rawJSONEvents == nil {
+		return ""
+	}
+	return s.rawJSONEvents[testID]
+}
+
+func (s *RawJSONSink) deletePath(testID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rawJSONEvents == nil {
+		return
+	}
+
+	if path, ok := s.rawJSONEvents[testID]; ok {
+		_ = os.Remove(path)
+		delete(s.rawJSONEvents, testID)
+	}
+}
+
+// DeleteRawJSON removes the stored raw JSON for a test once all consumers are done with it.
+func (s *RawJSONSink) DeleteRawJSON(testID string) {
+	s.deletePath(testID)
+}
+
+func (s *RawJSONSink) cleanupStoredFiles() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rawJSONEvents == nil {
+		return
+	}
+
+	for testID, path := range s.rawJSONEvents {
+		_ = os.Remove(path)
+		delete(s.rawJSONEvents, testID)
+	}
 }
