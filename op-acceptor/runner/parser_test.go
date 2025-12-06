@@ -82,7 +82,7 @@ func TestOutputParser_Parse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parser.Parse([]byte(tt.output), tt.metadata)
+			result := parser.Parse(strings.NewReader(tt.output), tt.metadata)
 
 			require.NotNil(t, result, "Parse should return non-nil result")
 			assert.Equal(t, tt.wantStatus, result.Status, "Status should match expected")
@@ -108,7 +108,7 @@ func TestOutputParser_ParseWithTimeout(t *testing.T) {
 		Package:  "example/pkg",
 	}
 
-	result := parser.ParseWithTimeout([]byte(output), metadata, timeout)
+	result := parser.ParseWithTimeout(strings.NewReader(output), metadata, timeout)
 
 	require.NotNil(t, result, "ParseWithTimeout should return non-nil result")
 
@@ -134,7 +134,7 @@ func TestOutputParser_ParseWithTimeout_PreservesCompletedSubtests(t *testing.T) 
 		Package:  "example/pkg",
 	}
 
-	result := parser.ParseWithTimeout([]byte(output), metadata, timeout)
+	result := parser.ParseWithTimeout(strings.NewReader(output), metadata, timeout)
 	require.NotNil(t, result)
 	assert.True(t, result.TimedOut)
 
@@ -260,7 +260,7 @@ func TestOutputParser_ParsePackageMode(t *testing.T) {
 		Package:  "example/pkg",
 	}
 
-	result := parser.Parse([]byte(output), metadata)
+	result := parser.Parse(strings.NewReader(output), metadata)
 
 	require.NotNil(t, result, "Parse should return non-nil result")
 	assert.Equal(t, types.TestStatusPass, result.Status, "Package should pass")
@@ -298,7 +298,7 @@ func TestOutputParser_ParsePackageModeWithElapsedFallback(t *testing.T) {
 		Package:  "example/pkg",
 	}
 
-	result := parser.Parse([]byte(output), metadata)
+	result := parser.Parse(strings.NewReader(output), metadata)
 
 	require.NotNil(t, result, "Parse should return non-nil result")
 	require.Len(t, result.SubTests, 2, "Should have 2 subtests")
@@ -332,7 +332,7 @@ func TestOutputParser_ParseSingleTestModeWithPackageLevelEvents(t *testing.T) {
 		Package:  "example/pkg",
 	}
 
-	result := parser.Parse([]byte(output), metadata)
+	result := parser.Parse(strings.NewReader(output), metadata)
 
 	require.NotNil(t, result, "Parse should return non-nil result")
 	assert.Equal(t, types.TestStatusPass, result.Status, "Test should pass")
@@ -368,7 +368,7 @@ func TestOutputParser_ParseSingleTestModeWithFailure(t *testing.T) {
 		Package:  "example/pkg",
 	}
 
-	result := parser.Parse([]byte(output), metadata)
+	result := parser.Parse(strings.NewReader(output), metadata)
 
 	require.NotNil(t, result, "Parse should return non-nil result")
 	assert.Equal(t, types.TestStatusFail, result.Status, "Test should fail")

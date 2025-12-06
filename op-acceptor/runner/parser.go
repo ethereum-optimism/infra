@@ -2,9 +2,9 @@ package runner
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -22,14 +22,14 @@ func NewOutputParser() OutputParser {
 }
 
 // Parse parses test output into TestResult
-func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *types.TestResult {
+func (p *outputParser) Parse(output io.Reader, metadata types.ValidatorMetadata) *types.TestResult {
 	result := &types.TestResult{
 		Metadata: metadata,
 		Status:   types.TestStatusPass,
 		SubTests: make(map[string]*types.TestResult),
 	}
 
-	if len(output) == 0 {
+	if output == nil {
 		result.Status = types.TestStatusFail
 		result.Error = fmt.Errorf("no test output")
 		return result
@@ -40,8 +40,10 @@ func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *t
 	var hasSkip bool
 	subTestStartTimes := make(map[string]time.Time)
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner := bufio.NewScanner(output)
+	hasData := false
 	for scanner.Scan() {
+		hasData = true
 		line := scanner.Bytes()
 		event, err := parseTestEvent(line)
 		if err != nil {
@@ -53,6 +55,11 @@ func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *t
 		} else if isSubTestEvent(event, metadata.FuncName) {
 			processSubTestEvent(event, result, subTestStartTimes, &errorMsg)
 		}
+	}
+
+	if !hasData {
+		result.Status = types.TestStatusFail
+		result.Error = fmt.Errorf("no test output")
 	}
 
 	// Calculate duration
@@ -76,18 +83,7 @@ func (p *outputParser) Parse(output []byte, metadata types.ValidatorMetadata) *t
 }
 
 // ParseWithTimeout parses test output for tests that exceeded timeout
-func (p *outputParser) ParseWithTimeout(output []byte, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult {
-	// If no output, return a minimal timeout result
-	if len(output) == 0 {
-		return &types.TestResult{
-			Metadata: metadata,
-			Status:   types.TestStatusFail,
-			Error:    fmt.Errorf("TIMEOUT: Test timed out after %v", timeout),
-			SubTests: make(map[string]*types.TestResult),
-			TimedOut: true,
-		}
-	}
-
+func (p *outputParser) ParseWithTimeout(output io.Reader, metadata types.ValidatorMetadata, timeout time.Duration) *types.TestResult {
 	// Build a timeout-focused parse that preserves completed subtests
 	result := &types.TestResult{
 		Metadata: metadata,
@@ -100,8 +96,10 @@ func (p *outputParser) ParseWithTimeout(output []byte, metadata types.ValidatorM
 	subTestStatuses := make(map[string]types.TestStatus)
 	subTestStartTimes := make(map[string]time.Time)
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner := bufio.NewScanner(output)
+	hasOutput := false
 	for scanner.Scan() {
+		hasOutput = true
 		line := scanner.Bytes()
 		event, err := parseTestEvent(line)
 		if err != nil {
@@ -157,6 +155,10 @@ func (p *outputParser) ParseWithTimeout(output []byte, metadata types.ValidatorM
 		case ActionOutput:
 			updateSubTestError(subTest, event.Output)
 		}
+	}
+
+	if !hasOutput {
+		return result
 	}
 
 	// Only mark subtests that started but never completed as timed out

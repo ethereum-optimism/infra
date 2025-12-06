@@ -103,8 +103,8 @@ func TestRawJSONSink(t *testing.T) {
 	}
 
 	// Store the raw JSON for each test
-	rawSink.StoreRawJSON(testResults[0].Metadata.ID, rawJSON)
-	rawSink.StoreRawJSON(testResults[1].Metadata.ID, rawJSON)
+	require.NoError(t, rawSink.StoreRawJSON(testResults[0].Metadata.ID, rawJSON))
+	require.NoError(t, rawSink.StoreRawJSON(testResults[1].Metadata.ID, rawJSON))
 
 	// Log the test results
 	for _, result := range testResults {
@@ -299,8 +299,8 @@ func TestFail(t *testing.T) {
 	}
 
 	// Store the raw JSON for each test
-	rawSink.StoreRawJSON(passResult.Metadata.ID, passJSON)
-	rawSink.StoreRawJSON(failResult.Metadata.ID, failJSON)
+	require.NoError(t, rawSink.StoreRawJSON(passResult.Metadata.ID, passJSON))
+	require.NoError(t, rawSink.StoreRawJSON(failResult.Metadata.ID, failJSON))
 
 	// Log the test results
 	err = logger.LogTestResult(passResult, runID)
@@ -491,9 +491,9 @@ func TestRawJSONSink_ComprehensiveLogging(t *testing.T) {
 	}
 
 	// Store the raw JSON for each test
-	rawSink.StoreRawJSON(testResults[0].Metadata.ID, passingTestJSON)
-	rawSink.StoreRawJSON(testResults[1].Metadata.ID, failingTestJSON)
-	rawSink.StoreRawJSON(testResults[2].Metadata.ID, packageTestJSON)
+	require.NoError(t, rawSink.StoreRawJSON(testResults[0].Metadata.ID, passingTestJSON))
+	require.NoError(t, rawSink.StoreRawJSON(testResults[1].Metadata.ID, failingTestJSON))
+	require.NoError(t, rawSink.StoreRawJSON(testResults[2].Metadata.ID, packageTestJSON))
 
 	// Log all test results
 	for _, result := range testResults {
@@ -734,7 +734,7 @@ func TestSkippedIntegration(t *testing.T) {
 
 		// Store raw JSON for this test
 		rawJSON := []byte(strings.Join(lines, "\n") + "\n")
-		rawSink.StoreRawJSON(result.Metadata.ID, rawJSON)
+		require.NoError(t, rawSink.StoreRawJSON(result.Metadata.ID, rawJSON))
 	}
 
 	// Log all test results
