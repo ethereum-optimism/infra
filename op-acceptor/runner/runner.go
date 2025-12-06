@@ -751,7 +751,7 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 	// Store the aggregated raw JSON for the package-level test result
 	if aggregatedRawFile != nil {
 		if _, err := aggregatedRawFile.Seek(0, io.SeekStart); err != nil {
-			aggregatedRawFile.Close()
+			_ = aggregatedRawFile.Close()
 			_ = os.Remove(aggregatedRawPath)
 			return nil, fmt.Errorf("failed to rewind aggregated raw JSON file: %w", err)
 		}
@@ -760,7 +760,7 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 				r.log.Error("Failed to store aggregated raw JSON", "package", metadata.Package, "error", err)
 			}
 		}
-		aggregatedRawFile.Close()
+		_ = aggregatedRawFile.Close()
 		_ = os.Remove(aggregatedRawPath)
 	}
 
@@ -948,7 +948,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 			return nil, fmt.Errorf("failed to read stdout for timeout parsing: %w", readerErr)
 		}
 		parsed := r.outputParser.ParseWithTimeout(stdoutReader, metadata, timeoutDuration)
-		stdoutReader.Close()
+		_ = stdoutReader.Close()
 		if parsed == nil {
 			parsed = &types.TestResult{
 				Metadata: metadata,
@@ -997,7 +997,7 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		return nil, fmt.Errorf("failed to read stdout for parsing: %w", readerErr)
 	}
 	parsedResult := r.parseTestOutput(stdoutReader, metadata)
-	stdoutReader.Close()
+	_ = stdoutReader.Close()
 
 	// If we couldn't parse the output for some reason, create a minimal failing result
 	if parsedResult == nil {
@@ -1425,14 +1425,6 @@ func (r *runner) storeRawJSONFromFile(testID, path string) error {
 		return err
 	}
 	return nil
-}
-
-// getRawJSON is a helper method to retrieve raw JSON for a test
-func (r *runner) getRawJSON(testID string) ([]byte, bool) {
-	if rawSink, ok := r.getRawJSONSink(); ok {
-		return rawSink.GetRawJSON(testID)
-	}
-	return nil, false
 }
 
 func (r *runner) testCommandContext(ctx context.Context, name string, arg ...string) (*exec.Cmd, func()) {

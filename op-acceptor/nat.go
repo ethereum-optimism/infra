@@ -611,9 +611,10 @@ func (n *nat) runTests(ctx context.Context) error {
 			gateTotal++
 			gateDuration += test.Duration
 
-			if test.Status == types.TestStatusPass {
+			switch test.Status {
+			case types.TestStatusPass:
 				gatePassed++
-			} else if test.Status == types.TestStatusFail {
+			case types.TestStatusFail:
 				gateFailed++
 			}
 
@@ -669,10 +670,11 @@ func (n *nat) runTests(ctx context.Context) error {
 				suiteTotal++
 				gateDuration += test.Duration
 
-				if test.Status == types.TestStatusPass {
+				switch test.Status {
+				case types.TestStatusPass:
 					gatePassed++
 					suitePassed++
-				} else if test.Status == types.TestStatusFail {
+				case types.TestStatusFail:
 					gateFailed++
 					suiteFailed++
 				}

@@ -162,7 +162,7 @@ func (e *testExecutor) runSingleTest(ctx context.Context, metadata types.Validat
 	} else {
 		result = e.outputParser.Parse(stdoutReader, metadata)
 	}
-	stdoutReader.Close()
+	_ = stdoutReader.Close()
 
 	if result == nil {
 		result = &types.TestResult{

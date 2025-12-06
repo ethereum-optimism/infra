@@ -59,7 +59,9 @@ func (s *RawJSONSink) Consume(result *types.TestResult, runID string) error {
 		if err != nil {
 			return fmt.Errorf("failed to open raw JSON file %s: %w", path, err)
 		}
-		defer file.Close()
+		defer func() {
+			_ = file.Close()
+		}()
 
 		if _, err := io.Copy(asyncFileWriterAdapter{writer: writer}, file); err != nil {
 			return fmt.Errorf("failed to write raw JSON events: %w", err)
@@ -91,7 +93,7 @@ func (s *RawJSONSink) StoreRawJSON(testID string, rawJSON []byte) error {
 	}
 
 	if _, err := tmpFile.Write(rawJSON); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpFile.Name())
 		return fmt.Errorf("failed to write raw JSON: %w", err)
 	}
@@ -111,7 +113,9 @@ func (s *RawJSONSink) StoreRawJSONFromFile(testID, sourcePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open raw JSON source %s: %w", sourcePath, err)
 	}
-	defer src.Close()
+	defer func() {
+		_ = src.Close()
+	}()
 
 	tmpFile, err := s.createTempRawFile(testID)
 	if err != nil {
@@ -119,7 +123,7 @@ func (s *RawJSONSink) StoreRawJSONFromFile(testID, sourcePath string) error {
 	}
 
 	if _, err := io.Copy(tmpFile, src); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpFile.Name())
 		return fmt.Errorf("failed to copy raw JSON: %w", err)
 	}
@@ -159,7 +163,9 @@ func (s *RawJSONSink) WriteRawJSONTo(testID string, w io.Writer) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to open raw JSON file %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	if _, err := io.Copy(w, file); err != nil {
 		return false, fmt.Errorf("failed to copy raw JSON: %w", err)
