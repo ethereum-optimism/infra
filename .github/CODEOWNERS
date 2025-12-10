@@ -1,4 +1,4 @@
 * @ethereum-optimism/infra-reviewers
 
-/op-txproxy @ethereum-optimism/devxpod
-.github/workflows/ @ethereum-optimism/plaftorm-security
+/op-txproxy @ethereum-optimism/ecosystem
+.github/workflows/ @ethereum-optimism/platform-security
