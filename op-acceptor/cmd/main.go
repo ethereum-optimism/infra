@@ -28,31 +28,17 @@ var (
 )
 
 func main() {
-	app := cli.NewApp()
-	app.Version = fmt.Sprintf("%s-%s-%s", Version, GitCommit, GitDate)
-	app.Name = "op-acceptor"
-	app.Usage = "Optimism Network Acceptance Tester Service"
-	app.Description = "op-acceptor tests networks"
-	app.Flags = cliapp.ProtectFlags(flags.Flags)
-	app.Action = cliapp.LifecycleCmd(run)
-	app.ExitErrHandler = func(c *cli.Context, err error) {
-		var exitErr cli.ExitCoder
-		if errors.As(err, &exitErr) {
-			// Use the exit code from the ExitCoder
-			cli.HandleExitCoder(exitErr)
-		} else if err != nil {
-			// Check for typed runtime errors
-			if nat.IsRuntimeError(err) {
-				// For runtime errors, use exit code 2
-				cli.HandleExitCoder(cli.Exit(err.Error(), 2))
-			} else if nat.IsTestFailureError(err) {
-				// For test failures, use exit code 1
-				cli.HandleExitCoder(cli.Exit(err.Error(), 1))
-			} else {
-				// For other unspecified errors, default to exit code 1
-				cli.HandleExitCoder(cli.Exit(err.Error(), 1))
-			}
-		}
+	app := buildApp()
+
+	if helpRequested(os.Args[1:]) {
+		app.Setup()
+		cli.ShowAppHelpAndExit(cli.NewContext(app, nil, nil), 0)
+	}
+
+	if versionRequested(os.Args[1:]) {
+		app.Setup()
+		cli.ShowVersion(cli.NewContext(app, nil, nil))
+		return
 	}
 
 	// Start telemetry
@@ -133,4 +119,51 @@ func installShutdownSignalHandler(logger log.Logger, closeApp context.CancelCaus
 	return func() {
 		close(done)
 	}
+}
+
+func buildApp() *cli.App {
+	app := cli.NewApp()
+	app.Version = fmt.Sprintf("%s-%s-%s", Version, GitCommit, GitDate)
+	app.Name = "op-acceptor"
+	app.Usage = "Optimism Network Acceptance Tester Service"
+	app.Description = "op-acceptor tests networks"
+	app.Flags = cliapp.ProtectFlags(flags.Flags)
+	app.Action = cliapp.LifecycleCmd(run)
+	app.ExitErrHandler = func(c *cli.Context, err error) {
+		var exitErr cli.ExitCoder
+		if errors.As(err, &exitErr) {
+			cli.HandleExitCoder(exitErr)
+			return
+		}
+		if err == nil {
+			return
+		}
+		switch {
+		case nat.IsRuntimeError(err):
+			cli.HandleExitCoder(cli.Exit(err.Error(), 2))
+		case nat.IsTestFailureError(err):
+			cli.HandleExitCoder(cli.Exit(err.Error(), 1))
+		default:
+			cli.HandleExitCoder(cli.Exit(err.Error(), 1))
+		}
+	}
+	return app
+}
+
+func helpRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" || arg == "help" {
+			return true
+		}
+	}
+	return false
+}
+
+func versionRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--version" || arg == "-v" || arg == "version" {
+			return true
+		}
+	}
+	return false
 }
