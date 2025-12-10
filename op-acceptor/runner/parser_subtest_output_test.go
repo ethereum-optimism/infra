@@ -2,6 +2,8 @@ package runner
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/types"
@@ -111,4 +113,41 @@ func TestRealWorldTestOutput(t *testing.T) {
 	for _, expected := range expectedInOutput {
 		assert.Contains(t, outputStr, expected, "Output should contain: %s", expected)
 	}
+}
+
+// TestParserTruncatesSubtestOutput ensures we don't retain unbounded subtest output in memory.
+func TestParserTruncatesSubtestOutput(t *testing.T) {
+	var buf bytes.Buffer
+	const totalLines = 400
+	const chunkSize = 2048
+
+	buf.WriteString(`{"Time":"2025-09-23T10:00:00Z","Action":"run","Package":"test/pkg","Test":"TestMain"}` + "\n")
+	buf.WriteString(`{"Time":"2025-09-23T10:00:00Z","Action":"run","Package":"test/pkg","Test":"TestMain/SubTestHuge"}` + "\n")
+
+	longChunk := strings.Repeat("X", chunkSize)
+	for i := 0; i < totalLines-1; i++ {
+		fmt.Fprintf(&buf, `{"Time":"2025-09-23T10:00:%02dZ","Action":"output","Package":"test/pkg","Test":"TestMain/SubTestHuge","Output":"%s"}`+"\n", i%60, longChunk)
+	}
+
+	// Write a final unique tail chunk to assert we kept the end of the log.
+	tailMarker := "TAIL_MARKER_12345"
+	lastChunk := strings.Repeat("Y", chunkSize-len(tailMarker)) + tailMarker
+	fmt.Fprintf(&buf, `{"Time":"2025-09-23T10:01:00Z","Action":"output","Package":"test/pkg","Test":"TestMain/SubTestHuge","Output":"%s"}`+"\n", lastChunk)
+	buf.WriteString(`{"Time":"2025-09-23T10:01:01Z","Action":"pass","Package":"test/pkg","Test":"TestMain/SubTestHuge","Elapsed":1.0}` + "\n")
+
+	parser := NewOutputParser()
+	result := parser.Parse(bytes.NewReader(buf.Bytes()), types.ValidatorMetadata{
+		FuncName: "TestMain",
+		Package:  "test/pkg",
+	})
+
+	require.NotNil(t, result)
+	sub, ok := result.SubTests["TestMain/SubTestHuge"]
+	require.True(t, ok, "expected subtest result")
+	require.NotEmpty(t, sub.Stdout, "subtest stdout should be captured")
+	assert.Contains(t, sub.Stdout, "showing last", "stdout should be truncated with a tail marker")
+	assert.Contains(t, sub.Stdout, tailMarker, "tail marker should be preserved after truncation")
+
+	// Allow a small header overhead on top of the tail buffer size.
+	assert.LessOrEqual(t, len(sub.Stdout), subtestStdoutTailBytes+256, "subtest stdout should be bounded")
 }
