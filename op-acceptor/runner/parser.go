@@ -13,6 +13,8 @@ import (
 
 var _ OutputParser = (*outputParser)(nil)
 
+const subtestStdoutTailBytes = 512 * 1024 // keep last 512KB of subtest output
+
 // outputParser implements OutputParser interface
 type outputParser struct{}
 
@@ -39,6 +41,7 @@ func (p *outputParser) Parse(output io.Reader, metadata types.ValidatorMetadata)
 	var errorMsg strings.Builder
 	var hasSkip bool
 	subTestStartTimes := make(map[string]time.Time)
+	subTestBuffers := make(map[string]*tailBuffer)
 
 	scanner := bufio.NewScanner(output)
 	hasData := false
@@ -53,7 +56,7 @@ func (p *outputParser) Parse(output io.Reader, metadata types.ValidatorMetadata)
 		if isMainTestEvent(event, metadata.FuncName) {
 			processMainTestEvent(event, result, &testStart, &testEnd, &errorMsg, &hasSkip)
 		} else if isSubTestEvent(event, metadata.FuncName) {
-			processSubTestEvent(event, result, subTestStartTimes, &errorMsg)
+			processSubTestEvent(event, result, subTestStartTimes, &errorMsg, subTestBuffers)
 		}
 	}
 
@@ -77,6 +80,13 @@ func (p *outputParser) Parse(output io.Reader, metadata types.ValidatorMetadata)
 		result.Status = types.TestStatusSkip
 		// Note: Skip reasons are not stored as errors since they're not failures
 		// The skip reason information is available in the test output if needed
+	}
+
+	// Attach bounded stdout snippets for subtests to avoid retaining full logs in memory
+	for name, subTest := range result.SubTests {
+		if buf, ok := subTestBuffers[name]; ok {
+			subTest.Stdout = buildStdoutSnippet(buf)
+		}
 	}
 
 	return result
@@ -249,7 +259,7 @@ func processMainTestEvent(event TestEvent, result *types.TestResult, testStart, 
 }
 
 func processSubTestEvent(event TestEvent, result *types.TestResult,
-	subTestStartTimes map[string]time.Time, errorMsg *strings.Builder) {
+	subTestStartTimes map[string]time.Time, errorMsg *strings.Builder, subTestBuffers map[string]*tailBuffer) {
 
 	// Extract subtest name
 	parts := strings.Split(event.Test, "/")
@@ -299,14 +309,9 @@ func processSubTestEvent(event TestEvent, result *types.TestResult,
 		subTest.Status = types.TestStatusSkip
 		calculateSubTestDuration(subTest, event, subTestStartTimes)
 	case ActionOutput:
-		// Store the plain text output in the subtest's Stdout field
-		// We store plain text here since subtests don't have their own JSON stream
-		// The filelogger will handle plain text appropriately
-		if subTest.Stdout == "" {
-			subTest.Stdout = event.Output
-		} else {
-			subTest.Stdout += event.Output
-		}
+		buffer := ensureSubTestBuffer(subTestBuffers, subTestName)
+		// Ignore write error: tailBuffer never errors
+		_, _ = buffer.Write([]byte(event.Output))
 		updateSubTestError(subTest, event.Output)
 	}
 
@@ -349,4 +354,13 @@ func calculateTestDuration(start, end time.Time) time.Duration {
 		return 0
 	}
 	return duration
+}
+
+func ensureSubTestBuffer(buffers map[string]*tailBuffer, name string) *tailBuffer {
+	buf, ok := buffers[name]
+	if !ok {
+		buf = newTailBuffer(subtestStdoutTailBytes)
+		buffers[name] = buf
+	}
+	return buf
 }
