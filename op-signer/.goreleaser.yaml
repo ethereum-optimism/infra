@@ -49,7 +49,7 @@ release:
   github:
     owner: ethereum-optimism
     name: infra
-  make_latest: false
+  make_latest: auto
 
 monorepo:
   tag_prefix: op-signer/
