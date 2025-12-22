@@ -316,6 +316,11 @@ type Backend struct {
 	maxLatencyThreshold          time.Duration
 	maxErrorRateThreshold        float64
 
+	probeSpec    *ProbeSpec
+	probeURL     string
+	ProbeWorker  *ProbeWorker
+	HealthyProbe bool
+
 	latencySlidingWindow            *sw.AvgSlidingWindow
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
 	intermittentErrorsSlidingWindow *sw.AvgSlidingWindow
@@ -468,6 +473,32 @@ func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendO
 	}
 }
 
+func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold int, probePeriodSeconds int, probeTimeoutSeconds int) BackendOpt {
+	return func(b *Backend) {
+		b.probeURL = probeURL
+		probeSpec := ProbeSpec{
+			// default values
+			FailureThreshold: 1,
+			SuccessThreshold: 2,
+			Period:           4 * time.Second,
+			Timeout:          1 * time.Second,
+		}
+		if probeFailureThreshold != 0 {
+			probeSpec.FailureThreshold = probeFailureThreshold
+		}
+		if probeSuccessThreshold != 0 {
+			probeSpec.SuccessThreshold = probeSuccessThreshold
+		}
+		if probePeriodSeconds != 0 {
+			probeSpec.Period = time.Duration(probePeriodSeconds) * time.Second
+		}
+		if probeTimeoutSeconds != 0 {
+			probeSpec.Timeout = time.Duration(probeTimeoutSeconds) * time.Second
+		}
+		b.probeSpec = &probeSpec
+	}
+}
+
 type indexedReqRes struct {
 	index int
 	req   *RPCReq
@@ -521,6 +552,8 @@ func NewBackend(
 		networkRequestsSlidingWindow:    sw.NewSlidingWindow(),
 		intermittentErrorsSlidingWindow: sw.NewSlidingWindow(),
 		allowedStatusCodes:              []int{400, 413}, // Alchemy returns a 400 on bad JSONs, and Quicknode returns a 413 on too large requests
+
+		HealthyProbe: true,
 	}
 
 	backend.Override(opts...)
@@ -884,6 +917,9 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 // IsHealthy checks if the backend is able to serve traffic, based on dynamic parameters
 func (b *Backend) IsHealthy() bool {
+	if !b.HealthyProbe {
+		return false
+	}
 	errorRate := b.ErrorRate()
 	avgLatency := time.Duration(b.latencySlidingWindow.Avg())
 	if errorRate >= b.maxErrorRateThreshold {
