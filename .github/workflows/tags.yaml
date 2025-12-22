@@ -23,7 +23,7 @@ jobs:
       dockerfile: ${{ needs.prep.outputs.image_name }}/Dockerfile
       tag: ${{ needs.prep.outputs.version }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
     permissions:
       contents: read
       id-token: write
