@@ -12,18 +12,18 @@ jobs:
       image_name: ${{ steps.parse-tag.outputs.image_name }}
       version: ${{ steps.parse-tag.outputs.version }}
     steps:
-      - uses: ethereum-optimism/factory/actions/parse-tag@240b16167a5f5aa789270fa9c0efbfa9f010b7e7
+      - uses: ethereum-optimism/factory/actions/parse-tag@f8f3cb4800e538003134fb5f50cc734c2c98d762
         id: parse-tag
   tag:
     needs: prep
-    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@ae4dada9bf0951124892dbc6b63cebef44d35f91
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@f8f3cb4800e538003134fb5f50cc734c2c98d762
     with:
       image_name: ${{ needs.prep.outputs.image_name }}
       context: .
       dockerfile: ${{ needs.prep.outputs.image_name }}/Dockerfile
       tag: ${{ needs.prep.outputs.version }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
     permissions:
       contents: read
       id-token: write
