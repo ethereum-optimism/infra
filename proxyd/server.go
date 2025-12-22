@@ -270,13 +270,21 @@ func (s *Server) Drain() {
 
 func (s *Server) Shutdown() {
 	s.srvMu.Lock()
-	time.Sleep(gracefulShutdownDuration)
 	defer s.srvMu.Unlock()
+
 	if s.rpcServer != nil {
-		_ = s.rpcServer.Shutdown(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownDuration)
+		defer cancel()
+		if err := s.rpcServer.Shutdown(ctx); err != nil {
+			log.Warn("error shutting down RPC server gracefully", "err", err)
+		}
 	}
 	if s.wsServer != nil {
-		_ = s.wsServer.Shutdown(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownDuration)
+		defer cancel()
+		if err := s.wsServer.Shutdown(ctx); err != nil {
+			log.Warn("error shutting down WS server gracefully", "err", err)
+		}
 	}
 	for _, bg := range s.BackendGroups {
 		bg.Shutdown()
