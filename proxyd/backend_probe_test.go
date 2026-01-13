@@ -85,6 +85,7 @@ func TestProbeWorker(t *testing.T) {
 
 			// Create probe worker
 			worker, err := NewProbeWorker(
+				"test-backend",
 				server.URL,
 				spec,
 				false,
@@ -146,6 +147,7 @@ func TestProbeWorkerTimeout(t *testing.T) {
 
 	// Create probe worker
 	worker, err := NewProbeWorker(
+		"test-backend",
 		server.URL,
 		spec,
 		false,
@@ -197,6 +199,7 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 		}
 
 		worker, err := NewProbeWorker(
+			"test-backend",
 			server.URL,
 			spec,
 			false,
@@ -245,6 +248,7 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 		}
 
 		worker, err := NewProbeWorker(
+			"test-backend",
 			server.URL,
 			spec,
 			false,
@@ -294,6 +298,7 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 		}
 
 		worker, err := NewProbeWorker(
+			"test-backend",
 			server.URL,
 			spec,
 			false,
@@ -332,6 +337,7 @@ func TestProbeWorkerDNSFailure(t *testing.T) {
 	}
 
 	worker, err := NewProbeWorker(
+		"test-backend",
 		"http://invalid-domain.com/health",
 		spec,
 		false,
@@ -374,6 +380,7 @@ func TestProbeWorkerConnectionRefused(t *testing.T) {
 
 	// Use localhost with a port that's unlikely to be listening
 	worker, err := NewProbeWorker(
+		"test-backend",
 		"http://127.0.0.1:59999/health",
 		spec,
 		false,

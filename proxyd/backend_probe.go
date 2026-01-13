@@ -92,9 +92,11 @@ type ProbeWorker struct {
 	resultHandler func(bool, string)
 	lastResult    bool
 	resultRun     int
+	backendName   string
 }
 
 func NewProbeWorker(
+	backendName string,
 	probeUrl string,
 	probeSpec ProbeSpec,
 	insecureSkipVerify bool,
@@ -130,6 +132,7 @@ func NewProbeWorker(
 		resultHandler: resultHandler,
 		transport:     transport,
 		req:           req,
+		backendName:   backendName,
 	}, nil
 }
 
@@ -172,13 +175,17 @@ func (w *ProbeWorker) Start() {
 }
 
 func (w *ProbeWorker) doProbe() {
-
 	client := &http.Client{
 		Timeout:   w.spec.Timeout,
 		Transport: w.transport,
 	}
 
+	start := time.Now()
 	result, message := doHTTPProbe(w.req, client)
+	duration := time.Since(start)
+
+	RecordBackendProbeDuration(w.backendName, duration)
+	RecordBackendProbeCheck(w.backendName, result)
 
 	if w.lastResult == result {
 		w.resultRun++
@@ -193,6 +200,6 @@ func (w *ProbeWorker) doProbe() {
 		return
 	}
 
+	RecordBackendProbeHealthy(w.backendName, result)
 	w.resultHandler(result, message)
-
 }
