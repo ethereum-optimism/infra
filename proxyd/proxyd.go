@@ -251,7 +251,7 @@ func Start(config *Config) (*Server, func(), error) {
 				maxProbeDelay = probeDelay
 			}
 			// Create and launch probe worker
-			back.ProbeWorker, err = NewProbeWorker(back.probeURL, *back.probeSpec, back.probeInsecureSkipVerify, func(healthy bool, msg string) {
+			back.ProbeWorker, err = NewProbeWorker(back.Name, back.probeURL, *back.probeSpec, back.probeInsecureSkipVerify, func(healthy bool, msg string) {
 				if healthy {
 					if !back.IsProbeHealthy() {
 						log.Info("backend is now healthy", "name", back.Name)
