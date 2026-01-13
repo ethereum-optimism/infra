@@ -328,7 +328,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		"auth", GetAuthCtx(ctx),
 		"user_agent", userAgent,
 		"origin", origin,
-		"remote_ip", xff,
+		"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 	)
 
 	body, err := io.ReadAll(LimitReader(r.Body, s.maxBodySize))
@@ -543,6 +543,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted)
@@ -556,6 +557,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
@@ -569,6 +571,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
