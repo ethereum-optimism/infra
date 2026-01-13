@@ -26,9 +26,7 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	t.Setenv("QUICKNODE_API_KEY", "abcdefg")
-	t.Setenv("ALCHEMY_API_KEY", "hijklmnop")
-	t.Setenv("API_KEYS", "qrs,tuv")
+	t.Setenv("API_KEYS", "abcdefg,hijklmnop,qrs,tuv")
 
 	config := ReadConfig("frontend_rate_limit")
 	_, shutdown, err := proxyd.Start(config)

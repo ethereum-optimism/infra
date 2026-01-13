@@ -419,12 +419,6 @@ func Start(config *Config) (*Server, func(), error) {
 
 	// Allow API Keys that bypass rate-limiting.
 	apiKeys := []string{}
-	if qnAPIKey, err := ReadFromEnvOrConfig("$QUICKNODE_API_KEY"); err == nil {
-		apiKeys = append(apiKeys, qnAPIKey)
-	}
-	if alchAPIKey, err := ReadFromEnvOrConfig("$ALCHEMY_API_KEY"); err == nil {
-		apiKeys = append(apiKeys, alchAPIKey)
-	}
 	if keys, err := ReadFromEnvOrConfig("$API_KEYS"); err == nil {
 		apiKeys = append(apiKeys, strings.Split(keys, ",")...)
 	}
