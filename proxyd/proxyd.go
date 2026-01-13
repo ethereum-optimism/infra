@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -416,6 +417,18 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
 	}
 
+	// Allow API Keys that bypass rate-limiting.
+	apiKeys := []string{}
+	if qnAPIKey, err := ReadFromEnvOrConfig("$QUICKNODE_API_KEY"); err == nil {
+		apiKeys = append(apiKeys, qnAPIKey)
+	}
+	if alchAPIKey, err := ReadFromEnvOrConfig("$ALCHEMY_API_KEY"); err == nil {
+		apiKeys = append(apiKeys, alchAPIKey)
+	}
+	if keys, err := ReadFromEnvOrConfig("$API_KEYS"); err == nil {
+		apiKeys = append(apiKeys, strings.Split(keys, ",")...)
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -438,6 +451,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig,
 		interopStrategy,
 		config.Server.EnableTxHashLogging,
+		apiKeys,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

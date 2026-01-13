@@ -26,6 +26,10 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
+	t.Setenv("QUICKNODE_API_KEY", "abcdefg")
+	t.Setenv("ALCHEMY_API_KEY", "hijklmnop")
+	t.Setenv("API_KEYS", "qrs,tuv")
+
 	config := ReadConfig("frontend_rate_limit")
 	_, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
@@ -52,6 +56,26 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 		h.Set("Origin", "exempt_origin")
 		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
 		_, codes := spamReqs(t, client, ethChainID, 429, 3)
+		require.Equal(t, 3, codes[200])
+	})
+
+	t.Run("exempt API keys", func(t *testing.T) {
+		// Test QUICKNODE_API_KEY in header.
+		h := make(http.Header)
+		h.Set("X-Api-Key", "abcdefg")
+		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
+		_, codes := spamReqs(t, client, ethChainID, 429, 3)
+		require.Equal(t, 3, codes[200])
+
+		// Test one of API_KEYS in header.
+		h.Set("X-Api-Key", "tuv")
+		client2 := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
+		_, codes = spamReqs(t, client2, ethChainID, 429, 3)
+		require.Equal(t, 3, codes[200])
+
+		// Test ALCHEMY_API_KEY appended to URL.
+		client3 := NewProxydClient("http://127.0.0.1:8545/hijklmnop")
+		_, codes = spamReqs(t, client3, ethChainID, 429, 3)
 		require.Equal(t, 3, codes[200])
 	})
 
