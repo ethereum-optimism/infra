@@ -1,3 +1,34 @@
+// backend_probe.go implements HTTP health check probing for backend servers.
+//
+// The probe system is inspired by Kubernetes liveness/readiness probes and provides:
+//   - Periodic HTTP health checks against a configurable endpoint
+//   - Configurable success/failure thresholds to prevent flapping
+//   - Async operation via a background goroutine per backend
+//
+// # Usage
+//
+// When a backend is configured with a probe_url, a ProbeWorker runs in the background,
+// periodically checking the endpoint. The backend is only marked unhealthy after
+// FailureThreshold consecutive failures, and only marked healthy after SuccessThreshold
+// consecutive successes. This threshold behavior prevents health status from flapping
+// due to transient network issues.
+//
+// # Configuration
+//
+// ProbeSpec controls the probe behavior:
+//   - FailureThreshold: consecutive failures before marking unhealthy (default: 1)
+//   - SuccessThreshold: consecutive successes before marking healthy (default: 2)
+//   - Period: interval between probes (default: 4s)
+//   - Timeout: HTTP request timeout per probe (default: 4s)
+//
+// # HTTP Probe Behavior
+//
+// The probe sends a GET request to the configured URL. Success is determined by:
+//   - 2xx status codes: success
+//   - 3xx (redirects), 4xx, 5xx, or connection errors: failure
+//
+// The probe uses a custom dialer with SO_LINGER set (borrowed from Kubernetes) to ensure
+// clean connection teardown, and disables keep-alives to get fresh connection state each probe.
 package proxyd
 
 import (
@@ -54,27 +85,19 @@ func doHTTPProbe(req *http.Request, client *http.Client) (bool, string) {
 }
 
 type ProbeWorker struct {
-	// Channel for stopping the probe.
-	stopCh chan struct{}
-
-	// Describes the probe configuration (read-only)
-	spec ProbeSpec
-
-	transport *http.Transport
-	req       *http.Request
-
-	// A callback function to pass probe result to
+	stopCh        chan struct{}
+	spec          ProbeSpec
+	transport     *http.Transport
+	req           *http.Request
 	resultHandler func(bool, string)
-
-	// The last probe result for this worker.
-	lastResult bool
-	// How many times in a row the probe has returned the same result.
-	resultRun int
+	lastResult    bool
+	resultRun     int
 }
 
 func NewProbeWorker(
 	probeUrl string,
 	probeSpec ProbeSpec,
+	insecureSkipVerify bool,
 	resultHandler func(bool, string),
 ) (*ProbeWorker, error) {
 
@@ -93,7 +116,7 @@ func NewProbeWorker(
 	}
 
 	transport := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: insecureSkipVerify},
 		TLSHandshakeTimeout: defaultTransport.TLSHandshakeTimeout,
 		DisableKeepAlives:   true,
 		DisableCompression:  true,
@@ -137,7 +160,6 @@ probeLoop:
 	}
 }
 
-// Stop stops the probe worker. It is safe to call Stop multiple times.
 func (w *ProbeWorker) Stop() {
 	select {
 	case w.stopCh <- struct{}{}:
@@ -145,13 +167,11 @@ func (w *ProbeWorker) Stop() {
 	}
 }
 
-// Start starts the probe worker.
 func (w *ProbeWorker) Start() {
 	go w.run()
 }
 
 func (w *ProbeWorker) doProbe() {
-	// Note, exec probe does NOT have access to pod environment variables or downward API
 
 	client := &http.Client{
 		Timeout:   w.spec.Timeout,
@@ -170,6 +190,7 @@ func (w *ProbeWorker) doProbe() {
 	if (!result && w.resultRun < int(w.spec.FailureThreshold)) ||
 		(result && w.resultRun < int(w.spec.SuccessThreshold)) {
 		// Success or failure is below threshold - leave the probe state unchanged.
+		return
 	}
 
 	w.resultHandler(result, message)

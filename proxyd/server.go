@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -89,7 +90,7 @@ type Server struct {
 	interopStrategy         InteropStrategy
 	publicAccess            bool
 	enableTxHashLogging     bool
-	isDraining              bool
+	isDraining              atomic.Bool
 }
 
 type limiterFunc func(method string) bool
@@ -220,7 +221,6 @@ func NewServer(
 		interopValidatingConfig: interopValidatingConfig,
 		interopStrategy:         interopStrategy,
 		enableTxHashLogging:     enableTxHashLogging,
-		isDraining:              false,
 	}, nil
 }
 
@@ -262,10 +262,8 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 }
 
 func (s *Server) Drain() {
-	s.srvMu.Lock()
-	s.isDraining = true
+	s.isDraining.Store(true)
 	time.Sleep(gracefulShutdownDuration)
-	defer s.srvMu.Unlock()
 }
 
 func (s *Server) Shutdown() {
@@ -283,7 +281,7 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
-	if s.isDraining {
+	if s.isDraining.Load() {
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
