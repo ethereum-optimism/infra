@@ -328,7 +328,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		"auth", GetAuthCtx(ctx),
 		"user_agent", userAgent,
 		"origin", origin,
-		"remote_ip", stripXFF(GetXForwardedFor(ctx)),
+		"remote_ip", xff,
 	)
 
 	body, err := io.ReadAll(LimitReader(r.Body, s.maxBodySize))
