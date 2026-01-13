@@ -492,16 +492,16 @@ func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold
 			Period:           4 * time.Second,
 			Timeout:          1 * time.Second,
 		}
-		if probeFailureThreshold != 0 {
+		if probeFailureThreshold > 0 {
 			probeSpec.FailureThreshold = probeFailureThreshold
 		}
-		if probeSuccessThreshold != 0 {
+		if probeSuccessThreshold > 0 {
 			probeSpec.SuccessThreshold = probeSuccessThreshold
 		}
-		if probePeriodSeconds != 0 {
+		if probePeriodSeconds > 0 {
 			probeSpec.Period = time.Duration(probePeriodSeconds) * time.Second
 		}
-		if probeTimeoutSeconds != 0 {
+		if probeTimeoutSeconds > 0 {
 			probeSpec.Timeout = time.Duration(probeTimeoutSeconds) * time.Second
 		}
 		b.probeSpec = &probeSpec
