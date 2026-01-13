@@ -288,11 +288,8 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel = context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	// User can provide an API key either via the "X-Api-Key" header or by appending it to the URL path.
+	// User can provide an API key via the "X-Api-Key" header
 	apiKey := r.Header.Get("X-Api-Key")
-	if apiKey == "" {
-		apiKey = strings.Trim(r.URL.Path, "/")
-	}
 	bypassLimit := s.isValidAPIKey(apiKey)
 
 	origin := r.Header.Get("Origin")
@@ -592,14 +589,14 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
-		if (parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional") && !bypassLimit {
+		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" {
 			tx, err := s.convertSendReqToSendTx(ctx, parsedReq)
 			if err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-			if err := s.rateLimitSender(ctx, tx); err != nil {
+			if err := s.rateLimitSender(ctx, tx, bypassLimit); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
@@ -910,9 +907,12 @@ func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transacti
 	return nil
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction) error {
+func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction, bypassLimit bool) error {
 	if s.senderLim == nil {
 		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}
+	if bypassLimit {
 		return nil
 	}
 	return s.genericRateLimitSender(ctx, tx, s.senderLim)

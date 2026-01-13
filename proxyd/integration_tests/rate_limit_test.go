@@ -58,17 +58,17 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 	})
 
 	t.Run("exempt API keys", func(t *testing.T) {
-		// Test QUICKNODE_API_KEY in header.
 		h := make(http.Header)
 
-		// Test one of API_KEYS in header.
-		h.Set("X-Api-Key", "tuv")
+		// Test first of API_KEYS in header.
+		h.Set("X-Api-Key", "hijklmnop")
 		client2 := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
 		_, codes := spamReqs(t, client2, ethChainID, 429, 3)
 		require.Equal(t, 3, codes[200])
 
-		// Test ALCHEMY_API_KEY appended to URL.
-		client3 := NewProxydClient("http://127.0.0.1:8545/hijklmnop")
+		// Test last of API_KEYS in header.
+		h.Set("X-Api-Key", "tuv")
+		client3 := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
 		_, codes = spamReqs(t, client3, ethChainID, 429, 3)
 		require.Equal(t, 3, codes[200])
 	})
