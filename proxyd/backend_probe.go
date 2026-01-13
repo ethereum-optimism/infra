@@ -99,8 +99,8 @@ func NewProbeWorker(
 	backendName string,
 	probeUrl string,
 	probeSpec ProbeSpec,
-	insecureSkipVerify bool,
 	resultHandler func(bool, string),
+	tlsConfig *tls.Config,
 ) (*ProbeWorker, error) {
 
 	u, err := url.Parse(probeUrl)
@@ -117,8 +117,13 @@ func NewProbeWorker(
 		"Accept":     {"*/*"},
 	}
 
+	// Use provided TLS config or fall back to default (secure) configuration
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	}
+
 	transport := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: insecureSkipVerify},
+		TLSClientConfig:     tlsConfig,
 		TLSHandshakeTimeout: defaultTransport.TLSHandshakeTimeout,
 		DisableKeepAlives:   true,
 		DisableCompression:  true,

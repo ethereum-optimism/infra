@@ -182,7 +182,7 @@ func Start(config *Config) (*Server, func(), error) {
 			opts = append(opts, WithBasicAuth(cfg.Username, passwordVal))
 		}
 		if cfg.ProbeURL != "" {
-			opts = append(opts, WithProbe(cfg.ProbeURL, cfg.ProbeFailureThreshold, cfg.ProbeSuccessThreshold, cfg.ProbePeriodSeconds, cfg.ProbeTimeoutSeconds, cfg.ProbeInsecureSkipVerify))
+			opts = append(opts, WithProbe(cfg.ProbeURL, cfg.ProbeFailureThreshold, cfg.ProbeSuccessThreshold, cfg.ProbePeriodSeconds, cfg.ProbeTimeoutSeconds))
 		}
 
 		headers := map[string]string{}
@@ -251,7 +251,14 @@ func Start(config *Config) (*Server, func(), error) {
 				maxProbeDelay = probeDelay
 			}
 			// Create and launch probe worker
-			back.ProbeWorker, err = NewProbeWorker(back.Name, back.probeURL, *back.probeSpec, back.probeInsecureSkipVerify, func(healthy bool, msg string) {
+			// Extract TLS config from backend to ensure consistent TLS validation
+			var probeTLSConfig *tls.Config
+			if back.client.Transport != nil {
+				if transport, ok := back.client.Transport.(*http.Transport); ok {
+					probeTLSConfig = transport.TLSClientConfig
+				}
+			}
+			back.ProbeWorker, err = NewProbeWorker(back.Name, back.probeURL, *back.probeSpec, func(healthy bool, msg string) {
 				if healthy {
 					if !back.IsProbeHealthy() {
 						log.Info("backend is now healthy", "name", back.Name)
@@ -263,7 +270,7 @@ func Start(config *Config) (*Server, func(), error) {
 					}
 					back.SetProbeHealth(false)
 				}
-			})
+			}, probeTLSConfig)
 			if err != nil {
 				return nil, nil, err
 			}
