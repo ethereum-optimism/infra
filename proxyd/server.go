@@ -554,7 +554,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			log.Debug(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
-				"req_id", parsedReq.ID,
+				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
