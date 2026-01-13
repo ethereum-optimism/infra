@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -809,7 +810,7 @@ func (s *Server) isUnlimitedUserAgent(origin string) bool {
 
 func (s *Server) isValidAPIKey(key string) bool {
 	for _, v := range s.limExemptKeys {
-		if key == v {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(v)) == 1 {
 			return true
 		}
 	}
