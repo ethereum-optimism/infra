@@ -88,11 +88,11 @@ func TestProbeWorker(t *testing.T) {
 				"test-backend",
 				server.URL,
 				spec,
-				false,
 				func(result bool, message string) {
 					resultChan <- result
 					messageChan <- message
 				},
+				nil,
 			)
 			if err != nil {
 				t.Fatalf("Failed to create probe worker: %v", err)
@@ -150,11 +150,11 @@ func TestProbeWorkerTimeout(t *testing.T) {
 		"test-backend",
 		server.URL,
 		spec,
-		false,
 		func(result bool, message string) {
 			resultChan <- result
 			messageChan <- message
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Failed to create probe worker: %v", err)
@@ -202,11 +202,11 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 			"test-backend",
 			server.URL,
 			spec,
-			false,
 			func(result bool, message string) {
 				callCount.Add(1)
 				resultChan <- result
 			},
+			nil,
 		)
 		if err != nil {
 			t.Fatalf("Failed to create probe worker: %v", err)
@@ -251,11 +251,11 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 			"test-backend",
 			server.URL,
 			spec,
-			false,
 			func(result bool, message string) {
 				callCount.Add(1)
 				resultChan <- result
 			},
+			nil,
 		)
 		if err != nil {
 			t.Fatalf("Failed to create probe worker: %v", err)
@@ -301,10 +301,10 @@ func TestProbeWorkerThresholdBehavior(t *testing.T) {
 			"test-backend",
 			server.URL,
 			spec,
-			false,
 			func(result bool, message string) {
 				resultChan <- result
 			},
+			nil,
 		)
 		if err != nil {
 			t.Fatalf("Failed to create probe worker: %v", err)
@@ -340,11 +340,11 @@ func TestProbeWorkerDNSFailure(t *testing.T) {
 		"test-backend",
 		"http://invalid-domain.com/health",
 		spec,
-		false,
 		func(result bool, message string) {
 			resultChan <- result
 			messageChan <- message
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Failed to create probe worker: %v", err)
@@ -383,11 +383,11 @@ func TestProbeWorkerConnectionRefused(t *testing.T) {
 		"test-backend",
 		"http://127.0.0.1:59999/health",
 		spec,
-		false,
 		func(result bool, message string) {
 			resultChan <- result
 			messageChan <- message
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Failed to create probe worker: %v", err)
