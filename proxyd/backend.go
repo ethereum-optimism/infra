@@ -323,11 +323,10 @@ type Backend struct {
 	maxLatencyThreshold          time.Duration
 	maxErrorRateThreshold        float64
 
-	probeSpec               *ProbeSpec
-	probeURL                string
-	probeInsecureSkipVerify bool
-	ProbeWorker             *ProbeWorker
-	healthyProbe            atomic.Bool
+	probeSpec    *ProbeSpec
+	probeURL     string
+	ProbeWorker  *ProbeWorker
+	healthyProbe atomic.Bool
 
 	latencySlidingWindow            *sw.AvgSlidingWindow
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
@@ -481,10 +480,9 @@ func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendO
 	}
 }
 
-func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold int, probePeriodSeconds int, probeTimeoutSeconds int, probeInsecureSkipVerify bool) BackendOpt {
+func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold int, probePeriodSeconds int, probeTimeoutSeconds int) BackendOpt {
 	return func(b *Backend) {
 		b.probeURL = probeURL
-		b.probeInsecureSkipVerify = probeInsecureSkipVerify
 		probeSpec := ProbeSpec{
 			// default values
 			FailureThreshold: 1,
