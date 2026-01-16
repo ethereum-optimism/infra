@@ -44,3 +44,55 @@ func TestConvertSendReqToSendTx_Fusaka(t *testing.T) {
 	t.Run("blob without cell proofs", tfn(txs.OffchainTxV0, 2))
 	t.Run("blob with cell proofs", tfn(txs.OffchainTxV1, 256))
 }
+
+func TestIsValidAPIKey(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiKey      string
+		exemptKeys  []string
+		expected    bool
+		description string
+	}{
+		{
+			name:        "valid API key",
+			apiKey:      "valid-key-123",
+			exemptKeys:  []string{"valid-key-123"},
+			expected:    true,
+			description: "should return true for a valid API key",
+		},
+		{
+			name:        "invalid API key",
+			apiKey:      "invalid-key",
+			exemptKeys:  []string{"valid-key-123"},
+			expected:    false,
+			description: "should return false for an invalid API key",
+		},
+		{
+			name:        "empty API key",
+			apiKey:      "",
+			exemptKeys:  []string{"valid-key-123"},
+			expected:    false,
+			description: "should return false for an empty API key",
+		},
+		{
+			name:        "multiple exempt keys",
+			apiKey:      "key-2",
+			exemptKeys:  []string{"key-1", "key-2", "key-3"},
+			expected:    true,
+			description: "should return true when key is in multiple exempt keys",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				limExemptKeys: tt.exemptKeys,
+			}
+
+			got := s.isValidAPIKey(tt.apiKey)
+			if got != tt.expected {
+				t.Errorf("isValidAPIKey() = %v, want %v: %s", got, tt.expected, tt.description)
+			}
+		})
+	}
+}

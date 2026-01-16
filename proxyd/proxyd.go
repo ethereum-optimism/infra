@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -416,6 +417,12 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("invalid interop validating strategy: %s", config.InteropValidationConfig.Strategy)
 	}
 
+	// Allow API Keys that bypass rate-limiting.
+	var apiKeys []string
+	if keys, err := ReadFromEnvOrConfig("$API_KEYS"); err == nil {
+		apiKeys = parseCommaSeparatedList(keys)
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -438,6 +445,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig,
 		interopStrategy,
 		config.Server.EnableTxHashLogging,
+		apiKeys,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -599,6 +607,17 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func parseCommaSeparatedList(input string) []string {
+	var result []string
+	for _, item := range strings.Split(input, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func millisecondsToDuration(ms int) time.Duration {
