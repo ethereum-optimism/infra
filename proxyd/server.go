@@ -543,6 +543,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted)
@@ -554,8 +555,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			log.Debug(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
-				"req_id", parsedReq.ID,
+				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
@@ -569,6 +571,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
