@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,6 +48,7 @@ const (
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
 	defaultCacheTtl                                 = 1 * time.Hour
+	gracefulShutdownDuration                        = 10 * time.Second
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
@@ -90,6 +92,7 @@ type Server struct {
 	interopStrategy         InteropStrategy
 	publicAccess            bool
 	enableTxHashLogging     bool
+	isDraining              atomic.Bool
 }
 
 type limiterFunc func(method string) bool
@@ -262,6 +265,11 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 	return s.wsServer.ListenAndServe()
 }
 
+func (s *Server) Drain() {
+	s.isDraining.Store(true)
+	time.Sleep(gracefulShutdownDuration)
+}
+
 func (s *Server) Shutdown() {
 	s.srvMu.Lock()
 	defer s.srvMu.Unlock()
@@ -277,6 +285,10 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
 	_, _ = w.Write([]byte("OK"))
 }
 
