@@ -918,7 +918,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 // IsHealthy checks if the backend is able to serve traffic, based on dynamic parameters
 func (b *Backend) IsHealthy() bool {
-	if !b.healthyProbe.Load() {
+	if !b.IsProbeHealthy() {
 		return false
 	}
 	errorRate := b.ErrorRate()
