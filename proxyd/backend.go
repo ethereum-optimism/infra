@@ -939,10 +939,16 @@ func (b *Backend) IsHealthy() bool {
 }
 
 func (b *Backend) IsProbeHealthy() bool {
+	if b.probeSpec == nil {
+		return true
+	}
 	return b.healthyProbe.Load()
 }
 
 func (b *Backend) SetProbeHealth(healthy bool) {
+	if b.probeSpec == nil {
+		return
+	}
 	b.healthyProbe.Store(healthy)
 }
 
