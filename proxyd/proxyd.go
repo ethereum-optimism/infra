@@ -418,9 +418,9 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	// Allow API Keys that bypass rate-limiting.
-	apiKeys := []string{}
+	var apiKeys []string
 	if keys, err := ReadFromEnvOrConfig("$API_KEYS"); err == nil {
-		apiKeys = append(apiKeys, strings.Split(keys, ",")...)
+		apiKeys = parseCommaSeparatedList(keys)
 	}
 
 	srv, err := NewServer(
@@ -607,6 +607,17 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func parseCommaSeparatedList(input string) []string {
+	var result []string
+	for _, item := range strings.Split(input, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func millisecondsToDuration(ms int) time.Duration {
