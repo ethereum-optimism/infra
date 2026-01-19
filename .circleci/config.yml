@@ -26,7 +26,6 @@ workflows:
             op-acceptor/.* run-build-op-acceptor true
             replica-healthcheck/.* run-build-rhc true
             .circleci/.* run-all true
-            .github/.* run-all true
           filters:
             tags:
               only: /.*/
