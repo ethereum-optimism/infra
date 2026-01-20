@@ -139,7 +139,7 @@ type txValidationResponse struct {
 	ErrorMessage string `json:"errorMessage"`
 }
 
-// buildValidationPayload creates the request payload for the validation middleware.
+// creates the request payload for the validation middleware.
 // If fieldMappings is empty, it returns the full transaction as JSON.
 // Otherwise, it extracts the specified fields and maps them to the target field names.
 func buildValidationPayload(tx *types.Transaction, from common.Address, fieldMappings []TxFieldMapping) ([]byte, error) {
@@ -149,33 +149,16 @@ func buildValidationPayload(tx *types.Transaction, from common.Address, fieldMap
 	return buildMappedPayload(tx, from, fieldMappings)
 }
 
-// buildFullTxPayload creates a payload containing the full transaction details.
+// creates a payload containing the full transaction details, including 'from' address
 func buildFullTxPayload(tx *types.Transaction, from common.Address) ([]byte, error) {
 	payload := map[string]interface{}{
-		"from":     from.Hex(),
-		"nonce":    tx.Nonce(),
-		"gasPrice": tx.GasPrice().String(),
-		"gas":      tx.Gas(),
-		"value":    tx.Value().String(),
-		"data":     common.Bytes2Hex(tx.Data()),
-		"chainId":  tx.ChainId().String(),
-		"hash":     tx.Hash().Hex(),
-		"type":     tx.Type(),
+		"tx":   tx,
+		"from": from.Hex(),
 	}
-
-	if tx.To() != nil {
-		payload["to"] = tx.To().Hex()
-	}
-
-	if tx.Type() >= types.DynamicFeeTxType {
-		payload["maxFeePerGas"] = tx.GasFeeCap().String()
-		payload["maxPriorityFeePerGas"] = tx.GasTipCap().String()
-	}
-
 	return json.Marshal(payload)
 }
 
-// buildMappedPayload creates a payload with only the mapped fields.
+// creates a payload with only the mapped fields.
 func buildMappedPayload(tx *types.Transaction, from common.Address, mappings []TxFieldMapping) ([]byte, error) {
 	payload := make(map[string]interface{})
 

@@ -17,7 +17,7 @@ import (
 )
 
 func TestBuildValidationPayload_FullTx(t *testing.T) {
-	tx := createTestTransaction(t)
+	tx := createSignedTestTransaction(t) // Use signed tx with chainId
 	from := common.HexToAddress("0x1234567890123456789012345678901234567890")
 
 	payload, err := buildValidationPayload(tx, from, nil)
@@ -27,12 +27,21 @@ func TestBuildValidationPayload_FullTx(t *testing.T) {
 	err = json.Unmarshal(payload, &result)
 	require.NoError(t, err)
 
+	// Full tx payload uses go-ethereum's native Transaction JSON format
+	// with "from" added separately at the top level
 	require.Equal(t, from.Hex(), result["from"])
-	require.NotNil(t, result["nonce"])
-	require.NotNil(t, result["gas"])
-	require.NotNil(t, result["value"])
-	require.NotNil(t, result["hash"])
-	require.NotNil(t, result["chainId"])
+	require.NotNil(t, result["tx"])
+
+	txObj, ok := result["tx"].(map[string]interface{})
+	require.True(t, ok)
+
+	// Native format uses hex strings and "input" instead of "data"
+	require.NotNil(t, txObj["nonce"])
+	require.NotNil(t, txObj["gas"])
+	require.NotNil(t, txObj["value"])
+	require.NotNil(t, txObj["hash"])
+	require.NotNil(t, txObj["chainId"])
+	require.NotNil(t, txObj["type"])
 }
 
 func TestBuildValidationPayload_MappedFields(t *testing.T) {
