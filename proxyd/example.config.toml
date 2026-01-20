@@ -131,3 +131,22 @@ secret = "test"
 eth_call = "main"
 eth_chainId = "main"
 eth_blockNumber = "alchemy"
+
+# Transaction validation middleware configuration.
+# This middleware can validate transactions before they are forwarded to backends.
+[tx_validation_middleware]
+# Enable or disable the validation middleware, default false
+enabled = false
+# The URL of the validation middleware service endpoint
+# endpoint = "https://your-validation-service.example.com/validate"
+# List of RPC methods to apply validation to, defaults to ["eth_sendRawTransaction", "eth_sendBundle"]
+# methods = ["eth_sendRawTransaction", "eth_sendBundle"]
+# Timeout in seconds for validation HTTP requests, default 5
+# timeout_seconds = 5
+# Field mappings to transform the transaction object before sending to the middleware.
+# If empty (default), the full transaction object is sent.
+# Example: To send only the sender address in the format {"address": "<from_address>"}:
+# [[tx_validation_middleware.field_mappings]]
+# source_field = "from"
+# target_field = "address"
+# Supported source fields: from, to, value, data, nonce, gas, gasPrice, chainId, hash, type, maxFeePerGas, maxPriorityFeePerGas
