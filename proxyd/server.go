@@ -97,6 +97,7 @@ type Server struct {
 	txValidationMethods       TxValidationMethodSet
 	txValidationFieldMappings []TxFieldMapping
 	txValidationClient        *TxValidationClient
+	txValidationFailOpen      bool
 }
 
 type limiterFunc func(method string) bool
@@ -202,13 +203,19 @@ func NewServer(
 	var txValidationMethods TxValidationMethodSet
 	if len(txValidationConfig.Methods) == 0 {
 		txValidationMethods = defaultTxValidationMethods()
+		if txValidationConfig.Enabled {
+			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",
+				"default_methods", []string{"eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"})
+		}
 	} else {
 		txValidationMethods = NewTxValidationMethodSet(txValidationConfig.Methods)
 	}
 
-	var txValidationClient *TxValidationClient
-	if txValidationConfig.Enabled {
-		txValidationClient = NewTxValidationClient(txValidationConfig.TimeoutSeconds)
+	txValidationClient := NewTxValidationClient(txValidationConfig.TimeoutSeconds)
+
+	txValidationFailOpen := true
+	if txValidationConfig.FailOpen != nil {
+		txValidationFailOpen = *txValidationConfig.FailOpen
 	}
 
 	return &Server{
@@ -243,11 +250,12 @@ func NewServer(
 		interopStrategy:           interopStrategy,
 		enableTxHashLogging:       enableTxHashLogging,
 		enableTxValidation:        txValidationConfig.Enabled,
-		txValidationFn:            txValidation,
+		txValidationFn:            txValidationClient.Validate,
 		txValidationEndpoint:      txValidationConfig.Endpoint,
 		txValidationMethods:       txValidationMethods,
 		txValidationFieldMappings: txValidationConfig.FieldMappings,
 		txValidationClient:        txValidationClient,
+		txValidationFailOpen:      txValidationFailOpen,
 	}, nil
 }
 
@@ -638,8 +646,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			}
 		}
 
-		// Apply transaction validation middleware if enabled and method is configured
-		if s.enableTxValidation && !bypassLimit && s.txValidationMethods.Contains(parsedReq.Method) {
+		// Apply transaction validation middleware if enabled and method is configured.
+		// Note: API keys only bypass rate limits, not transaction validation.
+		if s.enableTxValidation && s.txValidationMethods.Contains(parsedReq.Method) {
 			if err := s.applyTxValidation(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
@@ -1115,7 +1124,7 @@ func (s *Server) applyTxValidation(ctx context.Context, req *RPCReq) error {
 		return nil
 	}
 
-	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFieldMappings, s.txValidationFn)
+	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFieldMappings, s.txValidationFn, s.txValidationFailOpen)
 }
 
 // SetTxValidationFn allows overriding the transaction validation function for testing.

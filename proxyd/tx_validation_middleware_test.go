@@ -28,7 +28,7 @@ func TestBuildValidationPayload_FullTx(t *testing.T) {
 	require.NoError(t, err)
 
 	// Full tx payload uses go-ethereum's native Transaction JSON format
-	// with "from" added separately at the top level
+	// with "from" added as a separate top-level field
 	require.Equal(t, from.Hex(), result["from"])
 	require.NotNil(t, result["tx"])
 
@@ -42,6 +42,10 @@ func TestBuildValidationPayload_FullTx(t *testing.T) {
 	require.NotNil(t, txObj["hash"])
 	require.NotNil(t, txObj["chainId"])
 	require.NotNil(t, txObj["type"])
+	// Signature fields allow deriving sender
+	require.NotNil(t, txObj["v"])
+	require.NotNil(t, txObj["r"])
+	require.NotNil(t, txObj["s"])
 }
 
 func TestBuildValidationPayload_MappedFields(t *testing.T) {
@@ -130,6 +134,7 @@ func TestTxValidationMethodSet(t *testing.T) {
 func TestDefaultTxValidationMethods(t *testing.T) {
 	methods := defaultTxValidationMethods()
 	require.True(t, methods.Contains("eth_sendRawTransaction"))
+	require.True(t, methods.Contains("eth_sendRawTransactionConditional"))
 	require.True(t, methods.Contains("eth_sendBundle"))
 }
 
@@ -198,7 +203,7 @@ func TestValidateTransactions_SingleTx(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation)
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
 	require.NoError(t, err)
 	require.True(t, validationCalled)
 }
@@ -215,7 +220,7 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation)
+	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
 	require.NoError(t, err)
 	require.Equal(t, 3, callCount)
 }
@@ -230,7 +235,7 @@ func TestValidateTransactions_BlocksOnFirstRejection(t *testing.T) {
 		return true, nil // block all
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation)
+	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
 	require.Error(t, err)
 	require.Equal(t, ErrTransactionRejected, err)
 }
@@ -245,7 +250,7 @@ func TestValidateTransactions_TooManyTxs(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation)
+	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "maximum allowed")
 }
@@ -257,8 +262,22 @@ func TestValidateTransactions_ServiceError_AllowsThrough(t *testing.T) {
 		return false, errors.New("service unavailable")
 	}
 
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation)
+	// With failOpen=true, service errors should allow transaction through
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
 	require.NoError(t, err)
+}
+
+func TestValidateTransactions_ServiceError_FailClosed(t *testing.T) {
+	tx := createSignedTestTransaction(t)
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
+		return false, errors.New("service unavailable")
+	}
+
+	// With failOpen=false, service errors should reject transaction
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, false)
+	require.Error(t, err)
+	require.Equal(t, ErrInternal, err)
 }
 
 func TestTxValidationClient_HTTPServer(t *testing.T) {
@@ -365,9 +384,9 @@ func TestValidateTransactions_CanceledContext(t *testing.T) {
 		return false, ctx.Err()
 	}
 
-	// Due to fail-open behavior (legal requirement), validation service errors
+	// Due to fail-open behavior, validation service errors
 	// result in allowing the transaction through, not returning an error
-	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", nil, mockValidation)
+	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
 	require.NoError(t, err) // Transaction is allowed through
 }
 
@@ -382,7 +401,7 @@ func TestValidateSingleTransaction_CanceledContext_FailOpen(t *testing.T) {
 		return false, context.Canceled
 	}
 
-	err := validateSingleTransaction(ctx, tx, "http://test", nil, mockValidation)
+	err := validateSingleTransaction(ctx, tx, "http://test", nil, mockValidation, true)
 	require.NoError(t, err) // Allowed through due to fail-open
 }
 

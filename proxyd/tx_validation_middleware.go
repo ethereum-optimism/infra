@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -46,7 +45,7 @@ type TxValidationMiddlewareConfig struct {
 	Endpoint string `toml:"endpoint"`
 
 	// Methods is the list of RPC methods to apply validation to.
-	// Defaults to ["eth_sendRawTransaction", "eth_sendBundle"] if not specified.
+	// Defaults to ["eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"] if not specified.
 	Methods []string `toml:"methods"`
 
 	// FieldMappings defines how to transform the transaction into the middleware request format.
@@ -56,6 +55,10 @@ type TxValidationMiddlewareConfig struct {
 
 	// TimeoutSeconds is the timeout for validation HTTP requests. Defaults to 5 seconds.
 	TimeoutSeconds int `toml:"timeout_seconds"`
+
+	// FailOpen determines whether transactions should be allowed through if the validation
+	// service returns an error. Defaults to true for safety (fail-open).
+	FailOpen *bool `toml:"fail_open"`
 }
 
 // TxValidationClient is a reusable HTTP client for validation requests.
@@ -63,11 +66,6 @@ type TxValidationClient struct {
 	client  *http.Client
 	timeout time.Duration
 }
-
-var (
-	defaultTxValidationClient     *TxValidationClient
-	defaultTxValidationClientOnce sync.Once
-)
 
 // NewTxValidationClient creates a new validation client with the given timeout.
 func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
@@ -84,14 +82,6 @@ func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
 		},
 		timeout: time.Duration(timeoutSeconds) * time.Second,
 	}
-}
-
-// getDefaultTxValidationClient returns the shared default validation client.
-func getDefaultTxValidationClient() *TxValidationClient {
-	defaultTxValidationClientOnce.Do(func() {
-		defaultTxValidationClient = NewTxValidationClient(defaultValidationTimeoutSeconds)
-	})
-	return defaultTxValidationClient
 }
 
 // Validate performs the HTTP request to the validation middleware service.
@@ -127,11 +117,6 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 	return validationRes.Block, nil
 }
 
-// txValidation is the default validation function using the shared client.
-func txValidation(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-	return getDefaultTxValidationClient().Validate(ctx, endpoint, payload)
-}
-
 // txValidationResponse represents the response from the validation middleware.
 type txValidationResponse struct {
 	Block        bool   `json:"block"`
@@ -139,9 +124,6 @@ type txValidationResponse struct {
 	ErrorMessage string `json:"errorMessage"`
 }
 
-// creates the request payload for the validation middleware.
-// If fieldMappings is empty, it returns the full transaction as JSON.
-// Otherwise, it extracts the specified fields and maps them to the target field names.
 func buildValidationPayload(tx *types.Transaction, from common.Address, fieldMappings []TxFieldMapping) ([]byte, error) {
 	if len(fieldMappings) == 0 {
 		return buildFullTxPayload(tx, from)
@@ -149,7 +131,6 @@ func buildValidationPayload(tx *types.Transaction, from common.Address, fieldMap
 	return buildMappedPayload(tx, from, fieldMappings)
 }
 
-// creates a payload containing the full transaction details, including 'from' address
 func buildFullTxPayload(tx *types.Transaction, from common.Address) ([]byte, error) {
 	payload := map[string]interface{}{
 		"tx":   tx,
@@ -158,7 +139,6 @@ func buildFullTxPayload(tx *types.Transaction, from common.Address) ([]byte, err
 	return json.Marshal(payload)
 }
 
-// creates a payload with only the mapped fields.
 func buildMappedPayload(tx *types.Transaction, from common.Address, mappings []TxFieldMapping) ([]byte, error) {
 	payload := make(map[string]interface{})
 
@@ -172,7 +152,6 @@ func buildMappedPayload(tx *types.Transaction, from common.Address, mappings []T
 	return json.Marshal(payload)
 }
 
-// extractTxField extracts a field value from the transaction.
 func extractTxField(tx *types.Transaction, from common.Address, field string) interface{} {
 	switch field {
 	case "from":
@@ -213,16 +192,13 @@ func extractTxField(tx *types.Transaction, from common.Address, field string) in
 	}
 }
 
-// TxValidationMethodSet is a set of methods that should be validated.
 type TxValidationMethodSet map[string]struct{}
 
-// Contains checks if the given method should be validated.
 func (s TxValidationMethodSet) Contains(method string) bool {
 	_, ok := s[method]
 	return ok
 }
 
-// NewTxValidationMethodSet creates a set from a slice of methods.
 func NewTxValidationMethodSet(methods []string) TxValidationMethodSet {
 	set := make(TxValidationMethodSet, len(methods))
 	for _, m := range methods {
@@ -231,21 +207,21 @@ func NewTxValidationMethodSet(methods []string) TxValidationMethodSet {
 	return set
 }
 
-// defaultTxValidationMethods returns the default set of methods to validate.
 func defaultTxValidationMethods() TxValidationMethodSet {
 	return TxValidationMethodSet{
-		"eth_sendRawTransaction": {},
-		"eth_sendBundle":         {},
+		"eth_sendRawTransaction":            {},
+		"eth_sendRawTransactionConditional": {},
+		"eth_sendBundle":                    {},
 	}
 }
 
-// validateTransactions validates multiple transactions in parallel using errgroup.
 func validateTransactions(
 	ctx context.Context,
 	txs []*types.Transaction,
 	endpoint string,
 	fieldMappings []TxFieldMapping,
 	validationFn TxValidationFunc,
+	failOpen bool,
 ) error {
 	if len(txs) > maxBundleTransactions {
 		log.Warn("bundle contains too many transactions",
@@ -259,19 +235,19 @@ func validateTransactions(
 	for _, tx := range txs {
 		tx := tx // capture loop variable
 		g.Go(func() error {
-			return validateSingleTransaction(ctx, tx, endpoint, fieldMappings, validationFn)
+			return validateSingleTransaction(ctx, tx, endpoint, fieldMappings, validationFn, failOpen)
 		})
 	}
 	return g.Wait()
 }
 
-// validateSingleTransaction validates a single transaction against the middleware service.
 func validateSingleTransaction(
 	ctx context.Context,
 	tx *types.Transaction,
 	endpoint string,
 	fieldMappings []TxFieldMapping,
 	validationFn TxValidationFunc,
+	failOpen bool,
 ) error {
 	var signer types.Signer
 	if tx.ChainId().Sign() == 0 {
@@ -294,7 +270,19 @@ func validateSingleTransaction(
 
 	block, validationErr := validationFn(ctx, endpoint, payload)
 	if validationErr != nil {
-		log.Warn("tx validation service error, allowing transaction through",
+		if failOpen {
+			log.Warn("tx validation service error, allowing transaction through (fail_open=true)",
+				"req_id", GetReqID(ctx),
+				"from", from.Hex(),
+				"error", validationErr,
+				"chain_id", tx.ChainId(),
+				"nonce", tx.Nonce(),
+				"value", tx.Value(),
+				"tx_hash", tx.Hash().Hex(),
+			)
+			return nil
+		}
+		log.Warn("tx validation service error, rejecting transaction (fail_open=false)",
 			"req_id", GetReqID(ctx),
 			"from", from.Hex(),
 			"error", validationErr,
@@ -303,7 +291,7 @@ func validateSingleTransaction(
 			"value", tx.Value(),
 			"tx_hash", tx.Hash().Hex(),
 		)
-		return nil
+		return ErrInternal
 	}
 
 	if block {
@@ -317,7 +305,6 @@ func validateSingleTransaction(
 	return nil
 }
 
-// transactionsFromBundleReq extracts transactions from an eth_sendBundle request.
 func transactionsFromBundleReq(ctx context.Context, req *RPCReq) ([]*types.Transaction, error) {
 	var params []json.RawMessage
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -351,7 +338,6 @@ func transactionsFromBundleReq(ctx context.Context, req *RPCReq) ([]*types.Trans
 	return txs, nil
 }
 
-// decodeSignedTx decodes a hex-encoded signed transaction.
 func decodeSignedTx(ctx context.Context, txHex string) (*types.Transaction, error) {
 	var data hexutil.Bytes
 	if err := data.UnmarshalText([]byte(txHex)); err != nil {
