@@ -129,6 +129,30 @@ func (af *AsyncFile) Close() error {
 	return af.file.Close()
 }
 
+// Flush blocks until all queued writes are written to disk and synced.
+// It sends an empty marker to the queue and waits for the queue to drain,
+// ensuring all previously queued writes have been processed.
+func (af *AsyncFile) Flush() error {
+	af.mu.Lock()
+	if af.stopped {
+		af.mu.Unlock()
+		return nil
+	}
+	af.mu.Unlock()
+
+	// Send an empty marker to the queue. Once the queue drains to empty,
+	// we know all writes (including the marker) have been processed.
+	af.queue <- []byte{}
+
+	// Wait for the queue to drain. This spin-wait is acceptable for flush
+	// operations which only occur during shutdown or timeout handling.
+	for len(af.queue) > 0 {
+		time.Sleep(time.Millisecond)
+	}
+
+	return af.file.Sync()
+}
+
 // NewFileLogger creates a new FileLogger with given configuration
 func NewFileLogger(baseDir string, runID string, networkName string, gateRuns []string) (*FileLogger, error) {
 	if runID == "" {
@@ -246,6 +270,20 @@ func (l *FileLogger) closeAllWriters() {
 	l.asyncWriters = make(map[string]*AsyncFile)
 }
 
+// FlushAll flushes all async writers to disk without closing them
+func (l *FileLogger) FlushAll() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var firstErr error
+	for _, writer := range l.asyncWriters {
+		if err := writer.Flush(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // GetDirectoryForRunID returns the path for a specific runID
 // The runID must be provided, otherwise an error is returned
 func (l *FileLogger) GetDirectoryForRunID(runID string) (string, error) {
@@ -275,6 +313,15 @@ func (l *FileLogger) LogTestResult(result *types.TestResult, runID string) error
 	}
 
 	return nil
+}
+
+// LogTestResultSync logs a test result and flushes immediately to disk.
+// Use this for timeout cases to ensure logs are written before process termination.
+func (l *FileLogger) LogTestResultSync(result *types.TestResult, runID string) error {
+	if err := l.LogTestResult(result, runID); err != nil {
+		return err
+	}
+	return l.FlushAll()
 }
 
 // LogSummary writes a summary of the test run to a file
