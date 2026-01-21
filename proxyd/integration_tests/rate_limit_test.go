@@ -26,6 +26,8 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
+	t.Setenv("API_KEYS", "hijklmnop,qrs,tuv")
+
 	config := ReadConfig("frontend_rate_limit")
 	_, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
@@ -52,6 +54,22 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 		h.Set("Origin", "exempt_origin")
 		client := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
 		_, codes := spamReqs(t, client, ethChainID, 429, 3)
+		require.Equal(t, 3, codes[200])
+	})
+
+	t.Run("exempt API keys", func(t *testing.T) {
+		h := make(http.Header)
+
+		// Test first of API_KEYS in header.
+		h.Set("X-Api-Key", "hijklmnop")
+		client2 := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
+		_, codes := spamReqs(t, client2, ethChainID, 429, 3)
+		require.Equal(t, 3, codes[200])
+
+		// Test last of API_KEYS in header.
+		h.Set("X-Api-Key", "tuv")
+		client3 := NewProxydClientWithHeaders("http://127.0.0.1:8545", h)
+		_, codes = spamReqs(t, client3, ethChainID, 429, 3)
 		require.Equal(t, 3, codes[200])
 	})
 

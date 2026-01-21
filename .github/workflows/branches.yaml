@@ -12,7 +12,7 @@ jobs:
   local:
     # only build if the push is to a local branch, or if the PR is to main from a local branch
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
-    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@ae4dada9bf0951124892dbc6b63cebef44d35f91
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@f8f3cb4800e538003134fb5f50cc734c2c98d762
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +32,7 @@ jobs:
       context: .
       dockerfile: ${{ matrix.image_name }}/Dockerfile
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/oss
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
     permissions:
       contents: read
       id-token: write
@@ -41,7 +41,7 @@ jobs:
   fork:
     # only build if the PR is from a fork
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-    uses: ethereum-optimism/factory/.github/workflows/docker-build.yaml@ae4dada9bf0951124892dbc6b63cebef44d35f91
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@f8f3cb4800e538003134fb5f50cc734c2c98d762
     strategy:
       fail-fast: false
       matrix:
@@ -63,4 +63,3 @@ jobs:
       registry: ttl.sh/${{ github.sha }}
     permissions:
       contents: read
-    

@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -80,6 +81,7 @@ type Server struct {
 	allowedChainIds          []*big.Int
 	limExemptOrigins         []*regexp.Regexp
 	limExemptUserAgents      []*regexp.Regexp
+	limExemptKeys            []string
 	globallyLimitedMethods   map[string]bool
 	rpcServer                *http.Server
 	wsServer                 *http.Server
@@ -121,6 +123,7 @@ func NewServer(
 	interopStrategy InteropStrategy,
 	enableTxHashLogging bool,
 	gracefulShutdownDuration time.Duration,
+	limExemptKeys []string,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -223,6 +226,7 @@ func NewServer(
 		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
 		limExemptOrigins:         limExemptOrigins,
 		limExemptUserAgents:      limExemptUserAgents,
+		limExemptKeys:            limExemptKeys,
 		rateLimitHeader:          rateLimitHeader,
 		interopValidatingConfig:  interopValidatingConfig,
 		interopStrategy:          interopStrategy,
@@ -304,6 +308,10 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel = context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
+	// User can provide an API key via the "X-Api-Key" header
+	apiKey := r.Header.Get("X-Api-Key")
+	bypassLimit := s.isValidAPIKey(apiKey)
+
 	origin := r.Header.Get("Origin")
 	userAgent := r.Header.Get("User-Agent")
 	// Use XFF in context since it will automatically be replaced by the remote IP
@@ -317,6 +325,10 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isLimited := func(method string) bool {
+		if bypassLimit {
+			return false
+		}
+
 		isGloballyLimitedMethod := s.isGlobalLimit(method)
 		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
 			return false
@@ -394,7 +406,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		batchRes, batchContainsCached, servedBy, err := s.handleBatchRPC(ctx, reqs, isLimited, true)
+		batchRes, batchContainsCached, servedBy, err := s.handleBatchRPC(ctx, reqs, isLimited, true, bypassLimit)
 		if err == context.DeadlineExceeded {
 			writeRPCError(ctx, w, nil, ErrGatewayTimeout)
 			return
@@ -417,7 +429,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawBody := json.RawMessage(body)
-	backendRes, cached, servedBy, err := s.handleBatchRPC(ctx, []json.RawMessage{rawBody}, isLimited, false)
+	backendRes, cached, servedBy, err := s.handleBatchRPC(ctx, []json.RawMessage{rawBody}, isLimited, false, bypassLimit)
 	if err != nil {
 		if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 			errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
@@ -507,7 +519,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 	return finalErr
 }
 
-func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool) ([]*RPCRes, bool, string, error) {
+func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
 	// A request set is transformed into groups of batches.
 	// Each batch group maps to a forwarded JSON-RPC batch request (subject to maxUpstreamBatchSize constraints)
 	// A groupID is used to decouple Requests that have duplicate ID so they're not part of the same batch that's
@@ -562,6 +574,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted)
@@ -573,8 +586,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			log.Debug(
 				"rate limited individual RPC in a batch request",
 				"source", "rpc",
-				"req_id", parsedReq.ID,
+				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
@@ -588,6 +602,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				"source", "rpc",
 				"req_id", GetReqID(ctx),
 				"method", parsedReq.Method,
+				"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 			)
 			RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 			responses[i] = NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit)
@@ -604,7 +619,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-			if err := s.rateLimitSender(ctx, tx); err != nil {
+			if err := s.rateLimitSender(ctx, tx, bypassLimit); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
@@ -815,6 +830,15 @@ func (s *Server) isUnlimitedUserAgent(origin string) bool {
 	return false
 }
 
+func (s *Server) isValidAPIKey(key string) bool {
+	for _, v := range s.limExemptKeys {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(v)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
 }
@@ -906,9 +930,12 @@ func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transacti
 	return nil
 }
 
-func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction) error {
+func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction, bypassLimit bool) error {
 	if s.senderLim == nil {
 		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
+		return nil
+	}
+	if bypassLimit {
 		return nil
 	}
 	return s.genericRateLimitSender(ctx, tx, s.senderLim)

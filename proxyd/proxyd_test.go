@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -65,5 +66,26 @@ func TestMillisecondsToDurationIntegration(t *testing.T) {
 	tolerance := 10 * time.Millisecond
 	if elapsed < duration-tolerance || elapsed > duration+tolerance {
 		t.Errorf("Sleep duration was %v, expected approximately %v", elapsed, duration)
+	}
+}
+
+func TestParseCommaSeparatedList(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"happy path", "key1,key2,key3", []string{"key1", "key2", "key3"}},
+		{"trims whitespace", "  key1  ,  key2  ", []string{"key1", "key2"}},
+		{"filters empty strings", "key1,,key2", []string{"key1", "key2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseCommaSeparatedList(tt.input)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("parseCommaSeparatedList(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
