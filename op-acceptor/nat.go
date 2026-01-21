@@ -784,6 +784,13 @@ func (n *nat) writeRunArtifacts(runID string) error {
 func (n *nat) Stop(ctx context.Context) error {
 	n.config.Log.Info("Stopping op-acceptor")
 
+	// Flush logs before shutdown to ensure all buffered writes are persisted
+	if n.fileLogger != nil {
+		if err := n.fileLogger.FlushAll(); err != nil {
+			n.config.Log.Error("Error flushing logs during shutdown", "error", err)
+		}
+	}
+
 	// Check if we're already stopped
 	if !n.running.Load() {
 		n.config.Log.Debug("Service already stopped, nothing to do")

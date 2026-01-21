@@ -976,8 +976,9 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 		}
 
 		// Force logging of timeout result to ensure it's captured
+		// Use synchronous logging to ensure writes are flushed to disk before potential process termination
 		if r.fileLogger != nil {
-			if logErr := r.fileLogger.LogTestResult(parsed, r.runID); logErr != nil {
+			if logErr := r.fileLogger.LogTestResultSync(parsed, r.runID); logErr != nil {
 				r.log.Error("Failed to log timeout result", "error", logErr, "test", metadata.FuncName)
 			}
 		}
