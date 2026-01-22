@@ -111,9 +111,17 @@ type txValidationResponse struct {
 	ErrorMessage string          `json:"errorMessage"`
 }
 
-// buildValidationPayload builds a batch request payload mapping tx hashes to flattened tx objects with "from".
+// txValidationRequest is the request payload sent to the validation service.
+type txValidationRequest struct {
+	Txs map[string]map[string]interface{} `json:"txs"`
+}
+
+// buildValidationPayload builds a batch request payload with txs mapped by hash.
 func buildValidationPayload(txsWithSenders map[string]map[string]interface{}) ([]byte, error) {
-	return json.Marshal(txsWithSenders)
+	req := txValidationRequest{
+		Txs: txsWithSenders,
+	}
+	return json.Marshal(req)
 }
 
 type TxValidationMethodSet map[string]struct{}

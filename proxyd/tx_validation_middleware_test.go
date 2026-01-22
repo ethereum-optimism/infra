@@ -29,12 +29,15 @@ func TestBuildValidationPayload(t *testing.T) {
 	payload, err := buildValidationPayload(txsWithSenders)
 	require.NoError(t, err)
 
-	var result map[string]map[string]interface{}
+	var result struct {
+		Txs map[string]map[string]interface{} `json:"txs"`
+	}
 	err = json.Unmarshal(payload, &result)
 	require.NoError(t, err)
 
-	// Verify the tx hash key exists
-	txData, ok := result[txHash]
+	// Verify the "txs" wrapper exists and contains the tx hash
+	require.NotNil(t, result.Txs)
+	txData, ok := result.Txs[txHash]
 	require.True(t, ok)
 
 	// Verify "from" field is at the same level as other tx fields
@@ -144,13 +147,15 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 	callCount := 0
 	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 		callCount++
-		// Verify the payload contains all 3 txs (flattened structure)
-		var requestMap map[string]map[string]interface{}
-		err := json.Unmarshal(payload, &requestMap)
+		// Verify the payload contains all 3 txs wrapped in "txs" field
+		var request struct {
+			Txs map[string]map[string]interface{} `json:"txs"`
+		}
+		err := json.Unmarshal(payload, &request)
 		require.NoError(t, err)
-		require.Len(t, requestMap, 3)
+		require.Len(t, request.Txs, 3)
 		// Verify each tx has "from" at the same level as other fields
-		for _, txData := range requestMap {
+		for _, txData := range request.Txs {
 			require.NotEmpty(t, txData["from"])
 			require.NotNil(t, txData["nonce"])
 		}

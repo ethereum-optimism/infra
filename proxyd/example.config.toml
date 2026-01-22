@@ -134,7 +134,6 @@ eth_blockNumber = "alchemy"
 
 # Transaction validation middleware configuration.
 # This middleware can validate transactions before they are forwarded to backends.
-# Note: API keys only bypass rate limits, not transaction validation.
 [tx_validation_middleware]
 # Enable or disable the validation middleware, default false
 enabled = true

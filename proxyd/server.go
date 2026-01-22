@@ -645,7 +645,6 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		}
 
 		// Apply transaction validation middleware if enabled and method is configured.
-		// Note: API keys only bypass rate limits, not transaction validation.
 		if s.enableTxValidation && s.txValidationMethods.Contains(parsedReq.Method) {
 			if err := s.applyTxValidation(ctx, parsedReq); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
