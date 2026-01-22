@@ -137,6 +137,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		InteropValidationConfig{},              // interopValidatingConfig
 		NewFirstSupervisorStrategy([]string{}), // interopStrategy
 		false,                                  // enableTxHashLogging
+		0,                                      // gracefulShutdownDuration
 		nil,                                    // limExemptKeys
 	)
 	require.NoError(t, err)

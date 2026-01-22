@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,6 +48,7 @@ const (
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
 	defaultCacheTtl                                 = 1 * time.Hour
+	defaultGracefulShutdownDuration                 = 10 * time.Second
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
@@ -59,37 +61,39 @@ const (
 var emptyArrayResponse = json.RawMessage("[]")
 
 type Server struct {
-	BackendGroups           map[string]*BackendGroup
-	wsBackendGroup          *BackendGroup
-	wsMethodWhitelist       *StringSet
-	rpcMethodMappings       map[string]string
-	maxBodySize             int64
-	enableRequestLog        bool
-	maxRequestBodyLogLen    int
-	authenticatedPaths      map[string]string
-	timeout                 time.Duration
-	maxUpstreamBatchSize    int
-	maxBatchSize            int
-	enableServedByHeader    bool
-	upgrader                *websocket.Upgrader
-	mainLim                 FrontendRateLimiter
-	overrideLims            map[string]FrontendRateLimiter
-	senderLim               FrontendRateLimiter
-	interopSenderLim        FrontendRateLimiter
-	allowedChainIds         []*big.Int
-	limExemptOrigins        []*regexp.Regexp
-	limExemptUserAgents     []*regexp.Regexp
-	limExemptKeys           []string
-	globallyLimitedMethods  map[string]bool
-	rpcServer               *http.Server
-	wsServer                *http.Server
-	cache                   RPCCache
-	srvMu                   sync.Mutex
-	rateLimitHeader         string
-	interopValidatingConfig InteropValidationConfig
-	interopStrategy         InteropStrategy
-	publicAccess            bool
-	enableTxHashLogging     bool
+	BackendGroups            map[string]*BackendGroup
+	wsBackendGroup           *BackendGroup
+	wsMethodWhitelist        *StringSet
+	rpcMethodMappings        map[string]string
+	maxBodySize              int64
+	enableRequestLog         bool
+	maxRequestBodyLogLen     int
+	authenticatedPaths       map[string]string
+	timeout                  time.Duration
+	maxUpstreamBatchSize     int
+	maxBatchSize             int
+	enableServedByHeader     bool
+	upgrader                 *websocket.Upgrader
+	mainLim                  FrontendRateLimiter
+	overrideLims             map[string]FrontendRateLimiter
+	senderLim                FrontendRateLimiter
+	interopSenderLim         FrontendRateLimiter
+	allowedChainIds          []*big.Int
+	limExemptOrigins         []*regexp.Regexp
+	limExemptUserAgents      []*regexp.Regexp
+	limExemptKeys            []string
+	globallyLimitedMethods   map[string]bool
+	rpcServer                *http.Server
+	wsServer                 *http.Server
+	cache                    RPCCache
+	srvMu                    sync.Mutex
+	rateLimitHeader          string
+	interopValidatingConfig  InteropValidationConfig
+	interopStrategy          InteropStrategy
+	publicAccess             bool
+	enableTxHashLogging      bool
+	isDraining               atomic.Bool
+	gracefulShutdownDuration time.Duration
 }
 
 type limiterFunc func(method string) bool
@@ -118,6 +122,7 @@ func NewServer(
 	interopValidatingConfig InteropValidationConfig,
 	interopStrategy InteropStrategy,
 	enableTxHashLogging bool,
+	gracefulShutdownDuration time.Duration,
 	limExemptKeys []string,
 ) (*Server, error) {
 	if cache == nil {
@@ -209,19 +214,20 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                 mainLim,
-		overrideLims:            overrideLims,
-		globallyLimitedMethods:  globalMethodLims,
-		senderLim:               senderLim,
-		interopSenderLim:        interopSenderLim,
-		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:        limExemptOrigins,
-		limExemptUserAgents:     limExemptUserAgents,
-		limExemptKeys:           limExemptKeys,
-		rateLimitHeader:         rateLimitHeader,
-		interopValidatingConfig: interopValidatingConfig,
-		interopStrategy:         interopStrategy,
-		enableTxHashLogging:     enableTxHashLogging,
+		mainLim:                  mainLim,
+		overrideLims:             overrideLims,
+		globallyLimitedMethods:   globalMethodLims,
+		senderLim:                senderLim,
+		interopSenderLim:         interopSenderLim,
+		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:         limExemptOrigins,
+		limExemptUserAgents:      limExemptUserAgents,
+		limExemptKeys:            limExemptKeys,
+		rateLimitHeader:          rateLimitHeader,
+		interopValidatingConfig:  interopValidatingConfig,
+		interopStrategy:          interopStrategy,
+		enableTxHashLogging:      enableTxHashLogging,
+		gracefulShutdownDuration: gracefulShutdownDuration,
 	}, nil
 }
 
@@ -262,6 +268,11 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 	return s.wsServer.ListenAndServe()
 }
 
+func (s *Server) Drain() {
+	s.isDraining.Store(true)
+	time.Sleep(s.gracefulShutdownDuration)
+}
+
 func (s *Server) Shutdown() {
 	s.srvMu.Lock()
 	defer s.srvMu.Unlock()
@@ -277,6 +288,10 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
 	_, _ = w.Write([]byte("OK"))
 }
 
