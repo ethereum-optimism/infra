@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -23,9 +23,9 @@ const (
 	defaultValidationMaxConnsPerHost = 10
 )
 
-// TxValidationFunc validates a transaction and returns true if it should be rejected.
+// TxValidationFunc validates a batch of transactions and returns a map of tx hashes to unauthorized status.
 // The endpoint is the middleware service URL, and payload is the request body to send.
-type TxValidationFunc func(ctx context.Context, endpoint string, payload []byte) (bool, error)
+type TxValidationFunc func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error)
 
 // TxValidationMiddlewareConfig configures the transaction validation middleware.
 type TxValidationMiddlewareConfig struct {
@@ -71,50 +71,49 @@ func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
 }
 
 // Validate performs the HTTP request to the validation middleware service.
-func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payload []byte) (bool, error) {
+// Returns a map of tx hashes to unauthorized status.
+func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(payload))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
 	var validationRes txValidationResponse
 	if err := json.Unmarshal(body, &validationRes); err != nil {
-		return false, err
+		return nil, err
 	}
 
 	if msg := validationRes.ErrorCode + validationRes.ErrorMessage; msg != "" {
-		return false, ErrInternal
+		return nil, ErrInternal
 	}
-	return validationRes.Block, nil
+	return validationRes.Unauthorized, nil
 }
 
 // txValidationResponse represents the response from the validation middleware.
 type txValidationResponse struct {
-	Block        bool   `json:"block"`
-	ErrorCode    string `json:"errorCode"`
-	ErrorMessage string `json:"errorMessage"`
+	Unauthorized map[string]bool `json:"unauthorized"`
+	ErrorCode    string          `json:"errorCode"`
+	ErrorMessage string          `json:"errorMessage"`
 }
 
-func buildValidationPayload(tx *types.Transaction) ([]byte, error) {
-	payload := map[string]interface{}{
-		"tx": tx,
-	}
-	return json.Marshal(payload)
+// buildValidationPayload builds a batch request payload mapping tx hashes to flattened tx objects with "from".
+func buildValidationPayload(txsWithSenders map[string]map[string]interface{}) ([]byte, error) {
+	return json.Marshal(txsWithSenders)
 }
 
 type TxValidationMethodSet map[string]struct{}
@@ -157,77 +156,88 @@ func validateTransactions(
 		return ErrInvalidParams(fmt.Sprintf("bundle contains %d transactions, maximum allowed is %d", len(txs), maxBundleTransactions))
 	}
 
-	var g errgroup.Group
-	for _, tx := range txs {
-		tx := tx // capture loop variable
-		g.Go(func() error {
-			return validateSingleTransaction(ctx, tx, endpoint, validationFn, failOpen)
-		})
+	txsWithSenders, err := buildTxsWithSenders(ctx, txs)
+	if err != nil {
+		return err
 	}
-	return g.Wait()
+
+	payload, err := buildValidationPayload(txsWithSenders)
+	if err != nil {
+		log.Error("error building validation payload", "err", err, "req_id", GetReqID(ctx))
+		return ErrInternal
+	}
+
+	unauthorized, validationErr := validationFn(ctx, endpoint, payload)
+	if validationErr != nil {
+		if failOpen {
+			log.Warn("tx validation service error, allowing transactions through (fail_open=true)",
+				"req_id", GetReqID(ctx),
+				"error", validationErr,
+				"tx_count", len(txs),
+			)
+			return nil
+		}
+		log.Warn("tx validation service error, rejecting transactions (fail_open=false)",
+			"req_id", GetReqID(ctx),
+			"error", validationErr,
+			"tx_count", len(txs),
+		)
+		return ErrInternal
+	}
+
+	for txHash, isUnauthorized := range unauthorized {
+		if isUnauthorized {
+			txData := txsWithSenders[txHash]
+			log.Info("transaction rejected by validation middleware",
+				"req_id", GetReqID(ctx),
+				"from", txData["from"],
+				"tx_hash", txHash,
+			)
+			return ErrTransactionRejected
+		}
+	}
+	return nil
 }
 
-func validateSingleTransaction(
-	ctx context.Context,
-	tx *types.Transaction,
-	endpoint string,
-	validationFn TxValidationFunc,
-	failOpen bool,
-) error {
+// buildTxsWithSenders builds a map of tx hashes to flattened tx objects with "from" field added.
+func buildTxsWithSenders(ctx context.Context, txs []*types.Transaction) (map[string]map[string]interface{}, error) {
+	result := make(map[string]map[string]interface{}, len(txs))
+	for _, tx := range txs {
+		from, err := getSender(tx)
+		if err != nil {
+			log.Debug("could not get sender from transaction for validation", "err", err, "req_id", GetReqID(ctx))
+			return nil, ErrInvalidParams(err.Error())
+		}
+
+		// Marshal tx to JSON, then unmarshal to map to get all fields
+		txJSON, err := tx.MarshalJSON()
+		if err != nil {
+			log.Debug("could not marshal transaction for validation", "err", err, "req_id", GetReqID(ctx))
+			return nil, ErrInternal
+		}
+
+		var txMap map[string]interface{}
+		if err := json.Unmarshal(txJSON, &txMap); err != nil {
+			log.Debug("could not unmarshal transaction for validation", "err", err, "req_id", GetReqID(ctx))
+			return nil, ErrInternal
+		}
+
+		// Add "from" at the same level as other tx fields
+		txMap["from"] = from.Hex()
+		result[tx.Hash().Hex()] = txMap
+	}
+	return result, nil
+}
+
+// getSender derives the sender address from a signed transaction.
+func getSender(tx *types.Transaction) (common.Address, error) {
 	var signer types.Signer
 	if tx.ChainId().Sign() == 0 {
 		signer = new(types.HomesteadSigner)
 	} else {
 		signer = types.LatestSignerForChainID(tx.ChainId())
 	}
-
-	from, err := types.Sender(signer, tx)
-	if err != nil {
-		log.Debug("could not get sender from transaction for validation", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
-	}
-
-	payload, err := buildValidationPayload(tx)
-	if err != nil {
-		log.Error("error building validation payload", "err", err, "req_id", GetReqID(ctx))
-		return ErrInternal
-	}
-
-	block, validationErr := validationFn(ctx, endpoint, payload)
-	if validationErr != nil {
-		if failOpen {
-			log.Warn("tx validation service error, allowing transaction through (fail_open=true)",
-				"req_id", GetReqID(ctx),
-				"from", from.Hex(),
-				"error", validationErr,
-				"chain_id", tx.ChainId(),
-				"nonce", tx.Nonce(),
-				"value", tx.Value(),
-				"tx_hash", tx.Hash().Hex(),
-			)
-			return nil
-		}
-		log.Warn("tx validation service error, rejecting transaction (fail_open=false)",
-			"req_id", GetReqID(ctx),
-			"from", from.Hex(),
-			"error", validationErr,
-			"chain_id", tx.ChainId(),
-			"nonce", tx.Nonce(),
-			"value", tx.Value(),
-			"tx_hash", tx.Hash().Hex(),
-		)
-		return ErrInternal
-	}
-
-	if block {
-		log.Info("transaction rejected by validation middleware",
-			"req_id", GetReqID(ctx),
-			"from", from.Hex(),
-			"tx_hash", tx.Hash().Hex(),
-		)
-		return ErrTransactionRejected
-	}
-	return nil
+	return types.Sender(signer, tx)
 }
 
 func transactionsFromBundleReq(ctx context.Context, req *RPCReq) ([]*types.Transaction, error) {

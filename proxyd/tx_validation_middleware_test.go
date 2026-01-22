@@ -17,32 +17,69 @@ import (
 )
 
 func TestBuildValidationPayload(t *testing.T) {
-	tx := createSignedTestTransaction(t) // Use signed tx with chainId
+	tx := createSignedTestTransaction(t)
+	txHash := tx.Hash().Hex()
 
-	payload, err := buildValidationPayload(tx)
+	from, err := getSender(tx)
 	require.NoError(t, err)
 
-	var result map[string]interface{}
+	txsWithSenders, err := buildTxsWithSenders(context.Background(), []*types.Transaction{tx})
+	require.NoError(t, err)
+
+	payload, err := buildValidationPayload(txsWithSenders)
+	require.NoError(t, err)
+
+	var result map[string]map[string]interface{}
 	err = json.Unmarshal(payload, &result)
 	require.NoError(t, err)
 
-	// Payload uses go-ethereum's native Transaction JSON format
-	require.NotNil(t, result["tx"])
-
-	txObj, ok := result["tx"].(map[string]interface{})
+	// Verify the tx hash key exists
+	txData, ok := result[txHash]
 	require.True(t, ok)
 
-	// Native format uses hex strings and "input" instead of "data"
-	require.NotNil(t, txObj["nonce"])
-	require.NotNil(t, txObj["gas"])
-	require.NotNil(t, txObj["value"])
-	require.NotNil(t, txObj["hash"])
-	require.NotNil(t, txObj["chainId"])
-	require.NotNil(t, txObj["type"])
+	// Verify "from" field is at the same level as other tx fields
+	require.Equal(t, from.Hex(), txData["from"])
+
+	// Verify tx fields are at the same level (flattened, not nested under "tx")
+	require.NotNil(t, txData["nonce"])
+	require.NotNil(t, txData["gas"])
+	require.NotNil(t, txData["value"])
+	require.NotNil(t, txData["hash"])
+	require.NotNil(t, txData["chainId"])
+	require.NotNil(t, txData["type"])
 	// Signature fields allow deriving sender
-	require.NotNil(t, txObj["v"])
-	require.NotNil(t, txObj["r"])
-	require.NotNil(t, txObj["s"])
+	require.NotNil(t, txData["v"])
+	require.NotNil(t, txData["r"])
+	require.NotNil(t, txData["s"])
+}
+
+func TestBuildTxsWithSenders(t *testing.T) {
+	tx1 := createSignedTestTransaction(t)
+	tx2 := createSignedTestTransaction(t)
+
+	txsWithSenders, err := buildTxsWithSenders(context.Background(), []*types.Transaction{tx1, tx2})
+	require.NoError(t, err)
+	require.Len(t, txsWithSenders, 2)
+
+	// Verify both tx hashes are keys
+	_, ok := txsWithSenders[tx1.Hash().Hex()]
+	require.True(t, ok)
+	_, ok = txsWithSenders[tx2.Hash().Hex()]
+	require.True(t, ok)
+
+	// Verify from addresses and tx fields are populated (flattened structure)
+	for _, txData := range txsWithSenders {
+		require.NotEmpty(t, txData["from"])
+		require.NotNil(t, txData["nonce"])
+		require.NotNil(t, txData["hash"])
+	}
+}
+
+func TestGetSender(t *testing.T) {
+	tx := createSignedTestTransaction(t)
+	from, err := getSender(tx)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Address{}, from)
 }
 
 func TestTxValidationMethodSet(t *testing.T) {
@@ -59,39 +96,6 @@ func TestDefaultTxValidationMethods(t *testing.T) {
 	require.True(t, methods.Contains("eth_sendRawTransaction"))
 	require.True(t, methods.Contains("eth_sendRawTransactionConditional"))
 	require.True(t, methods.Contains("eth_sendBundle"))
-}
-
-func TestTxValidation_BlockResponse(t *testing.T) {
-	alwaysBlock := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return true, nil
-	}
-
-	block, err := alwaysBlock(context.Background(), "http://test", []byte(`{}`))
-	require.NoError(t, err)
-	require.True(t, block)
-}
-
-func TestTxValidation_AllowResponse(t *testing.T) {
-	neverBlock := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, nil
-	}
-
-	block, err := neverBlock(context.Background(), "http://test", []byte(`{}`))
-	require.NoError(t, err)
-	require.False(t, block)
-}
-
-func createTestTransaction(t *testing.T) *types.Transaction {
-	to := common.HexToAddress("0x0987654321098765432109876543210987654321")
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    1,
-		GasPrice: big.NewInt(1000000000),
-		Gas:      21000,
-		To:       &to,
-		Value:    big.NewInt(1000000000000000000),
-		Data:     []byte{},
-	})
-	return tx
 }
 
 func createSignedTestTransaction(t *testing.T) *types.Transaction {
@@ -121,9 +125,9 @@ func TestValidateTransactions_SingleTx(t *testing.T) {
 	tx := createSignedTestTransaction(t)
 
 	validationCalled := false
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 		validationCalled = true
-		return false, nil
+		return map[string]bool{}, nil // empty map = no unauthorized txs
 	}
 
 	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, true)
@@ -138,29 +142,63 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 	}
 
 	callCount := 0
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 		callCount++
-		return false, nil
+		// Verify the payload contains all 3 txs (flattened structure)
+		var requestMap map[string]map[string]interface{}
+		err := json.Unmarshal(payload, &requestMap)
+		require.NoError(t, err)
+		require.Len(t, requestMap, 3)
+		// Verify each tx has "from" at the same level as other fields
+		for _, txData := range requestMap {
+			require.NotEmpty(t, txData["from"])
+			require.NotNil(t, txData["nonce"])
+		}
+		return map[string]bool{}, nil
 	}
 
 	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
 	require.NoError(t, err)
-	require.Equal(t, 3, callCount)
+	require.Equal(t, 1, callCount) // Should be a single batch call now
 }
 
-func TestValidateTransactions_BlocksOnFirstRejection(t *testing.T) {
+func TestValidateTransactions_RejectsUnauthorized(t *testing.T) {
 	txs := make([]*types.Transaction, 3)
 	for i := 0; i < 3; i++ {
 		txs[i] = createSignedTestTransaction(t)
 	}
 
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return true, nil // block all
+	// Mark the second tx as unauthorized
+	unauthorizedTxHash := txs[1].Hash().Hex()
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return map[string]bool{
+			unauthorizedTxHash: true,
+		}, nil
 	}
 
 	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
 	require.Error(t, err)
 	require.Equal(t, ErrTransactionRejected, err)
+}
+
+func TestValidateTransactions_AllowsAuthorized(t *testing.T) {
+	txs := make([]*types.Transaction, 3)
+	for i := 0; i < 3; i++ {
+		txs[i] = createSignedTestTransaction(t)
+	}
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		// All txs are authorized (false = not unauthorized)
+		result := make(map[string]bool)
+		for _, tx := range txs {
+			result[tx.Hash().Hex()] = false
+		}
+		return result, nil
+	}
+
+	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
+	require.NoError(t, err)
 }
 
 func TestValidateTransactions_TooManyTxs(t *testing.T) {
@@ -169,8 +207,8 @@ func TestValidateTransactions_TooManyTxs(t *testing.T) {
 		txs[i] = createSignedTestTransaction(t)
 	}
 
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, nil
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return map[string]bool{}, nil
 	}
 
 	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
@@ -181,8 +219,8 @@ func TestValidateTransactions_TooManyTxs(t *testing.T) {
 func TestValidateTransactions_ServiceError_AllowsThrough(t *testing.T) {
 	tx := createSignedTestTransaction(t)
 
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, errors.New("service unavailable")
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return nil, errors.New("service unavailable")
 	}
 
 	// With failOpen=true, service errors should allow transaction through
@@ -193,8 +231,8 @@ func TestValidateTransactions_ServiceError_AllowsThrough(t *testing.T) {
 func TestValidateTransactions_ServiceError_FailClosed(t *testing.T) {
 	tx := createSignedTestTransaction(t)
 
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, errors.New("service unavailable")
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return nil, errors.New("service unavailable")
 	}
 
 	// With failOpen=false, service errors should reject transaction
@@ -210,40 +248,42 @@ func TestTxValidationClient_HTTPServer(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"block": false}`))
+		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
 	}))
 	defer server.Close()
 
 	client := NewTxValidationClient(5)
-	block, err := client.Validate(context.Background(), server.URL, []byte(`{"address": "0x123"}`))
+	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
-	require.False(t, block)
+	require.Empty(t, unauthorized)
 }
 
-func TestTxValidationClient_BlockResponse(t *testing.T) {
+func TestTxValidationClient_UnauthorizedResponse(t *testing.T) {
+	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"block": true}`))
+		_, _ = w.Write([]byte(`{"unauthorized": {"` + txHash + `": true}}`))
 	}))
 	defer server.Close()
 
 	client := NewTxValidationClient(5)
-	block, err := client.Validate(context.Background(), server.URL, []byte(`{"address": "0x123"}`))
+	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
-	require.True(t, block)
+	require.True(t, unauthorized[txHash])
 }
 
 func TestTxValidationClient_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"block": false, "errorCode": "ERR001", "errorMessage": "internal error"}`))
+		_, _ = w.Write([]byte(`{"unauthorized": {}, "errorCode": "ERR001", "errorMessage": "internal error"}`))
 	}))
 	defer server.Close()
 
 	client := NewTxValidationClient(5)
-	_, err := client.Validate(context.Background(), server.URL, []byte(`{"address": "0x123"}`))
+	_, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.Error(t, err)
 	require.Equal(t, ErrInternal, err)
 }
@@ -282,7 +322,7 @@ func TestTxValidationClient_CanceledContext(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"block": false}`))
+		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
 	}))
 	defer server.Close()
 
@@ -290,7 +330,7 @@ func TestTxValidationClient_CanceledContext(t *testing.T) {
 	cancel() // Cancel immediately
 
 	client := NewTxValidationClient(5)
-	_, err := client.Validate(ctx, server.URL, []byte(`{"address": "0x123"}`))
+	_, err := client.Validate(ctx, server.URL, []byte(`{}`))
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 }
@@ -301,31 +341,14 @@ func TestValidateTransactions_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	// Mock validation that returns context error - but due to fail-open behavior,
-	// the error will be logged and transaction allowed through
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, ctx.Err()
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return nil, ctx.Err()
 	}
 
 	// Due to fail-open behavior, validation service errors
 	// result in allowing the transaction through, not returning an error
 	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err) // Transaction is allowed through
-}
-
-func TestValidateSingleTransaction_CanceledContext_FailOpen(t *testing.T) {
-	tx := createSignedTestTransaction(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// Fail-open behavior: even with canceled context, transaction is allowed through
-	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (bool, error) {
-		return false, context.Canceled
-	}
-
-	err := validateSingleTransaction(ctx, tx, "http://test", mockValidation, true)
-	require.NoError(t, err) // Allowed through due to fail-open
 }
 
 func TestTransactionsFromBundleReq(t *testing.T) {
