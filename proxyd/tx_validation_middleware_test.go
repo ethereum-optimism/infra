@@ -16,20 +16,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildValidationPayload_FullTx(t *testing.T) {
+func TestBuildValidationPayload(t *testing.T) {
 	tx := createSignedTestTransaction(t) // Use signed tx with chainId
-	from := common.HexToAddress("0x1234567890123456789012345678901234567890")
 
-	payload, err := buildValidationPayload(tx, from, nil)
+	payload, err := buildValidationPayload(tx)
 	require.NoError(t, err)
 
 	var result map[string]interface{}
 	err = json.Unmarshal(payload, &result)
 	require.NoError(t, err)
 
-	// Full tx payload uses go-ethereum's native Transaction JSON format
-	// with "from" added as a separate top-level field
-	require.Equal(t, from.Hex(), result["from"])
+	// Payload uses go-ethereum's native Transaction JSON format
 	require.NotNil(t, result["tx"])
 
 	txObj, ok := result["tx"].(map[string]interface{})
@@ -46,80 +43,6 @@ func TestBuildValidationPayload_FullTx(t *testing.T) {
 	require.NotNil(t, txObj["v"])
 	require.NotNil(t, txObj["r"])
 	require.NotNil(t, txObj["s"])
-}
-
-func TestBuildValidationPayload_MappedFields(t *testing.T) {
-	tx := createTestTransaction(t)
-	from := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-	mappings := []TxFieldMapping{
-		{SourceField: "from", TargetField: "address"},
-	}
-
-	payload, err := buildValidationPayload(tx, from, mappings)
-	require.NoError(t, err)
-
-	var result map[string]interface{}
-	err = json.Unmarshal(payload, &result)
-	require.NoError(t, err)
-
-	require.Equal(t, from.Hex(), result["address"])
-	require.Nil(t, result["from"])
-	require.Nil(t, result["nonce"])
-}
-
-func TestBuildValidationPayload_MultipleMappings(t *testing.T) {
-	tx := createTestTransaction(t)
-	from := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-	mappings := []TxFieldMapping{
-		{SourceField: "from", TargetField: "sender"},
-		{SourceField: "value", TargetField: "amount"},
-		{SourceField: "hash", TargetField: "txHash"},
-	}
-
-	payload, err := buildValidationPayload(tx, from, mappings)
-	require.NoError(t, err)
-
-	var result map[string]interface{}
-	err = json.Unmarshal(payload, &result)
-	require.NoError(t, err)
-
-	require.Equal(t, from.Hex(), result["sender"])
-	require.NotNil(t, result["amount"])
-	require.NotNil(t, result["txHash"])
-	require.Nil(t, result["from"])
-}
-
-func TestExtractTxField(t *testing.T) {
-	tx := createTestTransaction(t)
-	from := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-	tests := []struct {
-		field    string
-		expected bool
-	}{
-		{"from", true},
-		{"nonce", true},
-		{"gas", true},
-		{"value", true},
-		{"data", true},
-		{"hash", true},
-		{"chainId", true},
-		{"type", true},
-		{"invalid", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.field, func(t *testing.T) {
-			result := extractTxField(tx, from, tt.field)
-			if tt.expected {
-				require.NotNil(t, result)
-			} else {
-				require.Nil(t, result)
-			}
-		})
-	}
 }
 
 func TestTxValidationMethodSet(t *testing.T) {
@@ -203,7 +126,7 @@ func TestValidateTransactions_SingleTx(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err)
 	require.True(t, validationCalled)
 }
@@ -220,7 +143,7 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
+	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
 	require.NoError(t, err)
 	require.Equal(t, 3, callCount)
 }
@@ -235,7 +158,7 @@ func TestValidateTransactions_BlocksOnFirstRejection(t *testing.T) {
 		return true, nil // block all
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
+	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
 	require.Error(t, err)
 	require.Equal(t, ErrTransactionRejected, err)
 }
@@ -250,7 +173,7 @@ func TestValidateTransactions_TooManyTxs(t *testing.T) {
 		return false, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", nil, mockValidation, true)
+	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "maximum allowed")
 }
@@ -263,7 +186,7 @@ func TestValidateTransactions_ServiceError_AllowsThrough(t *testing.T) {
 	}
 
 	// With failOpen=true, service errors should allow transaction through
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err)
 }
 
@@ -275,7 +198,7 @@ func TestValidateTransactions_ServiceError_FailClosed(t *testing.T) {
 	}
 
 	// With failOpen=false, service errors should reject transaction
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", nil, mockValidation, false)
+	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, false)
 	require.Error(t, err)
 	require.Equal(t, ErrInternal, err)
 }
@@ -386,7 +309,7 @@ func TestValidateTransactions_CanceledContext(t *testing.T) {
 
 	// Due to fail-open behavior, validation service errors
 	// result in allowing the transaction through, not returning an error
-	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", nil, mockValidation, true)
+	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err) // Transaction is allowed through
 }
 
@@ -401,7 +324,7 @@ func TestValidateSingleTransaction_CanceledContext_FailOpen(t *testing.T) {
 		return false, context.Canceled
 	}
 
-	err := validateSingleTransaction(ctx, tx, "http://test", nil, mockValidation, true)
+	err := validateSingleTransaction(ctx, tx, "http://test", mockValidation, true)
 	require.NoError(t, err) // Allowed through due to fail-open
 }
 

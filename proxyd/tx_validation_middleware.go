@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -28,14 +27,6 @@ const (
 // The endpoint is the middleware service URL, and payload is the request body to send.
 type TxValidationFunc func(ctx context.Context, endpoint string, payload []byte) (bool, error)
 
-// TxFieldMapping defines how to extract a field from a transaction and map it to the middleware request.
-type TxFieldMapping struct {
-	// SourceField is the transaction field to extract (e.g., "from", "to", "value", "data")
-	SourceField string `toml:"source_field"`
-	// TargetField is the field name in the middleware request body
-	TargetField string `toml:"target_field"`
-}
-
 // TxValidationMiddlewareConfig configures the transaction validation middleware.
 type TxValidationMiddlewareConfig struct {
 	// Enabled determines whether the middleware is active
@@ -47,11 +38,6 @@ type TxValidationMiddlewareConfig struct {
 	// Methods is the list of RPC methods to apply validation to.
 	// Defaults to ["eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"] if not specified.
 	Methods []string `toml:"methods"`
-
-	// FieldMappings defines how to transform the transaction into the middleware request format.
-	// If empty, the full transaction object is sent as-is.
-	// Example: [{ source_field = "from", target_field = "address" }] will send {"address": "<from_address>"}
-	FieldMappings []TxFieldMapping `toml:"field_mappings"`
 
 	// TimeoutSeconds is the timeout for validation HTTP requests. Defaults to 5 seconds.
 	TimeoutSeconds int `toml:"timeout_seconds"`
@@ -124,72 +110,11 @@ type txValidationResponse struct {
 	ErrorMessage string `json:"errorMessage"`
 }
 
-func buildValidationPayload(tx *types.Transaction, from common.Address, fieldMappings []TxFieldMapping) ([]byte, error) {
-	if len(fieldMappings) == 0 {
-		return buildFullTxPayload(tx, from)
-	}
-	return buildMappedPayload(tx, from, fieldMappings)
-}
-
-func buildFullTxPayload(tx *types.Transaction, from common.Address) ([]byte, error) {
+func buildValidationPayload(tx *types.Transaction) ([]byte, error) {
 	payload := map[string]interface{}{
-		"tx":   tx,
-		"from": from.Hex(),
+		"tx": tx,
 	}
 	return json.Marshal(payload)
-}
-
-func buildMappedPayload(tx *types.Transaction, from common.Address, mappings []TxFieldMapping) ([]byte, error) {
-	payload := make(map[string]interface{})
-
-	for _, mapping := range mappings {
-		value := extractTxField(tx, from, mapping.SourceField)
-		if value != nil {
-			payload[mapping.TargetField] = value
-		}
-	}
-
-	return json.Marshal(payload)
-}
-
-func extractTxField(tx *types.Transaction, from common.Address, field string) interface{} {
-	switch field {
-	case "from":
-		return from.Hex()
-	case "to":
-		if tx.To() != nil {
-			return tx.To().Hex()
-		}
-		return nil
-	case "value":
-		return tx.Value().String()
-	case "data":
-		return common.Bytes2Hex(tx.Data())
-	case "nonce":
-		return tx.Nonce()
-	case "gas":
-		return tx.Gas()
-	case "gasPrice":
-		return tx.GasPrice().String()
-	case "chainId":
-		return tx.ChainId().String()
-	case "hash":
-		return tx.Hash().Hex()
-	case "type":
-		return tx.Type()
-	case "maxFeePerGas":
-		if tx.Type() >= types.DynamicFeeTxType {
-			return tx.GasFeeCap().String()
-		}
-		return nil
-	case "maxPriorityFeePerGas":
-		if tx.Type() >= types.DynamicFeeTxType {
-			return tx.GasTipCap().String()
-		}
-		return nil
-	default:
-		return nil
-	}
 }
 
 type TxValidationMethodSet map[string]struct{}
@@ -207,19 +132,20 @@ func NewTxValidationMethodSet(methods []string) TxValidationMethodSet {
 	return set
 }
 
+var DefaultTxValidationMethods = []string{
+	"eth_sendRawTransaction",
+	"eth_sendRawTransactionConditional",
+	"eth_sendBundle",
+}
+
 func defaultTxValidationMethods() TxValidationMethodSet {
-	return TxValidationMethodSet{
-		"eth_sendRawTransaction":            {},
-		"eth_sendRawTransactionConditional": {},
-		"eth_sendBundle":                    {},
-	}
+	return NewTxValidationMethodSet(DefaultTxValidationMethods)
 }
 
 func validateTransactions(
 	ctx context.Context,
 	txs []*types.Transaction,
 	endpoint string,
-	fieldMappings []TxFieldMapping,
 	validationFn TxValidationFunc,
 	failOpen bool,
 ) error {
@@ -235,7 +161,7 @@ func validateTransactions(
 	for _, tx := range txs {
 		tx := tx // capture loop variable
 		g.Go(func() error {
-			return validateSingleTransaction(ctx, tx, endpoint, fieldMappings, validationFn, failOpen)
+			return validateSingleTransaction(ctx, tx, endpoint, validationFn, failOpen)
 		})
 	}
 	return g.Wait()
@@ -245,7 +171,6 @@ func validateSingleTransaction(
 	ctx context.Context,
 	tx *types.Transaction,
 	endpoint string,
-	fieldMappings []TxFieldMapping,
 	validationFn TxValidationFunc,
 	failOpen bool,
 ) error {
@@ -262,7 +187,7 @@ func validateSingleTransaction(
 		return ErrInvalidParams(err.Error())
 	}
 
-	payload, err := buildValidationPayload(tx, from, fieldMappings)
+	payload, err := buildValidationPayload(tx)
 	if err != nil {
 		log.Error("error building validation payload", "err", err, "req_id", GetReqID(ctx))
 		return ErrInternal

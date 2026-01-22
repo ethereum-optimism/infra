@@ -253,8 +253,11 @@ func Start(config *Config) (*Server, func(), error) {
 		log.Info("tx validation middleware enabled",
 			"endpoint", config.TxValidationMiddlewareConfig.Endpoint,
 			"methods", config.TxValidationMiddlewareConfig.Methods,
-			"field_mappings_count", len(config.TxValidationMiddlewareConfig.FieldMappings),
 		)
+		if len(config.TxValidationMiddlewareConfig.Methods) == 0 {
+			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",
+				"default_methods", DefaultTxValidationMethods)
+		}
 	}
 
 	if config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout == 0 && config.InteropValidationConfig.Strategy == HealthAwareLoadBalancingStrategy {

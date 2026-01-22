@@ -91,13 +91,12 @@ type Server struct {
 	publicAccess            bool
 	enableTxHashLogging     bool
 
-	enableTxValidation        bool
-	txValidationFn            TxValidationFunc
-	txValidationEndpoint      string
-	txValidationMethods       TxValidationMethodSet
-	txValidationFieldMappings []TxFieldMapping
-	txValidationClient        *TxValidationClient
-	txValidationFailOpen      bool
+	enableTxValidation   bool
+	txValidationFn       TxValidationFunc
+	txValidationEndpoint string
+	txValidationMethods  TxValidationMethodSet
+	txValidationClient   *TxValidationClient
+	txValidationFailOpen bool
 }
 
 type limiterFunc func(method string) bool
@@ -205,7 +204,7 @@ func NewServer(
 		txValidationMethods = defaultTxValidationMethods()
 		if txValidationConfig.Enabled {
 			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",
-				"default_methods", []string{"eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"})
+				"default_methods", DefaultTxValidationMethods)
 		}
 	} else {
 		txValidationMethods = NewTxValidationMethodSet(txValidationConfig.Methods)
@@ -236,26 +235,25 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                   mainLim,
-		overrideLims:              overrideLims,
-		globallyLimitedMethods:    globalMethodLims,
-		senderLim:                 senderLim,
-		interopSenderLim:          interopSenderLim,
-		allowedChainIds:           senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:          limExemptOrigins,
-		limExemptUserAgents:       limExemptUserAgents,
-		limExemptKeys:             limExemptKeys,
-		rateLimitHeader:           rateLimitHeader,
-		interopValidatingConfig:   interopValidatingConfig,
-		interopStrategy:           interopStrategy,
-		enableTxHashLogging:       enableTxHashLogging,
-		enableTxValidation:        txValidationConfig.Enabled,
-		txValidationFn:            txValidationClient.Validate,
-		txValidationEndpoint:      txValidationConfig.Endpoint,
-		txValidationMethods:       txValidationMethods,
-		txValidationFieldMappings: txValidationConfig.FieldMappings,
-		txValidationClient:        txValidationClient,
-		txValidationFailOpen:      txValidationFailOpen,
+		mainLim:                 mainLim,
+		overrideLims:            overrideLims,
+		globallyLimitedMethods:  globalMethodLims,
+		senderLim:               senderLim,
+		interopSenderLim:        interopSenderLim,
+		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:        limExemptOrigins,
+		limExemptUserAgents:     limExemptUserAgents,
+		limExemptKeys:           limExemptKeys,
+		rateLimitHeader:         rateLimitHeader,
+		interopValidatingConfig: interopValidatingConfig,
+		interopStrategy:         interopStrategy,
+		enableTxHashLogging:     enableTxHashLogging,
+		enableTxValidation:      txValidationConfig.Enabled,
+		txValidationFn:          txValidationClient.Validate,
+		txValidationEndpoint:    txValidationConfig.Endpoint,
+		txValidationMethods:     txValidationMethods,
+		txValidationClient:      txValidationClient,
+		txValidationFailOpen:    txValidationFailOpen,
 	}, nil
 }
 
@@ -1124,7 +1122,7 @@ func (s *Server) applyTxValidation(ctx context.Context, req *RPCReq) error {
 		return nil
 	}
 
-	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFieldMappings, s.txValidationFn, s.txValidationFailOpen)
+	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFn, s.txValidationFailOpen)
 }
 
 // SetTxValidationFn allows overriding the transaction validation function for testing.
