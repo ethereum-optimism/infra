@@ -490,7 +490,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig,
 		interopStrategy,
 		config.Server.EnableTxHashLogging,
-		secondsToDuration(config.Server.GracefulShutdownSeconds),
+		getGracefulShutdownDuration(config.Server.GracefulShutdownSeconds),
 		apiKeys,
 	)
 	if err != nil {
@@ -661,6 +661,13 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func getGracefulShutdownDuration(seconds *int) time.Duration {
+	if seconds == nil {
+		return 10 * time.Second
+	}
+	return time.Duration(*seconds) * time.Second
 }
 
 func parseCommaSeparatedList(input string) []string {

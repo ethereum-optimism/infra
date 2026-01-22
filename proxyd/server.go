@@ -149,10 +149,6 @@ func NewServer(
 		maxBatchSize = MaxBatchRPCCallsHardLimit
 	}
 
-	if gracefulShutdownDuration == 0 {
-		gracefulShutdownDuration = defaultGracefulShutdownDuration
-	}
-
 	var mainLim FrontendRateLimiter
 	limExemptOrigins := make([]*regexp.Regexp, 0)
 	limExemptUserAgents := make([]*regexp.Regexp, 0)
