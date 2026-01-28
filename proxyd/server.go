@@ -90,6 +90,13 @@ type Server struct {
 	interopStrategy         InteropStrategy
 	publicAccess            bool
 	enableTxHashLogging     bool
+
+	enableTxValidation   bool
+	txValidationFn       TxValidationFunc
+	txValidationEndpoint string
+	txValidationMethods  TxValidationMethodSet
+	txValidationClient   *TxValidationClient
+	txValidationFailOpen bool
 }
 
 type limiterFunc func(method string) bool
@@ -119,6 +126,7 @@ func NewServer(
 	interopStrategy InteropStrategy,
 	enableTxHashLogging bool,
 	limExemptKeys []string,
+	txValidationConfig TxValidationMiddlewareConfig,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -191,6 +199,24 @@ func NewServer(
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
 	}
 
+	var txValidationMethods TxValidationMethodSet
+	if len(txValidationConfig.Methods) == 0 {
+		txValidationMethods = defaultTxValidationMethods()
+		if txValidationConfig.Enabled {
+			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",
+				"default_methods", DefaultTxValidationMethods)
+		}
+	} else {
+		txValidationMethods = NewTxValidationMethodSet(txValidationConfig.Methods)
+	}
+
+	txValidationClient := NewTxValidationClient(txValidationConfig.TimeoutSeconds)
+
+	txValidationFailOpen := true
+	if txValidationConfig.FailOpen != nil {
+		txValidationFailOpen = *txValidationConfig.FailOpen
+	}
+
 	return &Server{
 		BackendGroups:        backendGroups,
 		wsBackendGroup:       wsBackendGroup,
@@ -222,6 +248,12 @@ func NewServer(
 		interopValidatingConfig: interopValidatingConfig,
 		interopStrategy:         interopStrategy,
 		enableTxHashLogging:     enableTxHashLogging,
+		enableTxValidation:      txValidationConfig.Enabled,
+		txValidationFn:          txValidationClient.Validate,
+		txValidationEndpoint:    txValidationConfig.Endpoint,
+		txValidationMethods:     txValidationMethods,
+		txValidationClient:      txValidationClient,
+		txValidationFailOpen:    txValidationFailOpen,
 	}, nil
 }
 
@@ -610,7 +642,15 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
+		}
 
+		// Apply transaction validation middleware if enabled and method is configured.
+		if s.enableTxValidation && s.txValidationMethods.Contains(parsedReq.Method) {
+			if err := s.applyTxValidation(ctx, parsedReq); err != nil {
+				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
+				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
+				continue
+			}
 		}
 
 		id := string(parsedReq.ID)
@@ -1056,6 +1096,37 @@ func truncate(str string, maxLen int) string {
 	} else {
 		return str
 	}
+}
+
+// applyTxValidation validates transactions using the configured validation middleware.
+// It supports both single transaction methods (eth_sendRawTransaction) and bundle methods (eth_sendBundle).
+func (s *Server) applyTxValidation(ctx context.Context, req *RPCReq) error {
+	var txs []*types.Transaction
+	var err error
+
+	switch req.Method {
+	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional":
+		tx, err := s.convertSendReqToSendTx(ctx, req)
+		if err != nil {
+			return err
+		}
+		txs = []*types.Transaction{tx}
+	case "eth_sendBundle":
+		txs, err = transactionsFromBundleReq(ctx, req)
+		if err != nil {
+			return err
+		}
+	default:
+		log.Debug("unsupported method for tx validation", "method", req.Method, "req_id", GetReqID(ctx))
+		return nil
+	}
+
+	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFn, s.txValidationFailOpen)
+}
+
+// SetTxValidationFn allows overriding the transaction validation function for testing.
+func (s *Server) SetTxValidationFn(fn TxValidationFunc) {
+	s.txValidationFn = fn
 }
 
 type batchElem struct {
