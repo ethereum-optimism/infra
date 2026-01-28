@@ -27,6 +27,13 @@ const (
 // The endpoint is the middleware service URL, and payload is the request body to send.
 type TxValidationFunc func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error)
 
+// TransactionWithFrom represents a transaction with the sender address included.
+// We use a map instead of types.Transaction because go-ethereum's Transaction type
+// does not include the "from" field in its JSON marshaling - the sender address must
+// be derived from the signature using ecrecover. This type allows us to include
+// "from" at the same level as other transaction fields for the validation service.
+type TransactionWithFrom map[string]interface{}
+
 // TxValidationMiddlewareConfig configures the transaction validation middleware.
 type TxValidationMiddlewareConfig struct {
 	// Enabled determines whether the middleware is active
@@ -113,11 +120,11 @@ type txValidationResponse struct {
 
 // txValidationRequest is the request payload sent to the validation service.
 type txValidationRequest struct {
-	Txs map[string]map[string]interface{} `json:"txs"`
+	Txs map[string]TransactionWithFrom `json:"txs"`
 }
 
 // buildValidationPayload builds a batch request payload with txs mapped by hash.
-func buildValidationPayload(txsWithSenders map[string]map[string]interface{}) ([]byte, error) {
+func buildValidationPayload(txsWithSenders map[string]TransactionWithFrom) ([]byte, error) {
 	req := txValidationRequest{
 		Txs: txsWithSenders,
 	}
@@ -175,7 +182,7 @@ func validateTransactions(
 		return ErrInternal
 	}
 
-	unauthorized, validationErr := validationFn(ctx, endpoint, payload)
+	validationResults, validationErr := validationFn(ctx, endpoint, payload)
 	if validationErr != nil {
 		if failOpen {
 			log.Warn("tx validation service error, allowing transactions through (fail_open=true)",
@@ -193,7 +200,7 @@ func validateTransactions(
 		return ErrInternal
 	}
 
-	for txHash, isUnauthorized := range unauthorized {
+	for txHash, isUnauthorized := range validationResults {
 		if isUnauthorized {
 			txData := txsWithSenders[txHash]
 			log.Info("transaction rejected by validation middleware",
@@ -207,9 +214,9 @@ func validateTransactions(
 	return nil
 }
 
-// buildTxsWithSenders builds a map of tx hashes to flattened tx objects with "from" field added.
-func buildTxsWithSenders(ctx context.Context, txs []*types.Transaction) (map[string]map[string]interface{}, error) {
-	result := make(map[string]map[string]interface{}, len(txs))
+// buildTxsWithSenders builds a map of tx hashes to TransactionWithFrom objects.
+func buildTxsWithSenders(ctx context.Context, txs []*types.Transaction) (map[string]TransactionWithFrom, error) {
+	result := make(map[string]TransactionWithFrom, len(txs))
 	for _, tx := range txs {
 		from, err := getSender(tx)
 		if err != nil {
@@ -230,7 +237,9 @@ func buildTxsWithSenders(ctx context.Context, txs []*types.Transaction) (map[str
 			return nil, ErrInternal
 		}
 
-		// Add "from" at the same level as other tx fields
+		// Add "from" at the same level as other tx fields.
+		// This is necessary because types.Transaction.MarshalJSON() does not include
+		// the sender address - it must be derived via ecrecover from the signature.
 		txMap["from"] = from.Hex()
 		result[tx.Hash().Hex()] = txMap
 	}
