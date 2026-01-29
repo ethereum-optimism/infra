@@ -132,6 +132,12 @@ var (
 		HTTPErrorCode: 429,
 	}
 
+	ErrTransactionRejected = &RPCErr{
+		Code:          JSONRPCErrorInternal - 100,
+		Message:       "transaction rejected",
+		HTTPErrorCode: 400,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")

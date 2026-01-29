@@ -245,6 +245,21 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
 	}
 
+	if config.TxValidationMiddlewareConfig.Enabled && config.TxValidationMiddlewareConfig.Endpoint == "" {
+		return nil, nil, errors.New("tx_validation_middleware is enabled but no endpoint is configured")
+	}
+
+	if config.TxValidationMiddlewareConfig.Enabled {
+		log.Info("tx validation middleware enabled",
+			"endpoint", config.TxValidationMiddlewareConfig.Endpoint,
+			"methods", config.TxValidationMiddlewareConfig.Methods,
+		)
+		if len(config.TxValidationMiddlewareConfig.Methods) == 0 {
+			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",
+				"default_methods", DefaultTxValidationMethods)
+		}
+	}
+
 	if config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout == 0 && config.InteropValidationConfig.Strategy == HealthAwareLoadBalancingStrategy {
 		log.Warn("no interop validation load balancing unhealthiness timeout provided for health aware strategy, using default timeout", "timeout", defaultInteropLoadBalancingUnhealthinessTimeout)
 		config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout = defaultInteropLoadBalancingUnhealthinessTimeout
@@ -446,6 +461,7 @@ func Start(config *Config) (*Server, func(), error) {
 		interopStrategy,
 		config.Server.EnableTxHashLogging,
 		apiKeys,
+		config.TxValidationMiddlewareConfig,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
