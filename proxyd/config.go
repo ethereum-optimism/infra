@@ -33,6 +33,10 @@ type ServerConfig struct {
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
 	PublicAccess          bool `toml:"public_access"`
 	EnableTxHashLogging   bool `toml:"enable_tx_hash_logging"`
+
+	// GracefulShutdownSeconds is the duration to wait during drain before shutting down.
+	// Defaults to 10 seconds if not specified.
+	GracefulShutdownSeconds int `toml:"graceful_shutdown_seconds"`
 }
 
 type CacheConfig struct {

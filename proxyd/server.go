@@ -48,7 +48,7 @@ const (
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
 	defaultCacheTtl                                 = 1 * time.Hour
-	gracefulShutdownDuration                        = 10 * time.Second
+	defaultGracefulShutdownDuration                 = 10 * time.Second
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
@@ -93,13 +93,14 @@ type Server struct {
 	publicAccess            bool
 	enableTxHashLogging     bool
 
-	enableTxValidation   bool
-	txValidationFn       TxValidationFunc
-	txValidationEndpoint string
-	txValidationMethods  TxValidationMethodSet
-	txValidationClient   *TxValidationClient
-	txValidationFailOpen bool
-	isDraining           atomic.Bool
+	enableTxValidation       bool
+	txValidationFn           TxValidationFunc
+	txValidationEndpoint     string
+	txValidationMethods      TxValidationMethodSet
+	txValidationClient       *TxValidationClient
+	txValidationFailOpen     bool
+	isDraining               atomic.Bool
+	gracefulShutdownDuration time.Duration
 }
 
 type limiterFunc func(method string) bool
@@ -130,6 +131,7 @@ func NewServer(
 	enableTxHashLogging bool,
 	limExemptKeys []string,
 	txValidationConfig TxValidationMiddlewareConfig,
+	gracefulShutdownDuration time.Duration,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -153,6 +155,10 @@ func NewServer(
 
 	if maxBatchSize > MaxBatchRPCCallsHardLimit {
 		maxBatchSize = MaxBatchRPCCallsHardLimit
+	}
+
+	if gracefulShutdownDuration == 0 {
+		gracefulShutdownDuration = defaultGracefulShutdownDuration
 	}
 
 	var mainLim FrontendRateLimiter
@@ -238,25 +244,26 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                 mainLim,
-		overrideLims:            overrideLims,
-		globallyLimitedMethods:  globalMethodLims,
-		senderLim:               senderLim,
-		interopSenderLim:        interopSenderLim,
-		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:        limExemptOrigins,
-		limExemptUserAgents:     limExemptUserAgents,
-		limExemptKeys:           limExemptKeys,
-		rateLimitHeader:         rateLimitHeader,
-		interopValidatingConfig: interopValidatingConfig,
-		interopStrategy:         interopStrategy,
-		enableTxHashLogging:     enableTxHashLogging,
-		enableTxValidation:      txValidationConfig.Enabled,
-		txValidationFn:          txValidationClient.Validate,
-		txValidationEndpoint:    txValidationConfig.Endpoint,
-		txValidationMethods:     txValidationMethods,
-		txValidationClient:      txValidationClient,
-		txValidationFailOpen:    txValidationFailOpen,
+		mainLim:                  mainLim,
+		overrideLims:             overrideLims,
+		globallyLimitedMethods:   globalMethodLims,
+		senderLim:                senderLim,
+		interopSenderLim:         interopSenderLim,
+		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:         limExemptOrigins,
+		limExemptUserAgents:      limExemptUserAgents,
+		limExemptKeys:            limExemptKeys,
+		rateLimitHeader:          rateLimitHeader,
+		interopValidatingConfig:  interopValidatingConfig,
+		interopStrategy:          interopStrategy,
+		enableTxHashLogging:      enableTxHashLogging,
+		enableTxValidation:       txValidationConfig.Enabled,
+		txValidationFn:           txValidationClient.Validate,
+		txValidationEndpoint:     txValidationConfig.Endpoint,
+		txValidationMethods:      txValidationMethods,
+		txValidationClient:       txValidationClient,
+		txValidationFailOpen:     txValidationFailOpen,
+		gracefulShutdownDuration: gracefulShutdownDuration,
 	}, nil
 }
 
@@ -299,7 +306,7 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 
 func (s *Server) Drain() {
 	s.isDraining.Store(true)
-	time.Sleep(gracefulShutdownDuration)
+	time.Sleep(s.gracefulShutdownDuration)
 }
 
 func (s *Server) Shutdown() {
