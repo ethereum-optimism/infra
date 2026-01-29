@@ -16,3 +16,5 @@ Each subproject can, optionally, adopt mise by adding a `mise.toml` configuratio
 ## Release Process
 
 For the thoroughly defined process releasing services in this repository, please refer to [this document](./RELEASE.md).
+
+<!-- Test comment for fork PR workflow verification -->
