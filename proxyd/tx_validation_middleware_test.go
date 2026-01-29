@@ -149,7 +149,7 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 		callCount++
 		// Verify the payload contains all 3 txs wrapped in "txs" field
 		var request struct {
-			Txs map[string]map[string]interface{} `json:"txs"`
+			Txs map[string]TransactionWithFrom `json:"txs"`
 		}
 		err := json.Unmarshal(payload, &request)
 		require.NoError(t, err)
