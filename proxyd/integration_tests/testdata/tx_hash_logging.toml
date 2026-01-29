@@ -1,4 +1,5 @@
 [server]
+graceful_shutdown_seconds = 0
 rpc_port = 8545
 enable_tx_hash_logging = true
 

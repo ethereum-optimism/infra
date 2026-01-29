@@ -1,4 +1,5 @@
 [server]
+graceful_shutdown_seconds = 0
 rpc_port = 8545
 max_body_size_bytes = 1048576
 

@@ -507,7 +507,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.EnableTxHashLogging,
 		apiKeys,
 		config.TxValidationMiddlewareConfig,
-		secondsToDuration(config.Server.GracefulShutdownSeconds),
+		getGracefulShutdownDuration(config.Server.GracefulShutdownSeconds),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -677,6 +677,13 @@ func validateReceiptsTarget(val string) (string, error) {
 
 func secondsToDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
+}
+
+func getGracefulShutdownDuration(seconds *int) time.Duration {
+	if seconds == nil {
+		return 10 * time.Second
+	}
+	return time.Duration(*seconds) * time.Second
 }
 
 func parseCommaSeparatedList(input string) []string {
