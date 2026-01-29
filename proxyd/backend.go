@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
@@ -322,10 +323,11 @@ type Backend struct {
 	maxLatencyThreshold          time.Duration
 	maxErrorRateThreshold        float64
 
-	probeSpec    *ProbeSpec
-	probeURL     string
-	ProbeWorker  *ProbeWorker
-	HealthyProbe bool
+	probeSpec               *ProbeSpec
+	probeURL                string
+	probeInsecureSkipVerify bool
+	ProbeWorker             *ProbeWorker
+	healthyProbe            atomic.Bool
 
 	latencySlidingWindow            *sw.AvgSlidingWindow
 	networkRequestsSlidingWindow    *sw.AvgSlidingWindow
@@ -479,9 +481,10 @@ func WithIntermittentNetworkErrorSlidingWindow(sw *sw.AvgSlidingWindow) BackendO
 	}
 }
 
-func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold int, probePeriodSeconds int, probeTimeoutSeconds int) BackendOpt {
+func WithProbe(probeURL string, probeFailureThreshold int, probeSuccessThreshold int, probePeriodSeconds int, probeTimeoutSeconds int, probeInsecureSkipVerify bool) BackendOpt {
 	return func(b *Backend) {
 		b.probeURL = probeURL
+		b.probeInsecureSkipVerify = probeInsecureSkipVerify
 		probeSpec := ProbeSpec{
 			// default values
 			FailureThreshold: 1,
@@ -559,8 +562,8 @@ func NewBackend(
 		intermittentErrorsSlidingWindow: sw.NewSlidingWindow(),
 		allowedStatusCodes:              []int{400, 413}, // Alchemy returns a 400 on bad JSONs, and Quicknode returns a 413 on too large requests
 
-		HealthyProbe: true,
 	}
+	backend.healthyProbe.Store(true)
 
 	backend.Override(opts...)
 
@@ -923,7 +926,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 // IsHealthy checks if the backend is able to serve traffic, based on dynamic parameters
 func (b *Backend) IsHealthy() bool {
-	if !b.HealthyProbe {
+	if !b.healthyProbe.Load() {
 		return false
 	}
 	errorRate := b.ErrorRate()
@@ -935,6 +938,14 @@ func (b *Backend) IsHealthy() bool {
 		return false
 	}
 	return true
+}
+
+func (b *Backend) IsProbeHealthy() bool {
+	return b.healthyProbe.Load()
+}
+
+func (b *Backend) SetProbeHealth(healthy bool) {
+	b.healthyProbe.Store(healthy)
 }
 
 // ErrorRate returns the instant error rate of the backend

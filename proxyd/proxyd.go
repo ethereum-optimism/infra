@@ -182,7 +182,7 @@ func Start(config *Config) (*Server, func(), error) {
 			opts = append(opts, WithBasicAuth(cfg.Username, passwordVal))
 		}
 		if cfg.ProbeURL != "" {
-			opts = append(opts, WithProbe(cfg.ProbeURL, cfg.ProbeFailureThreshold, cfg.ProbeSuccessThreshold, cfg.ProbePeriodSeconds, cfg.ProbeTimeoutSeconds))
+			opts = append(opts, WithProbe(cfg.ProbeURL, cfg.ProbeFailureThreshold, cfg.ProbeSuccessThreshold, cfg.ProbePeriodSeconds, cfg.ProbeTimeoutSeconds, cfg.ProbeInsecureSkipVerify))
 		}
 
 		headers := map[string]string{}
@@ -251,17 +251,17 @@ func Start(config *Config) (*Server, func(), error) {
 				maxProbeDelay = probeDelay
 			}
 			// Create and launch probe worker
-			back.ProbeWorker, err = NewProbeWorker(back.probeURL, *back.probeSpec, func(healthy bool, msg string) {
+			back.ProbeWorker, err = NewProbeWorker(back.probeURL, *back.probeSpec, back.probeInsecureSkipVerify, func(healthy bool, msg string) {
 				if healthy {
-					if !back.HealthyProbe {
+					if !back.IsProbeHealthy() {
 						log.Info("backend is now healthy", "name", back.Name)
 					}
-					back.HealthyProbe = true
+					back.SetProbeHealth(true)
 				} else {
-					if back.HealthyProbe {
+					if back.IsProbeHealthy() {
 						log.Info("backend is now unhealthy", "name", back.Name, "msg", msg)
 					}
-					back.HealthyProbe = false
+					back.SetProbeHealth(false)
 				}
 			})
 			if err != nil {

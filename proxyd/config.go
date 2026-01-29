@@ -114,11 +114,12 @@ type BackendConfig struct {
 	StripTrailingXFF bool              `toml:"strip_trailing_xff"`
 	Headers          map[string]string `toml:"headers"`
 
-	ProbeFailureThreshold int    `toml:"probe_failure_threshold"`
-	ProbeSuccessThreshold int    `toml:"probe_success_threshold"`
-	ProbePeriodSeconds    int    `toml:"probe_period_seconds"`
-	ProbeTimeoutSeconds   int    `toml:"probe_timeout_seconds"`
-	ProbeURL              string `toml:"probe_url"`
+	ProbeFailureThreshold   int    `toml:"probe_failure_threshold"`
+	ProbeSuccessThreshold   int    `toml:"probe_success_threshold"`
+	ProbePeriodSeconds      int    `toml:"probe_period_seconds"`
+	ProbeTimeoutSeconds     int    `toml:"probe_timeout_seconds"`
+	ProbeURL                string `toml:"probe_url"`
+	ProbeInsecureSkipVerify bool   `toml:"probe_insecure_skip_verify"`
 
 	Weight int `toml:"weight"`
 
