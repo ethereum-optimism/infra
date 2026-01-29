@@ -30,7 +30,7 @@ func TestBuildValidationPayload(t *testing.T) {
 	require.NoError(t, err)
 
 	var result struct {
-		Txs map[string]map[string]interface{} `json:"txs"`
+		Txs map[string]TransactionWithFrom `json:"txs"`
 	}
 	err = json.Unmarshal(payload, &result)
 	require.NoError(t, err)
