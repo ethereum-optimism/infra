@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,6 +48,7 @@ const (
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
 	defaultCacheTtl                                 = 1 * time.Hour
+	defaultGracefulShutdownDuration                 = 10 * time.Second
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
@@ -91,12 +93,14 @@ type Server struct {
 	publicAccess            bool
 	enableTxHashLogging     bool
 
-	enableTxValidation   bool
-	txValidationFn       TxValidationFunc
-	txValidationEndpoint string
-	txValidationMethods  TxValidationMethodSet
-	txValidationClient   *TxValidationClient
-	txValidationFailOpen bool
+	enableTxValidation       bool
+	txValidationFn           TxValidationFunc
+	txValidationEndpoint     string
+	txValidationMethods      TxValidationMethodSet
+	txValidationClient       *TxValidationClient
+	txValidationFailOpen     bool
+	isDraining               atomic.Bool
+	gracefulShutdownDuration time.Duration
 }
 
 type limiterFunc func(method string) bool
@@ -127,6 +131,7 @@ func NewServer(
 	enableTxHashLogging bool,
 	limExemptKeys []string,
 	txValidationConfig TxValidationMiddlewareConfig,
+	gracefulShutdownDuration time.Duration,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -235,25 +240,26 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                 mainLim,
-		overrideLims:            overrideLims,
-		globallyLimitedMethods:  globalMethodLims,
-		senderLim:               senderLim,
-		interopSenderLim:        interopSenderLim,
-		allowedChainIds:         senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:        limExemptOrigins,
-		limExemptUserAgents:     limExemptUserAgents,
-		limExemptKeys:           limExemptKeys,
-		rateLimitHeader:         rateLimitHeader,
-		interopValidatingConfig: interopValidatingConfig,
-		interopStrategy:         interopStrategy,
-		enableTxHashLogging:     enableTxHashLogging,
-		enableTxValidation:      txValidationConfig.Enabled,
-		txValidationFn:          txValidationClient.Validate,
-		txValidationEndpoint:    txValidationConfig.Endpoint,
-		txValidationMethods:     txValidationMethods,
-		txValidationClient:      txValidationClient,
-		txValidationFailOpen:    txValidationFailOpen,
+		mainLim:                  mainLim,
+		overrideLims:             overrideLims,
+		globallyLimitedMethods:   globalMethodLims,
+		senderLim:                senderLim,
+		interopSenderLim:         interopSenderLim,
+		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:         limExemptOrigins,
+		limExemptUserAgents:      limExemptUserAgents,
+		limExemptKeys:            limExemptKeys,
+		rateLimitHeader:          rateLimitHeader,
+		interopValidatingConfig:  interopValidatingConfig,
+		interopStrategy:          interopStrategy,
+		enableTxHashLogging:      enableTxHashLogging,
+		enableTxValidation:       txValidationConfig.Enabled,
+		txValidationFn:           txValidationClient.Validate,
+		txValidationEndpoint:     txValidationConfig.Endpoint,
+		txValidationMethods:      txValidationMethods,
+		txValidationClient:       txValidationClient,
+		txValidationFailOpen:     txValidationFailOpen,
+		gracefulShutdownDuration: gracefulShutdownDuration,
 	}, nil
 }
 
@@ -294,6 +300,11 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 	return s.wsServer.ListenAndServe()
 }
 
+func (s *Server) Drain() {
+	s.isDraining.Store(true)
+	time.Sleep(s.gracefulShutdownDuration)
+}
+
 func (s *Server) Shutdown() {
 	s.srvMu.Lock()
 	defer s.srvMu.Unlock()
@@ -309,6 +320,10 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
 	_, _ = w.Write([]byte("OK"))
 }
 
