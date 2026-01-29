@@ -224,7 +224,7 @@ func buildTxsWithSenders(ctx context.Context, txs []*types.Transaction) (map[str
 			return nil, ErrInvalidParams(err.Error())
 		}
 
-		// Marshal tx to JSON, then unmarshal to map to get all fields
+		// Marshal txn to JSON, then unmarshal to map to get all fields
 		txJSON, err := tx.MarshalJSON()
 		if err != nil {
 			log.Debug("could not marshal transaction for validation", "err", err, "req_id", GetReqID(ctx))
