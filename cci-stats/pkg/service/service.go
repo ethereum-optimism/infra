@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -258,9 +259,25 @@ func fetchJobs(ctx context.Context, client *circleci.Client, workflowID string) 
 	return jobs.Items, nil
 }
 
+func isNotFoundError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
 func fetchTestMetadata(ctx context.Context, config config.Config, client *circleci.Client, job *circleci.WorkflowJob) ([]*circleci.TestMetadata, error) {
 	md, err := client.Jobs.ListTestMetadata(ctx, job.ProjectSlug, fmt.Sprintf("%d", job.JobNumber))
 	if err != nil {
+		// Some jobs don't have test metadata in certain states (e.g., running, queued, not_run, on_hold)
+		// CircleCI API returns "not found" for these cases, which is expected and not an error
+		if isNotFoundError(err) {
+			slog.Debug(
+				"job has no test metadata ",
+				"job", job.ID,
+				"jobName", job.Name,
+				"jobNumber", job.JobNumber,
+				"projectSlug", job.ProjectSlug,
+			)
+			return []*circleci.TestMetadata{}, nil
+		}
 		return nil, fmt.Errorf("failed to list test metadata: %w", err)
 	}
 
