@@ -48,7 +48,6 @@ const (
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
 	defaultCacheTtl                                 = 1 * time.Hour
-	defaultGracefulShutdownDuration                 = 10 * time.Second
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
@@ -332,6 +331,13 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	if ctx == nil {
 		return
 	}
+
+	// Reject new requests during drain
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
+
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -758,6 +764,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	ctx := s.populateContext(w, r)
 	if ctx == nil {
+		return
+	}
+
+	// Reject new WebSocket connections during drain
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
 
