@@ -8,7 +8,7 @@ ws_method_whitelist = [
 ]
 
 [server]
-graceful_shutdown_seconds = 0
+
 rpc_port = 8545
 ws_port = 8546
 

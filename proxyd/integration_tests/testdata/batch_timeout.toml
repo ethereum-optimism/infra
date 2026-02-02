@@ -1,5 +1,5 @@
 [server]
-graceful_shutdown_seconds = 0
+
 rpc_port = 8545
 timeout_seconds = 1
 max_upstream_batch_size = 1
