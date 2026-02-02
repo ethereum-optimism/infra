@@ -1,4 +1,4 @@
-FROM golang:1.23.5-alpine3.21 AS builder
+FROM golang:1.24.0-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY op-acceptor/ .
 
 RUN make build
 
-FROM golang:1.23.5-alpine3.21
+FROM golang:1.24.0-alpine3.21
 
 RUN apk add --no-cache ca-certificates build-base git zstd
 
@@ -33,6 +33,15 @@ chown -R app:app /go
 
 COPY --from=builder /app/bin/op-acceptor /app/
 COPY op-acceptor/example-validators.yaml /app/
+
+# Pre-warm the Go module cache with optimism repo dependencies
+# This significantly speeds up test execution by caching ~90% of dependencies
+RUN git clone --depth 1 --single-branch --branch develop \
+    https://github.com/ethereum-optimism/optimism.git /tmp/optimism && \
+    cd /tmp/optimism/op-acceptance-tests && \
+    go mod download && \
+    rm -rf /tmp/optimism && \
+    chown -R app:app /go
 
 # Set ownership of the /app directory to allow the application to write logs and other files at runtime
 RUN chown -R app:app /app/

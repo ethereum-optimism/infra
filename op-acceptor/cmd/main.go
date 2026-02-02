@@ -129,6 +129,9 @@ func buildApp() *cli.App {
 	app.Description = "op-acceptor tests networks"
 	app.Flags = cliapp.ProtectFlags(flags.Flags)
 	app.Action = cliapp.LifecycleCmd(run)
+	app.Commands = []*cli.Command{
+		RunRemoteCommand(),
+	}
 	app.ExitErrHandler = func(c *cli.Context, err error) {
 		var exitErr cli.ExitCoder
 		if errors.As(err, &exitErr) {

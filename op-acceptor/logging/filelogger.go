@@ -376,6 +376,15 @@ func (l *FileLogger) CompleteWithTiming(runID string, wallClockTime time.Duratio
 
 	// Close all writers after completion
 	l.closeAllWriters()
+
+	// Write a .complete marker file to signal that all logging is done
+	// This can be used by artifact uploaders to know when it's safe to upload
+	baseDir, err := l.GetDirectoryForRunID(runID)
+	if err == nil {
+		completeMarker := filepath.Join(baseDir, ".complete")
+		_ = os.WriteFile(completeMarker, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
+	}
+
 	return nil
 }
 
