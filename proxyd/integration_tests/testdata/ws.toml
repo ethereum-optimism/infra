@@ -8,6 +8,7 @@ ws_method_whitelist = [
 ]
 
 [server]
+
 rpc_port = 8545
 ws_port = 8546
 

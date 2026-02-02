@@ -33,6 +33,10 @@ type ServerConfig struct {
 	AllowAllOrigins       bool `toml:"allow_all_origins"`
 	PublicAccess          bool `toml:"public_access"`
 	EnableTxHashLogging   bool `toml:"enable_tx_hash_logging"`
+
+	// GracefulShutdownSeconds is the duration to wait during drain before shutting down.
+	// Defaults to 0 (no drain delay). Set to a positive value to enable graceful drain.
+	GracefulShutdownSeconds int `toml:"graceful_shutdown_seconds"`
 }
 
 type CacheConfig struct {
@@ -113,6 +117,12 @@ type BackendConfig struct {
 	ClientKeyFile    string            `toml:"client_key_file"`
 	StripTrailingXFF bool              `toml:"strip_trailing_xff"`
 	Headers          map[string]string `toml:"headers"`
+
+	ProbeFailureThreshold int    `toml:"probe_failure_threshold"`
+	ProbeSuccessThreshold int    `toml:"probe_success_threshold"`
+	ProbePeriodSeconds    int    `toml:"probe_period_seconds"`
+	ProbeTimeoutSeconds   int    `toml:"probe_timeout_seconds"`
+	ProbeURL              string `toml:"probe_url"`
 
 	Weight int `toml:"weight"`
 

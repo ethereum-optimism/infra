@@ -125,6 +125,7 @@ func Start(config *Config) (*Server, func(), error) {
 		log.Info("Using max concurrent RPCs of", "maxConcurrentRPCs", maxConcurrentRPCs)
 	}
 
+	maxProbeDelay := time.Duration(0)
 	backendNames := make([]string, 0)
 	backendsByName := make(map[string]*Backend)
 	for name, cfg := range config.Backends {
@@ -179,6 +180,9 @@ func Start(config *Config) (*Server, func(), error) {
 				return nil, nil, err
 			}
 			opts = append(opts, WithBasicAuth(cfg.Username, passwordVal))
+		}
+		if cfg.ProbeURL != "" {
+			opts = append(opts, WithProbe(cfg.ProbeURL, cfg.ProbeFailureThreshold, cfg.ProbeSuccessThreshold, cfg.ProbePeriodSeconds, cfg.ProbeTimeoutSeconds))
 		}
 
 		headers := map[string]string{}
@@ -237,7 +241,48 @@ func Start(config *Config) (*Server, func(), error) {
 			"name", name,
 			"backend_names", backendNames,
 			"rpc_url", rpcURL,
-			"ws_url", wsURL)
+			"ws_url", wsURL,
+			"probe_url", back.probeURL)
+
+		if back.probeSpec != nil {
+			// capture the slowest probe
+			probeDelay := back.probeSpec.Period*time.Duration(back.probeSpec.FailureThreshold) + back.probeSpec.Timeout
+			if probeDelay > maxProbeDelay {
+				maxProbeDelay = probeDelay
+			}
+			// Create and launch probe worker
+			// Extract TLS config from backend to ensure consistent TLS validation
+			var probeTLSConfig *tls.Config
+			if back.client.Transport != nil {
+				if transport, ok := back.client.Transport.(*http.Transport); ok {
+					probeTLSConfig = transport.TLSClientConfig
+				}
+			}
+			back.ProbeWorker, err = NewProbeWorker(back.Name, back.probeURL, *back.probeSpec, func(healthy bool, msg string) {
+				if healthy {
+					if !back.IsProbeHealthy() {
+						log.Info("backend is now healthy", "name", back.Name)
+					}
+					back.SetProbeHealth(true)
+				} else {
+					if back.IsProbeHealthy() {
+						log.Info("backend is now unhealthy", "name", back.Name, "msg", msg)
+					}
+					back.SetProbeHealth(false)
+				}
+			}, probeTLSConfig)
+			if err != nil {
+				return nil, nil, err
+			}
+			// backend healthcheck starts here
+			back.ProbeWorker.Start()
+		}
+	}
+
+	// If any backend is in failed state, we want probe to fail before starting load balancing
+	if maxProbeDelay > 0 {
+		log.Info("waiting for initial probe run to complete", "delaySeconds", maxProbeDelay.Seconds())
+		time.Sleep(maxProbeDelay)
 	}
 
 	if config.InteropValidationConfig.Strategy == "" {
@@ -462,6 +507,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.Server.EnableTxHashLogging,
 		apiKeys,
 		config.TxValidationMiddlewareConfig,
+		time.Duration(config.Server.GracefulShutdownSeconds)*time.Second,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
@@ -598,6 +644,14 @@ func Start(config *Config) (*Server, func(), error) {
 	log.Info("started proxyd")
 
 	shutdownFunc := func() {
+		log.Info("draining proxyd")
+		srv.Drain()
+		log.Info("stopping probe workers")
+		for _, backEnd := range backendsByName {
+			if backEnd.ProbeWorker != nil {
+				backEnd.ProbeWorker.Stop()
+			}
+		}
 		log.Info("shutting down proxyd")
 		srv.Shutdown()
 		log.Info("goodbye")

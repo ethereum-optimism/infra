@@ -139,6 +139,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		false,                                  // enableTxHashLogging
 		nil,                                    // limExemptKeys
 		TxValidationMiddlewareConfig{},         // txValidationConfig
+		10*time.Second,                         // gracefulShutdownDuration
 	)
 	require.NoError(t, err)
 

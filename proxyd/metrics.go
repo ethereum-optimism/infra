@@ -471,6 +471,32 @@ var (
 		"backend_name",
 		"error",
 	})
+
+	backendProbeHealthy = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "backend_probe_healthy",
+		Help:      "Bool gauge for backend probe health status (1 = healthy, 0 = unhealthy)",
+	}, []string{
+		"backend_name",
+	})
+
+	backendProbeChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "backend_probe_checks_total",
+		Help:      "Count of backend probe checks by result",
+	}, []string{
+		"backend_name",
+		"result",
+	})
+
+	backendProbeDurationHist = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "backend_probe_duration_seconds",
+		Help:      "Histogram of backend probe durations",
+		Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	}, []string{
+		"backend_name",
+	})
 )
 
 func RecordRedisError(source string) {
@@ -642,6 +668,22 @@ func RecordBackendGroupMulticallRequest(bg *BackendGroup, backendName string) {
 
 func RecordBackendGroupMulticallCompletion(bg *BackendGroup, backendName string, error string) {
 	backendGroupMulticallCompletionCounter.WithLabelValues(bg.Name, backendName, error).Inc()
+}
+
+func RecordBackendProbeHealthy(backendName string, healthy bool) {
+	backendProbeHealthy.WithLabelValues(backendName).Set(boolToFloat64(healthy))
+}
+
+func RecordBackendProbeCheck(backendName string, success bool) {
+	result := "failure"
+	if success {
+		result = "success"
+	}
+	backendProbeChecksTotal.WithLabelValues(backendName, result).Inc()
+}
+
+func RecordBackendProbeDuration(backendName string, duration time.Duration) {
+	backendProbeDurationHist.WithLabelValues(backendName).Observe(duration.Seconds())
 }
 
 func boolToFloat64(b bool) float64 {

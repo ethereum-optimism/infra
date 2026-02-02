@@ -1,4 +1,5 @@
 [server]
+
 rpc_port = 8546
 
 [backend]
