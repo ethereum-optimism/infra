@@ -263,13 +263,13 @@ func NewServer(
 		txValidationClient:       txValidationClient,
 		txValidationFailOpen:     txValidationFailOpen,
 		gracefulShutdownDuration: gracefulShutdownDuration,
-		ingressRpc:              ingressRpc,
+		ingressRpc:               ingressRpc,
 		ingressRpcClient: &http.Client{
 			Timeout: defaultRPCTimeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-		},		
+		},
 	}, nil
 }
 
@@ -698,7 +698,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 						RecordIngressRequestDuration(time.Since(ingressStart))
 					}()
 				}
-			}			
+			}
 		}
 
 		// Apply transaction validation middleware if enabled and method is configured.
