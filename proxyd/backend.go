@@ -97,12 +97,6 @@ var (
 		Message:       "backend is currently not healthy to serve traffic",
 		HTTPErrorCode: 503,
 	}
-	ErrBlockOutOfRange = &RPCErr{
-		Code:          JSONRPCErrorInternal - 19,
-		Message:       "block is out of range",
-		HTTPErrorCode: 400,
-	}
-
 	ErrRequestBodyTooLarge = &RPCErr{
 		Code:          JSONRPCErrorInternal - 21,
 		Message:       "request body too large",
@@ -1794,9 +1788,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 				req:   req,
 				res:   &res,
 			})
-			if errors.Is(err, ErrRewriteBlockOutOfRange) {
-				res.Error = ErrBlockOutOfRange
-			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
+			if errors.Is(err, ErrRewriteRangeTooLarge) {
 				res.Error = ErrInvalidParams(
 					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
 				)

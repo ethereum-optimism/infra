@@ -32,10 +32,7 @@ const (
 	RewriteOverrideResponse
 )
 
-var (
-	ErrRewriteBlockOutOfRange = errors.New("block is out of range")
-	ErrRewriteRangeTooLarge   = errors.New("block range is too large")
-)
+var ErrRewriteRangeTooLarge = errors.New("block range is too large")
 
 // RewriteTags modifies the request and the response based on block tags
 func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
@@ -296,10 +293,6 @@ func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
 		case rpc.LatestBlockNumber:
 			return rctx.latest.String(), true, nil
 		}
-	default:
-		if rctx.latest > 0 && bnh.BlockNumber.Int64() > int64(rctx.latest) {
-			return "", false, ErrRewriteBlockOutOfRange
-		}
 	}
 
 	return current, false, nil
@@ -324,10 +317,6 @@ func rewriteTagBlockNumberOrHash(rctx RewriteContext, current *rpc.BlockNumberOr
 	case rpc.LatestBlockNumber:
 		bn := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(rctx.latest))
 		return &bn, true, nil
-	default:
-		if current.BlockNumber.Int64() > int64(rctx.latest) {
-			return nil, false, ErrRewriteBlockOutOfRange
-		}
 	}
 
 	return current, false, nil

@@ -752,19 +752,26 @@ func TestConsensus(t *testing.T) {
 		require.Equal(t, "0xe1", jsonMap["params"].([]interface{})[0])
 	})
 
-	t.Run("rewrite request of eth_getBlockByNumber - out of range", func(t *testing.T) {
+	t.Run("rewrite request of eth_getBlockByNumber - out of range is forwarded to backend", func(t *testing.T) {
 		reset()
 		useOnlyNode1()
 
+		// the request for a future block should be forwarded to the backend,
+		// which returns null per the Ethereum JSON-RPC spec
+		override("node1", "eth_getBlockByNumber", "0x300",
+			`{"jsonrpc":"2.0","id":67,"result":null}`)
+
 		resRaw, statusCode, err := client.SendRPC("eth_getBlockByNumber", []interface{}{"0x300"})
 		require.NoError(t, err)
-		require.Equal(t, 400, statusCode)
+		require.Equal(t, 200, statusCode)
 
 		var jsonMap map[string]interface{}
 		err = json.Unmarshal(resRaw, &jsonMap)
 		require.NoError(t, err)
-		require.Equal(t, -32019, int(jsonMap["error"].(map[string]interface{})["code"].(float64)))
-		require.Equal(t, "block is out of range", jsonMap["error"].(map[string]interface{})["message"])
+		require.Nil(t, jsonMap["result"])
+		require.Nil(t, jsonMap["error"])
+
+		require.Equal(t, 1, len(nodes["node1"].mockBackend.Requests()))
 	})
 
 	t.Run("batched rewrite", func(t *testing.T) {
@@ -786,9 +793,8 @@ func TestConsensus(t *testing.T) {
 		// rewrite latest to 0x101
 		require.Equal(t, "0x101", jsonMap[0]["result"].(map[string]interface{})["number"])
 
-		// out of bounds for block 0x102
-		require.Equal(t, -32019, int(jsonMap[1]["error"].(map[string]interface{})["code"].(float64)))
-		require.Equal(t, "block is out of range", jsonMap[1]["error"].(map[string]interface{})["message"])
+		// block 0x102 is beyond latest (0x101) but is forwarded to the backend
+		require.Equal(t, "0x102", jsonMap[1]["result"].(map[string]interface{})["number"])
 
 		// dont rewrite for 0xe1
 		require.Equal(t, "0xe1", jsonMap[2]["result"].(map[string]interface{})["number"])
