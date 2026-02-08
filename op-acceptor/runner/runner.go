@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -852,7 +853,19 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, args...)
 	defer cleanup()
 
-	stdoutFile, err := os.CreateTemp("", "op-acceptor-stdout-*.log")
+	// Create stdout temp file under log dir when available, so that if the process
+	// is killed mid-test the file remains in the run directory for investigation.
+	// Completed tests have the file processed and then deleted in defer.
+	// Include sanitized package name in the filename for identification.
+	stdoutTempDir := ""
+	if r.fileLogger != nil {
+		if logDir, err := r.fileLogger.GetDirectoryForRunID(r.runID); err == nil {
+			stdoutTempDir = logDir
+		}
+	}
+	pkgPrefix := sanitizeForFilename(metadata.Package, maxStdoutTempPrefixLen)
+	stdoutPattern := "op-acceptor-stdout-" + pkgPrefix + "-*.log"
+	stdoutFile, err := os.CreateTemp(stdoutTempDir, stdoutPattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout temp file: %w", err)
 	}
@@ -1039,6 +1052,29 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 // parseTestOutput parses the JSON test output and extracts test result information
 func (r *runner) parseTestOutput(output io.Reader, metadata types.ValidatorMetadata) *types.TestResult {
 	return r.outputParser.Parse(output, metadata)
+}
+
+// maxStdoutTempPrefixLen limits the package-based prefix in stdout temp filenames
+// so the full path stays well under PATH_MAX (1024 on Unix/macOS).
+const maxStdoutTempPrefixLen = 80
+
+// invalidFilenameChars matches one or more characters not allowed in a filename component (Unix/macOS).
+// Runs are replaced with a single '_' so e.g. "foo///bar" becomes "foo_bar".
+var invalidFilenameChars = regexp.MustCompile(`[^a-zA-Z0-9_.\-]+`)
+
+// sanitizeForFilename returns a string safe for use in a filename or path component:
+// only [a-zA-Z0-9_.-] are kept, others replaced with '_', truncated to maxLen (keeping the end).
+// Returns "pkg" if the result would be empty.
+func sanitizeForFilename(s string, maxLen int) string {
+	out := invalidFilenameChars.ReplaceAllString(s, "_")
+	out = strings.Trim(out, "._-")
+	if len(out) > maxLen {
+		out = out[len(out)-maxLen:]
+	}
+	if out == "" {
+		return "pkg"
+	}
+	return out
 }
 
 func buildStdoutSnippet(buf *tailBuffer) string {
