@@ -284,14 +284,6 @@ jobs:
             # Install tools from mise.toml
             mise install --verbose
       - run:
-          name: Install goreleaser pro
-          command: |
-            mkdir -p /tmp/goreleaser
-            cd /tmp/goreleaser
-            curl -L -o goreleaser.tgz https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3-pro/goreleaser-pro_Linux_x86_64.tar.gz
-            tar -xzvf goreleaser.tgz
-            mv goreleaser /usr/local/bin/goreleaser
-      - run:
           name: Configure Docker
           command: |
             gcloud auth configure-docker us-docker.pkg.dev
