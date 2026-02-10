@@ -1,8 +1,9 @@
-//go:build !windows
+//go:build windows
 
 package proxyd
 
-func setSockOptLinger(fd int) error {
-	// setSockOptLinger is not supported on Windows
-	return nil
+import "syscall"
+
+func setSockOptLinger(fd int, level int, opt int, l *syscall.Linger) error {
+	return syscall.SetsockoptLinger(syscall.Handle(fd), level, opt, l)
 }
