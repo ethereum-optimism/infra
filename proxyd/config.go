@@ -226,6 +226,7 @@ type Config struct {
 	Tracing               TracingConfig         `toml:"tracing"`
 	SenderRateLimit       SenderRateLimitConfig `toml:"sender_rate_limit"`
 	SanctionedAddresses   []string              `toml:"sanctioned_addresses"`
+	WatchedAddresses      []string              `toml:"watched_addresses"`
 }
 
 func ReadFromEnvOrConfig(value string) (string, error) {

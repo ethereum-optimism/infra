@@ -84,6 +84,7 @@ type Server struct {
 	srvMu                  sync.Mutex
 	rateLimitHeader        string
 	sanctionedAddresses    map[common.Address]struct{}
+	watchedAddresses       map[common.Address]struct{}
 }
 
 type limiterFunc func(method string) bool
@@ -106,6 +107,7 @@ func NewServer(
 	maxBatchSize int,
 	redisClient *redis.Client,
 	sanctionedAddresses map[common.Address]struct{},
+	watchedAddresses map[common.Address]struct{},
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -207,6 +209,7 @@ func NewServer(
 		limExemptUserAgents:    limExemptUserAgents,
 		rateLimitHeader:        rateLimitHeader,
 		sanctionedAddresses:    sanctionedAddresses,
+		watchedAddresses:       watchedAddresses,
 	}, nil
 }
 
@@ -449,6 +452,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		// Log request information
 		s.LogRequestInfo(ctx, parsedReq, "rpc", rawBody)
+
+		// Log transaction details if from/to matches a watched address
+		s.LogWatchedAddressTransaction(ctx, parsedReq)
 
 		// Check for Valora's specific eth_call request
 		if isValora && parsedReq.Method == "eth_call" {
@@ -1229,6 +1235,170 @@ func (s *Server) extractCallInfo(req *RPCReq, info *RequestInfo) {
 // extractEstimateGasInfo extracts gas estimation information
 func (s *Server) extractEstimateGasInfo(req *RPCReq, info *RequestInfo) {
 	s.extractCallInfo(req, info) // Same structure as eth_call
+}
+
+// LogWatchedAddressTransaction checks if a transaction involves any watched address
+// and if so, logs all available transaction details.
+func (s *Server) LogWatchedAddressTransaction(ctx context.Context, req *RPCReq) {
+	if len(s.watchedAddresses) == 0 {
+		return
+	}
+
+	switch req.Method {
+	case "eth_sendRawTransaction":
+		s.logWatchedRawTransaction(ctx, req)
+	case "eth_sendTransaction", "eth_call", "eth_estimateGas":
+		s.logWatchedCallTransaction(ctx, req)
+	}
+}
+
+// logWatchedRawTransaction decodes a raw transaction and logs it if from/to matches a watched address
+func (s *Server) logWatchedRawTransaction(ctx context.Context, req *RPCReq) {
+	tx, from, err := s.processTransaction(ctx, req)
+	if err != nil {
+		return
+	}
+
+	to := tx.To()
+	fromWatched := s.isWatchedAddress(from)
+	toWatched := to != nil && s.isWatchedAddress(to)
+
+	if !fromWatched && !toWatched {
+		return
+	}
+
+	logFields := []interface{}{
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"method", req.Method,
+		"tx_hash", tx.Hash().Hex(),
+		"from", from.Hex(),
+		"nonce", tx.Nonce(),
+		"value", tx.Value().String(),
+		"gas", tx.Gas(),
+		"chain_id", tx.ChainId().String(),
+		"tx_type", tx.Type(),
+	}
+
+	if to != nil {
+		logFields = append(logFields, "to", to.Hex())
+	} else {
+		logFields = append(logFields, "to", "contract_creation")
+	}
+
+	if tx.GasPrice() != nil && tx.GasPrice().Sign() > 0 {
+		logFields = append(logFields, "gas_price", tx.GasPrice().String())
+	}
+	if tx.GasTipCap() != nil && tx.GasTipCap().Sign() > 0 {
+		logFields = append(logFields, "gas_tip_cap", tx.GasTipCap().String())
+	}
+	if tx.GasFeeCap() != nil && tx.GasFeeCap().Sign() > 0 {
+		logFields = append(logFields, "gas_fee_cap", tx.GasFeeCap().String())
+	}
+	if len(tx.Data()) > 0 {
+		dataHex := fmt.Sprintf("0x%x", tx.Data())
+		logFields = append(logFields, "data", truncate(dataHex, 256))
+		logFields = append(logFields, "data_len", len(tx.Data()))
+	}
+	if tx.BlobGasFeeCap() != nil && tx.BlobGasFeeCap().Sign() > 0 {
+		logFields = append(logFields, "blob_gas_fee_cap", tx.BlobGasFeeCap().String())
+	}
+	if tx.BlobGas() > 0 {
+		logFields = append(logFields, "blob_gas", tx.BlobGas())
+	}
+
+	logFields = append(logFields, "from_watched", fromWatched, "to_watched", toWatched)
+
+	log.Info("watched address transaction detected", logFields...)
+}
+
+// logWatchedCallTransaction checks eth_sendTransaction / eth_call / eth_estimateGas params
+// for watched addresses and logs details if found
+func (s *Server) logWatchedCallTransaction(ctx context.Context, req *RPCReq) {
+	var params []json.RawMessage
+	if err := json.Unmarshal(req.Params, &params); err != nil || len(params) == 0 {
+		return
+	}
+
+	var callObj map[string]json.RawMessage
+	if err := json.Unmarshal(params[0], &callObj); err != nil {
+		return
+	}
+
+	var fromStr, toStr string
+	if raw, ok := callObj["from"]; ok {
+		json.Unmarshal(raw, &fromStr) // nolint:errcheck
+	}
+	if raw, ok := callObj["to"]; ok {
+		json.Unmarshal(raw, &toStr) // nolint:errcheck
+	}
+
+	var fromAddr, toAddr *common.Address
+	if common.IsHexAddress(fromStr) {
+		a := common.HexToAddress(fromStr)
+		fromAddr = &a
+	}
+	if common.IsHexAddress(toStr) {
+		a := common.HexToAddress(toStr)
+		toAddr = &a
+	}
+
+	fromWatched := fromAddr != nil && s.isWatchedAddress(fromAddr)
+	toWatched := toAddr != nil && s.isWatchedAddress(toAddr)
+
+	if !fromWatched && !toWatched {
+		return
+	}
+
+	logFields := []interface{}{
+		"req_id", GetReqID(ctx),
+		"auth", GetAuthCtx(ctx),
+		"method", req.Method,
+	}
+
+	if fromAddr != nil {
+		logFields = append(logFields, "from", fromAddr.Hex())
+	}
+	if toAddr != nil {
+		logFields = append(logFields, "to", toAddr.Hex())
+	}
+
+	// Extract optional fields from the call object
+	for _, field := range []string{"value", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce"} {
+		if raw, ok := callObj[field]; ok {
+			var val string
+			if json.Unmarshal(raw, &val) == nil && val != "" {
+				logFields = append(logFields, field, val)
+			}
+		}
+	}
+
+	if raw, ok := callObj["data"]; ok {
+		var dataStr string
+		if json.Unmarshal(raw, &dataStr) == nil && dataStr != "" {
+			logFields = append(logFields, "data", truncate(dataStr, 256))
+			logFields = append(logFields, "data_len", len(dataStr))
+		}
+	}
+	if raw, ok := callObj["input"]; ok {
+		var inputStr string
+		if json.Unmarshal(raw, &inputStr) == nil && inputStr != "" {
+			logFields = append(logFields, "input", truncate(inputStr, 256))
+		}
+	}
+
+	logFields = append(logFields, "from_watched", fromWatched, "to_watched", toWatched)
+
+	log.Info("watched address transaction detected", logFields...)
+}
+
+// isWatchedAddress checks if an address is in the watched addresses set
+func (s *Server) isWatchedAddress(addr *common.Address) bool {
+	if addr == nil || len(s.watchedAddresses) == 0 {
+		return false
+	}
+	_, ok := s.watchedAddresses[*addr]
+	return ok
 }
 
 // extractAddressFromParams extracts address from first parameter (for balance, code, etc.)

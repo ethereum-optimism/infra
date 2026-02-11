@@ -288,6 +288,56 @@ func TestContainsArchiveRequiredError(t *testing.T) {
 			expected: false,
 		},
 		{
+			name: "got 0 receipts but expected in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "got 0 receipts but expected 124",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "got 0 receipts but expected in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "failed to fetch receipts: got 0 receipts but expected 124",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "received 0 receipts but expected in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "received 0 receipts but expected 50",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "received 0 receipts but expected in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "temp: failed to fetch receipts for L1 sysCfg update: received 0 receipts but expected 10",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "got 0 receipts without expected (should not match)",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "got 0 receipts from upstream",
+				},
+			},
+			expected: false,
+		},
+		{
 			name: "no error",
 			response: &RPCRes{
 				Result: json.RawMessage(`"0x123"`),

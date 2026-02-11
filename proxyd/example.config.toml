@@ -121,6 +121,14 @@ backends = ["alchemy"]
 # in order for it to be value TOML, e.g. "$FOO_AUTH_KEY" = "foo_alias".
 secret = "test"
 
+# List of addresses to watch. When a transaction's 'from' or 'to' matches
+# one of these addresses, all transaction details (from, to, data, gasPrice,
+# gasTip, nonce, value, hash, etc.) will be logged.
+# watched_addresses = [
+#   "0x1234567890123456789012345678901234567890",
+#   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+# ]
+
 # Mapping of methods to backend groups.
 [rpc_method_mappings]
 eth_call = "main"

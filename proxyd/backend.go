@@ -428,6 +428,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"method", metricLabelMethod,
 			)
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
+		case ErrBackendOverCapacity:
+			log.Warn(
+				"backend over capacity",
+				"name", b.Name,
+				"req_id", GetReqID(ctx),
+				"method", metricLabelMethod,
+			)
+			RecordBatchRPCError(ctx, b.Name, reqs, err)
 		case ErrConsensusGetReceiptsCantBeBatched:
 			log.Warn(
 				"Received unsupported batch request for consensus_getReceipts",
@@ -626,6 +634,11 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	if err != nil {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		// Check if this is a "too many requests" error from our own rate limiter
+		// to enable failover to other backends instead of retrying the same one
+		if strings.Contains(err.Error(), "too many requests") {
+			return nil, ErrBackendOverCapacity
+		}
 		return nil, wrapErr(err, "error in backend request")
 	}
 
@@ -645,6 +658,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		// Return ErrBackendOverCapacity for 429 responses to enable failover to other backends
+		if httpRes.StatusCode == 429 {
+			return nil, ErrBackendOverCapacity
+		}
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
@@ -1272,6 +1289,9 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		// Log WebSocket request information
 		w.server.LogRequestInfo(ctx, req, "websocket")
 
+		// Log transaction details if from/to matches a watched address
+		w.server.LogWatchedAddressTransaction(ctx, req)
+
 		// Send eth_accounts requests directly to the client
 		if req.Method == "eth_accounts" {
 			msg = mustMarshalJSON(NewRPCRes(req.ID, emptyArrayResponse))
@@ -1843,7 +1863,11 @@ func containsArchiveRequiredError(responses []*RPCRes) bool {
 				strings.Contains(res.Error.Message, "data before") && strings.Contains(res.Error.Message, "not available") ||
 				strings.Contains(res.Error.Data, "data before") && strings.Contains(res.Error.Data, "not available") ||
 				strings.Contains(res.Error.Message, "state at block") && strings.Contains(res.Error.Message, "is pruned") ||
-				strings.Contains(res.Error.Data, "state at block") && strings.Contains(res.Error.Data, "is pruned") {
+				strings.Contains(res.Error.Data, "state at block") && strings.Contains(res.Error.Data, "is pruned") ||
+				strings.Contains(res.Error.Message, "got 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
+				strings.Contains(res.Error.Data, "got 0 receipts") && strings.Contains(res.Error.Data, "expected") ||
+				strings.Contains(res.Error.Message, "received 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
+				strings.Contains(res.Error.Data, "received 0 receipts") && strings.Contains(res.Error.Data, "expected") {
 				return true
 			}
 		}
