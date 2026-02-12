@@ -646,7 +646,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
 		// limits apply regardless of origin or user-agent. As such, they don't use the
 		// isLimited method.
-		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" {
+		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" || parsedReq.Method == "eth_sendRawTransactionSync" {
 			tx, err := s.convertSendReqToSendTx(ctx, parsedReq)
 			if err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
@@ -907,15 +907,19 @@ func (s *Server) convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*type
 		log.Debug("raw transaction conditional request has invalid number of params", "req_id", GetReqID(ctx))
 		// The error below is identical to the one Geth responds with.
 		return nil, ErrInvalidParams("missing value for required argument 0 or 1")
+	} else if req.Method == "eth_sendRawTransactionSync" && (len(params) == 0 || len(params) > 2) {
+		log.Debug("raw transaction sync request has invalid number of params", "req_id", GetReqID(ctx))
+		// The error below is identical to the one Geth responds with.
+		return nil, ErrInvalidParams("missing value for required argument 0")
 	}
 
-	address, ok := params[0].(string)
+	signedTransaction, ok := params[0].(string)
 	if !ok {
 		return nil, ErrParseErr
 	}
 
 	var data hexutil.Bytes
-	if err := data.UnmarshalText([]byte(address)); err != nil {
+	if err := data.UnmarshalText([]byte(signedTransaction)); err != nil {
 		log.Debug("error decoding raw tx data", "err", err, "req_id", GetReqID(ctx))
 		// Geth returns the raw error from UnmarshalText.
 		return nil, ErrInvalidParams(err.Error())
