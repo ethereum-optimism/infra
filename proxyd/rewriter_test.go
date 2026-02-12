@@ -65,14 +65,8 @@ func TestRewriteRequest(t *testing.T) {
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String()}})},
 				res:  nil,
 			},
-			expected: RewriteOverrideRequest,
-			check: func(t *testing.T, args args) {
-				var p []map[string]interface{}
-				err := json.Unmarshal(args.req.Params, &p)
-				require.Nil(t, err)
-				require.Equal(t, hexutil.Uint64(111).String(), p[0]["fromBlock"])
-				require.Equal(t, hexutil.Uint64(100).String(), p[0]["toBlock"])
-			},
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		{
 			name: "eth_getLogs toBlock latest",
@@ -111,14 +105,8 @@ func TestRewriteRequest(t *testing.T) {
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(111).String()}})},
 				res:  nil,
 			},
-			expected: RewriteOverrideRequest,
-			check: func(t *testing.T, args args) {
-				var p []map[string]interface{}
-				err := json.Unmarshal(args.req.Params, &p)
-				require.Nil(t, err)
-				require.Equal(t, hexutil.Uint64(100).String(), p[0]["fromBlock"])
-				require.Equal(t, hexutil.Uint64(111).String(), p[0]["toBlock"])
-			},
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		{
 			name: "eth_getLogs fromBlock, toBlock latest",
@@ -159,7 +147,8 @@ func TestRewriteRequest(t *testing.T) {
 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String(), "toBlock": hexutil.Uint64(222).String()}})},
 				res:  nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		{
 			name: "eth_getLogs fromBlock -> toBlock above max range",
@@ -251,13 +240,14 @@ func TestRewriteRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "debug_getRawReceipts out of range passes through to backend",
+			name: "debug_getRawReceipts out of range",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		{
 			name: "debug_getRawReceipts missing parameter",
@@ -356,13 +346,14 @@ func TestRewriteRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "eth_getCode out of range passes through to backend",
+			name: "eth_getCode out of range",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		/* default block parameter, at position 2 */
 		{
@@ -424,13 +415,14 @@ func TestRewriteRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "eth_getStorageAt out of range passes through to backend",
+			name: "eth_getStorageAt out of range",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		/* default block parameter, at position 0 */
 		{
@@ -514,13 +506,14 @@ func TestRewriteRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "eth_getBlockByNumber out of range passes through to backend",
+			name: "eth_getBlockByNumber out of range",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
 				res:  nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 		{
 			name: "eth_getStorageAt using rpc.BlockNumberOrHash",
@@ -602,7 +595,7 @@ func TestRewriteRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "eth_getStorageAt using rpc.BlockNumberOrHash out of range passes through to backend",
+			name: "eth_getStorageAt using rpc.BlockNumberOrHash out of range",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
@@ -613,7 +606,8 @@ func TestRewriteRequest(t *testing.T) {
 					}})},
 				res: nil,
 			},
-			expected: RewriteNone,
+			expected:    RewriteOverrideError,
+			expectedErr: ErrRewriteBlockOutOfRange,
 		},
 	}
 

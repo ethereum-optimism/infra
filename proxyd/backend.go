@@ -1788,7 +1788,39 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 				req:   req,
 				res:   &res,
 			})
-			if errors.Is(err, ErrRewriteRangeTooLarge) {
+			if errors.Is(err, ErrRewriteBlockOutOfRange) {
+				// Return spec-compliant response for out-of-range blocks
+				// instead of forwarding to backend (fail-fast)
+				log.Debug(
+					"returning spec-compliant response for out-of-range block request",
+					"method", req.Method,
+					"req_id", req.ID,
+				)
+				switch req.Method {
+				case "eth_getBlockByNumber",
+					"eth_getBlockByHash",
+					"eth_getBlockReceipts",
+					"eth_getBlockTransactionCountByNumber",
+					"eth_getUncleCountByBlockNumber",
+					"eth_getTransactionByBlockNumberAndIndex",
+					"eth_getUncleByBlockNumberAndIndex",
+					"debug_getRawReceipts",
+					"consensus_getReceipts":
+					res.Result = json.RawMessage("null")
+				case "eth_getLogs":
+					res.Result = json.RawMessage("[]")
+				case "eth_getCode":
+					res.Result = json.RawMessage("\"0x\"")
+				case "eth_getStorageAt":
+					res.Result = json.RawMessage("\"0x0000000000000000000000000000000000000000000000000000000000000000\"")
+				case "eth_getBalance",
+					"eth_getTransactionCount":
+					res.Result = json.RawMessage("\"0x0\"")
+				default:
+					// For unknown methods, return null
+					res.Result = json.RawMessage("null")
+				}
+			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
 				res.Error = ErrInvalidParams(
 					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
 				)
