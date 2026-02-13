@@ -117,7 +117,6 @@ func (i *InstrumentedEthClient) ignorableErrors(err error) bool {
 	msg := err.Error()
 	// we dont use errors.Is because eth client actually uses errors.New,
 	// therefore creating an incomparable instance :(
-	return msg == ethereum.NotFound.Error() ||
-		msg == txpool.ErrAlreadyKnown.Error() ||
+	return msg == txpool.ErrAlreadyKnown.Error() ||
 		msg == core.ErrNonceTooLow.Error()
 }
