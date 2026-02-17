@@ -296,12 +296,27 @@ func (r *runner) collectTestWork() []TestWork {
 			r.log.Warn("Failed to load timing file, falling back to round-robin",
 				"path", r.splitTimingFile, "error", err)
 		}
+		if len(timings) > 0 {
+			r.log.Info("Using timing-based bin-packing for CI split",
+				"timingFile", r.splitTimingFile,
+				"knownPackages", len(timings))
+		} else if r.splitTimingFile == "" {
+			r.log.Info("No timing file configured, using round-robin split")
+		} else {
+			r.log.Info("Timing file not found or empty, using round-robin split",
+				"timingFile", r.splitTimingFile)
+		}
 		workItems = ApplySplitFilter(workItems, r.splitTotal, r.splitIndex, timings)
 		r.log.Info("Applied CI split filter",
 			"splitTotal", r.splitTotal,
 			"splitIndex", r.splitIndex,
 			"workItems", len(workItems),
-			"timingBased", len(timings) > 0)
+			"algorithm", func() string {
+				if len(timings) > 0 {
+					return "timing-based"
+				}
+				return "round-robin"
+			}())
 	}
 
 	return workItems
