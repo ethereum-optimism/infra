@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -286,7 +287,40 @@ func (r *runner) collectTestWork() []TestWork {
 		}
 	}
 
+	// Apply CI split filtering if configured
+	if r.splitTotal > 0 {
+		workItems = ApplySplitFilter(workItems, r.splitTotal, r.splitIndex)
+		r.log.Info("Applied CI split filter",
+			"splitTotal", r.splitTotal,
+			"splitIndex", r.splitIndex,
+			"workItems", len(workItems))
+	}
+
 	return workItems
+}
+
+// splitKey returns a deterministic key for sorting work items during CI split filtering.
+// Includes GateID so that the same package appearing under different gates (via inheritance)
+// gets a stable, distinct position in the sort order.
+func splitKey(w TestWork) string {
+	return w.GateID + "|" + w.Validator.Package + "|" + w.Validator.FuncName
+}
+
+// ApplySplitFilter sorts work items deterministically and returns only those assigned
+// to the given split index. Items are distributed round-robin: item i is assigned to
+// node i % total.
+func ApplySplitFilter(items []TestWork, total, index int) []TestWork {
+	sort.Slice(items, func(i, j int) bool {
+		return splitKey(items[i]) < splitKey(items[j])
+	})
+
+	var filtered []TestWork
+	for i, item := range items {
+		if i%total == index {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 // initializeProgressTracking sets up data structures to concurrently

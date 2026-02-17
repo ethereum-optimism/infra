@@ -131,6 +131,8 @@ type runner struct {
 	serial             bool     // Whether to run tests serially instead of in parallel
 	concurrency        int      // Number of concurrent test workers (0 = auto-determine)
 	targetGates        []string // Target gates specified for this run
+	splitTotal         int      // Total split nodes for CI parallelism (0 = no splitting)
+	splitIndex         int      // This node's index (0-based) for CI parallelism
 
 	// New component fields
 	executor     TestExecutor
@@ -157,6 +159,8 @@ type Config struct {
 	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
 	ShowProgress       bool          // Whether to show periodic progress updates during test execution
 	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
+	SplitTotal         int           // Total split nodes for CI parallelism (0 = no splitting)
+	SplitIndex         int           // This node's index (0-based) for CI parallelism
 }
 
 // NewTestRunner creates a new test runner instance
@@ -208,6 +212,8 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		serial:             cfg.Serial,
 		concurrency:        cfg.Concurrency,
 		targetGates:        cfg.TargetGate,
+		splitTotal:         cfg.SplitTotal,
+		splitIndex:         cfg.SplitIndex,
 	}
 
 	// Initialize new components
