@@ -338,6 +338,26 @@ func TestContainsArchiveRequiredError(t *testing.T) {
 			expected: false,
 		},
 		{
+			name: "no transactions snapshot file in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "no transactions snapshot file for blockNum=8825881, BlocksAvailable=10278999",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "no transactions snapshot file in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "temp: failed to fetch receipts: no transactions snapshot file for blockNum=8825881",
+				},
+			},
+			expected: true,
+		},
+		{
 			name: "no error",
 			response: &RPCRes{
 				Result: json.RawMessage(`"0x123"`),

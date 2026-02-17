@@ -1844,6 +1844,7 @@ func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64
 // - "missing trie node" - node doesn't have the historical state
 // - "old data not available due to pruning" - data has been pruned
 // - "root hash mismatch witnessTrieRootHash" - witness trie root hash mismatch
+// - "no transactions snapshot file" - backend doesn't have transaction snapshot for the block
 func containsArchiveRequiredError(responses []*RPCRes) bool {
 	for _, res := range responses {
 		if res != nil && res.IsError() && res.Error != nil {
@@ -1867,7 +1868,9 @@ func containsArchiveRequiredError(responses []*RPCRes) bool {
 				strings.Contains(res.Error.Message, "got 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
 				strings.Contains(res.Error.Data, "got 0 receipts") && strings.Contains(res.Error.Data, "expected") ||
 				strings.Contains(res.Error.Message, "received 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
-				strings.Contains(res.Error.Data, "received 0 receipts") && strings.Contains(res.Error.Data, "expected") {
+				strings.Contains(res.Error.Data, "received 0 receipts") && strings.Contains(res.Error.Data, "expected") ||
+				strings.Contains(res.Error.Message, "no transactions snapshot file") ||
+				strings.Contains(res.Error.Data, "no transactions snapshot file") {
 				return true
 			}
 		}
