@@ -448,7 +448,7 @@ func TestApplySplitFilter(t *testing.T) {
 		seen := make(map[string]bool)
 
 		for idx := 0; idx < total; idx++ {
-			subset := ApplySplitFilter(items, total, idx)
+			subset := ApplySplitFilter(items, total, idx, nil)
 			for _, item := range subset {
 				key := item.Validator.Package + "|" + item.Validator.FuncName
 				assert.False(t, seen[key], "item %s assigned to multiple nodes", key)
@@ -461,7 +461,7 @@ func TestApplySplitFilter(t *testing.T) {
 	})
 
 	t.Run("split into 1 node returns all items", func(t *testing.T) {
-		result := ApplySplitFilter(items, 1, 0)
+		result := ApplySplitFilter(items, 1, 0, nil)
 		assert.Len(t, result, 10, "single node should get all items")
 	})
 
@@ -469,14 +469,14 @@ func TestApplySplitFilter(t *testing.T) {
 		total := 20
 		var all []TestWork
 		for idx := 0; idx < total; idx++ {
-			all = append(all, ApplySplitFilter(items, total, idx)...)
+			all = append(all, ApplySplitFilter(items, total, idx, nil)...)
 		}
 		assert.Len(t, all, 10, "all items should be covered even with excess nodes")
 	})
 
 	t.Run("split is deterministic", func(t *testing.T) {
-		result1 := ApplySplitFilter(items, 3, 1)
-		result2 := ApplySplitFilter(items, 3, 1)
+		result1 := ApplySplitFilter(items, 3, 1, nil)
+		result2 := ApplySplitFilter(items, 3, 1, nil)
 		require.Len(t, result1, len(result2))
 		for i := range result1 {
 			assert.Equal(t, result1[i].Validator.Package, result2[i].Validator.Package)
@@ -487,11 +487,178 @@ func TestApplySplitFilter(t *testing.T) {
 	t.Run("nodes get roughly equal work", func(t *testing.T) {
 		total := 3
 		for idx := 0; idx < total; idx++ {
-			subset := ApplySplitFilter(items, total, idx)
+			subset := ApplySplitFilter(items, total, idx, nil)
 			// 10 items / 3 nodes = 3 or 4 per node
 			assert.True(t, len(subset) >= 3 && len(subset) <= 4,
 				"node %d got %d items, expected 3-4", idx, len(subset))
 		}
+	})
+}
+
+func TestApplySplitFilterWithTimings(t *testing.T) {
+	// Create items with known timing characteristics:
+	// One heavy package (120s) and several light ones (10s each)
+	items := []TestWork{
+		{Validator: types.ValidatorMetadata{Package: "./heavy", FuncName: ""}, GateID: "gate", ResultKey: "./heavy"},
+		{Validator: types.ValidatorMetadata{Package: "./light1", FuncName: ""}, GateID: "gate", ResultKey: "./light1"},
+		{Validator: types.ValidatorMetadata{Package: "./light2", FuncName: ""}, GateID: "gate", ResultKey: "./light2"},
+		{Validator: types.ValidatorMetadata{Package: "./light3", FuncName: ""}, GateID: "gate", ResultKey: "./light3"},
+		{Validator: types.ValidatorMetadata{Package: "./light4", FuncName: ""}, GateID: "gate", ResultKey: "./light4"},
+		{Validator: types.ValidatorMetadata{Package: "./light5", FuncName: ""}, GateID: "gate", ResultKey: "./light5"},
+	}
+
+	timings := map[string]float64{
+		"gate|./heavy|":  120.0,
+		"gate|./light1|": 10.0,
+		"gate|./light2|": 10.0,
+		"gate|./light3|": 10.0,
+		"gate|./light4|": 10.0,
+		"gate|./light5|": 10.0,
+	}
+
+	t.Run("heavy item gets its own node", func(t *testing.T) {
+		total := 2
+		node0 := ApplySplitFilter(items, total, 0, timings)
+		node1 := ApplySplitFilter(items, total, 1, timings)
+
+		// All items should be covered
+		assert.Equal(t, len(items), len(node0)+len(node1))
+
+		// The heavy item should be alone on one node, lights on the other
+		// With LPT: heavy goes to node 0, then lights fill node 1 until it's still less
+		// Actually: heavy(120) → node0. light1(10) → node1(10). light2(10) → node1(20).
+		// light3(10) → node1(30). light4(10) → node1(40). light5(10) → node1(50).
+		// So node0=[heavy], node1=[light1..light5]
+
+		// Find which node has the heavy item
+		var heavyNode, lightNode []TestWork
+		for _, item := range node0 {
+			if item.Validator.Package == "./heavy" {
+				heavyNode = node0
+				lightNode = node1
+				break
+			}
+		}
+		if heavyNode == nil {
+			heavyNode = node1
+			lightNode = node0
+		}
+
+		assert.Len(t, heavyNode, 1, "heavy item should be alone")
+		assert.Len(t, lightNode, 5, "all lights should be together")
+	})
+
+	t.Run("all items covered with timings", func(t *testing.T) {
+		total := 3
+		var all []TestWork
+		seen := make(map[string]bool)
+
+		for idx := 0; idx < total; idx++ {
+			subset := ApplySplitFilter(items, total, idx, timings)
+			for _, item := range subset {
+				key := splitKey(item)
+				assert.False(t, seen[key], "item %s assigned to multiple nodes", key)
+				seen[key] = true
+			}
+			all = append(all, subset...)
+		}
+		assert.Len(t, all, len(items), "all items should be covered across nodes")
+	})
+
+	t.Run("timing split is deterministic", func(t *testing.T) {
+		result1 := ApplySplitFilter(items, 3, 1, timings)
+		result2 := ApplySplitFilter(items, 3, 1, timings)
+		require.Len(t, result1, len(result2))
+		for i := range result1 {
+			assert.Equal(t, splitKey(result1[i]), splitKey(result2[i]))
+		}
+	})
+
+	t.Run("balanced distribution with equal timings", func(t *testing.T) {
+		equalTimings := map[string]float64{
+			"gate|./heavy|":  30.0,
+			"gate|./light1|": 30.0,
+			"gate|./light2|": 30.0,
+			"gate|./light3|": 30.0,
+			"gate|./light4|": 30.0,
+			"gate|./light5|": 30.0,
+		}
+		total := 3
+		for idx := 0; idx < total; idx++ {
+			subset := ApplySplitFilter(items, total, idx, equalTimings)
+			// 6 items / 3 nodes = 2 per node
+			assert.Len(t, subset, 2, "node %d should get 2 items with equal timings", idx)
+		}
+	})
+}
+
+func TestApplySplitFilterTimingFallback(t *testing.T) {
+	items := []TestWork{
+		{Validator: types.ValidatorMetadata{Package: "./pkg1", FuncName: "TestA"}, GateID: "gate"},
+		{Validator: types.ValidatorMetadata{Package: "./pkg2", FuncName: "TestB"}, GateID: "gate"},
+	}
+
+	// With nil timings, should fall back to round-robin
+	node0 := ApplySplitFilter(items, 2, 0, nil)
+	node1 := ApplySplitFilter(items, 2, 1, nil)
+	assert.Equal(t, 2, len(node0)+len(node1))
+
+	// With empty timings, should also fall back to round-robin
+	node0Empty := ApplySplitFilter(items, 2, 0, map[string]float64{})
+	node1Empty := ApplySplitFilter(items, 2, 1, map[string]float64{})
+	assert.Equal(t, 2, len(node0Empty)+len(node1Empty))
+}
+
+func TestLoadWriteTimingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "timing.json")
+
+	// Write timing data
+	original := map[string]float64{
+		"gate|./pkg1|TestA": 45.2,
+		"gate|./pkg2|":      120.5,
+		"gate|./pkg3|TestC": 8.1,
+	}
+	err := WriteTimingFile(path, original)
+	require.NoError(t, err)
+
+	// Read it back
+	loaded, err := LoadTimingFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, original, loaded)
+}
+
+func TestLoadTimingFileNotExist(t *testing.T) {
+	// Non-existent file returns nil, nil
+	timings, err := LoadTimingFile("/nonexistent/path/timing.json")
+	assert.NoError(t, err)
+	assert.Nil(t, timings)
+}
+
+func TestLoadTimingFileEmpty(t *testing.T) {
+	// Empty path returns nil, nil
+	timings, err := LoadTimingFile("")
+	assert.NoError(t, err)
+	assert.Nil(t, timings)
+}
+
+func TestMedianTiming(t *testing.T) {
+	t.Run("empty map returns 60", func(t *testing.T) {
+		assert.Equal(t, 60.0, medianTiming(map[string]float64{}))
+	})
+
+	t.Run("single value", func(t *testing.T) {
+		assert.Equal(t, 42.0, medianTiming(map[string]float64{"a": 42.0}))
+	})
+
+	t.Run("odd count", func(t *testing.T) {
+		m := map[string]float64{"a": 10, "b": 20, "c": 30}
+		assert.Equal(t, 20.0, medianTiming(m))
+	})
+
+	t.Run("even count", func(t *testing.T) {
+		m := map[string]float64{"a": 10, "b": 20, "c": 30, "d": 40}
+		assert.Equal(t, 25.0, medianTiming(m))
 	})
 }
 

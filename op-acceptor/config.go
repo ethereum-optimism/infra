@@ -40,6 +40,8 @@ type Config struct {
 	ReportFromEvents     string                 // Path to raw events file for report-only mode (empty = normal mode)
 	SplitTotal           int                    // Total split nodes for CI parallelism (0 = no splitting)
 	SplitIndex           int                    // This node's index (0-based) for CI parallelism
+	SplitTimingFile      string                 // Path to JSON timing hints for balanced CI splitting
+	SplitTimingOutput    string                 // Path to write updated timing data after test execution
 	Log                  log.Logger
 	ExcludeGates         []string // List of gate IDs whose tests should be excluded
 }
@@ -166,6 +168,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		ReportFromEvents:     ctx.String(flags.ReportFromEvents.Name),
 		SplitTotal:           splitTotal,
 		SplitIndex:           splitIndex,
+		SplitTimingFile:      ctx.String(flags.SplitTimingFile.Name),
+		SplitTimingOutput:    ctx.String(flags.SplitTimingOutput.Name),
 		LogDir:               logDir,
 		Log:                  log,
 		ExcludeGates:         excludeGates,

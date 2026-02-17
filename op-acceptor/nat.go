@@ -199,6 +199,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		ProgressInterval:   config.ProgressInterval,
 		SplitTotal:         config.SplitTotal,
 		SplitIndex:         config.SplitIndex,
+		SplitTimingFile:    config.SplitTimingFile,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -547,6 +548,18 @@ func (n *nat) runTests(ctx context.Context) error {
 				_ = n.fileLogger.CompleteWithTiming(n.result.RunID, n.result.WallClockTime)
 			}
 			return nil
+		}
+	}
+
+	// Write timing output if configured (for CI caching)
+	if n.config.SplitTimingOutput != "" && !n.config.FlakeShake && n.result != nil {
+		timingData := n.extractTimingData(n.result)
+		if err := runner.WriteTimingFile(n.config.SplitTimingOutput, timingData); err != nil {
+			n.config.Log.Error("Failed to write timing output", "path", n.config.SplitTimingOutput, "error", err)
+		} else {
+			n.config.Log.Info("Wrote timing output for CI caching",
+				"path", n.config.SplitTimingOutput,
+				"packages", len(timingData))
 		}
 	}
 
@@ -1055,7 +1068,12 @@ func (n *nat) dryRun(ctx context.Context) error {
 				})
 			}
 		}
-		filtered := runner.ApplySplitFilter(allWork, n.config.SplitTotal, n.config.SplitIndex)
+		timings, err := runner.LoadTimingFile(n.config.SplitTimingFile)
+		if err != nil {
+			n.config.Log.Warn("Failed to load timing file, falling back to round-robin",
+				"path", n.config.SplitTimingFile, "error", err)
+		}
+		filtered := runner.ApplySplitFilter(allWork, n.config.SplitTotal, n.config.SplitIndex, timings)
 
 		// Rebuild gateValidators from the filtered work items
 		gateValidators = make(map[string][]types.ValidatorMetadata)
@@ -1065,7 +1083,8 @@ func (n *nat) dryRun(ctx context.Context) error {
 		n.config.Log.Info("DRY RUN: Applied CI split filter",
 			"splitTotal", n.config.SplitTotal,
 			"splitIndex", n.config.SplitIndex,
-			"workItems", len(filtered))
+			"workItems", len(filtered),
+			"timingBased", len(timings) > 0)
 	}
 
 	t := table.NewWriter()
@@ -1204,7 +1223,50 @@ func (n *nat) reportFromEvents() error {
 	logDir, _ := fileLogger.GetDirectoryForRunID(runID)
 	n.config.Log.Info("Consolidated report generated", "path", logDir)
 
+	// Write timing output if configured (for CI caching)
+	if n.config.SplitTimingOutput != "" {
+		timingData := extractTimingDataFromParsedResults(results)
+		if err := runner.WriteTimingFile(n.config.SplitTimingOutput, timingData); err != nil {
+			n.config.Log.Error("Failed to write timing output from events", "error", err)
+		} else {
+			n.config.Log.Info("Wrote timing output from events",
+				"path", n.config.SplitTimingOutput,
+				"packages", len(timingData))
+		}
+	}
+
 	return nil
+}
+
+// extractTimingData builds a TimingKey → duration_seconds map from test results.
+// This data can be cached and used for timing-based CI splitting on subsequent runs.
+func (n *nat) extractTimingData(result *runner.RunnerResult) map[string]float64 {
+	timings := make(map[string]float64)
+	for gateName, gate := range result.Gates {
+		for _, test := range gate.Tests {
+			key := runner.TimingKey(gateName, test.Metadata.Package, test.Metadata.FuncName)
+			timings[key] = test.Duration.Seconds()
+		}
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				key := runner.TimingKey(gateName, test.Metadata.Package, test.Metadata.FuncName)
+				timings[key] = test.Duration.Seconds()
+			}
+		}
+	}
+	return timings
+}
+
+// extractTimingDataFromParsedResults builds a TimingKey → duration_seconds map
+// from parsed test results (used in report-from-events mode).
+func extractTimingDataFromParsedResults(results []*types.TestResult) map[string]float64 {
+	timings := make(map[string]float64)
+	for _, result := range results {
+		// In gateless/report mode, use "gateless" as the gate ID
+		key := runner.TimingKey("gateless", result.Metadata.Package, result.Metadata.FuncName)
+		timings[key] = result.Duration.Seconds()
+	}
+	return timings
 }
 
 // WaitForShutdown waits for all goroutines to finish

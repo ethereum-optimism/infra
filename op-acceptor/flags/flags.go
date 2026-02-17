@@ -203,6 +203,18 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_INDEX"),
 		Usage:   "Index of this node (0-based) for CI parallelism.",
 	}
+	SplitTimingFile = &cli.StringFlag{
+		Name:    "split-timing-file",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_TIMING_FILE"),
+		Usage:   "Path to JSON file with package timing hints for balanced CI splitting.",
+	}
+	SplitTimingOutput = &cli.StringFlag{
+		Name:    "split-timing-output",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_TIMING_OUTPUT"),
+		Usage:   "Path to write updated timing data after test execution (for caching).",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -233,6 +245,8 @@ var optionalFlags = []cli.Flag{
 	ReportFromEvents,
 	SplitTotal,
 	SplitIndex,
+	SplitTimingFile,
+	SplitTimingOutput,
 }
 var Flags []cli.Flag
 

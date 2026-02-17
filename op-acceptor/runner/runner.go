@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -22,9 +24,6 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-
-	"math"
-	"runtime"
 
 	"github.com/ethereum-optimism/infra/op-acceptor/flags"
 	"github.com/ethereum-optimism/infra/op-acceptor/logging"
@@ -133,6 +132,7 @@ type runner struct {
 	targetGates        []string // Target gates specified for this run
 	splitTotal         int      // Total split nodes for CI parallelism (0 = no splitting)
 	splitIndex         int      // This node's index (0-based) for CI parallelism
+	splitTimingFile    string   // Path to JSON timing hints for balanced CI splitting
 
 	// New component fields
 	executor     TestExecutor
@@ -161,6 +161,7 @@ type Config struct {
 	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
 	SplitTotal         int           // Total split nodes for CI parallelism (0 = no splitting)
 	SplitIndex         int           // This node's index (0-based) for CI parallelism
+	SplitTimingFile    string        // Path to JSON timing hints for balanced CI splitting
 }
 
 // NewTestRunner creates a new test runner instance
@@ -214,6 +215,7 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		targetGates:        cfg.TargetGate,
 		splitTotal:         cfg.SplitTotal,
 		splitIndex:         cfg.SplitIndex,
+		splitTimingFile:    cfg.SplitTimingFile,
 	}
 
 	// Initialize new components
