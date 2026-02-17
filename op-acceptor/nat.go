@@ -105,6 +105,21 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		return nil, errors.New("config is required")
 	}
 
+	// In report-from-events mode, we only need config + log dir.
+	// Skip registry, runner, orchestrator, and addons setup.
+	if config.ReportFromEvents != "" {
+		config.Log.Info("Report-from-events mode: skipping test runner setup")
+		return &nat{
+			ctx:              ctx,
+			config:           config,
+			version:          version,
+			done:             make(chan struct{}),
+			shutdownCallback: shutdownCallback,
+			networkName:      "report",
+			tracer:           otel.Tracer("op-acceptor"),
+		}, nil
+	}
+
 	reg, err := registry.NewRegistry(registry.Config{
 		Log:                 config.Log,
 		ValidatorConfigFile: config.ValidatorConfig,
@@ -182,6 +197,8 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Concurrency:        config.Concurrency,
 		ShowProgress:       config.ShowProgress,
 		ProgressInterval:   config.ProgressInterval,
+		SplitTotal:         config.SplitTotal,
+		SplitIndex:         config.SplitIndex,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
@@ -307,6 +324,8 @@ func (n *nat) Start(ctx context.Context) error {
 			"concurrency", snap.Runner.Concurrency,
 			"show_progress", snap.Runner.ShowProgress,
 			"progress_interval", snap.Runner.ProgressInterval,
+			"split_total", n.config.SplitTotal,
+			"split_index", n.config.SplitIndex,
 			"test_log_level", snap.Logging.TestLogLevel,
 			"output_realtime_logs", snap.Logging.OutputRealtimeLogs,
 			"network", snap.NetworkName,
@@ -317,6 +336,18 @@ func (n *nat) Start(ctx context.Context) error {
 		"config.TestDir", n.config.TestDir,
 		"config.ValidatorConfig", n.config.ValidatorConfig,
 		"config.LogDir", n.config.LogDir)
+
+	// Report-from-events mode: generate HTML report from a raw events file, then exit.
+	if n.config.ReportFromEvents != "" {
+		err := n.reportFromEvents()
+		if err != nil {
+			return err
+		}
+		go func() {
+			n.shutdownCallback(nil)
+		}()
+		return nil
+	}
 
 	// Run tests immediately on startup (or dry-run)
 	if n.config.DryRun {
@@ -1011,9 +1042,39 @@ func (n *nat) dryRun(ctx context.Context) error {
 		gateValidators[gateID] = gateTests
 	}
 
+	// Apply CI split filtering if configured (mirrors runner.collectTestWork behavior)
+	if n.config.SplitTotal > 0 {
+		// Collect all work items in the same way as the runner
+		var allWork []runner.TestWork
+		for gateName, gateTests := range gateValidators {
+			for _, v := range gateTests {
+				allWork = append(allWork, runner.TestWork{
+					Validator: v,
+					GateID:    gateName,
+					SuiteID:   v.Suite,
+				})
+			}
+		}
+		filtered := runner.ApplySplitFilter(allWork, n.config.SplitTotal, n.config.SplitIndex)
+
+		// Rebuild gateValidators from the filtered work items
+		gateValidators = make(map[string][]types.ValidatorMetadata)
+		for _, w := range filtered {
+			gateValidators[w.GateID] = append(gateValidators[w.GateID], w.Validator)
+		}
+		n.config.Log.Info("DRY RUN: Applied CI split filter",
+			"splitTotal", n.config.SplitTotal,
+			"splitIndex", n.config.SplitIndex,
+			"workItems", len(filtered))
+	}
+
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.SetTitle("DRY RUN: Planned Test Execution (network: " + n.networkName + ")")
+	titleSuffix := ""
+	if n.config.SplitTotal > 0 {
+		titleSuffix = fmt.Sprintf(" [split %d/%d]", n.config.SplitIndex, n.config.SplitTotal)
+	}
+	t.SetTitle("DRY RUN: Planned Test Execution (network: " + n.networkName + ")" + titleSuffix)
 
 	headers := []interface{}{"TYPE", "ID", "TESTS", "STATUS"}
 	t.AppendHeader(table.Row(headers))
@@ -1097,6 +1158,52 @@ func (n *nat) dryRun(ctx context.Context) error {
 	t.Render()
 
 	n.config.Log.Info("DRY RUN: Summary", "totalGates", len(gateValidators), "totalTests", totalTests)
+	return nil
+}
+
+// reportFromEvents reads a raw_go_events.log file (possibly merged from multiple
+// parallel nodes) and generates a consolidated report without running any tests.
+// It reuses the standard FileLogger pipeline so that all sinks (HTML, text summary,
+// per-test logs, etc.) are exercised through the same code path as normal execution.
+func (n *nat) reportFromEvents() error {
+	eventsPath := n.config.ReportFromEvents
+	n.config.Log.Info("Generating report from events file", "path", eventsPath)
+
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return fmt.Errorf("failed to open events file %s: %w", eventsPath, err)
+	}
+	defer f.Close()
+
+	results, err := runner.ParseMultiPackageEvents(f)
+	if err != nil {
+		return fmt.Errorf("failed to parse events: %w", err)
+	}
+
+	n.config.Log.Info("Parsed test results from events", "packages", len(results))
+
+	// Use the same FileLogger pipeline as normal test execution
+	runID := uuid.New().String()
+	fileLogger, err := logging.NewFileLogger(n.config.LogDir, runID, n.networkName, n.config.TargetGate)
+	if err != nil {
+		return fmt.Errorf("failed to create file logger: %w", err)
+	}
+
+	// Feed all parsed results through the standard sink pipeline
+	for _, result := range results {
+		if err := fileLogger.LogTestResult(result, runID); err != nil {
+			return fmt.Errorf("failed to log result for %s: %w", result.Metadata.Package, err)
+		}
+	}
+
+	// Finalize all sinks (generates HTML, text summary, etc.)
+	if err := fileLogger.Complete(runID); err != nil {
+		return fmt.Errorf("failed to complete report: %w", err)
+	}
+
+	logDir, _ := fileLogger.GetDirectoryForRunID(runID)
+	n.config.Log.Info("Consolidated report generated", "path", logDir)
+
 	return nil
 }
 

@@ -428,6 +428,117 @@ func setupMultiPackageTestRunner(t testing.TB, testContents map[string][]byte, c
 	return r.(*runner)
 }
 
+func TestApplySplitFilter(t *testing.T) {
+	// Create 10 work items with distinct packages/functions
+	var items []TestWork
+	for i := 0; i < 10; i++ {
+		items = append(items, TestWork{
+			Validator: types.ValidatorMetadata{
+				Package:  fmt.Sprintf("./pkg%d", i),
+				FuncName: fmt.Sprintf("TestFunc%d", i),
+			},
+			GateID:    "gate",
+			ResultKey: fmt.Sprintf("TestFunc%d", i),
+		})
+	}
+
+	t.Run("split into 4 nodes covers all items", func(t *testing.T) {
+		total := 4
+		var all []TestWork
+		seen := make(map[string]bool)
+
+		for idx := 0; idx < total; idx++ {
+			subset := ApplySplitFilter(items, total, idx)
+			for _, item := range subset {
+				key := item.Validator.Package + "|" + item.Validator.FuncName
+				assert.False(t, seen[key], "item %s assigned to multiple nodes", key)
+				seen[key] = true
+			}
+			all = append(all, subset...)
+		}
+
+		assert.Len(t, all, 10, "all items should be covered across nodes")
+	})
+
+	t.Run("split into 1 node returns all items", func(t *testing.T) {
+		result := ApplySplitFilter(items, 1, 0)
+		assert.Len(t, result, 10, "single node should get all items")
+	})
+
+	t.Run("split into more nodes than items", func(t *testing.T) {
+		total := 20
+		var all []TestWork
+		for idx := 0; idx < total; idx++ {
+			all = append(all, ApplySplitFilter(items, total, idx)...)
+		}
+		assert.Len(t, all, 10, "all items should be covered even with excess nodes")
+	})
+
+	t.Run("split is deterministic", func(t *testing.T) {
+		result1 := ApplySplitFilter(items, 3, 1)
+		result2 := ApplySplitFilter(items, 3, 1)
+		require.Len(t, result1, len(result2))
+		for i := range result1 {
+			assert.Equal(t, result1[i].Validator.Package, result2[i].Validator.Package)
+			assert.Equal(t, result1[i].Validator.FuncName, result2[i].Validator.FuncName)
+		}
+	})
+
+	t.Run("nodes get roughly equal work", func(t *testing.T) {
+		total := 3
+		for idx := 0; idx < total; idx++ {
+			subset := ApplySplitFilter(items, total, idx)
+			// 10 items / 3 nodes = 3 or 4 per node
+			assert.True(t, len(subset) >= 3 && len(subset) <= 4,
+				"node %d got %d items, expected 3-4", idx, len(subset))
+		}
+	})
+}
+
+func TestCollectTestWorkWithSplit(t *testing.T) {
+	testContent := []byte(`
+package work_test
+
+import "testing"
+
+func TestWork(t *testing.T) {
+	t.Log("Work test running")
+}
+`)
+
+	configContent := []byte(`
+gates:
+  - id: split-gate
+    description: "Split test gate"
+    tests:
+      - package: "./work"
+        run_all: true
+      - name: "TestSpecific"
+        package: "./work"
+`)
+
+	r := setupMultiPackageTestRunner(t, map[string][]byte{
+		"work": testContent,
+	}, configContent)
+
+	// Without split, should get all items
+	allItems := r.collectTestWork()
+	totalCount := len(allItems)
+
+	// With split, each node should get a subset
+	r.splitTotal = 2
+	r.splitIndex = 0
+	node0Items := r.collectTestWork()
+
+	r.splitIndex = 1
+	node1Items := r.collectTestWork()
+
+	assert.Equal(t, totalCount, len(node0Items)+len(node1Items),
+		"split nodes should cover all items")
+	assert.True(t, len(node0Items) > 0, "node 0 should have items")
+	assert.True(t, len(node1Items) > 0, "node 1 should have items")
+}
+
 func findWorkItem(workItems []TestWork, gateID, suiteID, resultKey string) *TestWork {
 	for _, item := range workItems {
 		if item.GateID == gateID && item.SuiteID == suiteID && item.ResultKey == resultKey {
