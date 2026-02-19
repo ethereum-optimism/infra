@@ -187,6 +187,7 @@ type BackendGroupConfig struct {
 
 	Fallbacks                  []string `toml:"fallbacks"`
 	RestrictArchiveNodeTraffic bool     `toml:"restrict_archive_node_traffic"`
+	ArchiveBlockThreshold      uint64   `toml:"archive_block_threshold"`
 }
 
 type BackendGroupsConfig map[string]*BackendGroupConfig

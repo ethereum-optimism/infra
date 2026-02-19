@@ -48,6 +48,7 @@ var (
 		"eth_call":                1,
 		"eth_getStorageAt":        2,
 		"eth_getProof":            2,
+		"eth_getBlockReceipts":    0,
 	}
 )
 
@@ -794,6 +795,7 @@ type BackendGroup struct {
 	FallbackBackends           map[string]bool
 	routingStrategy            RoutingStrategy
 	RestrictArchiveNodeTraffic bool
+	ArchiveBlockThreshold      uint64
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -881,7 +883,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			continue
 		}
 
-		if bg.Consensus != nil && requiresArchiveForBlock(blockParam, bg.Consensus.GetLatestBlockNumber()) {
+		if bg.Consensus != nil && requiresArchiveForBlock(blockParam, bg.Consensus.GetLatestBlockNumber(), bg.ArchiveBlockThreshold) {
 			archiveRequired = true
 		}
 	}
@@ -1818,8 +1820,10 @@ func extractBlockParameter(param interface{}) string {
 	return ""
 }
 
-// requiresArchiveForBlock determines if a block parameter requires an archive node
-func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64) bool {
+// requiresArchiveForBlock determines if a block parameter requires an archive node.
+// archiveBlockThreshold specifies how many blocks from head are considered "old" enough
+// to require archive data. If 0, defaults to blocksInStateFullNode (128).
+func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64, archiveBlockThreshold uint64) bool {
 	if blockParam == "earliest" {
 		return true
 	}
@@ -1831,8 +1835,12 @@ func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64
 		if !ok {
 			return false // invalid hex
 		}
+		threshold := archiveBlockThreshold
+		if threshold == 0 {
+			threshold = blocksInStateFullNode
+		}
 		latestBlock := uint64(latestBlockNumber)
-		if latestBlock > 0 && blockNum.Uint64() <= latestBlock-blocksInStateFullNode {
+		if latestBlock > 0 && blockNum.Uint64() <= latestBlock-threshold {
 			return true
 		}
 	}

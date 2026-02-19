@@ -109,103 +109,155 @@ func TestRequiresArchiveForBlock(t *testing.T) {
 		name       string
 		blockParam string
 		latest     hexutil.Uint64
+		threshold  uint64
 		expected   bool
 	}{
 		{
 			name:       "earliest block",
 			blockParam: "earliest",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "pending block",
 			blockParam: "pending",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "latest block",
 			blockParam: "latest",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "recent block (within 128 blocks)",
 			blockParam: "0x3e0", // 992 in decimal (1000 - 8)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "old block (beyond 128 blocks)",
 			blockParam: "0x300", // 768 in decimal (1000 - 232)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block exactly at boundary",
 			blockParam: "0x368", // 872 in decimal (1000 - 128)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block just within boundary (needs archive)",
 			blockParam: "0x359", // 857 in decimal (1000 - 143, needs archive)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block just outside archive boundary",
 			blockParam: "0x367", // 871 in decimal (1000 - 129, first block that doesn't need archive)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "invalid hex",
 			blockParam: "0xinvalid",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "non-hex string",
 			blockParam: "notahex",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "empty string",
 			blockParam: "",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "zero latest block",
 			blockParam: "0x100",
 			latest:     hexutil.Uint64(0),
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "block number zero",
 			blockParam: "0x0",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block number equals latest",
 			blockParam: "0x3e8", // 1000 in decimal
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "block number greater than latest",
 			blockParam: "0x400", // 1024 in decimal
 			latest:     latestBlock,
+			threshold:  0,
+			expected:   false,
+		},
+		// Custom threshold tests
+		{
+			name:       "custom threshold: block within custom range",
+			blockParam: "0x3e0", // 992 (1000 - 8), within 500-block threshold
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   false,
+		},
+		{
+			name:       "custom threshold: block outside custom range",
+			blockParam: "0x1f4", // 500 (1000 - 500), at boundary
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   true,
+		},
+		{
+			name:       "custom threshold: block just inside custom range",
+			blockParam: "0x1f5", // 501 (1000 - 499)
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   false,
+		},
+		{
+			name:       "custom threshold: large threshold covers most blocks",
+			blockParam: "0x64", // 100
+			latest:     hexutil.Uint64(10000000),
+			threshold:  1000000,
+			expected:   true,
+		},
+		{
+			name:       "default threshold (0) falls back to 128",
+			blockParam: "0x369", // 873 = 1000 - 127, just inside 128-block window
+			latest:     hexutil.Uint64(1000),
+			threshold:  0,
 			expected:   false,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := requiresArchiveForBlock(test.blockParam, test.latest)
+			result := requiresArchiveForBlock(test.blockParam, test.latest, test.threshold)
 			assert.Equal(t, test.expected, result)
 		})
 	}
@@ -462,7 +514,7 @@ func TestArchiveDetectionIntegration(t *testing.T) {
 
 				// Test archive requirement logic
 				if extractedParam != "" {
-					requiresArchive := requiresArchiveForBlock(extractedParam, test.latestBlock)
+					requiresArchive := requiresArchiveForBlock(extractedParam, test.latestBlock, 0)
 					assert.Equal(t, test.expectedArchive, requiresArchive)
 				} else {
 					// Special case for blockHash - check if it's a map with blockHash

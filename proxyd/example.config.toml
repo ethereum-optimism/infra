@@ -107,6 +107,9 @@ backends = ["infura"]
 # - Requests that explicitly require archive data (old blocks, blockHash queries)
 # - Regular requests when no non-archive backends are available (fallback)
 # restrict_archive_node_traffic = true
+# Number of blocks from head beyond which requests are routed to archive backends.
+# Default: 128 (standard full-node state window)
+# archive_block_threshold = 1000000
 
 [backend_groups.alchemy]
 backends = ["alchemy"]

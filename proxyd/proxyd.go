@@ -252,6 +252,7 @@ func Start(config *Config) (*Server, func(), error) {
 			FallbackBackends:           fallbackBackends,
 			routingStrategy:            bg.RoutingStrategy,
 			RestrictArchiveNodeTraffic: bg.RestrictArchiveNodeTraffic,
+			ArchiveBlockThreshold:      bg.ArchiveBlockThreshold,
 		}
 	}
 
