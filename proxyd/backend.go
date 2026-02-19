@@ -1635,6 +1635,22 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			continue
 		}
 
+		// Check if response contains empty receipt arrays that may indicate missing archive data
+		if containsEmptyReceiptResponse(rpcReqs, res) {
+			log.Warn(
+				"backend returned empty receipt array, will try next backend",
+				"name", back.Name,
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+			)
+			lastArchiveRequiredResponse = &BackendGroupRPCResponse{
+				RPCRes:   res,
+				ServedBy: servedBy,
+				error:    nil,
+			}
+			continue
+		}
+
 		return &BackendGroupRPCResponse{
 			RPCRes:   res,
 			ServedBy: servedBy,
@@ -1703,6 +1719,17 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			if containsArchiveRequiredError(res) {
 				log.Warn(
 					"archive backend also returned archive-required error, trying next archive backend",
+					"name", back.Name,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+				)
+				continue
+			}
+
+			// Check if this archive backend returned empty receipt arrays
+			if containsEmptyReceiptResponse(rpcReqs, res) {
+				log.Warn(
+					"archive backend also returned empty receipt array, trying next archive backend",
 					"name", back.Name,
 					"req_id", GetReqID(ctx),
 					"auth", GetAuthCtx(ctx),
@@ -1841,6 +1868,40 @@ func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64
 		}
 		latestBlock := uint64(latestBlockNumber)
 		if latestBlock > 0 && blockNum.Uint64() <= latestBlock-threshold {
+			return true
+		}
+	}
+	return false
+}
+
+// receiptMethods maps RPC methods that return receipt arrays.
+// When these return an empty array for an old block, it likely means the backend
+// has pruned the data and we should retry on archive backends.
+var receiptMethods = map[string]bool{
+	"eth_getBlockReceipts": true,
+	"debug_getRawReceipts": true,
+}
+
+// containsEmptyReceiptResponse checks if any receipt method returned an empty array result.
+// Non-archive backends may return "result": [] (valid JSON-RPC success) for old blocks
+// instead of an error, which causes op-node to fail with "got 0 receipts but expected N".
+func containsEmptyReceiptResponse(rpcReqs []*RPCReq, rpcRes []*RPCRes) bool {
+	if len(rpcReqs) != len(rpcRes) {
+		return false
+	}
+	for i, req := range rpcReqs {
+		if req == nil || rpcRes[i] == nil {
+			continue
+		}
+		if !receiptMethods[req.Method] {
+			continue
+		}
+		res := rpcRes[i]
+		if res.IsError() {
+			continue
+		}
+		// After json.Unmarshal into interface{}, an empty JSON array becomes []interface{}{}
+		if arr, ok := res.Result.([]interface{}); ok && len(arr) == 0 {
 			return true
 		}
 	}

@@ -435,6 +435,127 @@ func TestContainsArchiveRequiredError(t *testing.T) {
 	}
 }
 
+func TestContainsEmptyReceiptResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		rpcReqs  []*RPCReq
+		rpcRes   []*RPCRes
+		expected bool
+	}{
+		{
+			name: "receipt method with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+		{
+			name: "debug_getRawReceipts with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "debug_getRawReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+		{
+			name: "receipt method with non-empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{map[string]interface{}{"status": "0x1"}}},
+			},
+			expected: false,
+		},
+		{
+			name: "receipt method with error response",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Error: &RPCErr{Code: -32000, Message: "some error"}},
+			},
+			expected: false,
+		},
+		{
+			name: "non-receipt method with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBalance"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: false,
+		},
+		{
+			name: "nil response in slice",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				nil,
+			},
+			expected: false,
+		},
+		{
+			name:     "mismatched request/response lengths",
+			rpcReqs:  []*RPCReq{{Method: "eth_getBlockReceipts"}},
+			rpcRes:   []*RPCRes{},
+			expected: false,
+		},
+		{
+			name:     "empty slices",
+			rpcReqs:  []*RPCReq{},
+			rpcRes:   []*RPCRes{},
+			expected: false,
+		},
+		{
+			name: "receipt method with nil result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: nil},
+			},
+			expected: false,
+		},
+		{
+			name: "receipt method with string result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: "0x123"},
+			},
+			expected: false,
+		},
+		{
+			name: "batch with mixed methods - receipt empty triggers",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBalance"},
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: "0x100"},
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := containsEmptyReceiptResponse(test.rpcReqs, test.rpcRes)
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
 func TestArchiveDetectionIntegration(t *testing.T) {
 	tests := []struct {
 		name            string
