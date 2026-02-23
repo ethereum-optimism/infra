@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,6 +133,9 @@ type runner struct {
 	concurrency        int      // Number of concurrent test workers (0 = auto-determine)
 	targetGates        []string // Target gates specified for this run
 
+	runtimeCache     *RuntimeCache
+	runtimeCachePath string
+
 	// New component fields
 	executor     TestExecutor
 	coordinator  TestCoordinator
@@ -157,6 +161,7 @@ type Config struct {
 	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
 	ShowProgress       bool          // Whether to show periodic progress updates during test execution
 	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
+	RuntimeCachePath string // Path to runtime cache file (empty = no caching)
 }
 
 // NewTestRunner creates a new test runner instance
@@ -209,6 +214,34 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		concurrency:        cfg.Concurrency,
 		targetGates:        cfg.TargetGate,
 	}
+
+	// Load runtime cache for test ordering
+	r.runtimeCachePath = cfg.RuntimeCachePath
+	if r.runtimeCachePath != "" {
+		cache, err := LoadRuntimeCache(r.runtimeCachePath)
+		if err != nil {
+			cfg.Log.Warn("Failed to load runtime cache, proceeding without it", "err", err, "path", r.runtimeCachePath)
+		}
+		r.runtimeCache = cache
+	} else {
+		r.runtimeCache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
+	}
+
+	// Sort validators by runtime for serial execution (longest first, unknowns first)
+	sort.SliceStable(r.validators, func(i, j int) bool {
+		di, iKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[i])]
+		dj, jKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[j])]
+		if !iKnown && !jKnown {
+			return false
+		}
+		if !iKnown {
+			return true
+		}
+		if !jKnown {
+			return false
+		}
+		return di > dj
+	})
 
 	// Initialize new components
 	r.outputParser = NewOutputParser()
