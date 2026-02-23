@@ -221,13 +221,14 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		cache, err := LoadRuntimeCache(r.runtimeCachePath)
 		if err != nil {
 			cfg.Log.Warn("Failed to load runtime cache, proceeding without it", "err", err, "path", r.runtimeCachePath)
+			cache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
 		}
 		r.runtimeCache = cache
 	} else {
 		r.runtimeCache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
 	}
 
-	// Sort validators by runtime for serial execution (longest first, unknowns first)
+	// Sort validators by runtime to influence execution ordering (longest first, unknowns first)
 	sort.SliceStable(r.validators, func(i, j int) bool {
 		di, iKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[i])]
 		dj, jKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[j])]
