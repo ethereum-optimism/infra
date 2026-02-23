@@ -14,11 +14,11 @@ goreleaser-pro = "2.13.3"
 [tool_alias]
 # These are disabled, but latest mise versions error if they don't have a known
 # install source even though it won't ever actually use that source.
-asterisc = "ubi:ethereum-optimism/fake-asterisc"
-kontrol = "ubi:ethereum-optimism/fake-kontrol"
-binary_signer = "ubi:ethereum-optimism/fake-binary_signer"
+asterisc = "github:ethereum-optimism/fake-asterisc"
+kontrol = "github:ethereum-optimism/fake-kontrol"
+binary_signer = "github:ethereum-optimism/fake-binary_signer"
 
-goreleaser-pro = "ubi:goreleaser/goreleaser-pro[exe=goreleaser]"
+goreleaser-pro = "github:goreleaser/goreleaser-pro[exe=goreleaser]"
 
 
 [settings]
