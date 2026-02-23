@@ -47,6 +47,11 @@ func LoadRuntimeCache(path string) (*RuntimeCache, error) {
 		return empty, fmt.Errorf("parsing runtime cache: %w", err)
 	}
 
+	// Fix M2: reject stale/incompatible versions silently
+	if raw.Version != runtimeCacheVersion {
+		return empty, nil
+	}
+
 	cache := &RuntimeCache{Runtimes: make(map[string]time.Duration, len(raw.Runtimes))}
 	for k, v := range raw.Runtimes {
 		d, parseErr := time.ParseDuration(v)
@@ -63,6 +68,10 @@ func LoadRuntimeCache(path string) (*RuntimeCache, error) {
 func SaveRuntimeCache(path string, cache *RuntimeCache) error {
 	if path == "" {
 		return nil
+	}
+	// Fix I1: treat a nil cache as an empty cache
+	if cache == nil {
+		cache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
 	}
 
 	raw := runtimeCacheJSON{
@@ -91,6 +100,11 @@ func SaveRuntimeCache(path string, cache *RuntimeCache) error {
 		_ = tmp.Close()
 		return fmt.Errorf("writing runtime cache temp file: %w", err)
 	}
+	// Fix M3: fsync before close to ensure data reaches disk
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing runtime cache temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing runtime cache temp file: %w", err)
 	}
@@ -104,6 +118,10 @@ func SaveRuntimeCache(path string, cache *RuntimeCache) error {
 // known validators longest-first. Uses a stable sort to preserve relative
 // order among items with equal duration.
 func SortWorkByRuntime(items []TestWork, cache *RuntimeCache) {
+	// Fix I1: nothing to sort against with a nil cache
+	if cache == nil {
+		return
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		di, iKnown := cache.Runtimes[items[i].ResultKey]
 		dj, jKnown := cache.Runtimes[items[j].ResultKey]
