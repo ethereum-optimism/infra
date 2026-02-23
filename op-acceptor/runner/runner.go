@@ -348,6 +348,13 @@ func (r *runner) updateRuntimeCache(result *RunnerResult) {
 	if r.runtimeCachePath == "" {
 		return
 	}
+	if result == nil {
+		return
+	}
+	// Note: keys use runner.getTestKey format (bare FuncName or Package for RunAll),
+	// which is consistent with TestWork.ResultKey used by SortWorkByRuntime.
+	// Function names that collide across packages will have their durations overwritten
+	// by the last writer; this is acceptable as a best-effort optimization.
 	runtimes := make(map[string]time.Duration)
 	for _, gate := range result.Gates {
 		for _, test := range gate.Tests {
