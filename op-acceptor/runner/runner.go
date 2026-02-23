@@ -348,6 +348,10 @@ func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error)
 	// Collect all test work to be executed in parallel
 	workItems := r.collectTestWork()
 
+	// Sort work items longest-first so the critical path is front-loaded.
+	// Unknown validators sort to the front.
+	SortWorkByRuntime(workItems, r.runtimeCache)
+
 	if len(workItems) == 0 {
 		r.log.Warn("No test work items found")
 		resultMgr := NewResultHierarchyManager()
