@@ -11,7 +11,7 @@ binary_signer = "1.0.4"
 goreleaser-pro = "2.13.3"
 
 
-[alias]
+[tool_alias]
 # These are disabled, but latest mise versions error if they don't have a known
 # install source even though it won't ever actually use that source.
 asterisc = "ubi:ethereum-optimism/fake-asterisc"
