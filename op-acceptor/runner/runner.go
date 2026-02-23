@@ -338,7 +338,33 @@ func (r *runner) runAllTestsSerial(ctx context.Context) (*RunnerResult, error) {
 	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
 	result.RunID = r.runID
+	r.updateRuntimeCache(result)
 	return result, nil
+}
+
+// updateRuntimeCache writes a new runtime cache snapshot from the completed run.
+// Logs a warning on failure but does not affect the run result.
+func (r *runner) updateRuntimeCache(result *RunnerResult) {
+	if r.runtimeCachePath == "" {
+		return
+	}
+	runtimes := make(map[string]time.Duration)
+	for _, gate := range result.Gates {
+		for _, test := range gate.Tests {
+			key := r.getTestKey(test.Metadata)
+			runtimes[key] = test.Duration
+		}
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				key := r.getTestKey(test.Metadata)
+				runtimes[key] = test.Duration
+			}
+		}
+	}
+	newCache := &RuntimeCache{Runtimes: runtimes}
+	if err := SaveRuntimeCache(r.runtimeCachePath, newCache); err != nil {
+		r.log.Warn("Failed to save runtime cache", "err", err, "path", r.runtimeCachePath)
+	}
 }
 
 // runAllTestsParallel implements the new parallel test execution logic
@@ -385,6 +411,7 @@ func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error)
 	// Finalize gate and suite statuses
 	r.finalizeParallelResults(result)
 
+	r.updateRuntimeCache(result)
 	return result, nil
 }
 
