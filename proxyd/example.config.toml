@@ -107,6 +107,9 @@ backends = ["infura"]
 # - Requests that explicitly require archive data (old blocks, blockHash queries)
 # - Regular requests when no non-archive backends are available (fallback)
 # restrict_archive_node_traffic = true
+# Number of blocks from head beyond which requests are routed to archive backends.
+# Default: 128 (standard full-node state window)
+# archive_block_threshold = 1000000
 
 [backend_groups.alchemy]
 backends = ["alchemy"]
@@ -120,6 +123,14 @@ backends = ["alchemy"]
 # is provided. Note that you will need to quote the environment variable
 # in order for it to be value TOML, e.g. "$FOO_AUTH_KEY" = "foo_alias".
 secret = "test"
+
+# List of addresses to watch. When a transaction's 'from' or 'to' matches
+# one of these addresses, all transaction details (from, to, data, gasPrice,
+# gasTip, nonce, value, hash, etc.) will be logged.
+# watched_addresses = [
+#   "0x1234567890123456789012345678901234567890",
+#   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+# ]
 
 # Mapping of methods to backend groups.
 [rpc_method_mappings]

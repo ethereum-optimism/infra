@@ -926,6 +926,404 @@ func TestExtractTransactionParameterMethods(t *testing.T) {
 	}
 }
 
+func TestIsWatchedAddress(t *testing.T) {
+	watchedAddr1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	watchedAddr2 := common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+	unwatchedAddr := common.HexToAddress("0x9999999999999999999999999999999999999999")
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr1: {},
+			watchedAddr2: {},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		addr     *common.Address
+		expected bool
+	}{
+		{
+			name:     "watched address 1",
+			addr:     &watchedAddr1,
+			expected: true,
+		},
+		{
+			name:     "watched address 2",
+			addr:     &watchedAddr2,
+			expected: true,
+		},
+		{
+			name:     "unwatched address",
+			addr:     &unwatchedAddr,
+			expected: false,
+		},
+		{
+			name:     "nil address",
+			addr:     nil,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := server.isWatchedAddress(tc.addr)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+
+	// Test with empty watched addresses
+	t.Run("empty watched addresses", func(t *testing.T) {
+		emptyServer := &Server{
+			watchedAddresses: map[common.Address]struct{}{},
+		}
+		result := emptyServer.isWatchedAddress(&watchedAddr1)
+		assert.False(t, result)
+	})
+
+	// Test with nil watched addresses map
+	t.Run("nil watched addresses map", func(t *testing.T) {
+		nilServer := &Server{}
+		result := nilServer.isWatchedAddress(&watchedAddr1)
+		assert.False(t, result)
+	})
+}
+
+func TestLogWatchedAddressTransaction_SendRawTransaction(t *testing.T) {
+	watchedPkey := "0x0000000000000000000000000000000000000000000000000000000000000001"
+	unwatchedPkey := "0x0000000000000000000000000000000000000000000000000000000000000002"
+	watchedAddr := addressFromPrivateKey(t, watchedPkey)
+	unwatchedAddr := addressFromPrivateKey(t, unwatchedPkey)
+
+	tests := []struct {
+		name           string
+		watchedAddrs   map[common.Address]struct{}
+		fromPkey       string
+		toAddr         common.Address
+		shouldNotPanic bool
+	}{
+		{
+			name: "from is watched address",
+			watchedAddrs: map[common.Address]struct{}{
+				watchedAddr: {},
+			},
+			fromPkey:       watchedPkey,
+			toAddr:         unwatchedAddr,
+			shouldNotPanic: true,
+		},
+		{
+			name: "to is watched address",
+			watchedAddrs: map[common.Address]struct{}{
+				unwatchedAddr: {},
+			},
+			fromPkey:       watchedPkey,
+			toAddr:         unwatchedAddr,
+			shouldNotPanic: true,
+		},
+		{
+			name: "both from and to are watched",
+			watchedAddrs: map[common.Address]struct{}{
+				watchedAddr:   {},
+				unwatchedAddr: {},
+			},
+			fromPkey:       watchedPkey,
+			toAddr:         unwatchedAddr,
+			shouldNotPanic: true,
+		},
+		{
+			name: "neither from nor to is watched",
+			watchedAddrs: map[common.Address]struct{}{
+				common.HexToAddress("0x9999999999999999999999999999999999999999"): {},
+			},
+			fromPkey:       watchedPkey,
+			toAddr:         unwatchedAddr,
+			shouldNotPanic: true,
+		},
+		{
+			name:           "empty watched addresses",
+			watchedAddrs:   map[common.Address]struct{}{},
+			fromPkey:       watchedPkey,
+			toAddr:         unwatchedAddr,
+			shouldNotPanic: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &Server{
+				watchedAddresses: tc.watchedAddrs,
+			}
+
+			rawTx := createRawTransactionFromPrivateKey(t, tc.fromPkey, tc.toAddr)
+			req := &RPCReq{
+				Method: "eth_sendRawTransaction",
+				Params: json.RawMessage(`["` + rawTx + `"]`),
+			}
+
+			ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+			// Should not panic
+			assert.NotPanics(t, func() {
+				server.LogWatchedAddressTransaction(ctx, req)
+			})
+		})
+	}
+}
+
+func TestLogWatchedAddressTransaction_EthCall(t *testing.T) {
+	watchedAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	otherAddr := common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+
+	tests := []struct {
+		name         string
+		watchedAddrs map[common.Address]struct{}
+		from         string
+		to           string
+		shouldLog    bool
+	}{
+		{
+			name: "from is watched in eth_call",
+			watchedAddrs: map[common.Address]struct{}{
+				watchedAddr: {},
+			},
+			from:      watchedAddr.Hex(),
+			to:        otherAddr.Hex(),
+			shouldLog: true,
+		},
+		{
+			name: "to is watched in eth_call",
+			watchedAddrs: map[common.Address]struct{}{
+				otherAddr: {},
+			},
+			from:      watchedAddr.Hex(),
+			to:        otherAddr.Hex(),
+			shouldLog: true,
+		},
+		{
+			name: "neither from nor to watched in eth_call",
+			watchedAddrs: map[common.Address]struct{}{
+				common.HexToAddress("0x9999999999999999999999999999999999999999"): {},
+			},
+			from:      watchedAddr.Hex(),
+			to:        otherAddr.Hex(),
+			shouldLog: false,
+		},
+		{
+			name:         "empty watched addresses",
+			watchedAddrs: map[common.Address]struct{}{},
+			from:         watchedAddr.Hex(),
+			to:           otherAddr.Hex(),
+			shouldLog:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &Server{
+				watchedAddresses: tc.watchedAddrs,
+			}
+
+			params := fmt.Sprintf(`[{"from":"%s","to":"%s","data":"0x12345678","value":"0x100","gas":"0x5208","gasPrice":"0x4a817c800","nonce":"0x1"},"latest"]`, tc.from, tc.to)
+			req := &RPCReq{
+				Method: "eth_call",
+				Params: json.RawMessage(params),
+			}
+
+			ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+			assert.NotPanics(t, func() {
+				server.LogWatchedAddressTransaction(ctx, req)
+			})
+		})
+	}
+}
+
+func TestLogWatchedAddressTransaction_EthSendTransaction(t *testing.T) {
+	watchedAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	otherAddr := common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr: {},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		params string
+	}{
+		{
+			name:   "eth_sendTransaction from watched",
+			method: "eth_sendTransaction",
+			params: fmt.Sprintf(`[{"from":"%s","to":"%s","value":"0x100"}]`, watchedAddr.Hex(), otherAddr.Hex()),
+		},
+		{
+			name:   "eth_estimateGas to watched",
+			method: "eth_estimateGas",
+			params: fmt.Sprintf(`[{"from":"%s","to":"%s","data":"0xdeadbeef"}]`, otherAddr.Hex(), watchedAddr.Hex()),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &RPCReq{
+				Method: tc.method,
+				Params: json.RawMessage(tc.params),
+			}
+
+			ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+			assert.NotPanics(t, func() {
+				server.LogWatchedAddressTransaction(ctx, req)
+			})
+		})
+	}
+}
+
+func TestLogWatchedAddressTransaction_NonTransactionMethods(t *testing.T) {
+	watchedAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr: {},
+		},
+	}
+
+	// Methods that should NOT trigger watched address logging
+	methods := []struct {
+		method string
+		params string
+	}{
+		{"eth_blockNumber", `[]`},
+		{"eth_getBalance", `["0x1234567890123456789012345678901234567890","latest"]`},
+		{"eth_getCode", `["0x1234567890123456789012345678901234567890","latest"]`},
+		{"eth_chainId", `[]`},
+		{"eth_getTransactionByHash", `["0xabcd"]`},
+		{"eth_getTransactionReceipt", `["0xabcd"]`},
+	}
+
+	for _, m := range methods {
+		t.Run(m.method, func(t *testing.T) {
+			req := &RPCReq{
+				Method: m.method,
+				Params: json.RawMessage(m.params),
+			}
+			ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+			assert.NotPanics(t, func() {
+				server.LogWatchedAddressTransaction(ctx, req)
+			})
+		})
+	}
+}
+
+func TestLogWatchedAddressTransaction_InvalidParams(t *testing.T) {
+	watchedAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr: {},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		params string
+	}{
+		{
+			name:   "eth_sendRawTransaction with invalid hex",
+			method: "eth_sendRawTransaction",
+			params: `["0xinvalid"]`,
+		},
+		{
+			name:   "eth_sendRawTransaction with malformed JSON params",
+			method: "eth_sendRawTransaction",
+			params: `["bad`,
+		},
+		{
+			name:   "eth_call with empty params",
+			method: "eth_call",
+			params: `[]`,
+		},
+		{
+			name:   "eth_call with invalid call object",
+			method: "eth_call",
+			params: `["not_an_object"]`,
+		},
+		{
+			name:   "eth_sendTransaction with empty params",
+			method: "eth_sendTransaction",
+			params: `[]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &RPCReq{
+				Method: tc.method,
+				Params: json.RawMessage(tc.params),
+			}
+			ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+			// Should handle gracefully without panicking
+			assert.NotPanics(t, func() {
+				server.LogWatchedAddressTransaction(ctx, req)
+			})
+		})
+	}
+}
+
+func TestLogWatchedAddressTransaction_ContractCreation(t *testing.T) {
+	// Test with a contract creation transaction (no "to" address)
+	watchedPkey := "0x0000000000000000000000000000000000000000000000000000000000000001"
+	watchedAddr := addressFromPrivateKey(t, watchedPkey)
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr: {},
+		},
+	}
+
+	rawTx := createContractCreationFromPrivateKey(t, watchedPkey)
+	req := &RPCReq{
+		Method: "eth_sendRawTransaction",
+		Params: json.RawMessage(`["` + rawTx + `"]`),
+	}
+
+	ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+	assert.NotPanics(t, func() {
+		server.LogWatchedAddressTransaction(ctx, req)
+	})
+}
+
+func TestLogWatchedCallTransaction_AllOptionalFields(t *testing.T) {
+	watchedAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	otherAddr := common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+
+	server := &Server{
+		watchedAddresses: map[common.Address]struct{}{
+			watchedAddr: {},
+		},
+	}
+
+	// Test with all optional fields (gas, gasPrice, maxFeePerGas, maxPriorityFeePerGas, nonce, data, input, value)
+	params := fmt.Sprintf(`[{"from":"%s","to":"%s","value":"0x1000","gas":"0x5208","gasPrice":"0x4a817c800","maxFeePerGas":"0x59682f00","maxPriorityFeePerGas":"0x3b9aca00","nonce":"0x5","data":"0xdeadbeef1234","input":"0xcafebabe"},"latest"]`,
+		watchedAddr.Hex(), otherAddr.Hex())
+	req := &RPCReq{
+		Method: "eth_call",
+		Params: json.RawMessage(params),
+	}
+
+	ctx := createTestContext("127.0.0.1", "test-agent", "")
+
+	assert.NotPanics(t, func() {
+		server.LogWatchedAddressTransaction(ctx, req)
+	})
+}
+
 // Helper functions for creating test contexts
 
 func createTestContext(ip, userAgent, referer string) context.Context {

@@ -252,6 +252,7 @@ func Start(config *Config) (*Server, func(), error) {
 			FallbackBackends:           fallbackBackends,
 			routingStrategy:            bg.RoutingStrategy,
 			RestrictArchiveNodeTraffic: bg.RestrictArchiveNodeTraffic,
+			ArchiveBlockThreshold:      bg.ArchiveBlockThreshold,
 		}
 	}
 
@@ -318,6 +319,20 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
+	watchedAddressesMap := make(map[common.Address]struct{})
+	if config.WatchedAddresses != nil {
+		watchedAddressesMap = make(map[common.Address]struct{}, len(config.WatchedAddresses))
+		for _, addr := range config.WatchedAddresses {
+			if !common.IsHexAddress(addr) {
+				log.Warn("invalid watched address", "address", addr)
+				continue
+			}
+			address := common.HexToAddress(addr)
+			watchedAddressesMap[address] = struct{}{}
+			log.Info("watching address for transaction logging", "address", address.Hex())
+		}
+	}
+
 	srv, err := NewServer(
 		backendGroups,
 		wsBackendGroup,
@@ -336,6 +351,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.BatchConfig.MaxSize,
 		redisClient,
 		sanctionedAddressesMap,
+		watchedAddressesMap,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)

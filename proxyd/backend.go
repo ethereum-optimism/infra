@@ -48,6 +48,7 @@ var (
 		"eth_call":                1,
 		"eth_getStorageAt":        2,
 		"eth_getProof":            2,
+		"eth_getBlockReceipts":    0,
 	}
 )
 
@@ -428,6 +429,14 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 				"method", metricLabelMethod,
 			)
 			RecordBatchRPCError(ctx, b.Name, reqs, err)
+		case ErrBackendOverCapacity:
+			log.Warn(
+				"backend over capacity",
+				"name", b.Name,
+				"req_id", GetReqID(ctx),
+				"method", metricLabelMethod,
+			)
+			RecordBatchRPCError(ctx, b.Name, reqs, err)
 		case ErrConsensusGetReceiptsCantBeBatched:
 			log.Warn(
 				"Received unsupported batch request for consensus_getReceipts",
@@ -626,6 +635,11 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	if err != nil {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		// Check if this is a "too many requests" error from our own rate limiter
+		// to enable failover to other backends instead of retrying the same one
+		if strings.Contains(err.Error(), "too many requests") {
+			return nil, ErrBackendOverCapacity
+		}
 		return nil, wrapErr(err, "error in backend request")
 	}
 
@@ -645,6 +659,10 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	if httpRes.StatusCode != 200 && httpRes.StatusCode != 400 {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+		// Return ErrBackendOverCapacity for 429 responses to enable failover to other backends
+		if httpRes.StatusCode == 429 {
+			return nil, ErrBackendOverCapacity
+		}
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
@@ -777,6 +795,7 @@ type BackendGroup struct {
 	FallbackBackends           map[string]bool
 	routingStrategy            RoutingStrategy
 	RestrictArchiveNodeTraffic bool
+	ArchiveBlockThreshold      uint64
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -832,6 +851,12 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// Determine if archive is required
 	archiveRequired := false
 	for _, req := range rpcReqs {
+		// All debug_* methods require archive nodes
+		if strings.HasPrefix(req.Method, "debug_") {
+			archiveRequired = true
+			break
+		}
+
 		idx, ok := blockParamIndex[req.Method]
 		if !ok {
 			continue
@@ -858,7 +883,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			continue
 		}
 
-		if bg.Consensus != nil && requiresArchiveForBlock(blockParam, bg.Consensus.GetLatestBlockNumber()) {
+		if bg.Consensus != nil && requiresArchiveForBlock(blockParam, bg.Consensus.GetLatestBlockNumber(), bg.ArchiveBlockThreshold) {
 			archiveRequired = true
 		}
 	}
@@ -1266,6 +1291,9 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		// Log WebSocket request information
 		w.server.LogRequestInfo(ctx, req, "websocket")
 
+		// Log transaction details if from/to matches a watched address
+		w.server.LogWatchedAddressTransaction(ctx, req)
+
 		// Send eth_accounts requests directly to the client
 		if req.Method == "eth_accounts" {
 			msg = mustMarshalJSON(NewRPCRes(req.ID, emptyArrayResponse))
@@ -1607,6 +1635,22 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			continue
 		}
 
+		// Check if response contains empty receipt arrays that may indicate missing archive data
+		if containsEmptyReceiptResponse(rpcReqs, res) {
+			log.Warn(
+				"backend returned empty receipt array, will try next backend",
+				"name", back.Name,
+				"req_id", GetReqID(ctx),
+				"auth", GetAuthCtx(ctx),
+			)
+			lastArchiveRequiredResponse = &BackendGroupRPCResponse{
+				RPCRes:   res,
+				ServedBy: servedBy,
+				error:    nil,
+			}
+			continue
+		}
+
 		return &BackendGroupRPCResponse{
 			RPCRes:   res,
 			ServedBy: servedBy,
@@ -1675,6 +1719,17 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 			if containsArchiveRequiredError(res) {
 				log.Warn(
 					"archive backend also returned archive-required error, trying next archive backend",
+					"name", back.Name,
+					"req_id", GetReqID(ctx),
+					"auth", GetAuthCtx(ctx),
+				)
+				continue
+			}
+
+			// Check if this archive backend returned empty receipt arrays
+			if containsEmptyReceiptResponse(rpcReqs, res) {
+				log.Warn(
+					"archive backend also returned empty receipt array, trying next archive backend",
 					"name", back.Name,
 					"req_id", GetReqID(ctx),
 					"auth", GetAuthCtx(ctx),
@@ -1792,8 +1847,10 @@ func extractBlockParameter(param interface{}) string {
 	return ""
 }
 
-// requiresArchiveForBlock determines if a block parameter requires an archive node
-func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64) bool {
+// requiresArchiveForBlock determines if a block parameter requires an archive node.
+// archiveBlockThreshold specifies how many blocks from head are considered "old" enough
+// to require archive data. If 0, defaults to blocksInStateFullNode (128).
+func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64, archiveBlockThreshold uint64) bool {
 	if blockParam == "earliest" {
 		return true
 	}
@@ -1805,8 +1862,46 @@ func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64
 		if !ok {
 			return false // invalid hex
 		}
+		threshold := archiveBlockThreshold
+		if threshold == 0 {
+			threshold = blocksInStateFullNode
+		}
 		latestBlock := uint64(latestBlockNumber)
-		if latestBlock > 0 && blockNum.Uint64() <= latestBlock-blocksInStateFullNode {
+		if latestBlock > 0 && blockNum.Uint64() <= latestBlock-threshold {
+			return true
+		}
+	}
+	return false
+}
+
+// receiptMethods maps RPC methods that return receipt arrays.
+// When these return an empty array for an old block, it likely means the backend
+// has pruned the data and we should retry on archive backends.
+var receiptMethods = map[string]bool{
+	"eth_getBlockReceipts": true,
+	"debug_getRawReceipts": true,
+}
+
+// containsEmptyReceiptResponse checks if any receipt method returned an empty array result.
+// Non-archive backends may return "result": [] (valid JSON-RPC success) for old blocks
+// instead of an error, which causes op-node to fail with "got 0 receipts but expected N".
+func containsEmptyReceiptResponse(rpcReqs []*RPCReq, rpcRes []*RPCRes) bool {
+	if len(rpcReqs) != len(rpcRes) {
+		return false
+	}
+	for i, req := range rpcReqs {
+		if req == nil || rpcRes[i] == nil {
+			continue
+		}
+		if !receiptMethods[req.Method] {
+			continue
+		}
+		res := rpcRes[i]
+		if res.IsError() {
+			continue
+		}
+		// After json.Unmarshal into interface{}, an empty JSON array becomes []interface{}{}
+		if arr, ok := res.Result.([]interface{}); ok && len(arr) == 0 {
 			return true
 		}
 	}
@@ -1818,6 +1913,7 @@ func requiresArchiveForBlock(blockParam string, latestBlockNumber hexutil.Uint64
 // - "missing trie node" - node doesn't have the historical state
 // - "old data not available due to pruning" - data has been pruned
 // - "root hash mismatch witnessTrieRootHash" - witness trie root hash mismatch
+// - "no transactions snapshot file" - backend doesn't have transaction snapshot for the block
 func containsArchiveRequiredError(responses []*RPCRes) bool {
 	for _, res := range responses {
 		if res != nil && res.IsError() && res.Error != nil {
@@ -1832,10 +1928,18 @@ func containsArchiveRequiredError(responses []*RPCRes) bool {
 				strings.Contains(res.Error.Data, "distance to target block exceeds maximum proof window") ||
 				strings.Contains(res.Error.Message, "No state available for block") ||
 				strings.Contains(res.Error.Data, "No state available for block") ||
+				strings.Contains(res.Error.Message, "block number is in the future") ||
+				strings.Contains(res.Error.Data, "block number is in the future") ||
 				strings.Contains(res.Error.Message, "data before") && strings.Contains(res.Error.Message, "not available") ||
 				strings.Contains(res.Error.Data, "data before") && strings.Contains(res.Error.Data, "not available") ||
 				strings.Contains(res.Error.Message, "state at block") && strings.Contains(res.Error.Message, "is pruned") ||
-				strings.Contains(res.Error.Data, "state at block") && strings.Contains(res.Error.Data, "is pruned") {
+				strings.Contains(res.Error.Data, "state at block") && strings.Contains(res.Error.Data, "is pruned") ||
+				strings.Contains(res.Error.Message, "got 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
+				strings.Contains(res.Error.Data, "got 0 receipts") && strings.Contains(res.Error.Data, "expected") ||
+				strings.Contains(res.Error.Message, "received 0 receipts") && strings.Contains(res.Error.Message, "expected") ||
+				strings.Contains(res.Error.Data, "received 0 receipts") && strings.Contains(res.Error.Data, "expected") ||
+				strings.Contains(res.Error.Message, "no transactions snapshot file") ||
+				strings.Contains(res.Error.Data, "no transactions snapshot file") {
 				return true
 			}
 		}

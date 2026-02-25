@@ -187,6 +187,7 @@ type BackendGroupConfig struct {
 
 	Fallbacks                  []string `toml:"fallbacks"`
 	RestrictArchiveNodeTraffic bool     `toml:"restrict_archive_node_traffic"`
+	ArchiveBlockThreshold      uint64   `toml:"archive_block_threshold"`
 }
 
 type BackendGroupsConfig map[string]*BackendGroupConfig
@@ -226,6 +227,7 @@ type Config struct {
 	Tracing               TracingConfig         `toml:"tracing"`
 	SenderRateLimit       SenderRateLimitConfig `toml:"sender_rate_limit"`
 	SanctionedAddresses   []string              `toml:"sanctioned_addresses"`
+	WatchedAddresses      []string              `toml:"watched_addresses"`
 }
 
 func ReadFromEnvOrConfig(value string) (string, error) {

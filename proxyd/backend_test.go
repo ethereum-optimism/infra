@@ -109,103 +109,155 @@ func TestRequiresArchiveForBlock(t *testing.T) {
 		name       string
 		blockParam string
 		latest     hexutil.Uint64
+		threshold  uint64
 		expected   bool
 	}{
 		{
 			name:       "earliest block",
 			blockParam: "earliest",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "pending block",
 			blockParam: "pending",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "latest block",
 			blockParam: "latest",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "recent block (within 128 blocks)",
 			blockParam: "0x3e0", // 992 in decimal (1000 - 8)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "old block (beyond 128 blocks)",
 			blockParam: "0x300", // 768 in decimal (1000 - 232)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block exactly at boundary",
 			blockParam: "0x368", // 872 in decimal (1000 - 128)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block just within boundary (needs archive)",
 			blockParam: "0x359", // 857 in decimal (1000 - 143, needs archive)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block just outside archive boundary",
 			blockParam: "0x367", // 871 in decimal (1000 - 129, first block that doesn't need archive)
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "invalid hex",
 			blockParam: "0xinvalid",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "non-hex string",
 			blockParam: "notahex",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "empty string",
 			blockParam: "",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "zero latest block",
 			blockParam: "0x100",
 			latest:     hexutil.Uint64(0),
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "block number zero",
 			blockParam: "0x0",
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   true,
 		},
 		{
 			name:       "block number equals latest",
 			blockParam: "0x3e8", // 1000 in decimal
 			latest:     latestBlock,
+			threshold:  0,
 			expected:   false,
 		},
 		{
 			name:       "block number greater than latest",
 			blockParam: "0x400", // 1024 in decimal
 			latest:     latestBlock,
+			threshold:  0,
+			expected:   false,
+		},
+		// Custom threshold tests
+		{
+			name:       "custom threshold: block within custom range",
+			blockParam: "0x3e0", // 992 (1000 - 8), within 500-block threshold
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   false,
+		},
+		{
+			name:       "custom threshold: block outside custom range",
+			blockParam: "0x1f4", // 500 (1000 - 500), at boundary
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   true,
+		},
+		{
+			name:       "custom threshold: block just inside custom range",
+			blockParam: "0x1f5", // 501 (1000 - 499)
+			latest:     hexutil.Uint64(1000),
+			threshold:  500,
+			expected:   false,
+		},
+		{
+			name:       "custom threshold: large threshold covers most blocks",
+			blockParam: "0x64", // 100
+			latest:     hexutil.Uint64(10000000),
+			threshold:  1000000,
+			expected:   true,
+		},
+		{
+			name:       "default threshold (0) falls back to 128",
+			blockParam: "0x369", // 873 = 1000 - 127, just inside 128-block window
+			latest:     hexutil.Uint64(1000),
+			threshold:  0,
 			expected:   false,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := requiresArchiveForBlock(test.blockParam, test.latest)
+			result := requiresArchiveForBlock(test.blockParam, test.latest, test.threshold)
 			assert.Equal(t, test.expected, result)
 		})
 	}
@@ -288,6 +340,76 @@ func TestContainsArchiveRequiredError(t *testing.T) {
 			expected: false,
 		},
 		{
+			name: "got 0 receipts but expected in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "got 0 receipts but expected 124",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "got 0 receipts but expected in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "failed to fetch receipts: got 0 receipts but expected 124",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "received 0 receipts but expected in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "received 0 receipts but expected 50",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "received 0 receipts but expected in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "temp: failed to fetch receipts for L1 sysCfg update: received 0 receipts but expected 10",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "got 0 receipts without expected (should not match)",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "got 0 receipts from upstream",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "no transactions snapshot file in message",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code:    -32000,
+					Message: "no transactions snapshot file for blockNum=8825881, BlocksAvailable=10278999",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "no transactions snapshot file in data",
+			response: &RPCRes{
+				Error: &RPCErr{
+					Code: -32000,
+					Data: "temp: failed to fetch receipts: no transactions snapshot file for blockNum=8825881",
+				},
+			},
+			expected: true,
+		},
+		{
 			name: "no error",
 			response: &RPCRes{
 				Result: json.RawMessage(`"0x123"`),
@@ -308,6 +430,127 @@ func TestContainsArchiveRequiredError(t *testing.T) {
 				responses = append(responses, test.response)
 			}
 			result := containsArchiveRequiredError(responses)
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestContainsEmptyReceiptResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		rpcReqs  []*RPCReq
+		rpcRes   []*RPCRes
+		expected bool
+	}{
+		{
+			name: "receipt method with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+		{
+			name: "debug_getRawReceipts with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "debug_getRawReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+		{
+			name: "receipt method with non-empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{map[string]interface{}{"status": "0x1"}}},
+			},
+			expected: false,
+		},
+		{
+			name: "receipt method with error response",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Error: &RPCErr{Code: -32000, Message: "some error"}},
+			},
+			expected: false,
+		},
+		{
+			name: "non-receipt method with empty array result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBalance"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: []interface{}{}},
+			},
+			expected: false,
+		},
+		{
+			name: "nil response in slice",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				nil,
+			},
+			expected: false,
+		},
+		{
+			name:     "mismatched request/response lengths",
+			rpcReqs:  []*RPCReq{{Method: "eth_getBlockReceipts"}},
+			rpcRes:   []*RPCRes{},
+			expected: false,
+		},
+		{
+			name:     "empty slices",
+			rpcReqs:  []*RPCReq{},
+			rpcRes:   []*RPCRes{},
+			expected: false,
+		},
+		{
+			name: "receipt method with nil result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: nil},
+			},
+			expected: false,
+		},
+		{
+			name: "receipt method with string result",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: "0x123"},
+			},
+			expected: false,
+		},
+		{
+			name: "batch with mixed methods - receipt empty triggers",
+			rpcReqs: []*RPCReq{
+				{Method: "eth_getBalance"},
+				{Method: "eth_getBlockReceipts"},
+			},
+			rpcRes: []*RPCRes{
+				{Result: "0x100"},
+				{Result: []interface{}{}},
+			},
+			expected: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := containsEmptyReceiptResponse(test.rpcReqs, test.rpcRes)
 			assert.Equal(t, test.expected, result)
 		})
 	}
@@ -392,7 +635,7 @@ func TestArchiveDetectionIntegration(t *testing.T) {
 
 				// Test archive requirement logic
 				if extractedParam != "" {
-					requiresArchive := requiresArchiveForBlock(extractedParam, test.latestBlock)
+					requiresArchive := requiresArchiveForBlock(extractedParam, test.latestBlock, 0)
 					assert.Equal(t, test.expectedArchive, requiresArchive)
 				} else {
 					// Special case for blockHash - check if it's a map with blockHash
