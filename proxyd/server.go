@@ -219,8 +219,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 
 	// Non-instrumented methods
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
-	// hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
-	// hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
+	hdlr.HandleFunc("/readyz", s.HandleReadyz).Methods("GET")
 
 	// Instrumented methods
 	// hdlr.Handle("/healthz", otelhttp.NewHandler(http.HandlerFunc(s.HandleHealthz), "HealthzHandler")).Methods("GET")
@@ -280,6 +279,27 @@ func (s *Server) Shutdown() {
 func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	// _, span := tracer.Start(r.Context(), "HealthzFunction")
 	// defer span.End()
+
+	_, _ = w.Write([]byte("OK"))
+}
+
+func (s *Server) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	for name, bg := range s.BackendGroups {
+		backends := bg.orderedBackendsForRequest()
+		hasHealthy := false
+		for _, be := range backends {
+			if be.IsHealthy() {
+				hasHealthy = true
+				break
+			}
+		}
+		if !hasHealthy {
+			log.Warn("readiness check failed: no healthy backends", "backend_group", name)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("NOT OK"))
+			return
+		}
+	}
 
 	_, _ = w.Write([]byte("OK"))
 }
