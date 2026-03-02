@@ -18,6 +18,10 @@ type RPCRes struct {
 	Result  json.RawMessage
 	Error   *RPCErr
 	ID      json.RawMessage
+
+	// RawResponse holds the original upstream response bytes for zero-copy passthrough.
+	// When set, writeRPCRes will write these bytes directly instead of re-encoding.
+	RawResponse []byte
 }
 
 type rpcResJSON struct {

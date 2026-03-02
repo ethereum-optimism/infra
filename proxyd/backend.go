@@ -889,12 +889,22 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		})
 	}
 
+	// Check if we can use zero-copy passthrough:
+	// - Single request (not batch)
+	// - No translated requests (consensus_getReceipts needs response modification)
+	// - HTTP 200 status
+	canPassthrough := isSingleElementBatch && len(translatedReqs) == 0 && httpRes.StatusCode == 200
+
 	var rpcRes []*RPCRes
 	if isSingleElementBatch {
 		var singleRes RPCRes
 		if err := json.Unmarshal(resB, &singleRes); err != nil {
 			endUnmarshal()
 			return nil, ErrBackendBadResponse
+		}
+		// Store raw response for zero-copy passthrough
+		if canPassthrough {
+			singleRes.RawResponse = resB
 		}
 		rpcRes = []*RPCRes{
 			&singleRes,
@@ -941,6 +951,8 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 				Method: translatedReq.Method,
 				Result: res.Result,
 			})
+			// Clear raw response since we modified the result
+			res.RawResponse = nil
 		}
 	}
 

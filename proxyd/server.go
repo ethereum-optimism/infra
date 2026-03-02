@@ -1118,19 +1118,38 @@ func writeRPCRes(ctx context.Context, w http.ResponseWriter, res *RPCRes) {
 	// Track downstream encode timing
 	endEncode := func() {}
 	if timing != nil {
-		endEncode = timing.StartStep(StepDownstreamEncode, PhaseDownstreamSend, nil)
+		endEncode = timing.StartStep(StepDownstreamEncode, PhaseDownstreamSend, map[string]any{
+			"passthrough": res.RawResponse != nil,
+		})
 	}
-	enc := json.NewEncoder(ww)
-	if err := enc.Encode(res); err != nil {
-		endEncode()
-		log.Error("error writing rpc response", "err", err)
-		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
-		if timing != nil {
-			timing.MarkDownstreamEnd()
+
+	// Zero-copy passthrough: if we have the original response bytes, write them directly
+	if res.RawResponse != nil {
+		if _, err := ww.Write(res.RawResponse); err != nil {
+			endEncode()
+			log.Error("error writing raw rpc response", "err", err)
+			RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+			if timing != nil {
+				timing.MarkDownstreamEnd()
+			}
+			return
 		}
-		return
+		// Add newline for consistency with json.Encoder behavior
+		ww.Write([]byte("\n"))
+		endEncode()
+	} else {
+		enc := json.NewEncoder(ww)
+		if err := enc.Encode(res); err != nil {
+			endEncode()
+			log.Error("error writing rpc response", "err", err)
+			RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+			if timing != nil {
+				timing.MarkDownstreamEnd()
+			}
+			return
+		}
+		endEncode()
 	}
-	endEncode()
 
 	// Mark downstream end
 	if timing != nil {
