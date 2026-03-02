@@ -7,6 +7,10 @@ proxyd:
 	go build -v $(LDFLAGS) -o ./bin/proxyd ./cmd/proxyd
 .PHONY: proxyd
 
+bench:
+	go build -v -o ./bin/bench ./bench
+.PHONY: bench
+
 fmt:
 	go mod tidy
 	gofmt -w .
