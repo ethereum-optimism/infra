@@ -342,6 +342,11 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel = context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
+	// Initialize timing tracking
+	timing := NewRPCTiming()
+	ctx = WithTiming(ctx, timing)
+	defer timing.EmitLog(ctx)
+
 	// User can provide an API key via the "X-Api-Key" header
 	apiKey := r.Header.Get("X-Api-Key")
 	bypassLimit := s.isValidAPIKey(apiKey)
@@ -354,6 +359,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	isUnlimitedUserAgent := s.isUnlimitedUserAgent(userAgent)
 
 	if xff == "" {
+		timing.SetError("request does not include a remote IP")
 		writeRPCError(ctx, w, nil, ErrInvalidRequest("request does not include a remote IP"))
 		return
 	}
@@ -396,15 +402,20 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		"remote_ip", xff,
 	)
 
+	// Track read downstream body timing
+	endReadBody := timing.StartStep(StepReadDownstreamBody, PhaseRecvToUpstreamStart, nil)
 	body, err := io.ReadAll(LimitReader(r.Body, s.maxBodySize))
+	endReadBody()
 	if errors.Is(err, ErrLimitReaderOverLimit) {
 		log.Error("request body too large", "req_id", GetReqID(ctx))
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, ErrRequestBodyTooLarge)
+		timing.SetError("request body too large")
 		writeRPCError(ctx, w, nil, ErrRequestBodyTooLarge)
 		return
 	}
 	if err != nil {
 		log.Error("error reading request body", "err", err)
+		timing.SetError("error reading request body")
 		writeRPCError(ctx, w, nil, ErrInternal)
 		return
 	}
@@ -418,39 +429,51 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Track parse request timing
+	endParseReq := timing.StartStep(StepParseRequest, PhaseRecvToUpstreamStart, nil)
 	if IsBatch(body) {
 		reqs, err := ParseBatchRPCReq(body)
+		endParseReq()
 		if err != nil {
 			log.Error("error parsing batch RPC request", "err", err)
 			RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+			timing.SetError("error parsing batch RPC request")
 			writeRPCError(ctx, w, nil, ErrParseErr)
 			return
 		}
 
 		RecordBatchSize(len(reqs))
+		timing.SetBatchInfo(true, len(reqs))
 
 		if len(reqs) > s.maxBatchSize {
 			RecordRPCError(ctx, BackendProxyd, MethodUnknown, ErrTooManyBatchRequests)
+			timing.SetError("too many batch requests")
 			writeRPCError(ctx, w, nil, ErrTooManyBatchRequests)
 			return
 		}
 
 		if len(reqs) == 0 {
+			timing.SetError("empty batch")
 			writeRPCError(ctx, w, nil, ErrInvalidRequest("must specify at least one batch call"))
 			return
 		}
 
 		batchRes, batchContainsCached, servedBy, err := s.handleBatchRPC(ctx, reqs, isLimited, true, bypassLimit)
+		timing.SetServedBy(servedBy)
 		if err == context.DeadlineExceeded {
+			timing.SetStatus("timeout")
+			timing.SetError("gateway timeout")
 			writeRPCError(ctx, w, nil, ErrGatewayTimeout)
 			return
 		}
 		if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 			errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
+			timing.SetError(err.Error())
 			writeRPCError(ctx, w, nil, ErrInvalidRequest(err.Error()))
 			return
 		}
 		if err != nil {
+			timing.SetError("internal error")
 			writeRPCError(ctx, w, nil, ErrInternal)
 			return
 		}
@@ -462,14 +485,20 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	endParseReq()
+	timing.SetBatchInfo(false, 1)
+
 	rawBody := json.RawMessage(body)
 	backendRes, cached, servedBy, err := s.handleBatchRPC(ctx, []json.RawMessage{rawBody}, isLimited, false, bypassLimit)
+	timing.SetServedBy(servedBy)
 	if err != nil {
 		if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 			errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
+			timing.SetError(err.Error())
 			writeRPCError(ctx, w, nil, ErrInvalidRequest(err.Error()))
 			return
 		}
+		timing.SetError("internal error")
 		writeRPCError(ctx, w, nil, ErrInternal)
 		return
 	}
@@ -565,9 +594,17 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		backendGroup string
 	}
 
+	timing := GetTiming(ctx)
+
 	responses := make([]*RPCRes, len(reqs))
 	batches := make(map[batchGroup][]batchElem)
 	ids := make(map[string]int, len(reqs))
+
+	// Track route and validate timing
+	endRouteValidate := func() {}
+	if timing != nil {
+		endRouteValidate = timing.StartStep(StepRouteAndValidate, PhaseRecvToUpstreamStart, nil)
+	}
 
 	for i := range reqs {
 		parsedReq, err := ParseRPCReq(reqs[i])
@@ -579,6 +616,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 		// Simple health check
 		if len(reqs) == 1 && parsedReq.Method == proxydHealthzMethod {
+			endRouteValidate()
 			res := &RPCRes{
 				ID:      parsedReq.ID,
 				JSONRPC: JSONRPCVersion,
@@ -681,21 +719,38 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		batchGroup := batchGroup{groupID: batchGroupID, backendGroup: group}
 		batches[batchGroup] = append(batches[batchGroup], batchElem{parsedReq, i})
 	}
+	endRouteValidate()
 
 	servedBy := make(map[string]bool, 0)
 	var cached bool
 	for group, batch := range batches {
 		var cacheMisses []batchElem
 
+		// Track cache get timing
+		endCacheGet := func() {}
+		if timing != nil {
+			endCacheGet = timing.StartStep(StepCacheGet, PhaseRecvToUpstreamStart, map[string]any{
+				"backend_group": group.backendGroup,
+				"batch_size":    len(batch),
+			})
+		}
+
 		for _, req := range batch {
 			backendRes, _ := s.cache.GetRPC(ctx, req.Req)
 			if backendRes != nil {
 				responses[req.Index] = backendRes
 				cached = true
+				if timing != nil {
+					timing.IncrCacheHit()
+				}
 			} else {
 				cacheMisses = append(cacheMisses, req)
+				if timing != nil {
+					timing.IncrCacheMiss()
+				}
 			}
 		}
+		endCacheGet()
 
 		// Create minibatches - each minibatch must be no larger than the maxUpstreamBatchSize
 		numBatches := int(math.Ceil(float64(len(cacheMisses)) / float64(s.maxUpstreamBatchSize)))
@@ -713,7 +768,26 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			start := i * s.maxUpstreamBatchSize
 			end := int(math.Min(float64(start+s.maxUpstreamBatchSize), float64(len(cacheMisses))))
 			elems := cacheMisses[start:end]
+
+			// Mark upstream start and track forward timing
+			if timing != nil {
+				timing.MarkUpstreamStart()
+			}
+			endUpstreamForward := func() {}
+			if timing != nil {
+				endUpstreamForward = timing.StartStep(StepUpstreamForward, PhaseUpstreamRoundtrip, map[string]any{
+					"backend_group":   group.backendGroup,
+					"mini_batch_idx":  i,
+					"mini_batch_size": len(elems),
+				})
+			}
+
 			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch)
+			endUpstreamForward()
+			if timing != nil {
+				timing.MarkUpstreamEnd()
+			}
+
 			servedBy[sb] = true
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
@@ -736,8 +810,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			for i := range elems {
 				responses[elems[i].Index] = res[i]
 
-				// TODO(inphi): batch put these
+				// Track cache put timing
 				if res[i].Error == nil && res[i].Result != nil {
+					endCachePut := func() {}
+					if timing != nil {
+						endCachePut = timing.StartStep(StepCachePut, PhaseProxyRecvToDownstream, nil)
+					}
 					if err := s.cache.PutRPC(ctx, elems[i].Req, res[i]); err != nil {
 						log.Warn(
 							"cache put error",
@@ -745,6 +823,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 							"err", err,
 						)
 					}
+					endCachePut()
 				}
 			}
 		}
@@ -1020,6 +1099,13 @@ func writeRPCError(ctx context.Context, w http.ResponseWriter, id json.RawMessag
 }
 
 func writeRPCRes(ctx context.Context, w http.ResponseWriter, res *RPCRes) {
+	timing := GetTiming(ctx)
+
+	// Mark downstream start
+	if timing != nil {
+		timing.MarkDownstreamStart()
+	}
+
 	statusCode := 200
 	if res.IsError() && res.Error.HTTPErrorCode != 0 {
 		statusCode = res.Error.HTTPErrorCode
@@ -1028,26 +1114,69 @@ func writeRPCRes(ctx context.Context, w http.ResponseWriter, res *RPCRes) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(statusCode)
 	ww := &recordLenWriter{Writer: w}
+
+	// Track downstream encode timing
+	endEncode := func() {}
+	if timing != nil {
+		endEncode = timing.StartStep(StepDownstreamEncode, PhaseDownstreamSend, nil)
+	}
 	enc := json.NewEncoder(ww)
 	if err := enc.Encode(res); err != nil {
+		endEncode()
 		log.Error("error writing rpc response", "err", err)
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+		if timing != nil {
+			timing.MarkDownstreamEnd()
+		}
 		return
 	}
+	endEncode()
+
+	// Mark downstream end
+	if timing != nil {
+		timing.MarkDownstreamEnd()
+	}
+
 	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(statusCode)).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 
 func writeBatchRPCRes(ctx context.Context, w http.ResponseWriter, res []*RPCRes) {
+	timing := GetTiming(ctx)
+
+	// Mark downstream start
+	if timing != nil {
+		timing.MarkDownstreamStart()
+	}
+
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(200)
 	ww := &recordLenWriter{Writer: w}
+
+	// Track downstream encode timing
+	endEncode := func() {}
+	if timing != nil {
+		endEncode = timing.StartStep(StepDownstreamEncode, PhaseDownstreamSend, map[string]any{
+			"batch_size": len(res),
+		})
+	}
 	enc := json.NewEncoder(ww)
 	if err := enc.Encode(res); err != nil {
+		endEncode()
 		log.Error("error writing batch rpc response", "err", err)
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+		if timing != nil {
+			timing.MarkDownstreamEnd()
+		}
 		return
 	}
+	endEncode()
+
+	// Mark downstream end
+	if timing != nil {
+		timing.MarkDownstreamEnd()
+	}
+
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 
