@@ -185,6 +185,36 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "EXCLUDE_GATES"),
 		Usage:   "Comma-separated list of gate IDs to blacklist globally across all modes.",
 	}
+	ReportFromEvents = &cli.StringFlag{
+		Name:    "report-from-events",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "REPORT_FROM_EVENTS"),
+		Usage:   "Path to a raw_go_events.log file (or merged file). Generates an HTML report from the events without running tests.",
+	}
+	SplitTotal = &cli.IntFlag{
+		Name:    "split-total",
+		Value:   0,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_TOTAL"),
+		Usage:   "Total number of split nodes for CI parallelism. 0 = no splitting.",
+	}
+	SplitIndex = &cli.IntFlag{
+		Name:    "split-index",
+		Value:   0,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_INDEX"),
+		Usage:   "Index of this node (0-based) for CI parallelism.",
+	}
+	SplitTimingFile = &cli.StringFlag{
+		Name:    "split-timing-file",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_TIMING_FILE"),
+		Usage:   "Path to JSON file with package timing hints for balanced CI splitting.",
+	}
+	SplitTimingOutput = &cli.StringFlag{
+		Name:    "split-timing-output",
+		Value:   "",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SPLIT_TIMING_OUTPUT"),
+		Usage:   "Path to write updated timing data after test execution (for caching).",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -212,6 +242,11 @@ var optionalFlags = []cli.Flag{
 	FlakeShakeIterations,
 	ExcludeGates,
 	DryRun,
+	ReportFromEvents,
+	SplitTotal,
+	SplitIndex,
+	SplitTimingFile,
+	SplitTimingOutput,
 }
 var Flags []cli.Flag
 

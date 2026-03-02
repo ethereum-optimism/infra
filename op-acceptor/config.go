@@ -37,48 +37,52 @@ type Config struct {
 	FlakeShake           bool                   // Enable flake-shake mode for test stability validation
 	FlakeShakeIterations int                    // Number of times to run each test in flake-shake mode
 	DryRun               bool                   // If true, show what tests would be run without executing them
+	ReportFromEvents     string                 // Path to raw events file for report-only mode (empty = normal mode)
+	SplitTotal           int                    // Total split nodes for CI parallelism (0 = no splitting)
+	SplitIndex           int                    // This node's index (0-based) for CI parallelism
+	SplitTimingFile      string                 // Path to JSON timing hints for balanced CI splitting
+	SplitTimingOutput    string                 // Path to write updated timing data after test execution
 	Log                  log.Logger
 	ExcludeGates         []string // List of gate IDs whose tests should be excluded
 }
 
-// NewConfig creates a new Config from cli context
-// parseGates parses a comma-separated string of gate IDs into a slice
-func parseGates(gateStr string) []string {
-	if gateStr == "" {
+// parseCSV splits a comma-separated string into a trimmed, non-empty slice.
+func parseCSV(s string) []string {
+	if s == "" {
 		return nil
 	}
-	var gates []string
-	for _, g := range strings.Split(gateStr, ",") {
-		g = strings.TrimSpace(g)
-		if g != "" {
-			gates = append(gates, g)
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
 		}
 	}
-	return gates
+	return out
 }
 
 // NewConfig creates a new Config from cli context
 func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig string, gate string) (*Config, error) {
-	gates := parseGates(gate)
-	// Parse flags
-	if err := flags.CheckRequired(ctx); err != nil {
-		return nil, fmt.Errorf("missing required flags: %w", err)
-	}
-	if testDir == "" {
-		return nil, errors.New("test directory is required")
+	gates := parseCSV(gate)
+
+	reportFromEvents := ctx.String(flags.ReportFromEvents.Name)
+
+	// In report-from-events mode, testdir is not required
+	if reportFromEvents == "" {
+		if err := flags.CheckRequired(ctx); err != nil {
+			return nil, fmt.Errorf("missing required flags: %w", err)
+		}
+		if testDir == "" {
+			return nil, errors.New("test directory is required")
+		}
 	}
 
 	// Determine if we're in gateless mode (gate not specified). Validator config is optional in gateless mode
 	gatelessMode := len(gates) == 0
 
-	// In gateless mode, we don't require validator config or gate
-	if !gatelessMode {
-		if validatorConfig == "" {
-			return nil, errors.New("validator configuration file is required when not in gateless mode")
-		}
-		if len(gates) == 0 {
-			return nil, errors.New("gate is required when not in gateless mode")
-		}
+	// In gate mode, validator config is required
+	if !gatelessMode && validatorConfig == "" {
+		return nil, errors.New("validator configuration file is required when not in gateless mode")
 	}
 
 	var absValidatorConfig string
@@ -120,7 +124,15 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 
 	devnetEnvURL := ctx.String(flags.DevnetEnvURL.Name)
 
-	excludeGates := parseExcludeGates(ctx.String(flags.ExcludeGates.Name))
+	splitTotal := ctx.Int(flags.SplitTotal.Name)
+	splitIndex := ctx.Int(flags.SplitIndex.Name)
+	if splitTotal > 0 {
+		if splitIndex < 0 || splitIndex >= splitTotal {
+			return nil, fmt.Errorf("split-index must be >= 0 and < split-total (%d), got %d", splitTotal, splitIndex)
+		}
+	}
+
+	excludeGates := parseCSV(ctx.String(flags.ExcludeGates.Name))
 
 	// Conflict: selected gates are also excluded
 	for _, g := range gates {
@@ -153,26 +165,13 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		FlakeShake:           ctx.Bool(flags.FlakeShake.Name),
 		FlakeShakeIterations: ctx.Int(flags.FlakeShakeIterations.Name),
 		DryRun:               ctx.Bool(flags.DryRun.Name),
+		ReportFromEvents:     ctx.String(flags.ReportFromEvents.Name),
+		SplitTotal:           splitTotal,
+		SplitIndex:           splitIndex,
+		SplitTimingFile:      ctx.String(flags.SplitTimingFile.Name),
+		SplitTimingOutput:    ctx.String(flags.SplitTimingOutput.Name),
 		LogDir:               logDir,
 		Log:                  log,
 		ExcludeGates:         excludeGates,
 	}, nil
-}
-
-// parseExcludeGates determines which gates to exclude based on env/flag.
-
-func parseExcludeGates(value string) []string {
-	val := strings.TrimSpace(value)
-	if val == "" {
-		// No default exclusions: empty means no skip gates
-		return nil
-	}
-	parts := strings.Split(val, ",")
-	var gates []string
-	for _, p := range parts {
-		if s := strings.TrimSpace(p); s != "" {
-			gates = append(gates, s)
-		}
-	}
-	return gates
 }

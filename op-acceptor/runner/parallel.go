@@ -2,7 +2,10 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -286,7 +289,164 @@ func (r *runner) collectTestWork() []TestWork {
 		}
 	}
 
+	// Apply CI split filtering if configured
+	if r.splitTotal > 0 {
+		timings, err := LoadTimingFile(r.splitTimingFile)
+		if err != nil {
+			r.log.Warn("Failed to load timing file, falling back to round-robin",
+				"path", r.splitTimingFile, "error", err)
+		}
+		if len(timings) > 0 {
+			r.log.Info("Using timing-based bin-packing for CI split",
+				"timingFile", r.splitTimingFile,
+				"knownPackages", len(timings))
+		} else if r.splitTimingFile == "" {
+			r.log.Info("No timing file configured, using round-robin split")
+		} else {
+			r.log.Info("Timing file not found or empty, using round-robin split",
+				"timingFile", r.splitTimingFile)
+		}
+		workItems = ApplySplitFilter(workItems, r.splitTotal, r.splitIndex, timings)
+		r.log.Info("Applied CI split filter",
+			"splitTotal", r.splitTotal,
+			"splitIndex", r.splitIndex,
+			"workItems", len(workItems),
+			"algorithm", func() string {
+				if len(timings) > 0 {
+					return "timing-based"
+				}
+				return "round-robin"
+			}())
+	}
+
 	return workItems
+}
+
+// TimingKey builds the canonical key used for timing-based CI splitting.
+// The format is "gate|package|funcName", which uniquely identifies a test
+// work item across gates (the same package under different gates via
+// inheritance gets a distinct key).
+func TimingKey(gate, pkg, funcName string) string {
+	return gate + "|" + pkg + "|" + funcName
+}
+
+// splitKey returns the timing key for a TestWork item.
+func splitKey(w TestWork) string {
+	return TimingKey(w.GateID, w.Validator.Package, w.Validator.FuncName)
+}
+
+// ApplySplitFilter distributes work items across split nodes. When timings are
+// provided, it uses a greedy bin-packing (LPT) algorithm for balanced splits.
+// Otherwise it falls back to deterministic round-robin by sorted key.
+func ApplySplitFilter(items []TestWork, total, index int, timings map[string]float64) []TestWork {
+	if len(timings) > 0 {
+		return applySplitByTiming(items, total, index, timings)
+	}
+	// Existing round-robin fallback
+	sort.Slice(items, func(i, j int) bool {
+		return splitKey(items[i]) < splitKey(items[j])
+	})
+	var filtered []TestWork
+	for i, item := range items {
+		if i%total == index {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// applySplitByTiming uses the Longest Processing Time first (LPT) greedy
+// bin-packing algorithm to distribute work items across nodes, minimizing
+// the makespan (duration of the slowest node).
+func applySplitByTiming(items []TestWork, total, index int, timings map[string]float64) []TestWork {
+	defaultDuration := medianTiming(timings)
+
+	// Build a duration lookup for each item
+	duration := func(w TestWork) float64 {
+		if d, ok := timings[splitKey(w)]; ok {
+			return d
+		}
+		return defaultDuration
+	}
+
+	// Sort by duration descending (heaviest first -- standard LPT),
+	// with tie-break by key for determinism.
+	sort.Slice(items, func(i, j int) bool {
+		di, dj := duration(items[i]), duration(items[j])
+		if di != dj {
+			return di > dj
+		}
+		return splitKey(items[i]) < splitKey(items[j])
+	})
+
+	// Greedy assignment: assign each item to the node with the lowest total
+	nodeTotals := make([]float64, total)
+	nodeItems := make([][]TestWork, total)
+	for _, item := range items {
+		minNode := 0
+		for n := 1; n < total; n++ {
+			if nodeTotals[n] < nodeTotals[minNode] {
+				minNode = n
+			}
+		}
+		nodeItems[minNode] = append(nodeItems[minNode], item)
+		nodeTotals[minNode] += duration(item)
+	}
+
+	return nodeItems[index]
+}
+
+// medianTiming returns the median of the timing values. If the map is empty,
+// returns 60.0 as a sensible default for unknown test durations.
+func medianTiming(timings map[string]float64) float64 {
+	if len(timings) == 0 {
+		return 60.0
+	}
+	vals := make([]float64, 0, len(timings))
+	for _, v := range timings {
+		vals = append(vals, v)
+	}
+	sort.Float64s(vals)
+	mid := len(vals) / 2
+	if len(vals)%2 == 0 {
+		return (vals[mid-1] + vals[mid]) / 2
+	}
+	return vals[mid]
+}
+
+// LoadTimingFile reads a JSON file mapping TimingKey → duration_seconds.
+// Returns nil map (not error) if the path is empty or the file doesn't exist.
+func LoadTimingFile(path string) (map[string]float64, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading timing file: %w", err)
+	}
+	var timings map[string]float64
+	if err := json.Unmarshal(data, &timings); err != nil {
+		return nil, fmt.Errorf("parsing timing file: %w", err)
+	}
+	return timings, nil
+}
+
+// WriteTimingFile writes a JSON map of TimingKey → duration_seconds.
+func WriteTimingFile(path string, timings map[string]float64) error {
+	if path == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(timings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling timing data: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing timing file: %w", err)
+	}
+	return nil
 }
 
 // initializeProgressTracking sets up data structures to concurrently
