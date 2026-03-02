@@ -52,7 +52,7 @@ func (e *StaticMethodHandler) GetRPCMethod(ctx context.Context, req *RPCReq) (*R
 		return nil, nil
 	}
 
-	var result interface{}
+	var result json.RawMessage
 	if err := json.Unmarshal([]byte(val), &result); err != nil {
 		log.Error("error unmarshalling value from cache", "key", key, "method", req.Method, "err", err)
 		return nil, err
@@ -81,7 +81,10 @@ func (e *StaticMethodHandler) PutRPCMethod(ctx context.Context, req *RPCReq, res
 	defer e.m.Unlock()
 
 	key := e.key(req)
-	value := mustMarshalJSON(res.Result)
+	value := []byte(res.Result)
+	if value == nil {
+		value = []byte("null")
+	}
 
 	err := e.cache.Put(ctx, key, string(value))
 	if err != nil {

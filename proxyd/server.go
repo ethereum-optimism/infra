@@ -582,7 +582,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			res := &RPCRes{
 				ID:      parsedReq.ID,
 				JSONRPC: JSONRPCVersion,
-				Result:  "OK",
+				Result:  mustMarshalJSON("OK"),
 			}
 			return []*RPCRes{res}, false, "", nil
 		}

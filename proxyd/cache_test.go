@@ -29,7 +29,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  "0xff",
+				Result:  mustMarshalJSON("0xff"),
 				ID:      ID,
 			},
 			name: "eth_chainId",
@@ -42,7 +42,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  "9999",
+				Result:  mustMarshalJSON("9999"),
 				ID:      ID,
 			},
 			name: "net_version",
@@ -56,7 +56,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  `{"eth_getBlockTransactionCountByHash":"!"}`,
+				Result:  mustMarshalJSON(`{"eth_getBlockTransactionCountByHash":"!"}`),
 				ID:      ID,
 			},
 			name: "eth_getBlockTransactionCountByHash",
@@ -70,7 +70,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  `{"eth_getUncleCountByBlockHash":"!"}`,
+				Result:  mustMarshalJSON(`{"eth_getUncleCountByBlockHash":"!"}`),
 				ID:      ID,
 			},
 			name: "eth_getUncleCountByBlockHash",
@@ -84,7 +84,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  `{"eth_getBlockByHash":"!"}`,
+				Result:  mustMarshalJSON(`{"eth_getBlockByHash":"!"}`),
 				ID:      ID,
 			},
 			name: "eth_getBlockByHash",
@@ -98,7 +98,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  `{"eth_getUncleByBlockHashAndIndex":"!"}`,
+				Result:  mustMarshalJSON(`{"eth_getUncleByBlockHashAndIndex":"!"}`),
 				ID:      ID,
 			},
 			name: "eth_getUncleByBlockHashAndIndex",
@@ -112,7 +112,7 @@ func TestRPCCacheImmutableRPCs(t *testing.T) {
 			},
 			res: &RPCRes{
 				JSONRPC: "2.0",
-				Result:  []interface{}{"a"},
+				Result:  mustMarshalJSON([]interface{}{"a"}),
 				ID:      ID,
 			},
 			name: "debug_getRawReceipts",

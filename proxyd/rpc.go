@@ -15,21 +15,21 @@ type RPCReq struct {
 
 type RPCRes struct {
 	JSONRPC string
-	Result  interface{}
+	Result  json.RawMessage
 	Error   *RPCErr
 	ID      json.RawMessage
 }
 
 type rpcResJSON struct {
 	JSONRPC string          `json:"jsonrpc"`
-	Result  interface{}     `json:"result,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *RPCErr         `json:"error,omitempty"`
 	ID      json.RawMessage `json:"id"`
 }
 
 type nullResultRPCRes struct {
 	JSONRPC string          `json:"jsonrpc"`
-	Result  interface{}     `json:"result"`
+	Result  json.RawMessage `json:"result"`
 	ID      json.RawMessage `json:"id"`
 }
 
@@ -151,9 +151,21 @@ func NewRPCErrorRes(id json.RawMessage, err error) *RPCRes {
 }
 
 func NewRPCRes(id json.RawMessage, result interface{}) *RPCRes {
+	var rawResult json.RawMessage
+	switch typed := result.(type) {
+	case nil:
+		rawResult = nil
+	case json.RawMessage:
+		rawResult = typed
+	case []byte:
+		rawResult = typed
+	default:
+		rawResult = mustMarshalJSON(typed)
+	}
+
 	return &RPCRes{
 		JSONRPC: JSONRPCVersion,
-		Result:  result,
+		Result:  rawResult,
 		ID:      id,
 	}
 }
