@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,6 +133,9 @@ type runner struct {
 	concurrency        int      // Number of concurrent test workers (0 = auto-determine)
 	targetGates        []string // Target gates specified for this run
 
+	runtimeCache     *RuntimeCache
+	runtimeCachePath string
+
 	// New component fields
 	executor     TestExecutor
 	coordinator  TestCoordinator
@@ -157,6 +161,7 @@ type Config struct {
 	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
 	ShowProgress       bool          // Whether to show periodic progress updates during test execution
 	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
+	RuntimeCachePath string // Path to runtime cache file (empty = no caching)
 }
 
 // NewTestRunner creates a new test runner instance
@@ -209,6 +214,35 @@ func NewTestRunner(cfg Config) (TestRunner, error) {
 		concurrency:        cfg.Concurrency,
 		targetGates:        cfg.TargetGate,
 	}
+
+	// Load runtime cache for test ordering
+	r.runtimeCachePath = cfg.RuntimeCachePath
+	if r.runtimeCachePath != "" {
+		cache, err := LoadRuntimeCache(r.runtimeCachePath)
+		if err != nil {
+			cfg.Log.Warn("Failed to load runtime cache, proceeding without it", "err", err, "path", r.runtimeCachePath)
+			cache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
+		}
+		r.runtimeCache = cache
+	} else {
+		r.runtimeCache = &RuntimeCache{Runtimes: map[string]time.Duration{}}
+	}
+
+	// Sort validators by runtime to influence execution ordering (longest first, unknowns first)
+	sort.SliceStable(r.validators, func(i, j int) bool {
+		di, iKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[i])]
+		dj, jKnown := r.runtimeCache.Runtimes[r.getTestKey(r.validators[j])]
+		if !iKnown && !jKnown {
+			return false
+		}
+		if !iKnown {
+			return true
+		}
+		if !jKnown {
+			return false
+		}
+		return di > dj
+	})
 
 	// Initialize new components
 	r.outputParser = NewOutputParser()
@@ -304,7 +338,40 @@ func (r *runner) runAllTestsSerial(ctx context.Context) (*RunnerResult, error) {
 	result.Status = determineRunnerStatus(result)
 	result.Stats.EndTime = time.Now()
 	result.RunID = r.runID
+	r.updateRuntimeCache(result)
 	return result, nil
+}
+
+// updateRuntimeCache writes a new runtime cache snapshot from the completed run.
+// Logs a warning on failure but does not affect the run result.
+func (r *runner) updateRuntimeCache(result *RunnerResult) {
+	if r.runtimeCachePath == "" {
+		return
+	}
+	if result == nil {
+		return
+	}
+	// Note: keys use runner.getTestKey format (bare FuncName or Package for RunAll),
+	// which is consistent with TestWork.ResultKey used by SortWorkByRuntime.
+	// Function names that collide across packages will have their durations overwritten
+	// by the last writer; this is acceptable as a best-effort optimization.
+	runtimes := make(map[string]time.Duration)
+	for _, gate := range result.Gates {
+		for _, test := range gate.Tests {
+			key := r.getTestKey(test.Metadata)
+			runtimes[key] = test.Duration
+		}
+		for _, suite := range gate.Suites {
+			for _, test := range suite.Tests {
+				key := r.getTestKey(test.Metadata)
+				runtimes[key] = test.Duration
+			}
+		}
+	}
+	newCache := &RuntimeCache{Runtimes: runtimes}
+	if err := SaveRuntimeCache(r.runtimeCachePath, newCache); err != nil {
+		r.log.Warn("Failed to save runtime cache", "err", err, "path", r.runtimeCachePath)
+	}
 }
 
 // runAllTestsParallel implements the new parallel test execution logic
@@ -313,6 +380,10 @@ func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error)
 
 	// Collect all test work to be executed in parallel
 	workItems := r.collectTestWork()
+
+	// Sort work items longest-first so the critical path is front-loaded.
+	// Unknown validators sort to the front.
+	SortWorkByRuntime(workItems, r.runtimeCache)
 
 	if len(workItems) == 0 {
 		r.log.Warn("No test work items found")
@@ -347,6 +418,7 @@ func (r *runner) runAllTestsParallel(ctx context.Context) (*RunnerResult, error)
 	// Finalize gate and suite statuses
 	r.finalizeParallelResults(result)
 
+	r.updateRuntimeCache(result)
 	return result, nil
 }
 
