@@ -814,20 +814,8 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		httpReq.Header.Set(name, value)
 	}
 
-	timing := GetTiming(ctx)
-
-	// Track upstream HTTP call timing (includes semaphore acquisition)
-	endHttpDo := func() {}
-	if timing != nil {
-		endHttpDo = timing.StartStep(StepUpstreamHttpDo, PhaseUpstreamRoundtrip, map[string]any{
-			"backend": b.Name,
-		})
-	}
-
 	start := time.Now()
-	httpRes, err := b.client.DoLimited(ctx, httpReq)
-	endHttpDo()
-
+	httpRes, err := b.client.DoLimited(httpReq)
 	if httpRes != nil && httpRes.Body != nil {
 		defer httpRes.Body.Close()
 	}
@@ -861,16 +849,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, fmt.Errorf("response code %d", httpRes.StatusCode)
 	}
 
-	// Track upstream read body timing
-	endReadBody := func() {}
-	if timing != nil {
-		endReadBody = timing.StartStep(StepUpstreamReadBody, PhaseUpstreamRoundtrip, map[string]any{
-			"backend": b.Name,
-		})
-	}
 	resB, err := io.ReadAll(LimitReader(httpRes.Body, b.maxResponseSize))
-	endReadBody()
-
 	if errors.Is(err, ErrLimitReaderOverLimit) {
 		return nil, ErrBackendResponseTooLarge
 	}
@@ -880,38 +859,17 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, wrapErr(err, "error reading response body")
 	}
 
-	// Track upstream unmarshal timing
-	endUnmarshal := func() {}
-	if timing != nil {
-		endUnmarshal = timing.StartStep(StepUpstreamUnmarshal, PhaseUpstreamRoundtrip, map[string]any{
-			"backend":       b.Name,
-			"response_size": len(resB),
-		})
-	}
-
-	// Check if we can use zero-copy passthrough:
-	// - Single request (not batch)
-	// - No translated requests (consensus_getReceipts needs response modification)
-	// - HTTP 200 status
-	canPassthrough := isSingleElementBatch && len(translatedReqs) == 0 && httpRes.StatusCode == 200
-
 	var rpcRes []*RPCRes
 	if isSingleElementBatch {
 		var singleRes RPCRes
 		if err := json.Unmarshal(resB, &singleRes); err != nil {
-			endUnmarshal()
 			return nil, ErrBackendBadResponse
-		}
-		// Store raw response for zero-copy passthrough
-		if canPassthrough {
-			singleRes.RawResponse = resB
 		}
 		rpcRes = []*RPCRes{
 			&singleRes,
 		}
 	} else {
 		if err := json.Unmarshal(resB, &rpcRes); err != nil {
-			endUnmarshal()
 			// Infura may return a single JSON-RPC response if, for example, the batch contains a request for an unsupported method
 			if responseIsNotBatched(resB) {
 				b.intermittentErrorsSlidingWindow.Incr()
@@ -923,12 +881,22 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 			return nil, ErrBackendBadResponse
 		}
 	}
-	endUnmarshal()
 
 	if len(rpcReqs) != len(rpcRes) {
 		b.intermittentErrorsSlidingWindow.Incr()
 		RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		return nil, ErrBackendUnexpectedJSONRPC
+	}
+
+	// Check if we can use zero-copy passthrough:
+	// - Single request (not batch)
+	// - No translated requests (consensus_getReceipts needs response modification)
+	// - HTTP 200 status
+	canPassthrough := isSingleElementBatch && len(translatedReqs) == 0 && httpRes.StatusCode == 200
+
+	// Store raw response for zero-copy passthrough
+	if canPassthrough && len(rpcRes) == 1 {
+		rpcRes[0].RawResponse = resB
 	}
 
 	// capture the HTTP status code in the response. this will only
@@ -1631,30 +1599,18 @@ type LimitedHTTPClient struct {
 	backendName string
 }
 
-func (c *LimitedHTTPClient) DoLimited(ctx context.Context, req *http.Request) (*http.Response, error) {
+func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error) {
 	if c.sem == nil {
 		return c.Do(req)
 	}
 
-	// Track semaphore acquisition timing
-	timing := GetTiming(ctx)
-	endAcquireSlot := func() {}
-	if timing != nil {
-		endAcquireSlot = timing.StartStep(StepUpstreamAcquireSlot, PhaseUpstreamRoundtrip, map[string]any{
-			"backend": c.backendName,
-		})
-	}
-
 	if err := c.sem.Acquire(req.Context(), 1); err != nil {
-		endAcquireSlot()
 		if errors.Is(err, context.Canceled) {
 			return nil, ErrContextCanceled
 		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
 		return nil, wrapErr(err, ErrTooManyRequests.Message)
 	}
-	endAcquireSlot()
-
 	defer c.sem.Release(1)
 	return c.Do(req)
 }

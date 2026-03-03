@@ -45,7 +45,7 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		req, err := http.NewRequest("GET", server.URL, nil)
 		require.NoError(t, err)
 
-		resp, err := client.DoLimited(context.Background(), req)
+		resp, err := client.DoLimited(req)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
@@ -62,7 +62,7 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		req, err := http.NewRequest("GET", server.URL, nil)
 		require.NoError(t, err)
 
-		resp, err := client.DoLimited(context.Background(), req)
+		resp, err := client.DoLimited(req)
 		if resp != nil {
 			defer resp.Body.Close()
 		}
@@ -77,7 +77,7 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		req, err = http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 		require.NoError(t, err)
 
-		resp, err = client.DoLimited(ctx, req)
+		resp, err = client.DoLimited(req)
 		if resp != nil {
 			defer resp.Body.Close()
 		}
