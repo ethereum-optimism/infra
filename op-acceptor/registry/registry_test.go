@@ -318,6 +318,74 @@ func TestExcludeGates_PackagePrefix_Gateless(t *testing.T) {
 	assert.Len(t, vals, 0, "all discovered tests under ./tests/pkg should be excluded by prefix blacklist")
 }
 
+func TestExcludeGates_NamedTest_Gateless(t *testing.T) {
+	// In gateless mode, validators have FuncName="" (RunAll).
+	// When an excluded gate names a specific test in a package, the validator
+	// should NOT be dropped; instead, SkipTests should be populated.
+	tmpDir := t.TempDir()
+
+	// Create two packages
+	pkg1Dir := filepath.Join(tmpDir, "tests", "pkg1")
+	pkg2Dir := filepath.Join(tmpDir, "tests", "pkg2")
+	require.NoError(t, os.MkdirAll(pkg1Dir, 0755))
+	require.NoError(t, os.MkdirAll(pkg2Dir, 0755))
+
+	// pkg1 has two tests
+	require.NoError(t, os.WriteFile(filepath.Join(pkg1Dir, "pkg1_test.go"), []byte(
+		"package pkg1_test\nimport \"testing\"\nfunc TestA(t *testing.T){}\nfunc TestB(t *testing.T){}\n",
+	), 0644))
+	// pkg2 has one test
+	require.NoError(t, os.WriteFile(filepath.Join(pkg2Dir, "pkg2_test.go"), []byte(
+		"package pkg2_test\nimport \"testing\"\nfunc TestC(t *testing.T){}\n",
+	), 0644))
+
+	// validators.yaml: gate 'shaky' names TestA in ./pkg1
+	cfgPath := filepath.Join(tmpDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`gates:
+  - id: shaky
+    tests:
+      - name: TestA
+        package: ./pkg1
+`), 0644))
+
+	// Save cwd and switch to tmpDir/tests so gateless discovery finds ./pkg1, ./pkg2
+	origWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(filepath.Join(tmpDir, "tests")))
+	defer func() { require.NoError(t, os.Chdir(origWd)) }()
+
+	reg, err := NewRegistry(Config{
+		Log:                 log.New(),
+		GatelessMode:        true,
+		TestDir:             ".",
+		ValidatorConfigFile: cfgPath,
+		ExcludeGates:        []string{"shaky"},
+	})
+	require.NoError(t, err)
+
+	vals := reg.GetValidators()
+	// Both packages should still be present
+	require.Len(t, vals, 2, "both packages should remain; named test exclusion should not drop the package")
+
+	// Find the pkg1 validator and verify SkipTests
+	var pkg1Val *types.ValidatorMetadata
+	for i := range vals {
+		if strings.HasSuffix(vals[i].Package, "pkg1") {
+			pkg1Val = &vals[i]
+			break
+		}
+	}
+	require.NotNil(t, pkg1Val, "pkg1 validator should exist")
+	assert.Equal(t, []string{"TestA"}, pkg1Val.SkipTests, "TestA should be in SkipTests")
+
+	// pkg2 should have no SkipTests
+	for _, v := range vals {
+		if strings.HasSuffix(v.Package, "pkg2") {
+			assert.Empty(t, v.SkipTests, "pkg2 should have no SkipTests")
+		}
+	}
+}
+
 func TestExcludeGates_Inheritance(t *testing.T) {
 	// Excluding a gate should also exclude tests it inherits from parents
 	tmpDir := t.TempDir()

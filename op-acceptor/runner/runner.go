@@ -1179,6 +1179,11 @@ func (r *runner) buildTestArgs(metadata types.ValidatorMetadata) []string {
 		args = append(args, "-run", fmt.Sprintf("^%s$", metadata.FuncName))
 	}
 
+	// Add skip pattern for excluded named tests
+	if len(metadata.SkipTests) > 0 {
+		args = append(args, SkipFlag, fmt.Sprintf("^(%s)$", strings.Join(metadata.SkipTests, "|")))
+	}
+
 	// Always disable caching
 	args = append(args, "-count", "1")
 

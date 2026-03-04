@@ -280,6 +280,15 @@ func TestBuildTestArgs(t *testing.T) {
 			},
 			want: []string{"test", "./...", "-run", "^TestFoo$", "-count", "1", "-v", "-json"},
 		},
+		{
+			name: "run all with skip tests",
+			metadata: types.ValidatorMetadata{
+				Package:   "pkg/foo",
+				RunAll:    true,
+				SkipTests: []string{"TestFlaky", "TestUnstable"},
+			},
+			want: []string{"test", "pkg/foo", "-skip", "^(TestFlaky|TestUnstable)$", "-count", "1", "-timeout", "10m0s", "-v", "-json"},
+		},
 	}
 
 	for _, tt := range tests {

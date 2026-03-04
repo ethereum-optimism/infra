@@ -18,6 +18,7 @@ const (
 	TimeoutFlag     = "-timeout"
 	CountFlag       = "-count"
 	RunFlag         = "-run"
+	SkipFlag        = "-skip"
 
 	// Test count to disable caching
 	DisableCacheCount = "1"

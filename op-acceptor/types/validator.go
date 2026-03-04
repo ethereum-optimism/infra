@@ -27,14 +27,15 @@ type ValidatorConfig struct {
 }
 
 type ValidatorMetadata struct {
-	ID       string
-	Type     ValidatorType
-	Gate     string
-	Suite    string
-	FuncName string
-	Package  string
-	Timeout  time.Duration
-	RunAll   bool
+	ID        string
+	Type      ValidatorType
+	Gate      string
+	Suite     string
+	FuncName  string
+	Package   string
+	Timeout   time.Duration
+	RunAll    bool
+	SkipTests []string // Test function names to skip via -skip flag
 }
 
 // GetName returns a name for the validator based on available fields
