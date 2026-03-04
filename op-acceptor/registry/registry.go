@@ -217,13 +217,29 @@ func (r *Registry) applyExcludeGates(cfgPath string, gates []string) {
 			filtered = append(filtered, v)
 			continue
 		}
-		// Match by tuple or package
-		if _, ok := s.byTuple[TestRef{Package: v.Package, Name: v.FuncName}]; ok || packagePrefixBlacklisted(v.Package, s.byPackage) {
+		// Package-level exclusion: drop the entire validator
+		if packagePrefixBlacklisted(v.Package, s.byPackage) {
 			excludedCount++
-			name := v.FuncName
-			excludedPrev = append(excludedPrev, formatRef(v.Package, name))
+			excludedPrev = append(excludedPrev, formatRef(v.Package, v.FuncName))
 			r.config.Log.Info("Excluded by blacklist", "package", v.Package, "name", v.FuncName)
 			continue
+		}
+		// Exact tuple match (validator has a specific FuncName)
+		if v.FuncName != "" {
+			if _, ok := s.byTuple[TestRef{Package: v.Package, Name: v.FuncName}]; ok {
+				excludedCount++
+				excludedPrev = append(excludedPrev, formatRef(v.Package, v.FuncName))
+				r.config.Log.Info("Excluded by blacklist", "package", v.Package, "name", v.FuncName)
+				continue
+			}
+		}
+		// RunAll validator (FuncName == ""): check if any tuple entries target tests in this package.
+		// Instead of dropping the whole package, populate SkipTests so the runner can use -skip.
+		if v.RunAll && v.FuncName == "" {
+			if skips := tupleMatchesForPackage(v.Package, s.byTuple); len(skips) > 0 {
+				v.SkipTests = skips
+				r.config.Log.Info("Added skip tests for package", "package", v.Package, "skipTests", skips)
+			}
 		}
 		filtered = append(filtered, v)
 	}
@@ -245,6 +261,21 @@ func packagePrefixBlacklisted(pkg string, byPackage map[string]struct{}) bool {
 		}
 	}
 	return false
+}
+
+// tupleMatchesForPackage returns test names from tuple entries whose package matches
+// or is a prefix of the given package (on segment boundaries).
+func tupleMatchesForPackage(pkg string, byTuple map[TestRef]struct{}) []string {
+	var names []string
+	for ref := range byTuple {
+		if ref.Name == "" {
+			continue
+		}
+		if ref.Package == pkg || (strings.HasPrefix(pkg, ref.Package) && (len(pkg) == len(ref.Package) || pkg[len(ref.Package)] == '/')) {
+			names = append(names, ref.Name)
+		}
+	}
+	return names
 }
 
 func formatRef(pkg string, name string) string {
