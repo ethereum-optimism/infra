@@ -277,6 +277,8 @@ jobs:
       - run:
           name: Setup mise
           command: |
+            # Install zstd (needed to extract mise archive)
+            apt-get update -qq && apt-get install -y -qq zstd
             # Install mise
             curl -fsSL https://mise.run | sh
             echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> $BASH_ENV
