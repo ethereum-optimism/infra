@@ -254,6 +254,7 @@ type Config struct {
 type InteropValidationConfig struct {
 	Urls                              []string                  `toml:"urls"`
 	Strategy                          InteropValidationStrategy `toml:"strategy"`
+	ChainID                           uint64                    `toml:"chain_id"`
 	LoadBalancingUnhealthinessTimeout time.Duration             `toml:"load_balancing_unhealthiness_timeout"`
 	ReqSizeLimit                      int                       `toml:"req_size_limit"`
 	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`

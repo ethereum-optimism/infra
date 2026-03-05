@@ -454,6 +454,7 @@ func Start(config *Config) (*Server, func(), error) {
 	opts := CommonStrategyOpts(
 		WithReqSizeLimit(config.InteropValidationConfig.ReqSizeLimit),
 		WithAccessListSizeLimit(config.InteropValidationConfig.AccessListSizeLimit),
+		WithChainID(config.InteropValidationConfig.ChainID),
 	)
 
 	switch config.InteropValidationConfig.Strategy {
