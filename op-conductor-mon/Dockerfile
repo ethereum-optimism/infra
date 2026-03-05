@@ -1,18 +1,12 @@
-FROM golang:1.23-alpine AS builder
+FROM dhi.io/golang:1.24-dev AS builder
 
 COPY ./op-conductor-mon /app
 
 WORKDIR /app
-RUN apk add --no-cache make jq bash git alpine-sdk
-RUN make build
+RUN CGO_ENABLED=0 make build
 
-FROM alpine:3.18
-RUN apk --no-cache add make jq bash git alpine-sdk redis
+FROM dhi.io/alpine-base:3.22
 
-RUN addgroup -S app && adduser -S app -G app
-USER app
-WORKDIR /app
-
-COPY --from=builder /app/bin/op-conductor-mon /app
+COPY --from=builder /app/bin/op-conductor-mon /app/op-conductor-mon
 
 ENTRYPOINT ["/app/op-conductor-mon"]
