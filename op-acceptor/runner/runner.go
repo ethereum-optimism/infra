@@ -747,20 +747,40 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 	return res, err
 }
 
-// allTestsWouldBeSkipped returns true if every top-level test function in the
-// package is present in metadata.SkipTests, meaning no tests would actually run.
-// It uses "go test -list ." to enumerate the package's test functions without
-// executing them, so it is cheap and does not start any test infrastructure.
+// testFuncPattern matches top-level Go test function declarations. We only
+// match Test* here because SkipTests comes from explicit YAML entries which
+// are invariably Test* functions; Benchmark* and Fuzz* are not skipped via
+// -skip in normal acceptance test runs.
+var testFuncPattern = regexp.MustCompile(`^func (Test\w+)\(`)
+
+// allTestsWouldBeSkipped returns true if every top-level Test* function in the
+// package source is present in metadata.SkipTests, meaning no tests would
+// actually run.
+//
+// Critically, this must NOT invoke the test binary because TestMain can start
+// expensive infrastructure (devnets) that hangs on teardown when 0 tests run.
+// Instead we use "go list -json" to resolve the package's test source files
+// and scan them with a regex — no compilation or execution required.
 func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.ValidatorMetadata) (bool, error) {
-	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", "-list", ".", metadata.Package)
+	// Resolve test source files via "go list -json" (no build, no test binary).
+	listCmd, cleanup := r.testCommandContext(ctx, r.goBinary, "list", "-json", metadata.Package)
 	defer cleanup()
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = io.Discard
+	var listOut bytes.Buffer
+	listCmd.Stdout = &listOut
+	listCmd.Stderr = io.Discard
 
-	if err := cmd.Run(); err != nil {
-		return false, fmt.Errorf("go test -list failed for %s: %w", metadata.Package, err)
+	if err := listCmd.Run(); err != nil {
+		return false, fmt.Errorf("go list -json failed for %s: %w", metadata.Package, err)
+	}
+
+	var pkgInfo struct {
+		Dir          string
+		TestGoFiles  []string
+		XTestGoFiles []string
+	}
+	if err := json.Unmarshal(listOut.Bytes(), &pkgInfo); err != nil {
+		return false, fmt.Errorf("parsing go list output for %s: %w", metadata.Package, err)
 	}
 
 	skipSet := make(map[string]struct{}, len(metadata.SkipTests))
@@ -768,28 +788,43 @@ func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.Vali
 		skipSet[s] = struct{}{}
 	}
 
-	// "go test -list" outputs one test name per line, followed by a summary line
-	// like "ok  <package>  0.001s". Only count lines that look like test names
-	// (no spaces, non-empty, not the "ok" summary).
+	testFiles := append(pkgInfo.TestGoFiles, pkgInfo.XTestGoFiles...)
 	foundAny := false
-	scanner := bufio.NewScanner(&out)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "ok ") || strings.HasPrefix(line, "?") {
-			continue
+	for _, file := range testFiles {
+		fns, err := scanTestFunctions(filepath.Join(pkgInfo.Dir, file))
+		if err != nil {
+			return false, fmt.Errorf("scanning %s: %w", file, err)
 		}
-		foundAny = true
-		if _, skip := skipSet[line]; !skip {
-			return false, nil // at least one test would run
+		for _, fn := range fns {
+			foundAny = true
+			if _, skip := skipSet[fn]; !skip {
+				return false, nil // at least one test would run
+			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false, fmt.Errorf("scanning go test -list output: %w", err)
 	}
 
-	// If no test functions were found at all, don't treat that as "all skipped";
-	// let the normal execution handle the empty-package case.
+	// If no Test* functions were found at all, do not treat that as "all
+	// skipped" — let the normal execution path handle the empty-package case.
 	return foundAny, nil
+}
+
+// scanTestFunctions opens a Go test source file and returns the names of all
+// top-level Test* functions found in it.
+func scanTestFunctions(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var funcs []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if m := testFuncPattern.FindStringSubmatch(scanner.Text()); m != nil {
+			funcs = append(funcs, m[1])
+		}
+	}
+	return funcs, scanner.Err()
 }
 
 // runTestList runs a list of tests and aggregates their results
