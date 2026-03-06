@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -715,6 +716,24 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 // runAllTestsInPackage discovers and runs all tests in a package
 // Executes the entire package as a single go test process to preserve intra-package parallelism.
 func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	// If the validator has a non-empty SkipTests list, check whether every test
+	// in the package would be skipped. If so, skip the entire invocation to avoid
+	// spinning up expensive test infrastructure (e.g. devnets) that will never
+	// actually run any tests and may hang on teardown.
+	if len(metadata.SkipTests) > 0 {
+		if all, err := r.allTestsWouldBeSkipped(ctx, metadata); err != nil {
+			r.log.Warn("Could not determine if all tests are skipped; proceeding normally",
+				"package", metadata.Package, "err", err)
+		} else if all {
+			r.log.Info("All tests in package are excluded by skip filter; skipping package invocation",
+				"package", metadata.Package, "skipTests", metadata.SkipTests)
+			return &types.TestResult{
+				Metadata: metadata,
+				Status:   types.TestStatusSkip,
+			}, nil
+		}
+	}
+
 	pkgMeta := metadata
 	pkgMeta.RunAll = false
 	pkgMeta.FuncName = ""
@@ -726,6 +745,91 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 		res.Metadata.RunAll = true
 	}
 	return res, err
+}
+
+// testFuncPattern matches top-level Go test function declarations. We only
+// match Test* here because SkipTests comes from explicit YAML entries which
+// are invariably Test* functions; Benchmark* and Fuzz* are not skipped via
+// -skip in normal acceptance test runs.
+var testFuncPattern = regexp.MustCompile(`^func (Test\w+)\(`)
+
+// allTestsWouldBeSkipped returns true if every top-level Test* function in the
+// package source is present in metadata.SkipTests, meaning no tests would
+// actually run.
+//
+// Critically, this must NOT invoke the test binary because TestMain can start
+// expensive infrastructure (devnets) that hangs on teardown when 0 tests run.
+// Instead we use "go list -json" to resolve the package's test source files
+// and scan them with a regex — no compilation or execution required.
+func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.ValidatorMetadata) (bool, error) {
+	// Resolve test source files via "go list -json" (no build, no test binary).
+	listCmd, cleanup := r.testCommandContext(ctx, r.goBinary, "list", "-json", metadata.Package)
+	defer cleanup()
+
+	var listOut bytes.Buffer
+	listCmd.Stdout = &listOut
+	listCmd.Stderr = io.Discard
+
+	if err := listCmd.Run(); err != nil {
+		return false, fmt.Errorf("go list -json failed for %s: %w", metadata.Package, err)
+	}
+
+	var pkgInfo struct {
+		Dir          string
+		TestGoFiles  []string
+		XTestGoFiles []string
+	}
+	if err := json.Unmarshal(listOut.Bytes(), &pkgInfo); err != nil {
+		return false, fmt.Errorf("parsing go list output for %s: %w", metadata.Package, err)
+	}
+
+	skipSet := make(map[string]struct{}, len(metadata.SkipTests))
+	for _, s := range metadata.SkipTests {
+		skipSet[s] = struct{}{}
+	}
+
+	testFiles := append(pkgInfo.TestGoFiles, pkgInfo.XTestGoFiles...)
+	foundAny := false
+	for _, file := range testFiles {
+		fns, err := scanTestFunctions(filepath.Join(pkgInfo.Dir, file))
+		if err != nil {
+			return false, fmt.Errorf("scanning %s: %w", file, err)
+		}
+		for _, fn := range fns {
+			// TestMain is the test harness entry point, not an actual test function.
+			// The Go testing framework never runs it as a test, so exclude it.
+			if fn == "TestMain" {
+				continue
+			}
+			foundAny = true
+			if _, skip := skipSet[fn]; !skip {
+				return false, nil // at least one test would run
+			}
+		}
+	}
+
+	// If no Test* functions were found at all, do not treat that as "all
+	// skipped" — let the normal execution path handle the empty-package case.
+	return foundAny, nil
+}
+
+// scanTestFunctions opens a Go test source file and returns the names of all
+// top-level Test* functions found in it.
+func scanTestFunctions(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var funcs []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if m := testFuncPattern.FindStringSubmatch(scanner.Text()); m != nil {
+			funcs = append(funcs, m[1])
+		}
+	}
+	return funcs, scanner.Err()
 }
 
 // runTestList runs a list of tests and aggregates their results
