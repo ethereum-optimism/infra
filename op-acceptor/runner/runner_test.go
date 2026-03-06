@@ -2354,3 +2354,68 @@ func TestChildPkg(t *testing.T) { t.Log("child ok") }
 	assert.True(t, hasParent, "should contain TestParentPkg from parent package")
 	assert.True(t, hasChild, "should contain TestChildPkg from child subpackage")
 }
+
+// TestRunAllTests_SkipWhenAllTestsExcluded verifies that when every test in a RunAll
+// package appears in the SkipTests list, the package is not invoked at all and the
+// result is reported as skipped. This prevents expensive test infrastructure (like
+// devnets) from starting when no tests would actually run.
+func TestRunAllTests_SkipWhenAllTestsExcluded(t *testing.T) {
+	ctx := context.Background()
+
+	// Package has one test: TestOnlyTest.
+	// It is listed in a "quarantine" gate so that exclude-gates sets SkipTests.
+	// The "production" gate uses a RunAll validator for the same package.
+	configContent := []byte(`
+gates:
+  - id: quarantine
+    tests:
+      - package: ./feature
+        name: TestOnlyTest
+  - id: production
+    tests:
+      - package: ./feature
+`)
+	testContent := []byte(`
+package feature_test
+
+import "testing"
+
+func TestOnlyTest(t *testing.T) { t.Log("only test") }
+`)
+
+	testDir := t.TempDir()
+	initGoModule(t, testDir, "test")
+	featureDir := filepath.Join(testDir, "feature")
+	require.NoError(t, os.MkdirAll(featureDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "example_test.go"), testContent, 0644))
+
+	validatorConfigPath := filepath.Join(testDir, "validators.yaml")
+	require.NoError(t, os.WriteFile(validatorConfigPath, configContent, 0644))
+
+	reg, err := registry.NewRegistry(registry.Config{
+		ValidatorConfigFile: validatorConfigPath,
+		ExcludeGates:        []string{"quarantine"},
+	})
+	require.NoError(t, err)
+
+	r, err := NewTestRunner(Config{
+		Registry: reg,
+		WorkDir:  testDir,
+		Log:      testlog.Logger(t, slog.LevelDebug),
+	})
+	require.NoError(t, err)
+
+	result, err := r.RunAllTests(ctx)
+	require.NoError(t, err)
+
+	// The production gate should have a skipped result for the package (not a failure).
+	require.Contains(t, result.Gates, "production")
+	gate := result.Gates["production"]
+	require.Len(t, gate.Tests, 1)
+	var pkgResult *types.TestResult
+	for _, v := range gate.Tests {
+		pkgResult = v
+	}
+	require.NotNil(t, pkgResult)
+	assert.Equal(t, types.TestStatusSkip, pkgResult.Status, "package with all tests excluded should be reported as skipped, not failed")
+}

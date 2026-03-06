@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -715,6 +716,24 @@ func (r *runner) RunTest(ctx context.Context, metadata types.ValidatorMetadata) 
 // runAllTestsInPackage discovers and runs all tests in a package
 // Executes the entire package as a single go test process to preserve intra-package parallelism.
 func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.ValidatorMetadata) (*types.TestResult, error) {
+	// If the validator has a non-empty SkipTests list, check whether every test
+	// in the package would be skipped. If so, skip the entire invocation to avoid
+	// spinning up expensive test infrastructure (e.g. devnets) that will never
+	// actually run any tests and may hang on teardown.
+	if len(metadata.SkipTests) > 0 {
+		if all, err := r.allTestsWouldBeSkipped(ctx, metadata); err != nil {
+			r.log.Warn("Could not determine if all tests are skipped; proceeding normally",
+				"package", metadata.Package, "err", err)
+		} else if all {
+			r.log.Info("All tests in package are excluded by skip filter; skipping package invocation",
+				"package", metadata.Package, "skipTests", metadata.SkipTests)
+			return &types.TestResult{
+				Metadata: metadata,
+				Status:   types.TestStatusSkip,
+			}, nil
+		}
+	}
+
 	pkgMeta := metadata
 	pkgMeta.RunAll = false
 	pkgMeta.FuncName = ""
@@ -726,6 +745,51 @@ func (r *runner) runAllTestsInPackage(ctx context.Context, metadata types.Valida
 		res.Metadata.RunAll = true
 	}
 	return res, err
+}
+
+// allTestsWouldBeSkipped returns true if every top-level test function in the
+// package is present in metadata.SkipTests, meaning no tests would actually run.
+// It uses "go test -list ." to enumerate the package's test functions without
+// executing them, so it is cheap and does not start any test infrastructure.
+func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.ValidatorMetadata) (bool, error) {
+	cmd, cleanup := r.testCommandContext(ctx, r.goBinary, "test", "-list", ".", metadata.Package)
+	defer cleanup()
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("go test -list failed for %s: %w", metadata.Package, err)
+	}
+
+	skipSet := make(map[string]struct{}, len(metadata.SkipTests))
+	for _, s := range metadata.SkipTests {
+		skipSet[s] = struct{}{}
+	}
+
+	// "go test -list" outputs one test name per line, followed by a summary line
+	// like "ok  <package>  0.001s". Only count lines that look like test names
+	// (no spaces, non-empty, not the "ok" summary).
+	foundAny := false
+	scanner := bufio.NewScanner(&out)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "ok ") || strings.HasPrefix(line, "?") {
+			continue
+		}
+		foundAny = true
+		if _, skip := skipSet[line]; !skip {
+			return false, nil // at least one test would run
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("scanning go test -list output: %w", err)
+	}
+
+	// If no test functions were found at all, don't treat that as "all skipped";
+	// let the normal execution handle the empty-package case.
+	return foundAny, nil
 }
 
 // runTestList runs a list of tests and aggregates their results
