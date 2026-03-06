@@ -2375,10 +2375,17 @@ gates:
     tests:
       - package: ./feature
 `)
+	// Include a TestMain to verify it is not mistaken for a test function and
+	// does not prevent the all-skipped detection from working.
 	testContent := []byte(`
 package feature_test
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
+
+func TestMain(m *testing.M) { os.Exit(m.Run()) }
 
 func TestOnlyTest(t *testing.T) { t.Log("only test") }
 `)

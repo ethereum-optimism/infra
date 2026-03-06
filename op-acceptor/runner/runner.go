@@ -796,6 +796,11 @@ func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.Vali
 			return false, fmt.Errorf("scanning %s: %w", file, err)
 		}
 		for _, fn := range fns {
+			// TestMain is the test harness entry point, not an actual test function.
+			// The Go testing framework never runs it as a test, so exclude it.
+			if fn == "TestMain" {
+				continue
+			}
 			foundAny = true
 			if _, skip := skipSet[fn]; !skip {
 				return false, nil // at least one test would run
