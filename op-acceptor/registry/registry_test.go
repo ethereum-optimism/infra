@@ -1,8 +1,10 @@
 package registry
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -495,6 +497,219 @@ func TestExample2(t *testing.T) {
 	}
 	expected := []string{"./pkg1", "./subdir/pkg2"}
 	require.ElementsMatch(t, expected, packages)
+}
+
+// createTestPackages creates n test packages under tmpDir and returns their
+// expected relative paths (e.g., "./pkg-00", "./pkg-01", ...).
+func createTestPackages(t *testing.T, tmpDir string, n int) []string {
+	t.Helper()
+	var paths []string
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("pkg-%02d", i)
+		dir := filepath.Join(tmpDir, name)
+		require.NoError(t, os.MkdirAll(dir, 0755))
+		content := fmt.Sprintf("package %s\nimport \"testing\"\nfunc Test%s(t *testing.T){}\n", name, name)
+		// Package names can't have hyphens — use underscore in Go but keep dir name for path
+		content = strings.ReplaceAll(content, "-", "_")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name+"_test.go"), []byte(content), 0644))
+		paths = append(paths, "./"+name)
+	}
+	return paths
+}
+
+func TestShardFiltering_Basic(t *testing.T) {
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 8)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	// Create 4 shards and verify each gets 2 packages
+	for shard := 0; shard < 4; shard++ {
+		reg, err := NewRegistry(Config{
+			Log:          log.New(),
+			GatelessMode: true,
+			TestDir:      ".",
+			ShardIndex:   shard,
+			ShardTotal:   4,
+		})
+		require.NoError(t, err)
+
+		vals := reg.GetValidators()
+		assert.Len(t, vals, 2, "shard %d should have 2 packages", shard)
+	}
+}
+
+func TestShardFiltering_Coverage(t *testing.T) {
+	// Verify that the union of all shards equals the full package set (no gaps, no duplicates).
+	tmpDir := t.TempDir()
+	allPkgs := createTestPackages(t, tmpDir, 10)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	shardTotal := 3
+	var allShardedPkgs []string
+
+	for shard := 0; shard < shardTotal; shard++ {
+		reg, err := NewRegistry(Config{
+			Log:          log.New(),
+			GatelessMode: true,
+			TestDir:      ".",
+			ShardIndex:   shard,
+			ShardTotal:   shardTotal,
+		})
+		require.NoError(t, err)
+
+		for _, v := range reg.GetValidators() {
+			allShardedPkgs = append(allShardedPkgs, v.Package)
+		}
+	}
+
+	sort.Strings(allPkgs)
+	sort.Strings(allShardedPkgs)
+	assert.Equal(t, allPkgs, allShardedPkgs, "union of all shards should equal the full package set")
+}
+
+func TestShardFiltering_Deterministic(t *testing.T) {
+	// Running the same shard twice should produce identical results.
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 6)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	var runs [2][]string
+	for i := 0; i < 2; i++ {
+		reg, err := NewRegistry(Config{
+			Log:          log.New(),
+			GatelessMode: true,
+			TestDir:      ".",
+			ShardIndex:   1,
+			ShardTotal:   3,
+		})
+		require.NoError(t, err)
+		for _, v := range reg.GetValidators() {
+			runs[i] = append(runs[i], v.Package)
+		}
+	}
+	assert.Equal(t, runs[0], runs[1], "shard assignment should be deterministic")
+}
+
+func TestShardFiltering_NoOverlap(t *testing.T) {
+	// No package should appear in more than one shard.
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 7)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	shardTotal := 3
+	seen := make(map[string]int) // package -> which shard
+
+	for shard := 0; shard < shardTotal; shard++ {
+		reg, err := NewRegistry(Config{
+			Log:          log.New(),
+			GatelessMode: true,
+			TestDir:      ".",
+			ShardIndex:   shard,
+			ShardTotal:   shardTotal,
+		})
+		require.NoError(t, err)
+
+		for _, v := range reg.GetValidators() {
+			prev, dup := seen[v.Package]
+			assert.False(t, dup, "package %s appears in shard %d and %d", v.Package, prev, shard)
+			seen[v.Package] = shard
+		}
+	}
+}
+
+func TestShardFiltering_MoreShardsThanPackages(t *testing.T) {
+	// When there are more shards than packages, some shards should be empty.
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 2)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	nonEmpty := 0
+	for shard := 0; shard < 5; shard++ {
+		reg, err := NewRegistry(Config{
+			Log:          log.New(),
+			GatelessMode: true,
+			TestDir:      ".",
+			ShardIndex:   shard,
+			ShardTotal:   5,
+		})
+		require.NoError(t, err)
+		if len(reg.GetValidators()) > 0 {
+			nonEmpty++
+		}
+	}
+	assert.Equal(t, 2, nonEmpty, "only 2 shards should have packages when there are 2 packages and 5 shards")
+}
+
+func TestShardFiltering_SinglePackage(t *testing.T) {
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 1)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	// Shard 0 should get the package, shard 1 should be empty
+	reg0, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      ".",
+		ShardIndex:   0,
+		ShardTotal:   2,
+	})
+	require.NoError(t, err)
+	assert.Len(t, reg0.GetValidators(), 1)
+
+	reg1, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      ".",
+		ShardIndex:   1,
+		ShardTotal:   2,
+	})
+	require.NoError(t, err)
+	assert.Len(t, reg1.GetValidators(), 0)
+}
+
+func TestShardFiltering_Disabled(t *testing.T) {
+	// Default values (-1, 0) should mean no sharding — all packages returned.
+	tmpDir := t.TempDir()
+	createTestPackages(t, tmpDir, 4)
+
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(originalWd)) }()
+
+	reg, err := NewRegistry(Config{
+		Log:          log.New(),
+		GatelessMode: true,
+		TestDir:      ".",
+		ShardIndex:   -1,
+		ShardTotal:   0,
+	})
+	require.NoError(t, err)
+	assert.Len(t, reg.GetValidators(), 4, "no sharding should return all packages")
 }
 
 func TestRegistryGatelessModeEmpty(t *testing.T) {
