@@ -158,11 +158,7 @@ func (h *BatchRPCResponseRouter) ServeHTTP(w http.ResponseWriter, r *http.Reques
 				return
 			}
 
-			out[i] = &proxyd.RPCRes{
-				JSONRPC: proxyd.JSONRPCVersion,
-				Result:  result,
-				ID:      req.ID,
-			}
+			out[i] = proxyd.NewRPCRes(req.ID, result)
 		}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			panic(err)
@@ -193,11 +189,7 @@ func (h *BatchRPCResponseRouter) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	out := &proxyd.RPCRes{
-		JSONRPC: proxyd.JSONRPCVersion,
-		Result:  result,
-		ID:      req.ID,
-	}
+	out := proxyd.NewRPCRes(req.ID, result)
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(out); err != nil {
 		panic(err)

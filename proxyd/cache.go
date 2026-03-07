@@ -168,8 +168,8 @@ func newRPCCache(cache Cache) RPCCache {
 		},
 		filterPut: func(req *RPCReq, res *RPCRes) bool {
 			// don't cache if response contains 0 receipts
-			rawReceipts, ok := res.Result.([]interface{})
-			if !ok {
+			var rawReceipts []json.RawMessage
+			if err := json.Unmarshal(res.Result, &rawReceipts); err != nil {
 				return false
 			}
 			return len(rawReceipts) > 0

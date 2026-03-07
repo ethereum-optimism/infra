@@ -582,7 +582,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			res := &RPCRes{
 				ID:      parsedReq.ID,
 				JSONRPC: JSONRPCVersion,
-				Result:  "OK",
+				Result:  mustMarshalJSON("OK"),
 			}
 			return []*RPCRes{res}, false, "", nil
 		}
@@ -1028,11 +1028,23 @@ func writeRPCRes(ctx context.Context, w http.ResponseWriter, res *RPCRes) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(statusCode)
 	ww := &recordLenWriter{Writer: w}
-	enc := json.NewEncoder(ww)
-	if err := enc.Encode(res); err != nil {
-		log.Error("error writing rpc response", "err", err)
-		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
-		return
+
+	// Zero-copy passthrough: if we have the original response bytes, write them directly
+	if res.RawResponse != nil {
+		if _, err := ww.Write(res.RawResponse); err != nil {
+			log.Error("error writing raw rpc response", "err", err)
+			RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+			return
+		}
+		// Add newline for consistency with json.Encoder behavior
+		ww.Write([]byte("\n"))
+	} else {
+		enc := json.NewEncoder(ww)
+		if err := enc.Encode(res); err != nil {
+			log.Error("error writing rpc response", "err", err)
+			RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
+			return
+		}
 	}
 	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(statusCode)).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
