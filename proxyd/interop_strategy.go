@@ -7,11 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/holiman/uint256"
 )
 
 type InteropStrategy interface {
@@ -20,6 +22,7 @@ type InteropStrategy interface {
 
 type commonInteropStrategy struct {
 	urls                                    []string
+	chainID                                 eth.ChainID
 	accessListSizeLimit                     int
 	reqSizeLimit                            int
 	validateAndDeduplicateInteropAccessList bool
@@ -69,6 +72,12 @@ var WithValidateAndDeduplicateInteropAccessList = func(validateAndDeduplicateInt
 var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonStrategyOpt {
 	return func(s *commonInteropStrategy) {
 		s.skipOnNoSupervisorBackend = skipOnNoSupervisorBackend
+	}
+}
+
+var WithChainID = func(chainID uint64) commonStrategyOpt {
+	return func(s *commonInteropStrategy) {
+		s.chainID = eth.ChainIDFromUInt64(chainID)
 	}
 }
 
@@ -136,7 +145,7 @@ func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, in
 	firstSupervisorUrl := s.urls[0]
 
 	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
-	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl)
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl, s.chainID)
 	return err
 }
 
@@ -167,7 +176,7 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		wg.Add(1)
 		go func(ctx context.Context, url string) {
 			defer wg.Done()
-			_, _, err := performCheckAccessListOp(ctx, accessListToValidate, url)
+			_, _, err := performCheckAccessListOp(ctx, accessListToValidate, url, s.chainID)
 			resultChan <- err
 		}(ctx, url)
 	}
@@ -238,7 +247,7 @@ func (s *healthAwareLoadBalancingStrategyImpl) ValidateAccessList(ctx context.Co
 			continue
 		}
 
-		httpCode, err := backend.Validate(ctx, accessListToValidate)
+		httpCode, err := backend.Validate(ctx, accessListToValidate, s.chainID)
 		if err == nil {
 			return nil
 		}
@@ -290,17 +299,18 @@ func (b *healthAwareBackend) MarkUnhealthy() {
 	b.lastUnhealthy = time.Now()
 }
 
-func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash) (int, error) {
-	httpCode, _, err := performCheckAccessListOp(ctx, accessList, b.url)
+func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.Hash, chainID eth.ChainID) (int, error) {
+	httpCode, _, err := performCheckAccessListOp(ctx, accessList, b.url, chainID)
 	if err != nil {
 		return httpCode, ParseInteropError(err)
 	}
 	return httpCode, nil
 }
 
-func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string) (int, string, error) {
+func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string, chainID eth.ChainID) (int, string, error) {
 	validatingBackend := interop.NewInteropClient(url)
 	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
+		ChainID:   uint256.Int(chainID),
 		Timestamp: getInteropExecutingDescriptorTimestamp(),
 	})
 
