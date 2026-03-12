@@ -696,11 +696,13 @@ func TestRewriteResponse(t *testing.T) {
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_blockNumber"},
-				res:  &RPCRes{Result: hexutil.Uint64(200)},
+				res:  &RPCRes{Result: mustMarshalJSON(hexutil.Uint64(200))},
 			},
 			expected: RewriteOverrideResponse,
 			check: func(t *testing.T, args args) {
-				require.Equal(t, args.res.Result, hexutil.Uint64(100))
+				var result hexutil.Uint64
+				require.NoError(t, json.Unmarshal(args.res.Result, &result))
+				require.Equal(t, hexutil.Uint64(100), result)
 			},
 		},
 	}

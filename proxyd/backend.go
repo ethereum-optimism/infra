@@ -888,6 +888,17 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, ErrBackendUnexpectedJSONRPC
 	}
 
+	// Check if we can use zero-copy passthrough:
+	// - Single request (not batch)
+	// - No translated requests (consensus_getReceipts needs response modification)
+	// - HTTP 200 status
+	canPassthrough := isSingleElementBatch && len(translatedReqs) == 0 && httpRes.StatusCode == 200
+
+	// Store raw response for zero-copy passthrough
+	if canPassthrough && len(rpcRes) == 1 {
+		rpcRes[0].RawResponse = resB
+	}
+
 	// capture the HTTP status code in the response. this will only
 	// ever be 400 given the status check on line 318 above.
 	if httpRes.StatusCode != 200 {
@@ -904,10 +915,12 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 	for _, res := range rpcRes {
 		translatedReq, exist := translatedReqs[string(res.ID)]
 		if exist {
-			res.Result = ConsensusGetReceiptsResult{
+			res.Result = mustMarshalJSON(ConsensusGetReceiptsResult{
 				Method: translatedReq.Method,
 				Result: res.Result,
-			}
+			})
+			// Clear raw response since we modified the result
+			res.RawResponse = nil
 		}
 	}
 
