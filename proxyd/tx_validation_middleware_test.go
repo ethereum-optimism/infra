@@ -293,6 +293,33 @@ func TestTxValidationClient_ErrorResponse(t *testing.T) {
 	require.Equal(t, ErrInternal, err)
 }
 
+func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
+	requestReachedServer := make(chan struct{}, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReachedServer <- struct{}{}
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel parent request context before validation call
+
+	client := NewTxValidationClient(5)
+	unauthorized, err := client.Validate(ctx, server.URL, []byte(`{}`))
+	require.NoError(t, err)
+	require.Empty(t, unauthorized)
+
+	select {
+	case <-requestReachedServer:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("validation request did not reach server")
+	}
+}
+
 func TestDecodeSignedTx(t *testing.T) {
 	tx := createSignedTestTransaction(t)
 	txBytes, err := tx.MarshalBinary()
@@ -320,24 +347,6 @@ func TestDecodeSignedTx_Missing0xPrefix(t *testing.T) {
 	txHex := common.Bytes2Hex(txBytes)
 	_, err = decodeSignedTx(context.Background(), txHex)
 	require.Error(t, err)
-}
-
-func TestTxValidationClient_CanceledContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(100 * time.Millisecond)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	client := NewTxValidationClient(5)
-	_, err := client.Validate(ctx, server.URL, []byte(`{}`))
-	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled))
 }
 
 func TestValidateTransactions_CanceledContext(t *testing.T) {
