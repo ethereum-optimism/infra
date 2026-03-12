@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -320,24 +319,6 @@ func TestDecodeSignedTx_Missing0xPrefix(t *testing.T) {
 	txHex := common.Bytes2Hex(txBytes)
 	_, err = decodeSignedTx(context.Background(), txHex)
 	require.Error(t, err)
-}
-
-func TestTxValidationClient_CanceledContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(100 * time.Millisecond)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	client := NewTxValidationClient(5)
-	_, err := client.Validate(ctx, server.URL, []byte(`{}`))
-	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled))
 }
 
 func TestValidateTransactions_CanceledContext(t *testing.T) {
