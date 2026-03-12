@@ -81,7 +81,7 @@ func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
 // Returns a map of tx hashes to unauthorized status.
 func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 	// Detach from the request context so that client disconnects don't cancel
-	// the middleware request. We still enforce our own timeout.
+	// the middleware request, allowing transactions to bypass validation when failing open.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeout)
 	defer cancel()
 
