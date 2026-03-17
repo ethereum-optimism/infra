@@ -720,21 +720,6 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			forwardDuration := time.Since(forwardStart)
 			servedBy[sb] = true
 
-			// Log forwarding for sendRawTransaction requests
-			if s.enableTxHashLogging {
-				for _, elem := range elems {
-					if txHash, ok := txHashes[elem.Index]; ok {
-						log.Info("sendRawTransaction forwarded",
-							"tx_hash", txHash,
-							"req_id", GetReqID(ctx),
-							"backend", sb,
-							"backend_group", group.backendGroup,
-							"duration_ms", forwardDuration.Milliseconds(),
-						)
-					}
-				}
-			}
-
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
@@ -750,6 +735,21 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				res = nil
 				for _, elem := range elems {
 					res = append(res, NewRPCErrorRes(elem.Req.ID, err))
+				}
+			}
+
+			// Log forwarding for sendRawTransaction requests (success path only)
+			if err == nil && s.enableTxHashLogging {
+				for _, elem := range elems {
+					if txHash, ok := txHashes[elem.Index]; ok {
+						log.Info("sendRawTransaction forwarded",
+							"tx_hash", txHash,
+							"req_id", GetReqID(ctx),
+							"backend", sb,
+							"backend_group", group.backendGroup,
+							"duration_ms", forwardDuration.Milliseconds(),
+						)
+					}
 				}
 			}
 
