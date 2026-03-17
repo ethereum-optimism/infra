@@ -568,6 +568,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 	responses := make([]*RPCRes, len(reqs))
 	batches := make(map[batchGroup][]batchElem)
 	ids := make(map[string]int, len(reqs))
+	txHashes := make(map[int]common.Hash) // tracks tx hashes by request index for forwarding logs
 
 	for i := range reqs {
 		parsedReq, err := ParseRPCReq(reqs[i])
@@ -653,6 +654,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
+			txHashes[i] = tx.Hash()
 			if err := s.rateLimitSender(ctx, tx, bypassLimit); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
@@ -713,8 +715,26 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			start := i * s.maxUpstreamBatchSize
 			end := int(math.Min(float64(start+s.maxUpstreamBatchSize), float64(len(cacheMisses))))
 			elems := cacheMisses[start:end]
+			forwardStart := time.Now()
 			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch)
+			forwardDuration := time.Since(forwardStart)
 			servedBy[sb] = true
+
+			// Log forwarding for sendRawTransaction requests
+			if s.enableTxHashLogging {
+				for _, elem := range elems {
+					if txHash, ok := txHashes[elem.Index]; ok {
+						log.Info("sendRawTransaction forwarded",
+							"tx_hash", txHash,
+							"req_id", GetReqID(ctx),
+							"backend", sb,
+							"backend_group", group.backendGroup,
+							"duration_ms", forwardDuration.Milliseconds(),
+						)
+					}
+				}
+			}
+
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {

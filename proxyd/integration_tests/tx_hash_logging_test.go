@@ -49,6 +49,10 @@ func TestTxHashLogging(t *testing.T) {
 		require.Contains(t, logOutput, "req_id")
 		require.Contains(t, logOutput, "chain_id")
 		require.Contains(t, logOutput, "nonce")
+
+		// Verify forwarding log also present with tx_hash and duration
+		require.Contains(t, logOutput, "sendRawTransaction forwarded")
+		require.Contains(t, logOutput, "duration_ms")
 	})
 
 	t.Run("batch sendRawTransaction should log tx hash", func(t *testing.T) {
@@ -121,6 +125,7 @@ func TestTxHashLoggingDisabled(t *testing.T) {
 		// Verify log does NOT contain transaction hash logging
 		logOutput := logBuf.String()
 		require.NotContains(t, logOutput, "processing sendRawTransaction")
+		require.NotContains(t, logOutput, "sendRawTransaction forwarded")
 		require.NotContains(t, logOutput, "0x0cdd497ce38727606708946cd07b83b101b92a29dea7f090f1f09ae849efd1a3")
 	})
 }
