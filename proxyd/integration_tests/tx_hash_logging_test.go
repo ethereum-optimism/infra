@@ -2,15 +2,37 @@ package integration_tests
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
+
+// findJSONLogLine searches JSON log output for a line with the given message
+// and returns the parsed fields, or nil if not found.
+func findJSONLogLine(t *testing.T, logOutput string, msg string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(logOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["msg"] == msg {
+			return entry
+		}
+	}
+	return nil
+}
 
 func TestTxHashLogging(t *testing.T) {
 	// Capture log output
@@ -49,6 +71,17 @@ func TestTxHashLogging(t *testing.T) {
 		require.Contains(t, logOutput, "req_id")
 		require.Contains(t, logOutput, "chain_id")
 		require.Contains(t, logOutput, "nonce")
+
+		// Verify forwarding log has correct tx_hash and matching req_id
+		recvLog := findJSONLogLine(t, logOutput, "processing sendRawTransaction")
+		require.NotNil(t, recvLog, "expected processing sendRawTransaction log line")
+
+		fwdLog := findJSONLogLine(t, logOutput, "sendRawTransaction forwarded")
+		require.NotNil(t, fwdLog, "expected sendRawTransaction forwarded log line")
+		require.Equal(t, "0x0cdd497ce38727606708946cd07b83b101b92a29dea7f090f1f09ae849efd1a3", fwdLog["tx_hash"])
+		require.Equal(t, recvLog["req_id"], fwdLog["req_id"], "req_id should match between processing and forwarded logs")
+		require.NotEmpty(t, fwdLog["backend"], "backend should be present")
+		require.NotNil(t, fwdLog["duration_ms"], "duration_ms should be present")
 	})
 
 	t.Run("batch sendRawTransaction should log tx hash", func(t *testing.T) {
@@ -121,6 +154,7 @@ func TestTxHashLoggingDisabled(t *testing.T) {
 		// Verify log does NOT contain transaction hash logging
 		logOutput := logBuf.String()
 		require.NotContains(t, logOutput, "processing sendRawTransaction")
+		require.NotContains(t, logOutput, "sendRawTransaction forwarded")
 		require.NotContains(t, logOutput, "0x0cdd497ce38727606708946cd07b83b101b92a29dea7f090f1f09ae849efd1a3")
 	})
 }
