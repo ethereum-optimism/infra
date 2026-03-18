@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -209,6 +210,18 @@ func TestAllowedStatusCodes(t *testing.T) {
 	require.Equal(t, -32000, res[0].Error.Code)
 	require.Equal(t, "backend has a foo problem", res[0].Error.Message)
 	require.Equal(t, http.StatusServiceUnavailable, res[0].Error.HTTPErrorCode)
+}
+
+func TestWithTLSConfigAppliesToHTTPAndWebsocketClients(t *testing.T) {
+	backend := NewBackend("test-backend", "http://example.com", "ws://example.com", semaphore.NewWeighted(1))
+	tlsConfig := &tls.Config{}
+
+	WithTLSConfig(tlsConfig)(backend)
+
+	transport, ok := backend.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.Same(t, tlsConfig, transport.TLSClientConfig)
+	require.Same(t, tlsConfig, backend.dialer.TLSClientConfig)
 }
 
 func getHttpResponseCodeCount(statusCode string) float64 {
