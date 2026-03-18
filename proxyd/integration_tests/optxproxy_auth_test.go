@@ -36,7 +36,9 @@ func TestOpTxProxyAuthForwarder(t *testing.T) {
 
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(bytes.NewReader(res)).Decode(rpcRes))
-		require.Equal(t, "", rpcRes.Result.(string))
+		var result string
+		require.NoError(t, json.Unmarshal(rpcRes.Result, &result))
+		require.Equal(t, "", result)
 	})
 
 	t.Run("forwards if present", func(t *testing.T) {
@@ -50,6 +52,8 @@ func TestOpTxProxyAuthForwarder(t *testing.T) {
 
 		rpcRes := &proxyd.RPCRes{}
 		require.NoError(t, json.NewDecoder(bytes.NewReader(res)).Decode(rpcRes))
-		require.Equal(t, "foobar", rpcRes.Result.(string))
+		var result string
+		require.NoError(t, json.Unmarshal(rpcRes.Result, &result))
+		require.Equal(t, "foobar", result)
 	})
 }
