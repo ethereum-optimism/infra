@@ -224,6 +224,17 @@ func TestWithTLSConfigAppliesToHTTPAndWebsocketClients(t *testing.T) {
 	require.Same(t, tlsConfig, backend.dialer.TLSClientConfig)
 }
 
+func TestWithTLSConfigInitializesWebsocketDialerWhenMissing(t *testing.T) {
+	backend := NewBackend("test-backend", "http://example.com", "ws://example.com", semaphore.NewWeighted(1))
+	backend.dialer = nil
+	tlsConfig := &tls.Config{}
+
+	WithTLSConfig(tlsConfig)(backend)
+
+	require.NotNil(t, backend.dialer)
+	require.Same(t, tlsConfig, backend.dialer.TLSClientConfig)
+}
+
 func getHttpResponseCodeCount(statusCode string) float64 {
 	metricFamilies, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {

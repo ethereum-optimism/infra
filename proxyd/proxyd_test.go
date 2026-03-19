@@ -121,6 +121,19 @@ func TestConfigureBackendTLS(t *testing.T) {
 		require.Len(t, tlsConfig.Certificates, 1)
 	})
 
+	t.Run("supports CA file without client cert", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath, _ := writeSelfSignedClientCert(t, dir)
+
+		tlsConfig, err := configureBackendTLS(&BackendConfig{
+			CAFile: certPath,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.RootCAs)
+		require.Empty(t, tlsConfig.Certificates)
+	})
+
 	t.Run("supports CA and client cert together", func(t *testing.T) {
 		dir := t.TempDir()
 		certPath, keyPath := writeSelfSignedClientCert(t, dir)
