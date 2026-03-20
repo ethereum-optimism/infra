@@ -11,8 +11,8 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"net/http"
 	"net"
+	"net/http"
 	"regexp"
 	"strconv"
 	"sync"
@@ -829,8 +829,8 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	authorization := vars["authorization"]
 	xff := r.Header.Get(s.rateLimitHeader)
 	if xff == "" {
-        if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-            xff = host
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			xff = host
 		}
 	}
 
