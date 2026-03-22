@@ -56,3 +56,61 @@ func TestIsNotFoundError(t *testing.T) {
 		})
 	}
 }
+
+func TestFlakyStatusMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		result         string
+		message        string
+		expectedResult string
+		filtered       bool
+	}{
+		{
+			name:           "flaky fail becomes failed",
+			result:         "skipped",
+			message:        "FLAKY_FAIL: test-reason: assertion failed",
+			expectedResult: "failed",
+		},
+		{
+			name:           "flaky pass becomes flaky_pass",
+			result:         "skipped",
+			message:        "FLAKY_PASS: test-reason",
+			expectedResult: "flaky_pass",
+		},
+		{
+			name:     "regular skip is filtered",
+			result:   "skipped",
+			message:  "precondition not met",
+			filtered: true,
+		},
+		{
+			name:     "empty skip is filtered",
+			result:   "skipped",
+			message:  "",
+			filtered: true,
+		},
+		{
+			name:           "regular failure unchanged",
+			result:         "failed",
+			message:        "test failed",
+			expectedResult: "failed",
+		},
+		{
+			name:           "success unchanged",
+			result:         "success",
+			message:        "",
+			expectedResult: "success",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, keep := mapFlakyStatus(tt.result, tt.message)
+			if keep == tt.filtered {
+				t.Errorf("mapFlakyStatus() filtered = %v, want %v", !keep, tt.filtered)
+			}
+			if !tt.filtered && got != tt.expectedResult {
+				t.Errorf("mapFlakyStatus() result = %q, want %q", got, tt.expectedResult)
+			}
+		})
+	}
+}

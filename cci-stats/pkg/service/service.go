@@ -259,6 +259,21 @@ func fetchJobs(ctx context.Context, client *circleci.Client, workflowID string) 
 	return jobs.Items, nil
 }
 
+// mapFlakyStatus maps CircleCI test result status based on flaky markers
+// in the skip message. Returns the mapped status and whether to keep the result.
+func mapFlakyStatus(result, message string) (status string, keep bool) {
+	if result == "skipped" {
+		if strings.HasPrefix(message, "FLAKY_FAIL:") {
+			return "failed", true
+		}
+		if strings.HasPrefix(message, "FLAKY_PASS:") {
+			return "flaky_pass", true
+		}
+		return "", false
+	}
+	return result, true
+}
+
 func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
 }
@@ -283,9 +298,11 @@ func fetchTestMetadata(ctx context.Context, config config.Config, client *circle
 
 	var out []*circleci.TestMetadata
 	for _, m := range md.Items {
-		if m.Result == "skipped" {
+		status, keep := mapFlakyStatus(m.Result, m.Message)
+		if !keep {
 			continue
 		}
+		m.Result = status
 
 		if m.Result == "success" && config.SlowTestThresholdSeconds > m.RunTime {
 			continue
