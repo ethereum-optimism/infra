@@ -264,7 +264,7 @@ func fetchJobs(ctx context.Context, client *circleci.Client, workflowID string) 
 // and all other statuses pass through unchanged.
 func mapFlakyStatus(result, message string) string {
 	if result == "skipped" {
-		if strings.HasPrefix(message, "FLAKY_FAIL:") {
+		if strings.HasPrefix(message, "FLAKY_FAIL") {
 			return "failed"
 		}
 		if strings.HasPrefix(message, "FLAKY_PASS") {
