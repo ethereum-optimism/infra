@@ -259,6 +259,21 @@ func fetchJobs(ctx context.Context, client *circleci.Client, workflowID string) 
 	return jobs.Items, nil
 }
 
+// mapFlakyStatus maps CircleCI test result status based on flaky markers
+// in the skip message. FLAKY_FAIL becomes "failed", FLAKY_PASS becomes "flaky_pass",
+// and all other statuses pass through unchanged.
+func mapFlakyStatus(result, message string) string {
+	if result == "skipped" {
+		if strings.HasPrefix(message, "FLAKY_FAIL") {
+			return "failed"
+		}
+		if strings.HasPrefix(message, "FLAKY_PASS") {
+			return "flaky_pass"
+		}
+	}
+	return result
+}
+
 func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
 }
@@ -283,9 +298,7 @@ func fetchTestMetadata(ctx context.Context, config config.Config, client *circle
 
 	var out []*circleci.TestMetadata
 	for _, m := range md.Items {
-		if m.Result == "skipped" {
-			continue
-		}
+		m.Result = mapFlakyStatus(m.Result, m.Message)
 
 		if m.Result == "success" && config.SlowTestThresholdSeconds > m.RunTime {
 			continue
