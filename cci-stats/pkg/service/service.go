@@ -267,7 +267,7 @@ func mapFlakyStatus(result, message string) string {
 		if strings.HasPrefix(message, "FLAKY_FAIL:") {
 			return "failed"
 		}
-		if strings.HasPrefix(message, "FLAKY_PASS:") {
+		if strings.HasPrefix(message, "FLAKY_PASS") {
 			return "flaky_pass"
 		}
 	}
