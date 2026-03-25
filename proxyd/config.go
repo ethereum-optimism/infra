@@ -207,7 +207,10 @@ type BackendGroupConfig struct {
 	// Will override consensus_max_block_range if consensus_max_block range is also set
 	MaxBlockRange uint64 `toml:"max_block_range"`
 
-	ConsensusHA                  bool         `toml:"consensus_ha"`
+	ConsensusCLSyncThreshold uint64       `toml:"consensus_cl_sync_threshold"`
+	ConsensusCLHeadL1MaxAge  TOMLDuration `toml:"consensus_cl_head_l1_max_age"`
+
+	ConsensusHA bool `toml:"consensus_ha"`
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`
 	ConsensusHALockPeriod        TOMLDuration `toml:"consensus_ha_lock_period"`
 	ConsensusHARedis             RedisConfig  `toml:"consensus_ha_redis"`

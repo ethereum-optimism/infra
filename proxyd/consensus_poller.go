@@ -41,6 +41,8 @@ type ConsensusPoller struct {
 	maxBlockRange      uint64
 	interval           time.Duration
 	consensusLayer     bool
+	clSyncThreshold    uint64
+	clHeadL1MaxAge     time.Duration
 }
 
 type backendState struct {
@@ -49,6 +51,7 @@ type backendState struct {
 	latestBlockNumber    hexutil.Uint64
 	latestBlockHash      string
 	safeBlockNumber      hexutil.Uint64
+	safeBlockHash        string
 	finalizedBlockNumber hexutil.Uint64
 
 	peerCount uint64
@@ -105,6 +108,21 @@ func (ct *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
 // GetFinalizedBlockNumber returns the `finalized` agreed block number in a consensus
 func (ct *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
 	return ct.tracker.GetFinalizedBlockNumber()
+}
+
+// GetLatestBlockHash returns the hash of the `latest` agreed block in a consensus
+func (ct *ConsensusPoller) GetLatestBlockHash() string {
+	return ct.tracker.GetLatestBlockHash()
+}
+
+// GetSafeBlockHash returns the hash of the `safe` agreed block in a consensus
+func (ct *ConsensusPoller) GetSafeBlockHash() string {
+	return ct.tracker.GetSafeBlockHash()
+}
+
+// IsConsensusLayer returns true if this poller is operating in CL (op-node) mode
+func (cp *ConsensusPoller) IsConsensusLayer() bool {
+	return cp.consensusLayer
 }
 
 func (cp *ConsensusPoller) Shutdown() {
@@ -255,6 +273,18 @@ func WithConsensusLayerConsensusAwareness(clConsensusAware bool) ConsensusOpt {
 	}
 }
 
+func WithCLSyncThreshold(threshold uint64) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.clSyncThreshold = threshold
+	}
+}
+
+func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.clHeadL1MaxAge = maxAge
+	}
+}
+
 func WithMaxBlockRange(maxBlockRange uint64) ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.maxBlockRange = maxBlockRange
@@ -289,6 +319,8 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:        8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:       3,
 		interval:           DefaultPollerInterval,
+		clSyncThreshold:    10,             // 10 L1 blocks ~ 2 minutes
+		clHeadL1MaxAge:     5 * time.Minute, // L1 head older than this → node is stalled
 	}
 
 	for _, opt := range opts {
@@ -326,14 +358,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	inSync, err := cp.isInSync(ctx, be)
-	RecordConsensusBackendInSync(be, err == nil && inSync)
-	if err != nil {
-		log.Warn("error updating backend sync state", "name", be.Name, "err", err)
-		return
-	}
-
 	var peerCount uint64
+	var err error
 	if !be.skipPeerCountCheck {
 		peerCount, err = cp.getPeerCount(ctx, be)
 		if err != nil {
@@ -348,8 +374,9 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
+	var inSync bool
 	var latestBlockNumber, safeBlockNumber, finalizedBlockNumber hexutil.Uint64
-	var latestBlockHash string
+	var latestBlockHash, safeBlockHash string
 	if cp.consensusLayer {
 		syncStatus, err := cp.fetchCLSyncStatus(ctx, be)
 		if err != nil {
@@ -359,9 +386,37 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockHash = syncStatus.LatestBlockHash
 		latestBlockNumber = syncStatus.LatestBlockNumber
 		safeBlockNumber = syncStatus.SafeBlockNumber
+		safeBlockHash = syncStatus.SafeBlockHash
 		finalizedBlockNumber = syncStatus.FinalizedBlockNumber
 
+		lag := uint64(0)
+		if syncStatus.HeadL1Number > syncStatus.CurrentL1Number {
+			lag = syncStatus.HeadL1Number - syncStatus.CurrentL1Number
+		}
+		l1BlockLagOK := lag <= cp.clSyncThreshold
+
+		l1TimestampOK := true
+		if cp.clHeadL1MaxAge > 0 && syncStatus.HeadL1Timestamp > 0 {
+			l1Age := time.Since(time.Unix(int64(syncStatus.HeadL1Timestamp), 0))
+			l1TimestampOK = l1Age <= cp.clHeadL1MaxAge
+			if !l1TimestampOK {
+				log.Warn("CL backend L1 head is stale",
+					"backend", be.Name,
+					"head_l1_age", l1Age,
+					"max_age", cp.clHeadL1MaxAge,
+				)
+			}
+		}
+		inSync = l1BlockLagOK && l1TimestampOK
+		RecordConsensusBackendInSync(be, inSync)
 	} else {
+		inSync, err = cp.isELInSync(ctx, be)
+		RecordConsensusBackendInSync(be, err == nil && inSync)
+		if err != nil {
+			log.Warn("error updating backend sync state", "name", be.Name, "err", err)
+			return
+		}
+
 		latestBlockNumber, latestBlockHash, err = cp.fetchELBlock(ctx, be, "latest")
 		if err != nil {
 			log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
@@ -378,7 +433,6 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 			return
 		}
-
 	}
 	if latestBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
@@ -402,7 +456,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	changed := cp.setBackendState(be, peerCount, inSync,
 		latestBlockNumber, latestBlockHash,
-		safeBlockNumber, finalizedBlockNumber)
+		safeBlockNumber, safeBlockHash,
+		finalizedBlockNumber)
 
 	RecordBackendLatestBlock(be, latestBlockNumber)
 	RecordBackendSafeBlock(be, safeBlockNumber)
@@ -484,6 +539,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	var lowestLatestBlockHash string
 	var lowestFinalizedBlock hexutil.Uint64
 	var lowestSafeBlock hexutil.Uint64
+	var lowestSafeBlockHash string
 	for _, bs := range candidates {
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
@@ -494,6 +550,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 		if lowestSafeBlock == 0 || bs.safeBlockNumber < lowestSafeBlock {
 			lowestSafeBlock = bs.safeBlockNumber
+			lowestSafeBlockHash = bs.safeBlockHash
 		}
 	}
 
@@ -501,7 +558,6 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	// the proposed block needs have the same hash in the entire consensus group
 	proposedBlock := lowestLatestBlock
 	proposedBlockHash := lowestLatestBlockHash
-	hasConsensus := false
 	broken := false
 
 	if lowestLatestBlock > currentConsensusBlockNumber {
@@ -510,49 +566,32 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 
 	// if there is a block to propose, check if it is the same in all backends
 	if proposedBlock > 0 {
-		for !hasConsensus {
-			allAgreed := true
-			for be := range candidates {
-				// For consensus layer check consistency of block N by using optimism_outputAtblock
-				var err error
-				var actualBlockNumber hexutil.Uint64
-				var actualBlockHash string
+		fetch := cp.elBlockFetcher
+		if cp.consensusLayer {
+			fetch = cp.clBlockFetcher
+		}
+		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, fetch, "unsafe")
+	}
 
-				if cp.consensusLayer {
-					actualBlockNumber, actualBlockHash, err = cp.fetchCLBlock(ctx, be, proposedBlock.String())
-				} else {
-					actualBlockNumber, actualBlockHash, err = cp.fetchELBlock(ctx, be, proposedBlock.String())
-				}
-				if err != nil {
-					log.Warn("error updating backend", "name", be.Name, "err", err)
-					continue
-				}
-				if proposedBlockHash == "" {
-					proposedBlockHash = actualBlockHash
-				}
-				blocksDontMatch := (actualBlockNumber != proposedBlock) || (actualBlockHash != proposedBlockHash)
-				if blocksDontMatch {
-					if currentConsensusBlockNumber >= actualBlockNumber {
-						log.Warn("backend broke consensus",
-							"name", be.Name,
-							"actualBlockNumber", actualBlockNumber,
-							"actualBlockHash", actualBlockHash,
-							"proposedBlock", proposedBlock,
-							"proposedBlockHash", proposedBlockHash)
-						broken = true
-					}
-					allAgreed = false
-					break
-				}
-			}
-			if allAgreed {
-				hasConsensus = true
-			} else {
-				// walk one block behind and try again
-				proposedBlock -= 1
-				proposedBlockHash = ""
-				log.Debug("no consensus, now trying", "block:", proposedBlock)
-			}
+	// CL mode: hash-verify safe and finalized via the same walk-back mechanism.
+	// EL mode uses raw minimums; CL has L1-derived safety guarantees worth enforcing.
+	if cp.consensusLayer && lowestSafeBlock > 0 {
+		var safeBroken bool
+		lowestSafeBlock, lowestSafeBlockHash, safeBroken = cp.findConsensusBlock(ctx, candidates, cp.GetSafeBlockNumber(), lowestSafeBlock, lowestSafeBlockHash, cp.safeBlockFetcher, "safe")
+		if safeBroken {
+			log.Warn("safe consensus broken",
+				"currentConsensusSafeBlock", cp.GetSafeBlockNumber(),
+				"proposedSafeBlock", lowestSafeBlock,
+				"proposedSafeBlockHash", lowestSafeBlockHash)
+		}
+	}
+	if cp.consensusLayer && lowestFinalizedBlock > 0 {
+		var finalizedBroken bool
+		lowestFinalizedBlock, _, finalizedBroken = cp.findConsensusBlock(ctx, candidates, cp.GetFinalizedBlockNumber(), lowestFinalizedBlock, "", cp.finalizedBlockFetcher, "finalized")
+		if finalizedBroken {
+			log.Warn("finalized consensus broken",
+				"currentConsensusFinalizedBlock", cp.GetFinalizedBlockNumber(),
+				"proposedFinalizedBlock", lowestFinalizedBlock)
 		}
 	}
 
@@ -571,6 +610,9 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	cp.tracker.SetLatestBlockNumber(proposedBlock)
 	cp.tracker.SetSafeBlockNumber(lowestSafeBlock)
 	cp.tracker.SetFinalizedBlockNumber(lowestFinalizedBlock)
+	cp.tracker.SetLatestBlockHash(proposedBlockHash)
+	cp.tracker.SetSafeBlockHash(lowestSafeBlockHash)
+	// note: finalized hash is not tracked — finalizedBlockHash is not cached in backendState
 
 	// update consensus group
 	group := make([]*Backend, 0, len(candidates))
@@ -652,6 +694,120 @@ func (cp *ConsensusPoller) Reset() {
 	}
 }
 
+// blockHashFetcher retrieves the block number and hash for a given block from a backend.
+// bs is provided for fetchers that can use cached state (e.g. CL); it may be ignored.
+type blockHashFetcher func(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error)
+
+// clBlockFetcher returns a blockHashFetcher for CL (op-node) unsafe blocks.
+// When the backend's cached latest block matches the requested block, it uses the
+// cached hash to avoid an extra RPC call; otherwise it calls fetchCLBlock.
+func (cp *ConsensusPoller) clBlockFetcher(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	if bs.latestBlockNumber == block {
+		return bs.latestBlockNumber, bs.latestBlockHash, nil
+	}
+	return cp.fetchCLBlock(ctx, be, block.String())
+}
+
+// safeBlockFetcher returns a blockHashFetcher for CL safe blocks.
+// Uses the cached safe hash when the backend is at exactly the proposed block,
+// otherwise calls optimism_outputAtBlock. All candidates have safeBlockNumber >=
+// lowestSafeBlock >= proposedBlock at every walk-back step, so no abstain is needed.
+func (cp *ConsensusPoller) safeBlockFetcher(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	if bs.safeBlockNumber == block {
+		return bs.safeBlockNumber, bs.safeBlockHash, nil
+	}
+	return cp.fetchCLBlock(ctx, be, block.String())
+}
+
+// finalizedBlockFetcher returns a blockHashFetcher for CL finalized blocks.
+// Always calls optimism_outputAtBlock — finalizedBlockHash is not cached in backendState.
+func (cp *ConsensusPoller) finalizedBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	return cp.fetchCLBlock(ctx, be, block.String())
+}
+
+// elBlockFetcher returns a blockHashFetcher for EL backends.
+// It always calls fetchELBlock; bs is unused.
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	return cp.fetchELBlock(ctx, be, block.String())
+}
+
+// findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
+// label identifies the safety level ("unsafe", "safe", "finalized") for log context.
+// It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+func (cp *ConsensusPoller) findConsensusBlock(
+	ctx context.Context,
+	candidates map[*Backend]*backendState,
+	currentConsensusBlock hexutil.Uint64,
+	startBlock hexutil.Uint64,
+	startHash string,
+	fetch blockHashFetcher,
+	label string,
+) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool) {
+	proposedBlock = startBlock
+	proposedBlockHash = startHash
+
+	for {
+		allAgreed := true
+		for be, bs := range candidates {
+			actualBlockNumber, actualHash, err := fetch(ctx, be, bs, proposedBlock)
+			if err != nil {
+				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
+				continue
+			}
+			if proposedBlockHash == "" {
+				proposedBlockHash = actualHash
+			}
+			if actualBlockNumber != proposedBlock || actualHash != proposedBlockHash {
+				if currentConsensusBlock >= proposedBlock {
+					log.Warn("backend broke consensus",
+						"label", label,
+						"name", be.Name,
+						"actualBlockNumber", actualBlockNumber,
+						"actualHash", actualHash,
+						"proposedBlock", proposedBlock,
+						"proposedBlockHash", proposedBlockHash)
+					broken = true
+				}
+				allAgreed = false
+				break
+			}
+		}
+		if allAgreed {
+			return proposedBlock, proposedBlockHash, broken
+		}
+		proposedBlock -= 1
+		proposedBlockHash = ""
+		log.Debug("no consensus, walking back", "label", label, "block", proposedBlock)
+	}
+}
+
+func (cp *ConsensusPoller) fetchCLBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
+	var rpcRes RPCRes
+	log.Trace("executing fetchCLBlock for backend",
+		"backend", be.Name,
+		"block", block,
+	)
+	err = be.ForwardRPC(ctx, &rpcRes, "67", "optimism_outputAtBlock", block)
+	if err != nil {
+		return 0, "", err
+	}
+
+	jsonMap, ok := rpcRes.Result.(map[string]interface{})
+	if !ok {
+		return 0, "", fmt.Errorf("unexpected response to optimism_outputAtBlock on backend %s", be.Name)
+	}
+	blockRef, ok := jsonMap["blockRef"].(map[string]interface{})
+	if !ok {
+		return 0, "", fmt.Errorf("missing blockRef in optimism_outputAtBlock response on backend %s", be.Name)
+	}
+	numberVal, nOk := blockRef["number"].(float64)
+	hashVal, hOk := blockRef["hash"].(string)
+	if !nOk || !hOk {
+		return 0, "", fmt.Errorf("missing or invalid number/hash in blockRef on backend %s", be.Name)
+	}
+	return hexutil.Uint64(uint64(numberVal)), hashVal, nil
+}
+
 func (cp *ConsensusPoller) fetchELBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
 	var rpcRes RPCRes
 	log.Trace("executing fetchELBlock for backend",
@@ -667,24 +823,34 @@ func (cp *ConsensusPoller) fetchELBlock(ctx context.Context, be *Backend, block 
 	if !ok {
 		return 0, "", fmt.Errorf("unexpected response to eth_getBlockByNumber on backend %s", be.Name)
 	}
-	blockNumber = hexutil.Uint64(hexutil.MustDecodeUint64(jsonMap["number"].(string)))
-	blockHash = jsonMap["hash"].(string)
+	numStr, ok := jsonMap["number"].(string)
+	if !ok {
+		return 0, "", fmt.Errorf("missing or invalid number in eth_getBlockByNumber on backend %s", be.Name)
+	}
+	hashStr, ok := jsonMap["hash"].(string)
+	if !ok {
+		return 0, "", fmt.Errorf("missing or invalid hash in eth_getBlockByNumber on backend %s", be.Name)
+	}
+	blockNumber = hexutil.Uint64(hexutil.MustDecodeUint64(numStr))
+	blockHash = hashStr
 
 	return
 }
 
-type ELSyncStatus struct {
+type CLSyncStatus struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
 	SafeBlockHash        string
 	FinalizedBlockNumber hexutil.Uint64
-	FinalizedBlockHash   string
+	CurrentL1Number      uint64
+	HeadL1Number         uint64
+	HeadL1Timestamp      uint64 // Unix seconds; used to detect L1 connection staleness
 }
 
-func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (elSyncStatus *ELSyncStatus, err error) {
+func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (clSyncStatus *CLSyncStatus, err error) {
 	var rpcRes RPCRes
-	log.Trace("executing fetchCLBlock for backend",
+	log.Trace("executing fetchCLSyncStatus for backend",
 		"backend", be.Name,
 	)
 	err = be.ForwardRPC(ctx, &rpcRes, "67", "optimism_syncStatus")
@@ -692,38 +858,68 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, err
 	}
 
-	elSyncResponse, ok := rpcRes.Result.(map[string]interface{})
+	syncStatusResult, ok := rpcRes.Result.(map[string]interface{})
 	log.Trace("syncStatus response for backend",
 		"backend", be.Name,
-		"syncStatus", elSyncResponse,
+		"syncStatus", syncStatusResult,
 	)
 	if !ok {
 		return nil, fmt.Errorf("unexpected response to optimism_syncStatus on backend %s", be.Name)
 	}
 
-	latestBlockNumber, latestBlockHash, err := parseCLSyncStatusBlock(elSyncResponse, "unsafe_l2")
+	latestBlockNumber, latestBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "unsafe_l2")
 	if err != nil {
 		return nil, err
 	}
 
-	safeBlockNumber, safeBlockHash, err := parseCLSyncStatusBlock(elSyncResponse, "safe_l2")
+	safeBlockNumber, safeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
 	if err != nil {
 		return nil, err
 	}
 
-	finalizedBlockNumber, finalizedBlockHash, err := parseCLSyncStatusBlock(elSyncResponse, "finalized_l2")
+	finalizedBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
 	if err != nil {
 		return nil, err
 	}
 
-	return &ELSyncStatus{
+	currentL1Number, _, err := parseCLSyncStatusBlock(syncStatusResult, "current_l1")
+	if err != nil {
+		return nil, err
+	}
+
+	headL1Number, _, err := parseCLSyncStatusBlock(syncStatusResult, "head_l1")
+	if err != nil {
+		return nil, err
+	}
+
+	headL1Timestamp, err := parseCLBlockTimestamp(syncStatusResult, "head_l1")
+	if err != nil {
+		return nil, err
+	}
+
+	return &CLSyncStatus{
 		LatestBlockNumber:    hexutil.Uint64(latestBlockNumber),
 		LatestBlockHash:      latestBlockHash,
 		SafeBlockNumber:      hexutil.Uint64(safeBlockNumber),
 		SafeBlockHash:        safeBlockHash,
 		FinalizedBlockNumber: hexutil.Uint64(finalizedBlockNumber),
-		FinalizedBlockHash:   finalizedBlockHash,
+		CurrentL1Number:      currentL1Number,
+		HeadL1Number:         headL1Number,
+		HeadL1Timestamp:      headL1Timestamp,
 	}, nil
+}
+
+// parseCLBlockTimestamp extracts the Unix timestamp from a block ref field in an optimism_syncStatus response.
+func parseCLBlockTimestamp(jsonMap map[string]interface{}, key string) (uint64, error) {
+	blockMap, ok := jsonMap[key].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("unexpected type for %s in optimism_syncStatus", key)
+	}
+	tsVal, ok := blockMap["timestamp"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("missing or invalid timestamp in %s", key)
+	}
+	return uint64(tsVal), nil
 }
 
 // parseCLSyncStatusBlock is a helper function to parse the inner map structs of optimism_syncStatusResponse
@@ -743,35 +939,6 @@ func parseCLSyncStatusBlock(jsonMap map[string]interface{}, safety string) (bloc
 	}
 	blockNumber = uint64(numberVal)
 	blockHash = hashVal
-
-	return blockNumber, blockHash, nil
-}
-
-// fetchCLBlock uses optimism_outputAtBlock to get a specific block info
-func (cp *ConsensusPoller) fetchCLBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
-	var rpcRes RPCRes
-	log.Trace("executing fetchCLBlock for backend",
-		"backend", be.Name,
-		"block", block,
-	)
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "optimism_outputAtBlock", block)
-	if err != nil {
-		return 0, "", err
-	}
-
-	elSyncResponse, ok := rpcRes.Result.(map[string]interface{})
-	if !ok {
-		return 0, "", fmt.Errorf("unexpected response to optimism_outputAtBlock on backend %s", be.Name)
-	}
-	blockRef := elSyncResponse["blockRef"].(map[string]interface{})
-	blockNumber = hexutil.Uint64(blockRef["number"].(float64))
-	blockHash = blockRef["hash"].(string)
-	log.Trace("outputAtBlock response for backend",
-		"backend", be.Name,
-		"syncStatus", elSyncResponse,
-		"blockNumber", blockNumber,
-		"blockHash", blockHash,
-	)
 
 	return blockNumber, blockHash, nil
 }
@@ -831,16 +998,7 @@ func (cp *ConsensusPoller) fetchCLPeerCount(ctx context.Context, be *Backend) (c
 	return count, nil
 }
 
-// isInSync is a convenient wrapper to check if the backend is in sync from the network
-func (cp *ConsensusPoller) isInSync(ctx context.Context, be *Backend) (result bool, err error) {
-	if cp.consensusLayer {
-		return cp.isCLInSync(ctx, be)
-	}
-	return cp.isELInSync(ctx, be)
-
-}
-
-// isInSync is a convenient wrapper to check if the backend is in sync from the network
+// isELInSync checks if an EL backend is in sync by calling eth_syncing
 func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result bool, err error) {
 	var rpcRes RPCRes
 	err = be.ForwardRPC(ctx, &rpcRes, "67", "eth_syncing")
@@ -867,14 +1025,6 @@ func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result 
 	return res, nil
 }
 
-// TODO: Figure out correct way to determine if CL in Sync
-func (cp *ConsensusPoller) isCLInSync(ctx context.Context, be *Backend) (result bool, err error) {
-	log.Trace("executing isCLInSync for backend",
-		"backend", be.Name,
-	)
-	return true, nil
-}
-
 // GetBackendState creates a copy of backend state so that the caller can use it without locking
 func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 	bs := cp.backendState[be]
@@ -885,6 +1035,7 @@ func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 		latestBlockNumber:    bs.latestBlockNumber,
 		latestBlockHash:      bs.latestBlockHash,
 		safeBlockNumber:      bs.safeBlockNumber,
+		safeBlockHash:        bs.safeBlockHash,
 		finalizedBlockNumber: bs.finalizedBlockNumber,
 		peerCount:            bs.peerCount,
 		inSync:               bs.inSync,
@@ -902,7 +1053,7 @@ func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 
 func (cp *ConsensusPoller) setBackendState(be *Backend, peerCount uint64, inSync bool,
 	latestBlockNumber hexutil.Uint64, latestBlockHash string,
-	safeBlockNumber hexutil.Uint64,
+	safeBlockNumber hexutil.Uint64, safeBlockHash string,
 	finalizedBlockNumber hexutil.Uint64) bool {
 	bs := cp.backendState[be]
 	bs.backendStateMux.Lock()
@@ -911,8 +1062,9 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, peerCount uint64, inSync
 	bs.inSync = inSync
 	bs.latestBlockNumber = latestBlockNumber
 	bs.latestBlockHash = latestBlockHash
-	bs.finalizedBlockNumber = finalizedBlockNumber
 	bs.safeBlockNumber = safeBlockNumber
+	bs.safeBlockHash = safeBlockHash
+	bs.finalizedBlockNumber = finalizedBlockNumber
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed

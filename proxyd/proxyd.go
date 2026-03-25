@@ -604,6 +604,12 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
 			}
+			if bgcfg.ConsensusCLSyncThreshold > 0 {
+				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))
+			}
+			if bgcfg.ConsensusCLHeadL1MaxAge > 0 {
+				copts = append(copts, WithCLHeadL1MaxAge(time.Duration(bgcfg.ConsensusCLHeadL1MaxAge)))
+			}
 
 			for _, be := range bgcfg.Backends {
 				if fallback, ok := bg.FallbackBackends[be]; !ok {

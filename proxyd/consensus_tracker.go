@@ -24,13 +24,19 @@ type ConsensusTracker interface {
 	SetSafeBlockNumber(blockNumber hexutil.Uint64)
 	GetFinalizedBlockNumber() hexutil.Uint64
 	SetFinalizedBlockNumber(blockNumber hexutil.Uint64)
+	GetLatestBlockHash() string
+	SetLatestBlockHash(hash string)
+	GetSafeBlockHash() string
+	SetSafeBlockHash(hash string)
 }
 
 // DTO to hold the current consensus state
 type ConsensusTrackerState struct {
-	Latest    hexutil.Uint64 `json:"latest"`
-	Safe      hexutil.Uint64 `json:"safe"`
-	Finalized hexutil.Uint64 `json:"finalized"`
+	Latest     hexutil.Uint64 `json:"latest"`
+	Safe       hexutil.Uint64 `json:"safe"`
+	Finalized  hexutil.Uint64 `json:"finalized"`
+	LatestHash string         `json:"latest_hash"`
+	SafeHash   string         `json:"safe_hash"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -40,6 +46,8 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Latest = o.Latest
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
+	ct.state.LatestHash = o.LatestHash
+	ct.state.SafeHash = o.SafeHash
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
@@ -107,6 +115,34 @@ func (ct *InMemoryConsensusTracker) SetFinalizedBlockNumber(blockNumber hexutil.
 	ct.mutex.Lock()
 
 	ct.state.Finalized = blockNumber
+}
+
+func (ct *InMemoryConsensusTracker) GetLatestBlockHash() string {
+	defer ct.mutex.Unlock()
+	ct.mutex.Lock()
+
+	return ct.state.LatestHash
+}
+
+func (ct *InMemoryConsensusTracker) SetLatestBlockHash(hash string) {
+	defer ct.mutex.Unlock()
+	ct.mutex.Lock()
+
+	ct.state.LatestHash = hash
+}
+
+func (ct *InMemoryConsensusTracker) GetSafeBlockHash() string {
+	defer ct.mutex.Unlock()
+	ct.mutex.Lock()
+
+	return ct.state.SafeHash
+}
+
+func (ct *InMemoryConsensusTracker) SetSafeBlockHash(hash string) {
+	defer ct.mutex.Unlock()
+	ct.mutex.Lock()
+
+	ct.state.SafeHash = hash
 }
 
 // RedisConsensusTracker store and retrieve in a shared Redis cluster, with leader election
@@ -318,6 +354,22 @@ func (ct *RedisConsensusTracker) GetFinalizedBlockNumber() hexutil.Uint64 {
 
 func (ct *RedisConsensusTracker) SetFinalizedBlockNumber(blockNumber hexutil.Uint64) {
 	ct.local.SetFinalizedBlockNumber(blockNumber)
+}
+
+func (ct *RedisConsensusTracker) GetLatestBlockHash() string {
+	return ct.remote.GetLatestBlockHash()
+}
+
+func (ct *RedisConsensusTracker) SetLatestBlockHash(hash string) {
+	ct.local.SetLatestBlockHash(hash)
+}
+
+func (ct *RedisConsensusTracker) GetSafeBlockHash() string {
+	return ct.remote.GetSafeBlockHash()
+}
+
+func (ct *RedisConsensusTracker) SetSafeBlockHash(hash string) {
+	ct.local.SetSafeBlockHash(hash)
 }
 
 func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
