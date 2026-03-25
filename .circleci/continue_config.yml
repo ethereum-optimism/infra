@@ -176,7 +176,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
     steps:
       - circleci-utils/checkout-with-mise
@@ -211,7 +211,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
       - image: cimg/postgres:14.6
         environment:
@@ -297,7 +297,7 @@ jobs:
   # Run full op-acceptor suite, including acceptance tests via make test-all
   op-acceptor-test-all:
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
     resource_class: medium
     steps:
