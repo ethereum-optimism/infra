@@ -30,9 +30,9 @@ func NewSignerClient(providerName string, logger log.Logger, endpoint string, tl
 	return &InstrumentedSignerClient{c: c, providerName: providerName}, nil
 }
 
-func (i *InstrumentedSignerClient) SignTransaction(ctx context.Context, chainId *big.Int, from *common.Address, tx *types.Transaction) (*types.Transaction, error) {
+func (i *InstrumentedSignerClient) SignTransaction(ctx context.Context, chainID *big.Int, from *common.Address, tx *types.Transaction) (*types.Transaction, error) {
 	start := time.Now()
-	tx, err := i.c.SignTransaction(ctx, chainId, *from, tx)
+	tx, err := i.c.SignTransaction(ctx, chainID, *from, tx)
 	if err != nil {
 		metrics.RecordErrorDetails(i.providerName, "signer.SignTransaction", err)
 		return nil, err

@@ -29,7 +29,7 @@ func marshalECDSAPublicKey(pub *ecdsa.PublicKey) ([]byte, error) {
 	}
 
 	// Marshal the public key point (X, Y)
-	publicKeyBytes := secp256k1.S256().Marshal(pub.X, pub.Y)
+	publicKeyBytes := secp256k1.S256().Marshal(pub.X, pub.Y) //nolint:staticcheck // secp256k1 is not a standard curve; no alternative to raw X/Y access
 
 	// Construct the publicKeyInfo structure
 	pkix := publicKeyInfo{

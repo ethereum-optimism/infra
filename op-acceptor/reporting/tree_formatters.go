@@ -326,18 +326,18 @@ func (f *TreeTextFormatter) Format(tree *types.TestTree) (string, error) {
 
 	// Overall statistics
 	if f.includeStats {
-		buf.WriteString(fmt.Sprintf("Run ID: %s\n", tree.RunID))
+		fmt.Fprintf(&buf, "Run ID: %s\n", tree.RunID)
 		if tree.NetworkName != "" {
-			buf.WriteString(fmt.Sprintf("Network: %s\n", tree.NetworkName))
+			fmt.Fprintf(&buf, "Network: %s\n", tree.NetworkName)
 		}
-		buf.WriteString(fmt.Sprintf("Duration: %s\n", formatDuration(tree.Duration)))
-		buf.WriteString(fmt.Sprintf("Total Tests: %d\n", tree.Stats.Total))
-		buf.WriteString(fmt.Sprintf("Passed: %d\n", tree.Stats.Passed))
-		buf.WriteString(fmt.Sprintf("Failed: %d\n", tree.Stats.Failed))
-		buf.WriteString(fmt.Sprintf("Skipped: %d\n", tree.Stats.Skipped))
-		buf.WriteString(fmt.Sprintf("Errored: %d\n", tree.Stats.Errored))
-		buf.WriteString(fmt.Sprintf("Pass Rate: %.1f%%\n", tree.Stats.PassRate))
-		buf.WriteString(fmt.Sprintf("Status: %s\n", strings.ToUpper(getStatusString(tree.Stats.Status))))
+		fmt.Fprintf(&buf, "Duration: %s\n", formatDuration(tree.Duration))
+		fmt.Fprintf(&buf, "Total Tests: %d\n", tree.Stats.Total)
+		fmt.Fprintf(&buf, "Passed: %d\n", tree.Stats.Passed)
+		fmt.Fprintf(&buf, "Failed: %d\n", tree.Stats.Failed)
+		fmt.Fprintf(&buf, "Skipped: %d\n", tree.Stats.Skipped)
+		fmt.Fprintf(&buf, "Errored: %d\n", tree.Stats.Errored)
+		fmt.Fprintf(&buf, "Pass Rate: %.1f%%\n", tree.Stats.PassRate)
+		fmt.Fprintf(&buf, "Status: %s\n", strings.ToUpper(getStatusString(tree.Stats.Status)))
 		buf.WriteString("\n")
 	}
 
@@ -365,9 +365,9 @@ func (f *TreeTextFormatter) Format(tree *types.TestTree) (string, error) {
 		buf.WriteString("\nFailed Tests:\n")
 		buf.WriteString(strings.Repeat("-", 20) + "\n")
 		for _, node := range tree.FailedNodes {
-			buf.WriteString(fmt.Sprintf("- %s", node.GetPath()))
+			fmt.Fprintf(&buf, "- %s", node.GetPath())
 			if f.includeDetails && node.Error != nil {
-				buf.WriteString(fmt.Sprintf(" (Error: %s)", node.Error.Error()))
+				fmt.Fprintf(&buf, " (Error: %s)", node.Error.Error())
 			}
 			buf.WriteString("\n")
 		}

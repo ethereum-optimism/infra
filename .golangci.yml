@@ -7,9 +7,6 @@ linters:
     - asciicheck
     - misspell
     - errorlint
-  settings:
-    staticcheck:
-      checks: ["all"]
   exclusions:
     presets:
       - comments
@@ -23,10 +20,6 @@ linters:
       - text: "errors\\.Is"
         linters:
           - errorlint
-      - path: "pkg/provider/roundtrip.go"
-        linters:
-          - staticcheck
-        text: "SA4006"
 
 formatters:
   enable:

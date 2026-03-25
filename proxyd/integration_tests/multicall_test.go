@@ -441,16 +441,16 @@ func TestMulticall(t *testing.T) {
 			triggerBackend2 := make(chan struct{})
 			triggerBackend3 := make(chan struct{})
 
-			switch {
-			case i == 1:
+			switch i {
+			case 1:
 				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(200, txAccepted, triggerBackend1))
 				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(429, dummyRes, triggerBackend2))
 				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(503, dummyRes, triggerBackend3))
-			case i == 2:
+			case 2:
 				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
 				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(200, nonceErrorResponse, triggerBackend2))
 				nodes["node3"].mockBackend.SetHandler(TriggerResponseHandler(405, dummyRes, triggerBackend3))
-			case i == 3:
+			case 3:
 				// Return the quickest response
 				nodes["node1"].mockBackend.SetHandler(TriggerResponseHandler(404, dummyRes, triggerBackend1))
 				nodes["node2"].mockBackend.SetHandler(TriggerResponseHandler(500, dummyRes, triggerBackend2))
@@ -482,20 +482,20 @@ func TestMulticall(t *testing.T) {
 			rpcRes := &proxyd.RPCRes{}
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 
-			switch {
-			case i == 1:
+			switch i {
+			case 1:
 				servedBy := "node/node1"
 				require.NotNil(t, rpcRes.Result)
 				require.Equal(t, 200, resp.StatusCode, "expected 200 response from node1")
 				require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
 				require.False(t, rpcRes.IsError())
-			case i == 2:
+			case 2:
 				servedBy := "node/node2"
 				require.Nil(t, rpcRes.Result)
 				require.Equal(t, 200, resp.StatusCode, "expected 200 response from node2")
 				require.Equal(t, resp.Header["X-Served-By"], []string{servedBy}, "Error incorrect node served the request")
 				require.True(t, rpcRes.IsError())
-			case i == 3:
+			case 3:
 				servedBy := "node/node3"
 				require.Nil(t, rpcRes.Result)
 				require.Equal(t, 200, resp.StatusCode, "expected 200 response from node3")

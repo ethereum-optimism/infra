@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine as builder
+FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
 
 COPY ./op-txproxy /app
 WORKDIR /app
@@ -6,10 +6,10 @@ WORKDIR /app
 RUN apk --no-cache add make jq bash git alpine-sdk
 RUN make build
 
-FROM alpine:3.18
-RUN apk --no-cache add ca-certificates
+FROM dhi.io/alpine-base:3.23
 
 COPY --from=builder /app/bin/op-txproxy /bin/op-txproxy
 
+RUN ["/bin/op-txproxy", "--help"]
+
 ENTRYPOINT ["/bin/op-txproxy"]
-CMD ["/bin/op-txproxy"]

@@ -642,7 +642,7 @@ func generalize(tests []rewriteTest, baseMethod string, generalizedMethod string
 	newCases := make([]rewriteTest, 0)
 	for _, t := range tests {
 		if t.args.req.Method == baseMethod {
-			newName := strings.Replace(t.name, baseMethod, generalizedMethod, -1)
+			newName := strings.ReplaceAll(t.name, baseMethod, generalizedMethod)
 			var req *RPCReq
 			var res *RPCRes
 

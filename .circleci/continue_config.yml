@@ -176,7 +176,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
     steps:
       - circleci-utils/checkout-with-mise
@@ -196,12 +196,7 @@ jobs:
             if [ "<<parameters.module>>" = "op-acceptor" ]; then
               make lint
             else
-              # Original lint command for other projects
-              if [ -f .golangci.yml ]; then
-               golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-              else
-               golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-              fi
+              golangci-lint run ./...
             fi
           working_directory: <<parameters.module>>
 
@@ -211,7 +206,7 @@ jobs:
         description: Go Module Name
         type: string
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
       - image: cimg/postgres:14.6
         environment:
@@ -297,7 +292,7 @@ jobs:
   # Run full op-acceptor suite, including acceptance tests via make test-all
   op-acceptor-test-all:
     docker:
-      - image: cimg/go:1.23
+      - image: cimg/go:1.26
         user: root
     resource_class: medium
     steps:
