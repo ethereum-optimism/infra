@@ -304,7 +304,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:        8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:       3,
 		interval:           DefaultPollerInterval,
-		clSyncThreshold:    10,             // 10 L1 blocks ~ 2 minutes
+		clSyncThreshold:    10,              // 10 L1 blocks ~ 2 minutes
 		clHeadL1MaxAge:     5 * time.Minute, // L1 head older than this → node is stalled
 	}
 
