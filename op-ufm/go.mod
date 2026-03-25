@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/optimism/op-ufm
 
-go 1.26.1
+go 1.26.0
 
 require (
 	cloud.google.com/go/kms v1.12.1

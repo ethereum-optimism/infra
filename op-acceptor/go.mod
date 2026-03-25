@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/infra/op-acceptor
 
-go 1.26.1
+go 1.26.0
 
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101511.1-0.20250523133920-e3f85bf38455
 
