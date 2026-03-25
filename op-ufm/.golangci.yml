@@ -18,7 +18,11 @@ linters:
       - std-error-handling
     rules:
       - text: "errors\\.As"
+        linters:
+          - errorlint
       - text: "errors\\.Is"
+        linters:
+          - errorlint
       - path: "pkg/provider/roundtrip.go"
         linters:
           - staticcheck
