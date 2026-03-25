@@ -1102,8 +1102,11 @@ func (r *runner) runSingleTest(ctx context.Context, metadata types.ValidatorMeta
 	_ = stdoutFile.Sync()
 	_ = stdoutFile.Close()
 
-	// Check for timeout first and set flag
-	if ctx.Err() == context.DeadlineExceeded {
+	// Check for timeout: context deadline or Go's internal test timeout panic.
+	// Go 1.26+ exits quickly after an internal timeout, often before the
+	// context deadline is reached, so we also check stderr for the panic.
+	if ctx.Err() == context.DeadlineExceeded ||
+		(err != nil && bytes.Contains(stderr.Bytes(), []byte("panic: test timed out"))) {
 		timeoutOccurred = true
 		r.log.Error("Test timed out",
 			"test", metadata.FuncName,
