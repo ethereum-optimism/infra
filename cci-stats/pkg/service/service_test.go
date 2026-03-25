@@ -65,16 +65,34 @@ func TestFlakyStatusMapping(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "flaky fail becomes failed",
+			name:     "flaky fail becomes flaky_fail",
 			result:   "skipped",
 			message:  "FLAKY_FAIL: test-reason: assertion failed",
-			expected: "failed",
+			expected: "flaky_fail",
 		},
 		{
 			name:     "flaky pass becomes flaky_pass",
 			result:   "skipped",
 			message:  "FLAKY_PASS: test-reason",
 			expected: "flaky_pass",
+		},
+		{
+			name:     "flaky pass with log prefix",
+			result:   "skipped",
+			message:  "=== RUN TestFoo\ntestlog.go:151: writing test log\ntesting.go:259: FLAKY_PASS: tracked as flaky\n--- SKIP: TestFoo (0.00s)",
+			expected: "flaky_pass",
+		},
+		{
+			name:     "flaky pass without reason",
+			result:   "skipped",
+			message:  "=== RUN TestFoo\ntestlog.go:151: writing test log\ntesting.go:259: FLAKY_PASS\n--- SKIP: TestFoo (0.00s)",
+			expected: "flaky_pass",
+		},
+		{
+			name:     "flaky fail with log prefix",
+			result:   "skipped",
+			message:  "=== RUN TestFoo\ntestlog.go:151: writing test log\ntesting.go:259: FLAKY_FAIL: assertion failed\n--- SKIP: TestFoo (0.00s)",
+			expected: "flaky_fail",
 		},
 		{
 			name:     "regular skip stays skipped",
