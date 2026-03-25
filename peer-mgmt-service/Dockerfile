@@ -6,12 +6,8 @@ WORKDIR /app
 RUN apk add --no-cache make jq bash git alpine-sdk
 RUN make build
 
-FROM dhi.io/alpine-base:3.23-dev
+FROM dhi.io/alpine-base:3.23
 
-RUN apk --no-cache add make jq bash git alpine-sdk redis
-
-RUN addgroup -S app && adduser -S app -G app
-USER app
 WORKDIR /app
 
 COPY --from=builder /app/bin/pms /app/
