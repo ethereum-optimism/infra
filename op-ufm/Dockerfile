@@ -12,23 +12,15 @@ WORKDIR /app
 
 RUN make ufm
 
-FROM dhi.io/alpine-base:3.23-dev
-
-COPY --from=builder /app/entrypoint.sh /bin/entrypoint.sh
-COPY --from=builder /app/bin/ufm /bin/ufm
-
-RUN chmod +x /bin/entrypoint.sh
-
-RUN apk add --no-cache jq curl bind-tools
+FROM dhi.io/alpine-base:3.23
 
 VOLUME /etc/ufm
 
 EXPOSE 8080
 
-RUN /bin/ufm 2>&1 || [ $? -lt 127 ] && \
-    test -x /bin/entrypoint.sh && \
-    jq --version > /dev/null && curl --version > /dev/null && \
-    dig -v 2>&1 > /dev/null
+COPY --from=builder /app/bin/ufm /bin/ufm
 
-ENTRYPOINT ["/bin/entrypoint.sh"]
-CMD ["/bin/ufm", "/etc/ufm/config.toml"]
+RUN /bin/ufm 2>&1 || [ $? -lt 127 ]
+
+ENTRYPOINT ["/bin/ufm"]
+CMD ["/etc/ufm/config.toml"]
