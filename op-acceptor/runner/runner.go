@@ -162,7 +162,7 @@ type Config struct {
 	Concurrency        int           // Number of concurrent test workers (0 = auto-determine)
 	ShowProgress       bool          // Whether to show periodic progress updates during test execution
 	ProgressInterval   time.Duration // Interval between progress updates when ShowProgress is 'true'
-	RuntimeCachePath string // Path to runtime cache file (empty = no caching)
+	RuntimeCachePath   string        // Path to runtime cache file (empty = no caching)
 }
 
 // NewTestRunner creates a new test runner instance

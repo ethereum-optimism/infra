@@ -820,7 +820,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		defer httpRes.Body.Close()
 	}
 	if err != nil {
-		if !(errors.Is(err, context.Canceled) || errors.Is(err, ErrTooManyRequests)) {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, ErrTooManyRequests) {
 			b.intermittentErrorsSlidingWindow.Incr()
 			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
 		}

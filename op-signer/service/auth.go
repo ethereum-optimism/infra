@@ -22,12 +22,12 @@ func NewAuthMiddleware() oprpc.Middleware {
 			// PeerTLSInfo is attached to context by upstream op-service middleware
 			peerTlsInfo := optls.PeerTLSInfoFromContext(r.Context())
 			if peerTlsInfo.LeafCertificate == nil {
-				http.Error(w, "client certificate was not provided", 401)
+				http.Error(w, "client certificate was not provided", http.StatusUnauthorized)
 				return
 			}
 			// Note that the certificate is already verified by http server if we get here
 			if len(peerTlsInfo.LeafCertificate.DNSNames) < 1 {
-				http.Error(w, "client certificate verified but did not contain DNS SAN extension", 401)
+				http.Error(w, "client certificate verified but did not contain DNS SAN extension", http.StatusUnauthorized)
 				return
 			}
 			clientInfo.ClientName = peerTlsInfo.LeafCertificate.DNSNames[0]

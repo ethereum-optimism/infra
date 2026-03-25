@@ -182,7 +182,7 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		Concurrency:        config.Concurrency,
 		ShowProgress:       config.ShowProgress,
 		ProgressInterval:   config.ProgressInterval,
-		RuntimeCachePath: filepath.Join(config.LogDir, "runtime-cache.json"),
+		RuntimeCachePath:   filepath.Join(config.LogDir, "runtime-cache.json"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create test runner: %w", err)
