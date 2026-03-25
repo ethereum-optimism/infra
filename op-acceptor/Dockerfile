@@ -1,24 +1,16 @@
-FROM golang:1.26.1-alpine3.22 AS builder
+FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
 
 WORKDIR /app
 
-# Install make and other build dependencies
 RUN apk add --no-cache make git
 
 COPY op-acceptor/ .
 
 RUN make build
 
-FROM golang:1.26.1-alpine3.22
+FROM dhi.io/golang:1.26-alpine3.23-dev
 
-RUN apk add --no-cache ca-certificates build-base git zstd
-
-# Install Go binary
-# (we copy Go directly from the builder stage for simplicity and consistency)
-COPY --from=builder /usr/local/go /usr/local/go
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/go"
-ENV PATH="${GOPATH}/bin:${PATH}"
+RUN apk add --no-cache build-base git zstd
 
 WORKDIR /app
 
@@ -26,15 +18,13 @@ RUN addgroup -S app && adduser -S app -G app && \
     mkdir -p /devnets && \
     chown -R app:app /devnets
 
-# Modify ownership of /go to app user (as we need write permissions)
 RUN mkdir -p /go && \
-mkdir -p /go/pkg /go/bin /go/src && \
-chown -R app:app /go
+    mkdir -p /go/pkg /go/bin /go/src && \
+    chown -R app:app /go
 
 COPY --from=builder /app/bin/op-acceptor /app/
 COPY op-acceptor/example-validators.yaml /app/
 
-# Set ownership of the /app directory to allow the application to write logs and other files at runtime
 RUN chown -R app:app /app/
 
 RUN /app/op-acceptor --help && \

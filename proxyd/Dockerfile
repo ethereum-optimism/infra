@@ -1,4 +1,4 @@
-FROM golang:1.26.1-alpine3.22 AS builder
+FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
@@ -12,15 +12,13 @@ WORKDIR /app
 
 RUN make proxyd
 
-FROM alpine:3.22
+FROM dhi.io/alpine-base:3.23-dev
 
-RUN apk add bind-tools jq curl bash git redis
+RUN apk add --no-cache bind-tools jq curl bash git redis
 
 COPY ./proxyd/entrypoint.sh /bin/entrypoint.sh
 
-RUN apk update && \
-    apk add ca-certificates && \
-    chmod +x /bin/entrypoint.sh
+RUN chmod +x /bin/entrypoint.sh
 
 EXPOSE 8080
 
