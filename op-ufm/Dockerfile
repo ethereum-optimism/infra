@@ -26,5 +26,10 @@ VOLUME /etc/ufm
 
 EXPOSE 8080
 
+RUN /bin/ufm 2>&1 || [ $? -lt 127 ] && \
+    test -x /bin/entrypoint.sh && \
+    jq --version > /dev/null && curl --version > /dev/null && \
+    dig -v 2>&1 > /dev/null
+
 ENTRYPOINT ["/bin/entrypoint.sh"]
 CMD ["/bin/ufm", "/etc/ufm/config.toml"]

@@ -15,4 +15,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/op-signer /app
 
+RUN /app/op-signer --help
+
 ENTRYPOINT ["/app/op-signer"]

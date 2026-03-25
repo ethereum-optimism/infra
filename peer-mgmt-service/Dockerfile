@@ -15,4 +15,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/pms /app
 
+RUN /app/pms 2>&1 || [ $? -lt 127 ]
+
 ENTRYPOINT ["/app/pms"]

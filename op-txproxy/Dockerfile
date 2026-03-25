@@ -11,5 +11,7 @@ RUN apk --no-cache add ca-certificates
 
 COPY --from=builder /app/bin/op-txproxy /bin/op-txproxy
 
+RUN /bin/op-txproxy --help
+
 ENTRYPOINT ["/bin/op-txproxy"]
 CMD ["/bin/op-txproxy"]

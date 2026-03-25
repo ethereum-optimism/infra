@@ -18,4 +18,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/cci-stats /app
 
+RUN /app/cci-stats 2>&1 || [ $? -lt 127 ]
+
 ENTRYPOINT ["/app/cci-stats"]

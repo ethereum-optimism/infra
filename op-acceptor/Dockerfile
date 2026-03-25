@@ -37,6 +37,9 @@ COPY op-acceptor/example-validators.yaml /app/
 # Set ownership of the /app directory to allow the application to write logs and other files at runtime
 RUN chown -R app:app /app/
 
+RUN /app/op-acceptor --help && \
+    go version && git --version && zstd --version
+
 USER app
 
 VOLUME /devnets

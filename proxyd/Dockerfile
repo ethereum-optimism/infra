@@ -28,5 +28,10 @@ VOLUME /etc/proxyd
 
 COPY --from=builder /app/bin/proxyd /bin/proxyd
 
+RUN /bin/proxyd 2>&1 || [ $? -lt 127 ] && \
+    bash --version > /dev/null && jq --version > /dev/null && \
+    curl --version > /dev/null && dig -v 2>&1 > /dev/null && \
+    redis-cli --version > /dev/null
+
 ENTRYPOINT ["/bin/entrypoint.sh"]
 CMD ["/bin/proxyd", "/etc/proxyd/proxyd.toml"]
