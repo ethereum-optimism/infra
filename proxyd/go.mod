@@ -10,7 +10,7 @@ require (
 	github.com/ethereum/go-ethereum v1.16.2
 	github.com/go-redsync/redsync/v4 v4.10.0
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
-	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/holiman/uint256 v1.3.2
