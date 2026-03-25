@@ -646,7 +646,7 @@ func (s *AllLogsFileSink) Consume(result *types.TestResult, runID string) error 
 	if result.Error != nil {
 		content.WriteString("ERROR:\n")
 		content.WriteString("~~~~~~\n")
-		content.WriteString(fmt.Sprintf("%s\n\n", result.Error.Error()))
+		fmt.Fprintf(&content, "%s\n\n", result.Error.Error())
 	}
 
 	if result.Stdout != "" {
@@ -654,7 +654,7 @@ func (s *AllLogsFileSink) Consume(result *types.TestResult, runID string) error 
 		content.WriteString("~~~~~~~\n")
 		// Indent the stdout for better readability
 		indentedOutput := indentText(result.Stdout, "  ")
-		content.WriteString(fmt.Sprintf("%s\n", indentedOutput))
+		fmt.Fprintf(&content, "%s\n", indentedOutput)
 	}
 
 	// Add a clear separator at the end

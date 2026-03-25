@@ -196,12 +196,7 @@ jobs:
             if [ "<<parameters.module>>" = "op-acceptor" ]; then
               make lint
             else
-              # Original lint command for other projects
-              if [ -f .golangci.yml ]; then
-               golangci-lint run -c .golangci.yml -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-              else
-               golangci-lint run -E goimports,sqlclosecheck,bodyclose,asciicheck,misspell,errorlint -e "errors.As" -e "errors.Is" --timeout "5m0s" ./...
-              fi
+              golangci-lint run ./...
             fi
           working_directory: <<parameters.module>>
 

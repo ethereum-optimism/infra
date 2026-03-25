@@ -815,12 +815,16 @@ func (r *runner) allTestsWouldBeSkipped(ctx context.Context, metadata types.Vali
 
 // scanTestFunctions opens a Go test source file and returns the names of all
 // top-level Test* functions found in it.
-func scanTestFunctions(path string) ([]string, error) {
+func scanTestFunctions(path string) (_ []string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	var funcs []string
 	scanner := bufio.NewScanner(f)
@@ -829,7 +833,10 @@ func scanTestFunctions(path string) ([]string, error) {
 			funcs = append(funcs, m[1])
 		}
 	}
-	return funcs, scanner.Err()
+	if err = scanner.Err(); err != nil {
+		return nil, err
+	}
+	return funcs, nil
 }
 
 // runTestList runs a list of tests and aggregates their results
@@ -916,9 +923,9 @@ func (r *runner) runTestList(ctx context.Context, metadata types.ValidatorMetada
 			// Collect stdout from failing tests
 			if testResult.Stdout != "" {
 				if testResult.TimedOut {
-					failedTestsStdout.WriteString(fmt.Sprintf("\n--- Test: %s (TIMED OUT) ---\n", testName))
+					fmt.Fprintf(&failedTestsStdout, "\n--- Test: %s (TIMED OUT) ---\n", testName)
 				} else {
-					failedTestsStdout.WriteString(fmt.Sprintf("\n--- Test: %s ---\n", testName))
+					fmt.Fprintf(&failedTestsStdout, "\n--- Test: %s ---\n", testName)
 				}
 				failedTestsStdout.WriteString(testResult.Stdout)
 			}
@@ -1371,25 +1378,25 @@ func formatDuration(d time.Duration) string {
 // String returns a formatted string representation of the test results
 func (r *RunnerResult) String() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Test Run Results (%s):\n", formatDuration(r.Duration)))
-	b.WriteString(fmt.Sprintf("Total: %d, Passed: %d, Failed: %d, Skipped: %d\n",
-		r.Stats.Total, r.Stats.Passed, r.Stats.Failed, r.Stats.Skipped))
+	fmt.Fprintf(&b, "Test Run Results (%s):\n", formatDuration(r.Duration))
+	fmt.Fprintf(&b, "Total: %d, Passed: %d, Failed: %d, Skipped: %d\n",
+		r.Stats.Total, r.Stats.Passed, r.Stats.Failed, r.Stats.Skipped)
 
 	for gateName, gate := range r.Gates {
-		b.WriteString(fmt.Sprintf("\nGate: %s (%s)\n", gateName, formatDuration(gate.Duration)))
-		b.WriteString(fmt.Sprintf("%sStatus: %s\n", ui.TreeBranch, gate.Status))
-		b.WriteString(fmt.Sprintf("%sTests: %d passed, %d failed, %d skipped\n", ui.TreeBranch,
-			gate.Stats.Passed, gate.Stats.Failed, gate.Stats.Skipped))
+		fmt.Fprintf(&b, "\nGate: %s (%s)\n", gateName, formatDuration(gate.Duration))
+		fmt.Fprintf(&b, "%sStatus: %s\n", ui.TreeBranch, gate.Status)
+		fmt.Fprintf(&b, "%sTests: %d passed, %d failed, %d skipped\n", ui.TreeBranch,
+			gate.Stats.Passed, gate.Stats.Failed, gate.Stats.Skipped)
 
 		// Print direct gate tests
 		for testName, test := range gate.Tests {
 			// Get a display name for the test
 			displayName := types.GetTestDisplayName(testName, test.Metadata)
 
-			b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.TreeBranch,
-				displayName, formatDuration(test.Duration), test.Status))
+			fmt.Fprintf(&b, "%sTest: %s (%s) [status=%s]\n", ui.TreeBranch,
+				displayName, formatDuration(test.Duration), test.Status)
 			if test.Error != nil {
-				b.WriteString(fmt.Sprintf("%sError: %s\n", ui.BuildTreePrefix(2, true, []bool{false}), test.Error.Error()))
+				fmt.Fprintf(&b, "%sError: %s\n", ui.BuildTreePrefix(2, true, []bool{false}), test.Error.Error())
 			}
 
 			// Print subtests recursively
@@ -1398,20 +1405,20 @@ func (r *RunnerResult) String() string {
 
 		// Print suites
 		for suiteName, suite := range gate.Suites {
-			b.WriteString(fmt.Sprintf("%sSuite: %s (%s)\n", ui.TreeLastBranch, suiteName, formatDuration(suite.Duration)))
-			b.WriteString(fmt.Sprintf("%sStatus: %s\n", ui.SuiteBranch, suite.Status))
-			b.WriteString(fmt.Sprintf("%sTests: %d passed, %d failed, %d skipped\n", ui.SuiteBranch,
-				suite.Stats.Passed, suite.Stats.Failed, suite.Stats.Skipped))
+			fmt.Fprintf(&b, "%sSuite: %s (%s)\n", ui.TreeLastBranch, suiteName, formatDuration(suite.Duration))
+			fmt.Fprintf(&b, "%sStatus: %s\n", ui.SuiteBranch, suite.Status)
+			fmt.Fprintf(&b, "%sTests: %d passed, %d failed, %d skipped\n", ui.SuiteBranch,
+				suite.Stats.Passed, suite.Stats.Failed, suite.Stats.Skipped)
 
 			// Print suite tests
 			for testName, test := range suite.Tests {
 				// Get a display name for the test
 				displayName := types.GetTestDisplayName(testName, test.Metadata)
 
-				b.WriteString(fmt.Sprintf("%sTest: %s (%s) [status=%s]\n", ui.SuiteBranch,
-					displayName, formatDuration(test.Duration), test.Status))
+				fmt.Fprintf(&b, "%sTest: %s (%s) [status=%s]\n", ui.SuiteBranch,
+					displayName, formatDuration(test.Duration), test.Status)
 				if test.Error != nil {
-					b.WriteString(fmt.Sprintf("%sError: %s\n", ui.BuildTreePrefix(3, true, []bool{true, false}), test.Error.Error()))
+					fmt.Fprintf(&b, "%sError: %s\n", ui.BuildTreePrefix(3, true, []bool{true, false}), test.Error.Error())
 				}
 
 				// Print subtests recursively with suite indentation
