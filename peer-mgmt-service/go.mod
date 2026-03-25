@@ -11,7 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.18.0
 	github.com/rs/cors v1.11.0
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -144,15 +144,16 @@ require (
 	go.uber.org/mock v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
-	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260311193753-579e4da9a98c // indirect
+	golang.org/x/term v0.41.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
+	golang.org/x/tools v0.43.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
