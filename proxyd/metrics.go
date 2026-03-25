@@ -403,6 +403,31 @@ var (
 		"backend_name",
 	})
 
+	consensusCLBackendL1Lag = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_lag",
+		Help:      "L1 block lag for CL (op-node) backends (head_l1 - current_l1)",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLBackendL1Stale = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_stale",
+		Help:      "Bool gauge for CL backends with a stale L1 head timestamp",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLGroupWalkbackTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_group_walkback_total",
+		Help:      "Count of CL consensus walk-back events where the proposed block had divergent hashes",
+	}, []string{
+		"backend_group_name",
+		"safety",
+	})
+
 	consensusUpdateDelayBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_backend_update_delay",
@@ -638,6 +663,18 @@ func RecordConsensusBackendPeerCount(b *Backend, peerCount uint64) {
 
 func RecordConsensusBackendInSync(b *Backend, inSync bool) {
 	consensusInSyncBackend.WithLabelValues(b.Name).Set(boolToFloat64(inSync))
+}
+
+func RecordCLBackendL1Lag(b *Backend, lag uint64) {
+	consensusCLBackendL1Lag.WithLabelValues(b.Name).Set(float64(lag))
+}
+
+func RecordCLBackendL1Stale(b *Backend, stale bool) {
+	consensusCLBackendL1Stale.WithLabelValues(b.Name).Set(boolToFloat64(stale))
+}
+
+func RecordCLGroupConsensusWalkback(group *BackendGroup, safety string) {
+	consensusCLGroupWalkbackTotal.WithLabelValues(group.Name, safety).Inc()
 }
 
 func RecordConsensusBackendUpdateDelay(b *Backend, lastUpdate time.Time) {
