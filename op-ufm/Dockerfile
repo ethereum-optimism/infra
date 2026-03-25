@@ -1,4 +1,4 @@
-FROM golang:1.21.1-alpine3.18 as builder
+FROM golang:1.26.1-alpine3.22 as builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
@@ -12,7 +12,7 @@ WORKDIR /app
 
 RUN make ufm
 
-FROM alpine:3.18
+FROM alpine:3.22
 
 COPY --from=builder /app/entrypoint.sh /bin/entrypoint.sh
 COPY --from=builder /app/bin/ufm /bin/ufm

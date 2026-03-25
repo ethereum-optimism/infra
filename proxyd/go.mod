@@ -1,8 +1,6 @@
 module github.com/ethereum-optimism/infra/proxyd
 
-go 1.23.0
-
-toolchain go1.23.6
+go 1.26.1
 
 require (
 	github.com/BurntSushi/toml v1.5.0

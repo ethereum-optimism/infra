@@ -258,7 +258,7 @@ func ParseInteropError(err error) *RPCErr {
 				HTTPErrorCode: httpErr.StatusCode,
 			}
 
-			err = fmt.Errorf(rpcErrJson.Error.Message)
+			err = errors.New(rpcErrJson.Error.Message)
 		}
 	}
 

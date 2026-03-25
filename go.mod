@@ -1,3 +1,3 @@
 module github.com/ethereum-optimism/infra
 
-go 1.21
+go 1.26.1

@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/infra/op-txproxy
 
-go 1.22
+go 1.26.1
 
 require (
 	github.com/ethereum-optimism/optimism v1.9.1-0.20240827163921-45e129c8ca4b

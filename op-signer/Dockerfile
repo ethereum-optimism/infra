@@ -1,4 +1,4 @@
-FROM golang:1.24.7-alpine3.22 AS builder
+FROM golang:1.26.1-alpine3.22 AS builder
 
 COPY ./op-signer /app
 

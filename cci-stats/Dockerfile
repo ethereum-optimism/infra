@@ -1,4 +1,4 @@
-FROM golang:1.23.4-alpine3.20 as builder
+FROM golang:1.26.1-alpine3.22 as builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
@@ -10,7 +10,7 @@ WORKDIR /app
 RUN apk add --no-cache make jq bash git alpine-sdk
 RUN make build
 
-FROM alpine:3.20
+FROM alpine:3.22
 RUN addgroup -S app && adduser -S app -G app
 RUN apk add --no-cache ca-certificates
 USER app

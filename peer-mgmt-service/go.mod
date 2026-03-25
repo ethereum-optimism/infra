@@ -1,6 +1,6 @@
 module github.com/ethereum-optimism/infra/peer-mgmt-service
 
-go 1.21
+go 1.26.1
 
 require (
 	github.com/ethereum-optimism/optimism v1.5.0-rc.3.0.20240131131533-152d1e0a458d

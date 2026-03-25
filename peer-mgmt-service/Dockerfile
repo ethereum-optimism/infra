@@ -1,4 +1,4 @@
-FROM golang:1.21.3-alpine3.18 as builder
+FROM golang:1.26.1-alpine3.22 as builder
 
 COPY ./peer-mgmt-service /app
 
@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apk add --no-cache make jq bash git alpine-sdk
 RUN make build
 
-FROM alpine:3.18
+FROM alpine:3.22
 RUN apk --no-cache add make jq bash git alpine-sdk redis
 
 RUN addgroup -S app && adduser -S app -G app

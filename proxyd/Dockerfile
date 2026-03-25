@@ -1,4 +1,4 @@
-FROM golang:1.23.6-alpine3.20 AS builder
+FROM golang:1.26.1-alpine3.22 AS builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
@@ -12,7 +12,7 @@ WORKDIR /app
 
 RUN make proxyd
 
-FROM alpine:3.20
+FROM alpine:3.22
 
 RUN apk add bind-tools jq curl bash git redis
 

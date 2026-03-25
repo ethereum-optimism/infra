@@ -1,8 +1,6 @@
 module github.com/ethereum-optimism/infra/op-signer
 
-go 1.24.0
-
-toolchain go1.24.3
+go 1.26.1
 
 require (
 	cloud.google.com/go/kms v1.23.0
