@@ -1078,6 +1078,9 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 			maxBlockRange:  bg.Consensus.maxBlockRange,
 			latestHash:     bg.Consensus.GetLatestBlockHash(),
 			safeHash:       bg.Consensus.GetSafeBlockHash(),
+			localSafe:      bg.Consensus.GetLocalSafeBlockNumber(),
+			localSafeHash:  bg.Consensus.GetLocalSafeBlockHash(),
+			finalizedHash:  bg.Consensus.GetFinalizedBlockHash(),
 			consensusMode:  true,
 			consensusLayer: true,
 		}

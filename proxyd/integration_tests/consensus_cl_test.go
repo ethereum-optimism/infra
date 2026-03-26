@@ -70,6 +70,7 @@ func setupCL(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *Proxy
 
 // clSyncStatus builds a full optimism_syncStatus result map with the given unsafe_l2 values.
 // safe/finalized/L1 fields use the default test values.
+// local_safe_l2 defaults to the same values as safe_l2 (non-interop behaviour).
 func clSyncStatus(unsafeNum float64, unsafeHash string) map[string]interface{} {
 	return map[string]interface{}{
 		"unsafe_l2": map[string]interface{}{
@@ -77,6 +78,10 @@ func clSyncStatus(unsafeNum float64, unsafeHash string) map[string]interface{} {
 			"number": unsafeNum,
 		},
 		"safe_l2": map[string]interface{}{
+			"hash":   "hash_0xe1",
+			"number": float64(225),
+		},
+		"local_safe_l2": map[string]interface{}{
 			"hash":   "hash_0xe1",
 			"number": float64(225),
 		},
@@ -117,6 +122,20 @@ func clSyncStatusStaleL1(unsafeNum float64, unsafeHash string) map[string]interf
 		"timestamp": float64(1000), // Unix timestamp far in the past → stale
 	}
 	return s
+}
+
+// clSyncStatusInitializing builds a syncStatus where all fields are zero,
+// as returned by an op-node that has just restarted and hasn't connected to L1 yet.
+func clSyncStatusInitializing() map[string]interface{} {
+	zero := map[string]interface{}{"hash": "0x0000000000000000000000000000000000000000000000000000000000000000", "number": float64(0), "timestamp": float64(0)}
+	return map[string]interface{}{
+		"unsafe_l2":     zero,
+		"safe_l2":       zero,
+		"local_safe_l2": zero,
+		"finalized_l2":  zero,
+		"current_l1":    zero,
+		"head_l1":       zero,
+	}
 }
 
 func TestConsensusCL(t *testing.T) {
@@ -181,10 +200,15 @@ func TestConsensusCL(t *testing.T) {
 		})
 	}
 
-	// overrideSyncStatusFull overrides safe_l2 and finalized_l2 numbers in addition to unsafe_l2.
+	// overrideSyncStatusFull overrides safe_l2, local_safe_l2, and finalized_l2 numbers in addition to unsafe_l2.
+	// local_safe_l2 defaults to the same values as safe_l2 (non-interop behaviour).
 	overrideSyncStatusFull := func(node string, unsafeNum float64, unsafeHash string, safeNum float64, finalizedNum float64) {
 		s := clSyncStatus(unsafeNum, unsafeHash)
 		s["safe_l2"] = map[string]interface{}{
+			"hash":   "hash_safe",
+			"number": safeNum,
+		}
+		s["local_safe_l2"] = map[string]interface{}{
 			"hash":   "hash_safe",
 			"number": safeNum,
 		}
@@ -247,6 +271,22 @@ func TestConsensusCL(t *testing.T) {
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.Equal(t, 1, len(consensusGroup))
+	})
+
+	t.Run("prevent using a backend that is initializing (all-zero syncStatus)", func(t *testing.T) {
+		reset()
+		// Simulate a node that just restarted: all block numbers and timestamps are zero.
+		// The backend should be excluded from consensus (not banned) and the metric
+		// should reflect out-of-sync, not in-sync.
+		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusInitializing()))
+		update()
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 1, len(consensusGroup))
+		// node2 still healthy; consensus at default values
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 	})
 
 	t.Run("one node ahead - consensus resolves to lower", func(t *testing.T) {
@@ -358,8 +398,17 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, hexutil.Uint64(225).String(), hexutil.Uint64(uint64(safeL2["number"].(float64))).String())
 		require.Equal(t, "hash_0xe1", safeL2["hash"])
 
-		// finalized and L1 refs pass through from backend
-		require.NotNil(t, result["finalized_l2"])
+		localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
+		require.True(t, ok, "local_safe_l2 should be an object")
+		require.Equal(t, hexutil.Uint64(225).String(), hexutil.Uint64(uint64(localSafeL2["number"].(float64))).String())
+		require.Equal(t, "hash_0xe1", localSafeL2["hash"])
+
+		finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+		require.True(t, ok, "finalized_l2 should be an object")
+		require.Equal(t, hexutil.Uint64(193).String(), hexutil.Uint64(uint64(finalizedL2["number"].(float64))).String())
+		require.Equal(t, "hash_0xc1", finalizedL2["hash"])
+
+		// L1 refs pass through from backend
 		require.NotNil(t, result["current_l1"])
 		require.NotNil(t, result["head_l1"])
 	})
@@ -605,22 +654,19 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("finalized hash divergence - walks back to agreed finalized block", func(t *testing.T) {
+	t.Run("finalized at different heights - consensus uses minimum", func(t *testing.T) {
 		reset()
 
-		// both nodes at finalized 0xc1 (193) but different hashes via outputAtBlock
-		// (finalizedBlockFetcher always calls outputAtBlock — no cached hash)
-		override("node1", "optimism_outputAtBlock", "0xc1", outputAtBlock(193, "hash_0xc1_node1"))
-		override("node2", "optimism_outputAtBlock", "0xc1", outputAtBlock(193, "hash_0xc1_node2"))
-
-		// both agree at 0xc0 (192)
-		override("node1", "optimism_outputAtBlock", "0xc0", outputAtBlock(192, "agreed_finalized_hash"))
-		override("node2", "optimism_outputAtBlock", "0xc0", outputAtBlock(192, "agreed_finalized_hash"))
+		// node1 at finalized 0xc0 (192), node2 at 0xc1 (193)
+		// finalized is immutable — no walk-back; consensus picks the lower block and its hash.
+		s1 := clSyncStatus(257, "hash_0x101")
+		s1["finalized_l2"] = map[string]interface{}{"hash": "hash_0xc0", "number": float64(192)}
+		override("node1", "optimism_syncStatus", "", buildResponse(s1))
 
 		update()
 
-		// finalized walks back to last agreed block
 		require.Equal(t, "0xc0", bg.Consensus.GetFinalizedBlockNumber().String())
+		require.Equal(t, "hash_0xc0", bg.Consensus.GetFinalizedBlockHash())
 		// unsafe and safe consensus unaffected
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
@@ -650,5 +696,72 @@ func TestConsensusCL(t *testing.T) {
 
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 		require.Contains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
+	})
+
+	t.Run("ban backend if safe > local_safe (invalid interop state)", func(t *testing.T) {
+		reset()
+		// node1 reports safe (0xf1=241) > local_safe (0xe1=225) — invalid on interop chains
+		s := clSyncStatus(257, "hash_0x101")
+		s["safe_l2"] = map[string]interface{}{"hash": "hash_safe", "number": float64(241)}
+		s["local_safe_l2"] = map[string]interface{}{"hash": "hash_local_safe", "number": float64(225)}
+		override("node1", "optimism_syncStatus", "", buildResponse(s))
+		update()
+
+		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.Equal(t, 1, len(consensusGroup))
+	})
+
+	t.Run("rewrite local_safe_l2 uses consensus values", func(t *testing.T) {
+		reset()
+		// node2 has a higher local_safe; consensus picks the lower (node1's) value
+		s2 := clSyncStatus(257, "hash_0x101")
+		s2["local_safe_l2"] = map[string]interface{}{"hash": "hash_local_safe_high", "number": float64(240)}
+		override("node2", "optimism_syncStatus", "", buildResponse(s2))
+		update()
+
+		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
+		require.Equal(t, "hash_0xe1", bg.Consensus.GetLocalSafeBlockHash())
+
+		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+
+		var jsonMap map[string]interface{}
+		err = json.Unmarshal(resRaw, &jsonMap)
+		require.NoError(t, err)
+
+		result := jsonMap["result"].(map[string]interface{})
+		localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, hexutil.Uint64(225).String(), hexutil.Uint64(uint64(localSafeL2["number"].(float64))).String())
+		require.Equal(t, "hash_0xe1", localSafeL2["hash"])
+	})
+
+	t.Run("rewrite finalized_l2 uses consensus values", func(t *testing.T) {
+		reset()
+		// node2 has a higher finalized; consensus picks node1's lower value
+		s2 := clSyncStatus(257, "hash_0x101")
+		s2["finalized_l2"] = map[string]interface{}{"hash": "hash_finalized_high", "number": float64(210)}
+		override("node2", "optimism_syncStatus", "", buildResponse(s2))
+		update()
+
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+		require.Equal(t, "hash_0xc1", bg.Consensus.GetFinalizedBlockHash())
+
+		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+
+		var jsonMap map[string]interface{}
+		err = json.Unmarshal(resRaw, &jsonMap)
+		require.NoError(t, err)
+
+		result := jsonMap["result"].(map[string]interface{})
+		finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, hexutil.Uint64(193).String(), hexutil.Uint64(uint64(finalizedL2["number"].(float64))).String())
+		require.Equal(t, "hash_0xc1", finalizedL2["hash"])
 	})
 }

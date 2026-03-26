@@ -34,6 +34,10 @@
           "hash": "hash_0xe1",
           "number": 225
         },
+        "local_safe_l2": {
+          "hash": "hash_0xe1",
+          "number": 225
+        },
         "finalized_l2": {
           "hash": "hash_0xc1",
           "number": 193

@@ -19,14 +19,17 @@ type CLSyncStatus struct {
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
 	SafeBlockHash        string
+	LocalSafeBlockNumber hexutil.Uint64
+	LocalSafeBlockHash   string
 	FinalizedBlockNumber hexutil.Uint64
+	FinalizedBlockHash   string
 	CurrentL1Number      uint64
 	HeadL1Number         uint64
 	HeadL1Timestamp      uint64 // Unix seconds; used to detect L1 connection staleness
 }
 
-// WithConsensusLayerConsensusAwareness enables CL (op-node) consensus mode.
-func WithConsensusLayerConsensusAwareness(_ bool) ConsensusOpt {
+// WithCLConsensusMode enables CL (op-node) consensus mode.
+func WithCLConsensusMode() ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.consensusLayer = true
 	}
@@ -78,7 +81,13 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*C
 	RecordCLBackendL1Lag(be, lag)
 
 	l1TimestampOK := true
-	if cp.clHeadL1MaxAge > 0 && syncStatus.HeadL1Timestamp > 0 {
+	if syncStatus.HeadL1Timestamp == 0 {
+		// timestamp=0 means the node hasn't synced to L1 yet (e.g. initializing after restart)
+		l1TimestampOK = false
+		log.Warn("CL backend L1 head timestamp is zero — node is initializing",
+			"backend", be.Name,
+		)
+	} else if cp.clHeadL1MaxAge > 0 {
 		l1Age := time.Since(time.Unix(int64(syncStatus.HeadL1Timestamp), 0))
 		l1TimestampOK = l1Age <= cp.clHeadL1MaxAge
 		if !l1TimestampOK {
@@ -97,16 +106,17 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*C
 	return syncStatus, inSync, nil
 }
 
-// updateCLGroupConsensus runs hash-verified walk-backs for safe and finalized blocks
-// in CL mode. EL mode uses raw minimums; CL enforces L1-derived safety guarantees.
+// updateCLGroupConsensus runs a hash-verified walk-back for safe_l2 in CL mode.
+// EL mode uses raw minimums; CL enforces L1-derived safety guarantees for safe.
+// local_safe_l2 and finalized_l2 use their minimum block+hash directly (no walk-back needed:
+// local_safe is L1-derived and finalized is immutable — hash divergence is a backend bug, not a fork).
 //
-// It returns the agreed (safeBlock, safeHash, finalizedBlock) after walk-back.
+// It returns the agreed (safeBlock, safeHash) after walk-back.
 func (cp *ConsensusPoller) updateCLGroupConsensus(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
 	lowestSafeBlock hexutil.Uint64, lowestSafeBlockHash string,
-	lowestFinalizedBlock hexutil.Uint64,
-) (hexutil.Uint64, string, hexutil.Uint64) {
+) (hexutil.Uint64, string) {
 	if lowestSafeBlock > 0 {
 		var safeBroken bool
 		lowestSafeBlock, lowestSafeBlockHash, safeBroken = cp.findConsensusBlock(
@@ -120,19 +130,7 @@ func (cp *ConsensusPoller) updateCLGroupConsensus(
 			RecordCLGroupConsensusWalkback(cp.backendGroup, "safe")
 		}
 	}
-	if lowestFinalizedBlock > 0 {
-		var finalizedBroken bool
-		lowestFinalizedBlock, _, finalizedBroken = cp.findConsensusBlock(
-			ctx, candidates, cp.GetFinalizedBlockNumber(),
-			lowestFinalizedBlock, "", cp.finalizedBlockFetcher, "finalized")
-		if finalizedBroken {
-			log.Warn("finalized consensus broken",
-				"currentConsensusFinalizedBlock", cp.GetFinalizedBlockNumber(),
-				"proposedFinalizedBlock", lowestFinalizedBlock)
-			RecordCLGroupConsensusWalkback(cp.backendGroup, "finalized")
-		}
-	}
-	return lowestSafeBlock, lowestSafeBlockHash, lowestFinalizedBlock
+	return lowestSafeBlock, lowestSafeBlockHash
 }
 
 // clBlockFetcher is a blockHashFetcher for CL unsafe blocks.
@@ -156,11 +154,6 @@ func (cp *ConsensusPoller) safeBlockFetcher(ctx context.Context, be *Backend, bs
 	return cp.fetchCLBlock(ctx, be, block.String())
 }
 
-// finalizedBlockFetcher is a blockHashFetcher for CL finalized blocks.
-// Always calls optimism_outputAtBlock — finalizedBlockHash is not cached in backendState.
-func (cp *ConsensusPoller) finalizedBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
-	return cp.fetchCLBlock(ctx, be, block.String())
-}
 
 // fetchCLBlock calls optimism_outputAtBlock and returns the block number and hash
 // from the blockRef in the response.
@@ -222,7 +215,12 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, err
 	}
 
-	finalizedBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
+	localSafeBlockNumber, localSafeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
+	if err != nil {
+		return nil, err
+	}
+
+	finalizedBlockNumber, finalizedBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +245,10 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		LatestBlockHash:      latestBlockHash,
 		SafeBlockNumber:      hexutil.Uint64(safeBlockNumber),
 		SafeBlockHash:        safeBlockHash,
+		LocalSafeBlockNumber: hexutil.Uint64(localSafeBlockNumber),
+		LocalSafeBlockHash:   localSafeBlockHash,
 		FinalizedBlockNumber: hexutil.Uint64(finalizedBlockNumber),
+		FinalizedBlockHash:   finalizedBlockHash,
 		CurrentL1Number:      currentL1Number,
 		HeadL1Number:         headL1Number,
 		HeadL1Timestamp:      headL1Timestamp,

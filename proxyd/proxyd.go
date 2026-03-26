@@ -581,7 +581,7 @@ func Start(config *Config) (*Server, func(), error) {
 			copts := make([]ConsensusOpt, 0)
 
 			if bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
-				copts = append(copts, WithConsensusLayerConsensusAwareness(true))
+				copts = append(copts, WithCLConsensusMode())
 			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))

@@ -16,6 +16,9 @@ type RewriteContext struct {
 	consensusMode  bool
 	latestHash     string
 	safeHash       string
+	localSafe      hexutil.Uint64
+	localSafeHash  string
+	finalizedHash  string
 	consensusLayer bool
 }
 
@@ -85,6 +88,20 @@ func RewriteConsensusBackendResponse(rctx RewriteContext, req *RPCReq, res *RPCR
 			if ok {
 				safeL2["number"] = float64(rctx.safe)
 				safeL2["hash"] = rctx.safeHash
+			}
+		}
+		if rctx.localSafeHash != "" {
+			localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
+			if ok {
+				localSafeL2["number"] = float64(rctx.localSafe)
+				localSafeL2["hash"] = rctx.localSafeHash
+			}
+		}
+		if rctx.finalizedHash != "" {
+			finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+			if ok {
+				finalizedL2["number"] = float64(rctx.finalized)
+				finalizedL2["hash"] = rctx.finalizedHash
 			}
 		}
 		return true
