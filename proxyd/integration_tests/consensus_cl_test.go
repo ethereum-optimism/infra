@@ -654,23 +654,50 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("finalized at different heights - consensus uses minimum", func(t *testing.T) {
+	t.Run("finalized below consensus - lagging backend excluded from candidates", func(t *testing.T) {
 		reset()
+		update() // establishes finalized consensus at 0xc1 (193)
 
-		// node1 at finalized 0xc0 (192), node2 at 0xc1 (193)
-		// finalized is immutable — no walk-back; consensus picks the lower block and its hash.
+		// node1 drops to finalized 0xc0 (192), below the established consensus of 0xc1 (193).
+		// FilterCandidates excludes node1 to prevent dragging consensus backward,
+		// which would cause unnecessary EL sync cycles on downstream light nodes.
 		s1 := clSyncStatus(257, "hash_0x101")
 		s1["finalized_l2"] = map[string]interface{}{"hash": "hash_0xc0", "number": float64(192)}
 		override("node1", "optimism_syncStatus", "", buildResponse(s1))
 
 		update()
 
-		require.Equal(t, "0xc0", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, "hash_0xc0", bg.Consensus.GetFinalizedBlockHash())
+		// node1 excluded; consensus finalized holds at 0xc1 backed by node2 alone
+		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
+		require.Equal(t, "hash_0xc1", bg.Consensus.GetFinalizedBlockHash())
+		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 		// unsafe and safe consensus unaffected
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+	})
+
+	t.Run("local_safe below consensus - lagging backend excluded from candidates", func(t *testing.T) {
+		reset()
+		update() // establishes local_safe consensus at 0xe1 (225)
+
+		// node1 drops to local_safe 0xe0 (224), below the established consensus of 0xe1 (225).
+		// FilterCandidates excludes node1 to prevent local_safe from going backward,
+		// which would trigger unnecessary EL sync cycles in downstream light nodes via FollowSource.
+		s1 := clSyncStatus(257, "hash_0x101")
+		s1["local_safe_l2"] = map[string]interface{}{"hash": "hash_0xe0", "number": float64(224)}
+		override("node1", "optimism_syncStatus", "", buildResponse(s1))
+
+		update()
+
+		// node1 excluded; consensus local_safe holds at 0xe1 backed by node2 alone
+		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
+		require.Equal(t, "hash_0xe1", bg.Consensus.GetLocalSafeBlockHash())
+		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
+		// unsafe and safe consensus unaffected
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
 	})
 
 	t.Run("no consensus when both backends are out of sync", func(t *testing.T) {

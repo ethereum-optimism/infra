@@ -715,11 +715,13 @@ func (cp *ConsensusPoller) Unban(be *Backend) {
 	bs.bannedUntil = time.Now().Add(-10 * time.Hour)
 }
 
-// Reset reset all backend states
+// Reset resets all backend states and clears the consensus tracker.
+// This ensures the monotonicity filters in FilterCandidates start from a clean baseline.
 func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
+	cp.tracker.SetState(ConsensusTrackerState{})
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
@@ -950,9 +952,20 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 //   - in sync
 //   - updated recently
 //   - not lagging latest block
+//   - (CL mode) finalized and local_safe blocks are at or above the current group consensus,
+//     preventing a restarting backend from dragging consensus backward
 func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*backendState {
 
 	candidates := make(map[*Backend]*backendState, len(cp.backendGroup.Backends))
+
+	// Snapshot consensus values once for CL monotonicity checks below.
+	// Both are 0 when the tracker is uninitialized (fresh start or in-memory restart),
+	// in which case the checks are vacuous and all backends pass.
+	var consensusFinalized, consensusLocalSafe hexutil.Uint64
+	if cp.consensusLayer {
+		consensusFinalized = cp.GetFinalizedBlockNumber()
+		consensusLocalSafe = cp.GetLocalSafeBlockNumber()
+	}
 
 	for _, be := range backends {
 
@@ -977,6 +990,28 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 		}
 		if !be.skipIsSyncingCheck && !bs.inSync {
 			continue
+		}
+		// CL mode: exclude backends whose finalized or local_safe block is behind the current
+		// group consensus. This prevents a restarting backend from pulling consensus backward,
+		// which would cause unnecessary EL sync cycles on downstream light nodes.
+		// The checks are vacuous when consensus values are 0 (uninitialized tracker).
+		if cp.consensusLayer {
+			if consensusFinalized > 0 && bs.finalizedBlockNumber < consensusFinalized {
+				log.Debug("backend excluded: finalized block below consensus",
+					"backend_name", be.Name,
+					"backend_finalized", bs.finalizedBlockNumber,
+					"consensus_finalized", consensusFinalized,
+				)
+				continue
+			}
+			if consensusLocalSafe > 0 && bs.localSafeBlockNumber < consensusLocalSafe {
+				log.Debug("backend excluded: local_safe block below consensus",
+					"backend_name", be.Name,
+					"backend_local_safe", bs.localSafeBlockNumber,
+					"consensus_local_safe", consensusLocalSafe,
+				)
+				continue
+			}
 		}
 		if bs.lastUpdate.Add(cp.maxUpdateThreshold).Before(time.Now()) {
 			continue
