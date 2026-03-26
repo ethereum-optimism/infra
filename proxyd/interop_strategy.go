@@ -78,6 +78,7 @@ var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonS
 var WithChainID = func(chainID uint64) commonStrategyOpt {
 	return func(s *commonInteropStrategy) {
 		s.chainID = eth.ChainIDFromUInt64(chainID)
+		log.Info("interop strategy configured with chain ID", "chain_id", chainID)
 	}
 }
 
@@ -145,6 +146,14 @@ func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, in
 	firstSupervisorUrl := s.urls[0]
 
 	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
+	log.Debug(
+		"performing interop access list check",
+		"strategy", FirstSupervisorStrategy,
+		"req_id", GetReqID(ctx),
+		"chain_id", s.chainID,
+		"supervisor_url", firstSupervisorUrl,
+		"access_list_size", len(accessListToValidate),
+	)
 	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl, s.chainID)
 	return err
 }
@@ -169,6 +178,14 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		return nil
 	}
 
+	log.Debug(
+		"performing interop access list check",
+		"strategy", MulticallStrategy,
+		"req_id", GetReqID(ctx),
+		"chain_id", s.chainID,
+		"supervisor_count", len(s.urls),
+		"access_list_size", len(accessListToValidate),
+	)
 	resultChan := make(chan error, len(s.urls))
 	// concurrently broadcast the checkAccessList operation to all the validating backends
 	var wg sync.WaitGroup
@@ -237,6 +254,15 @@ func (s *healthAwareLoadBalancingStrategyImpl) ValidateAccessList(ctx context.Co
 	// retry only in case of encountering unhealthy backends
 	// retries prevents an infinite loop in case all backends are unhealthy
 	maxRetries := s.backends.Size()
+
+	log.Debug(
+		"performing interop access list check",
+		"strategy", HealthAwareLoadBalancingStrategy,
+		"req_id", GetReqID(ctx),
+		"chain_id", s.chainID,
+		"supervisor_count", s.backends.Size(),
+		"access_list_size", len(accessListToValidate),
+	)
 
 	// NOTE: races can still happen between the backend selection and the validation, yet they're are harmless
 	// The harmeless races are just a trade-off against avoiding lock contention for the duration of the entire request
@@ -308,9 +334,18 @@ func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.H
 }
 
 func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string, chainID eth.ChainID) (int, string, error) {
+	chainIDUint256 := uint256.Int(chainID)
+	log.Debug(
+		"calling CheckAccessList on supervisor",
+		"supervisor_url", url,
+		"req_id", GetReqID(ctx),
+		"chain_id", chainID,
+		"chain_id_uint256", chainIDUint256.Dec(),
+		"access_list_size", len(accessList),
+	)
 	validatingBackend := interop.NewInteropClient(url)
 	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-		ChainID:   uint256.Int(chainID),
+		ChainID:   chainIDUint256,
 		Timestamp: getInteropExecutingDescriptorTimestamp(),
 	})
 
@@ -338,6 +373,9 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 		"strategy", strategy,
 		"req_id", GetReqID(ctx),
 		"method", "eth_sendRawTransaction",
+		"chain_id", chainID,
+		"http_code", httpCode,
+		"rpc_error_code", rpcErrorCode,
 		"error", err,
 	)
 

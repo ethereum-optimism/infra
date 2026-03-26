@@ -1,0 +1,248 @@
+diff --git a/proxyd/backend.go b/proxyd/backend.go
+index b1d035b..84bbad7 100644
+--- a/proxyd/backend.go
++++ b/proxyd/backend.go
+@@ -97,12 +97,6 @@ var (
+ 		Message:       "backend is currently not healthy to serve traffic",
+ 		HTTPErrorCode: 503,
+ 	}
+-	ErrBlockOutOfRange = &RPCErr{
+-		Code:          JSONRPCErrorInternal - 19,
+-		Message:       "block is out of range",
+-		HTTPErrorCode: 400,
+-	}
+-
+ 	ErrRequestBodyTooLarge = &RPCErr{
+ 		Code:          JSONRPCErrorInternal - 21,
+ 		Message:       "request body too large",
+@@ -1794,9 +1788,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
+ 				req:   req,
+ 				res:   &res,
+ 			})
+-			if errors.Is(err, ErrRewriteBlockOutOfRange) {
+-				res.Error = ErrBlockOutOfRange
+-			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
++			if errors.Is(err, ErrRewriteRangeTooLarge) {
+ 				res.Error = ErrInvalidParams(
+ 					fmt.Sprintf("block range greater than %d max", rctx.maxBlockRange),
+ 				)
+diff --git a/proxyd/integration_tests/consensus_test.go b/proxyd/integration_tests/consensus_test.go
+index 00a7015..4b99ea1 100644
+--- a/proxyd/integration_tests/consensus_test.go
++++ b/proxyd/integration_tests/consensus_test.go
+@@ -752,19 +752,26 @@ func TestConsensus(t *testing.T) {
+ 		require.Equal(t, "0xe1", jsonMap["params"].([]interface{})[0])
+ 	})
+ 
+-	t.Run("rewrite request of eth_getBlockByNumber - out of range", func(t *testing.T) {
++	t.Run("rewrite request of eth_getBlockByNumber - out of range is forwarded to backend", func(t *testing.T) {
+ 		reset()
+ 		useOnlyNode1()
+ 
++		// the request for a future block should be forwarded to the backend,
++		// which returns null per the Ethereum JSON-RPC spec
++		override("node1", "eth_getBlockByNumber", "0x300",
++			`{"jsonrpc":"2.0","id":67,"result":null}`)
++
+ 		resRaw, statusCode, err := client.SendRPC("eth_getBlockByNumber", []interface{}{"0x300"})
+ 		require.NoError(t, err)
+-		require.Equal(t, 400, statusCode)
++		require.Equal(t, 200, statusCode)
+ 
+ 		var jsonMap map[string]interface{}
+ 		err = json.Unmarshal(resRaw, &jsonMap)
+ 		require.NoError(t, err)
+-		require.Equal(t, -32019, int(jsonMap["error"].(map[string]interface{})["code"].(float64)))
+-		require.Equal(t, "block is out of range", jsonMap["error"].(map[string]interface{})["message"])
++		require.Nil(t, jsonMap["result"])
++		require.Nil(t, jsonMap["error"])
++
++		require.Equal(t, 1, len(nodes["node1"].mockBackend.Requests()))
+ 	})
+ 
+ 	t.Run("batched rewrite", func(t *testing.T) {
+@@ -786,9 +793,8 @@ func TestConsensus(t *testing.T) {
+ 		// rewrite latest to 0x101
+ 		require.Equal(t, "0x101", jsonMap[0]["result"].(map[string]interface{})["number"])
+ 
+-		// out of bounds for block 0x102
+-		require.Equal(t, -32019, int(jsonMap[1]["error"].(map[string]interface{})["code"].(float64)))
+-		require.Equal(t, "block is out of range", jsonMap[1]["error"].(map[string]interface{})["message"])
++		// block 0x102 is beyond latest (0x101) but is forwarded to the backend
++		require.Equal(t, "0x102", jsonMap[1]["result"].(map[string]interface{})["number"])
+ 
+ 		// dont rewrite for 0xe1
+ 		require.Equal(t, "0xe1", jsonMap[2]["result"].(map[string]interface{})["number"])
+diff --git a/proxyd/rewriter.go b/proxyd/rewriter.go
+index 7f89e0f..81ccceb 100644
+--- a/proxyd/rewriter.go
++++ b/proxyd/rewriter.go
+@@ -32,10 +32,7 @@ const (
+ 	RewriteOverrideResponse
+ )
+ 
+-var (
+-	ErrRewriteBlockOutOfRange = errors.New("block is out of range")
+-	ErrRewriteRangeTooLarge   = errors.New("block range is too large")
+-)
++var ErrRewriteRangeTooLarge = errors.New("block range is too large")
+ 
+ // RewriteTags modifies the request and the response based on block tags
+ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
+@@ -296,10 +293,6 @@ func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
+ 		case rpc.LatestBlockNumber:
+ 			return rctx.latest.String(), true, nil
+ 		}
+-	default:
+-		if rctx.latest > 0 && bnh.BlockNumber.Int64() > int64(rctx.latest) {
+-			return "", false, ErrRewriteBlockOutOfRange
+-		}
+ 	}
+ 
+ 	return current, false, nil
+@@ -324,10 +317,6 @@ func rewriteTagBlockNumberOrHash(rctx RewriteContext, current *rpc.BlockNumberOr
+ 	case rpc.LatestBlockNumber:
+ 		bn := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(rctx.latest))
+ 		return &bn, true, nil
+-	default:
+-		if current.BlockNumber.Int64() > int64(rctx.latest) {
+-			return nil, false, ErrRewriteBlockOutOfRange
+-		}
+ 	}
+ 
+ 	return current, false, nil
+diff --git a/proxyd/rewriter_test.go b/proxyd/rewriter_test.go
+index a06fc86..2fb8e29 100644
+--- a/proxyd/rewriter_test.go
++++ b/proxyd/rewriter_test.go
+@@ -65,8 +65,14 @@ func TestRewriteRequest(t *testing.T) {
+ 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String()}})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteOverrideRequest,
++			check: func(t *testing.T, args args) {
++				var p []map[string]interface{}
++				err := json.Unmarshal(args.req.Params, &p)
++				require.Nil(t, err)
++				require.Equal(t, hexutil.Uint64(111).String(), p[0]["fromBlock"])
++				require.Equal(t, hexutil.Uint64(100).String(), p[0]["toBlock"])
++			},
+ 		},
+ 		{
+ 			name: "eth_getLogs toBlock latest",
+@@ -105,8 +111,14 @@ func TestRewriteRequest(t *testing.T) {
+ 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"toBlock": hexutil.Uint64(111).String()}})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteOverrideRequest,
++			check: func(t *testing.T, args args) {
++				var p []map[string]interface{}
++				err := json.Unmarshal(args.req.Params, &p)
++				require.Nil(t, err)
++				require.Equal(t, hexutil.Uint64(100).String(), p[0]["fromBlock"])
++				require.Equal(t, hexutil.Uint64(111).String(), p[0]["toBlock"])
++			},
+ 		},
+ 		{
+ 			name: "eth_getLogs fromBlock, toBlock latest",
+@@ -147,8 +159,7 @@ func TestRewriteRequest(t *testing.T) {
+ 				req:  &RPCReq{Method: "eth_getLogs", Params: mustMarshalJSON([]map[string]interface{}{{"fromBlock": hexutil.Uint64(111).String(), "toBlock": hexutil.Uint64(222).String()}})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 		{
+ 			name: "eth_getLogs fromBlock -> toBlock above max range",
+@@ -240,14 +251,13 @@ func TestRewriteRequest(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "debug_getRawReceipts out of range",
++			name: "debug_getRawReceipts out of range passes through to backend",
+ 			args: args{
+ 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
+ 				req:  &RPCReq{Method: "debug_getRawReceipts", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 		{
+ 			name: "debug_getRawReceipts missing parameter",
+@@ -346,14 +356,13 @@ func TestRewriteRequest(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "eth_getCode out of range",
++			name: "eth_getCode out of range passes through to backend",
+ 			args: args{
+ 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
+ 				req:  &RPCReq{Method: "eth_getCode", Params: mustMarshalJSON([]string{"0x123", hexutil.Uint64(111).String()})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 		/* default block parameter, at position 2 */
+ 		{
+@@ -415,14 +424,13 @@ func TestRewriteRequest(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "eth_getStorageAt out of range",
++			name: "eth_getStorageAt out of range passes through to backend",
+ 			args: args{
+ 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
+ 				req:  &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]string{"0x123", "5", hexutil.Uint64(111).String()})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 		/* default block parameter, at position 0 */
+ 		{
+@@ -506,14 +514,13 @@ func TestRewriteRequest(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "eth_getBlockByNumber out of range",
++			name: "eth_getBlockByNumber out of range passes through to backend",
+ 			args: args{
+ 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
+ 				req:  &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]string{hexutil.Uint64(111).String()})},
+ 				res:  nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 		{
+ 			name: "eth_getStorageAt using rpc.BlockNumberOrHash",
+@@ -595,7 +602,7 @@ func TestRewriteRequest(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "eth_getStorageAt using rpc.BlockNumberOrHash out of range",
++			name: "eth_getStorageAt using rpc.BlockNumberOrHash out of range passes through to backend",
+ 			args: args{
+ 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
+ 				req: &RPCReq{Method: "eth_getStorageAt", Params: mustMarshalJSON([]interface{}{
+@@ -606,8 +613,7 @@ func TestRewriteRequest(t *testing.T) {
+ 					}})},
+ 				res: nil,
+ 			},
+-			expected:    RewriteOverrideError,
+-			expectedErr: ErrRewriteBlockOutOfRange,
++			expected: RewriteNone,
+ 		},
+ 	}
+ 
