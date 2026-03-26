@@ -103,42 +103,42 @@ func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
 
 // GetLatestBlockNumber returns the `latest` agreed block number in a consensus
 func (ct *ConsensusPoller) GetLatestBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetLatestBlockNumber()
+	return ct.tracker.GetState().Latest
 }
 
 // GetSafeBlockNumber returns the `safe` agreed block number in a consensus
 func (ct *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetSafeBlockNumber()
+	return ct.tracker.GetState().Safe
 }
 
 // GetFinalizedBlockNumber returns the `finalized` agreed block number in a consensus
 func (ct *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetFinalizedBlockNumber()
+	return ct.tracker.GetState().Finalized
 }
 
 // GetLatestBlockHash returns the hash of the `latest` agreed block in a consensus
 func (ct *ConsensusPoller) GetLatestBlockHash() string {
-	return ct.tracker.GetLatestBlockHash()
+	return ct.tracker.GetState().LatestHash
 }
 
 // GetSafeBlockHash returns the hash of the `safe` agreed block in a consensus
 func (ct *ConsensusPoller) GetSafeBlockHash() string {
-	return ct.tracker.GetSafeBlockHash()
+	return ct.tracker.GetState().SafeHash
 }
 
 // GetLocalSafeBlockNumber returns the `local_safe` agreed block number in a consensus (CL mode only)
 func (ct *ConsensusPoller) GetLocalSafeBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetLocalSafeBlockNumber()
+	return ct.tracker.GetState().LocalSafe
 }
 
 // GetLocalSafeBlockHash returns the hash of the `local_safe` agreed block in a consensus (CL mode only)
 func (ct *ConsensusPoller) GetLocalSafeBlockHash() string {
-	return ct.tracker.GetLocalSafeBlockHash()
+	return ct.tracker.GetState().LocalSafeHash
 }
 
 // GetFinalizedBlockHash returns the hash of the `finalized` agreed block in a consensus (CL mode only)
 func (ct *ConsensusPoller) GetFinalizedBlockHash() string {
-	return ct.tracker.GetFinalizedBlockHash()
+	return ct.tracker.GetState().FinalizedHash
 }
 
 // IsConsensusLayer returns true if this poller is operating in CL (op-node) mode
@@ -457,11 +457,18 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
 
-	changed := cp.setBackendState(be, peerCount, inSync,
-		latestBlockNumber, latestBlockHash,
-		safeBlockNumber, safeBlockHash,
-		localSafeBlockNumber, localSafeBlockHash,
-		finalizedBlockNumber, finalizedBlockHash)
+	changed := cp.setBackendState(be, backendStateUpdate{
+		peerCount:            peerCount,
+		inSync:               inSync,
+		latestBlockNumber:    latestBlockNumber,
+		latestBlockHash:      latestBlockHash,
+		safeBlockNumber:      safeBlockNumber,
+		safeBlockHash:        safeBlockHash,
+		localSafeBlockNumber: localSafeBlockNumber,
+		localSafeBlockHash:   localSafeBlockHash,
+		finalizedBlockNumber: finalizedBlockNumber,
+		finalizedBlockHash:   finalizedBlockHash,
+	})
 
 	RecordBackendLatestBlock(be, latestBlockNumber)
 	RecordBackendSafeBlock(be, safeBlockNumber)
@@ -538,16 +545,16 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 
 	// update the lowest latest block number and hash
 	//        the lowest safe block number
-	//        the lowest local-safe block number (CL mode only)
 	//        the lowest finalized block number
+	//        the lowest local-safe block number and finalized hash (CL mode only)
 	var lowestLatestBlock hexutil.Uint64
 	var lowestLatestBlockHash string
 	var lowestFinalizedBlock hexutil.Uint64
-	var lowestFinalizedBlockHash string
+	var lowestFinalizedBlockHash string // only populated in CL mode
 	var lowestSafeBlock hexutil.Uint64
 	var lowestSafeBlockHash string
-	var lowestLocalSafeBlock hexutil.Uint64
-	var lowestLocalSafeBlockHash string
+	var lowestLocalSafeBlock hexutil.Uint64    // only populated in CL mode
+	var lowestLocalSafeBlockHash string        // only populated in CL mode
 	for _, bs := range candidates {
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
@@ -555,15 +562,19 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 		if lowestFinalizedBlock == 0 || bs.finalizedBlockNumber < lowestFinalizedBlock {
 			lowestFinalizedBlock = bs.finalizedBlockNumber
-			lowestFinalizedBlockHash = bs.finalizedBlockHash
+			if cp.consensusLayer {
+				lowestFinalizedBlockHash = bs.finalizedBlockHash
+			}
 		}
 		if lowestSafeBlock == 0 || bs.safeBlockNumber < lowestSafeBlock {
 			lowestSafeBlock = bs.safeBlockNumber
 			lowestSafeBlockHash = bs.safeBlockHash
 		}
-		if lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock {
-			lowestLocalSafeBlock = bs.localSafeBlockNumber
-			lowestLocalSafeBlockHash = bs.localSafeBlockHash
+		if cp.consensusLayer {
+			if lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock {
+				lowestLocalSafeBlock = bs.localSafeBlockNumber
+				lowestLocalSafeBlockHash = bs.localSafeBlockHash
+			}
 		}
 	}
 
@@ -607,14 +618,16 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	}
 
 	// update tracker
-	cp.tracker.SetLatestBlockNumber(proposedBlock)
-	cp.tracker.SetSafeBlockNumber(lowestSafeBlock)
-	cp.tracker.SetFinalizedBlockNumber(lowestFinalizedBlock)
-	cp.tracker.SetLatestBlockHash(proposedBlockHash)
-	cp.tracker.SetSafeBlockHash(lowestSafeBlockHash)
-	cp.tracker.SetLocalSafeBlockNumber(lowestLocalSafeBlock)
-	cp.tracker.SetLocalSafeBlockHash(lowestLocalSafeBlockHash)
-	cp.tracker.SetFinalizedBlockHash(lowestFinalizedBlockHash)
+	cp.tracker.SetState(ConsensusTrackerState{
+		Latest:        proposedBlock,
+		Safe:          lowestSafeBlock,
+		Finalized:     lowestFinalizedBlock,
+		LatestHash:    proposedBlockHash,
+		SafeHash:      lowestSafeBlockHash,
+		LocalSafe:     lowestLocalSafeBlock,
+		LocalSafeHash: lowestLocalSafeBlockHash,
+		FinalizedHash: lowestFinalizedBlockHash,
+	})
 
 	// update consensus group
 	group := make([]*Backend, 0, len(candidates))
@@ -866,24 +879,35 @@ func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	return bs.lastUpdate
 }
 
-func (cp *ConsensusPoller) setBackendState(be *Backend, peerCount uint64, inSync bool,
-	latestBlockNumber hexutil.Uint64, latestBlockHash string,
-	safeBlockNumber hexutil.Uint64, safeBlockHash string,
-	localSafeBlockNumber hexutil.Uint64, localSafeBlockHash string,
-	finalizedBlockNumber hexutil.Uint64, finalizedBlockHash string) bool {
+// backendStateUpdate is a value object passed to setBackendState to avoid
+// a wide positional parameter list of same-typed arguments.
+type backendStateUpdate struct {
+	peerCount            uint64
+	inSync               bool
+	latestBlockNumber    hexutil.Uint64
+	latestBlockHash      string
+	safeBlockNumber      hexutil.Uint64
+	safeBlockHash        string
+	localSafeBlockNumber hexutil.Uint64
+	localSafeBlockHash   string
+	finalizedBlockNumber hexutil.Uint64
+	finalizedBlockHash   string
+}
+
+func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) bool {
 	bs := cp.backendState[be]
 	bs.backendStateMux.Lock()
-	changed := bs.latestBlockHash != latestBlockHash
-	bs.peerCount = peerCount
-	bs.inSync = inSync
-	bs.latestBlockNumber = latestBlockNumber
-	bs.latestBlockHash = latestBlockHash
-	bs.safeBlockNumber = safeBlockNumber
-	bs.safeBlockHash = safeBlockHash
-	bs.localSafeBlockNumber = localSafeBlockNumber
-	bs.localSafeBlockHash = localSafeBlockHash
-	bs.finalizedBlockNumber = finalizedBlockNumber
-	bs.finalizedBlockHash = finalizedBlockHash
+	changed := bs.latestBlockHash != upd.latestBlockHash
+	bs.peerCount = upd.peerCount
+	bs.inSync = upd.inSync
+	bs.latestBlockNumber = upd.latestBlockNumber
+	bs.latestBlockHash = upd.latestBlockHash
+	bs.safeBlockNumber = upd.safeBlockNumber
+	bs.safeBlockHash = upd.safeBlockHash
+	bs.localSafeBlockNumber = upd.localSafeBlockNumber
+	bs.localSafeBlockHash = upd.localSafeBlockHash
+	bs.finalizedBlockNumber = upd.finalizedBlockNumber
+	bs.finalizedBlockHash = upd.finalizedBlockHash
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed
