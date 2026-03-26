@@ -18,15 +18,12 @@ import (
 // ConsensusTracker abstracts how we store and retrieve the current consensus
 // allowing it to be stored locally in-memory or in a shared Redis cluster
 type ConsensusTracker interface {
-	GetLatestBlockNumber() hexutil.Uint64
-	SetLatestBlockNumber(blockNumber hexutil.Uint64)
-	GetSafeBlockNumber() hexutil.Uint64
-	SetSafeBlockNumber(blockNumber hexutil.Uint64)
-	GetFinalizedBlockNumber() hexutil.Uint64
-	SetFinalizedBlockNumber(blockNumber hexutil.Uint64)
+	GetState() ConsensusTrackerState
+	SetState(state ConsensusTrackerState)
 }
 
-// DTO to hold the current consensus state
+// ConsensusTrackerState holds the full consensus state in one snapshot.
+// Adding a new field only requires changing this struct and update().
 type ConsensusTrackerState struct {
 	Latest    hexutil.Uint64 `json:"latest"`
 	Safe      hexutil.Uint64 `json:"safe"`
@@ -56,57 +53,26 @@ func NewInMemoryConsensusTracker() ConsensusTracker {
 }
 
 func (ct *InMemoryConsensusTracker) Valid() bool {
-	return ct.GetLatestBlockNumber() > 0 &&
-		ct.GetSafeBlockNumber() > 0 &&
-		ct.GetFinalizedBlockNumber() > 0
+	s := ct.GetState()
+	return s.Latest > 0 && s.Safe > 0 && s.Finalized > 0
 }
 
 func (ct *InMemoryConsensusTracker) Behind(other *InMemoryConsensusTracker) bool {
-	return ct.GetLatestBlockNumber() < other.GetLatestBlockNumber() ||
-		ct.GetSafeBlockNumber() < other.GetSafeBlockNumber() ||
-		ct.GetFinalizedBlockNumber() < other.GetFinalizedBlockNumber()
+	local := ct.GetState()
+	remote := other.GetState()
+	return local.Latest < remote.Latest ||
+		local.Safe < remote.Safe ||
+		local.Finalized < remote.Finalized
 }
 
-func (ct *InMemoryConsensusTracker) GetLatestBlockNumber() hexutil.Uint64 {
-	defer ct.mutex.Unlock()
+func (ct *InMemoryConsensusTracker) GetState() ConsensusTrackerState {
 	ct.mutex.Lock()
-
-	return ct.state.Latest
+	defer ct.mutex.Unlock()
+	return *ct.state
 }
 
-func (ct *InMemoryConsensusTracker) SetLatestBlockNumber(blockNumber hexutil.Uint64) {
-	defer ct.mutex.Unlock()
-	ct.mutex.Lock()
-
-	ct.state.Latest = blockNumber
-}
-
-func (ct *InMemoryConsensusTracker) GetSafeBlockNumber() hexutil.Uint64 {
-	defer ct.mutex.Unlock()
-	ct.mutex.Lock()
-
-	return ct.state.Safe
-}
-
-func (ct *InMemoryConsensusTracker) SetSafeBlockNumber(blockNumber hexutil.Uint64) {
-	defer ct.mutex.Unlock()
-	ct.mutex.Lock()
-
-	ct.state.Safe = blockNumber
-}
-
-func (ct *InMemoryConsensusTracker) GetFinalizedBlockNumber() hexutil.Uint64 {
-	defer ct.mutex.Unlock()
-	ct.mutex.Lock()
-
-	return ct.state.Finalized
-}
-
-func (ct *InMemoryConsensusTracker) SetFinalizedBlockNumber(blockNumber hexutil.Uint64) {
-	defer ct.mutex.Unlock()
-	ct.mutex.Lock()
-
-	ct.state.Finalized = blockNumber
+func (ct *InMemoryConsensusTracker) SetState(state ConsensusTrackerState) {
+	ct.update(&state)
 }
 
 // RedisConsensusTracker store and retrieve in a shared Redis cluster, with leader election
@@ -256,9 +222,10 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			ct.remote.update(state)
 			log.Debug("updated state from remote", "state", val, "leader", leaderName)
 
-			RecordGroupConsensusHALatestBlock(ct.backendGroup, leaderName, ct.remote.state.Latest)
-			RecordGroupConsensusHASafeBlock(ct.backendGroup, leaderName, ct.remote.state.Safe)
-			RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leaderName, ct.remote.state.Finalized)
+			remoteState := ct.remote.GetState()
+			RecordGroupConsensusHALatestBlock(ct.backendGroup, leaderName, remoteState.Latest)
+			RecordGroupConsensusHASafeBlock(ct.backendGroup, leaderName, remoteState.Safe)
+			RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leaderName, remoteState.Finalized)
 		}
 	} else {
 		if !ct.local.Valid() {
@@ -296,32 +263,17 @@ func (ct *RedisConsensusTracker) key(tag string) string {
 	return fmt.Sprintf("consensus:%s:%s", ct.namespace, tag)
 }
 
-func (ct *RedisConsensusTracker) GetLatestBlockNumber() hexutil.Uint64 {
-	return ct.remote.GetLatestBlockNumber()
+func (ct *RedisConsensusTracker) GetState() ConsensusTrackerState {
+	return ct.remote.GetState()
 }
 
-func (ct *RedisConsensusTracker) SetLatestBlockNumber(blockNumber hexutil.Uint64) {
-	ct.local.SetLatestBlockNumber(blockNumber)
-}
-
-func (ct *RedisConsensusTracker) GetSafeBlockNumber() hexutil.Uint64 {
-	return ct.remote.GetSafeBlockNumber()
-}
-
-func (ct *RedisConsensusTracker) SetSafeBlockNumber(blockNumber hexutil.Uint64) {
-	ct.local.SetSafeBlockNumber(blockNumber)
-}
-
-func (ct *RedisConsensusTracker) GetFinalizedBlockNumber() hexutil.Uint64 {
-	return ct.remote.GetFinalizedBlockNumber()
-}
-
-func (ct *RedisConsensusTracker) SetFinalizedBlockNumber(blockNumber hexutil.Uint64) {
-	ct.local.SetFinalizedBlockNumber(blockNumber)
+func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
+	ct.local.SetState(state)
 }
 
 func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
-	jsonState, err := json.Marshal(ct.local.state)
+	state := ct.local.GetState()
+	jsonState, err := json.Marshal(state)
 	if err != nil {
 		log.Error("failed to marshal local", "err", err)
 		RecordGroupConsensusError(ct.backendGroup, "leader_marshal_local_state", err)
@@ -348,9 +300,10 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	log.Debug("posted state", "state", string(jsonState), "leader", leader)
 
 	ct.leaderName = leader
-	ct.remote.update(ct.local.state)
+	ct.remote.update(&state)
 
-	RecordGroupConsensusHALatestBlock(ct.backendGroup, leader, ct.remote.state.Latest)
-	RecordGroupConsensusHASafeBlock(ct.backendGroup, leader, ct.remote.state.Safe)
-	RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leader, ct.remote.state.Finalized)
+	remoteState := ct.remote.GetState()
+	RecordGroupConsensusHALatestBlock(ct.backendGroup, leader, remoteState.Latest)
+	RecordGroupConsensusHASafeBlock(ct.backendGroup, leader, remoteState.Safe)
+	RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leader, remoteState.Finalized)
 }

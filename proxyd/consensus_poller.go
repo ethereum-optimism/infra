@@ -93,17 +93,17 @@ func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
 
 // GetLatestBlockNumber returns the `latest` agreed block number in a consensus
 func (ct *ConsensusPoller) GetLatestBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetLatestBlockNumber()
+	return ct.tracker.GetState().Latest
 }
 
 // GetSafeBlockNumber returns the `safe` agreed block number in a consensus
 func (ct *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetSafeBlockNumber()
+	return ct.tracker.GetState().Safe
 }
 
 // GetFinalizedBlockNumber returns the `finalized` agreed block number in a consensus
 func (ct *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetFinalizedBlockNumber()
+	return ct.tracker.GetState().Finalized
 }
 
 func (cp *ConsensusPoller) Shutdown() {
@@ -378,9 +378,14 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
 
-	changed := cp.setBackendState(be, peerCount, inSync,
-		latestBlockNumber, latestBlockHash,
-		safeBlockNumber, finalizedBlockNumber)
+	changed := cp.setBackendState(be, backendStateUpdate{
+		peerCount:            peerCount,
+		inSync:               inSync,
+		latestBlockNumber:    latestBlockNumber,
+		latestBlockHash:      latestBlockHash,
+		safeBlockNumber:      safeBlockNumber,
+		finalizedBlockNumber: finalizedBlockNumber,
+	})
 
 	RecordBackendLatestBlock(be, latestBlockNumber)
 	RecordBackendSafeBlock(be, safeBlockNumber)
@@ -537,9 +542,11 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	}
 
 	// update tracker
-	cp.tracker.SetLatestBlockNumber(proposedBlock)
-	cp.tracker.SetSafeBlockNumber(lowestSafeBlock)
-	cp.tracker.SetFinalizedBlockNumber(lowestFinalizedBlock)
+	cp.tracker.SetState(ConsensusTrackerState{
+		Latest:    proposedBlock,
+		Safe:      lowestSafeBlock,
+		Finalized: lowestFinalizedBlock,
+	})
 
 	// update consensus group
 	group := make([]*Backend, 0, len(candidates))
@@ -619,6 +626,7 @@ func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
+	cp.tracker.SetState(ConsensusTrackerState{})
 }
 
 // fetchBlock is a convenient wrapper to make a request to get a block directly from the backend
@@ -709,19 +717,27 @@ func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	return bs.lastUpdate
 }
 
-func (cp *ConsensusPoller) setBackendState(be *Backend, peerCount uint64, inSync bool,
-	latestBlockNumber hexutil.Uint64, latestBlockHash string,
-	safeBlockNumber hexutil.Uint64,
-	finalizedBlockNumber hexutil.Uint64) bool {
+// backendStateUpdate is a value object passed to setBackendState to avoid
+// transposition bugs with same-typed arguments.
+type backendStateUpdate struct {
+	peerCount            uint64
+	inSync               bool
+	latestBlockNumber    hexutil.Uint64
+	latestBlockHash      string
+	safeBlockNumber      hexutil.Uint64
+	finalizedBlockNumber hexutil.Uint64
+}
+
+func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) bool {
 	bs := cp.backendState[be]
 	bs.backendStateMux.Lock()
-	changed := bs.latestBlockHash != latestBlockHash
-	bs.peerCount = peerCount
-	bs.inSync = inSync
-	bs.latestBlockNumber = latestBlockNumber
-	bs.latestBlockHash = latestBlockHash
-	bs.finalizedBlockNumber = finalizedBlockNumber
-	bs.safeBlockNumber = safeBlockNumber
+	changed := bs.latestBlockHash != upd.latestBlockHash
+	bs.peerCount = upd.peerCount
+	bs.inSync = upd.inSync
+	bs.latestBlockNumber = upd.latestBlockNumber
+	bs.latestBlockHash = upd.latestBlockHash
+	bs.finalizedBlockNumber = upd.finalizedBlockNumber
+	bs.safeBlockNumber = upd.safeBlockNumber
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed
