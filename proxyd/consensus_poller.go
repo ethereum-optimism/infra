@@ -593,6 +593,7 @@ func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
+	cp.tracker.SetState(ConsensusTrackerState{})
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
