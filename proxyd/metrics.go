@@ -411,6 +411,15 @@ var (
 		"backend_name",
 	})
 
+	consensusCLBackendL1LagHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_lag_histogram",
+		Help:      "Distribution of L1 block lag across CL (op-node) backends (head_l1 - current_l1)",
+		Buckets:   []float64{0, 1, 2, 5, 10, 20, 50, 100},
+	}, []string{
+		"backend_name",
+	})
+
 	consensusCLBackendL1Stale = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_cl_backend_l1_stale",
@@ -426,6 +435,31 @@ var (
 	}, []string{
 		"backend_group_name",
 		"safety",
+	})
+
+	consensusCLBackendLocalSafeBlock = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_local_safe_block",
+		Help:      "Current local_safe_l2 block observed per CL (op-node) backend",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLGroupLocalSafeBlock = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_group_local_safe_block",
+		Help:      "Consensus local_safe_l2 block for the CL (op-node) backend group",
+	}, []string{
+		"backend_group_name",
+	})
+
+	consensusCLBanTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_total",
+		Help:      "Count of CL backend ban events, labelled by reason",
+	}, []string{
+		"backend_name",
+		"reason",
 	})
 
 	consensusUpdateDelayBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -667,6 +701,7 @@ func RecordConsensusBackendInSync(b *Backend, inSync bool) {
 
 func RecordCLBackendL1Lag(b *Backend, lag uint64) {
 	consensusCLBackendL1Lag.WithLabelValues(b.Name).Set(float64(lag))
+	consensusCLBackendL1LagHistogram.WithLabelValues(b.Name).Observe(float64(lag))
 }
 
 func RecordCLBackendL1Stale(b *Backend, stale bool) {
@@ -675,6 +710,18 @@ func RecordCLBackendL1Stale(b *Backend, stale bool) {
 
 func RecordCLGroupConsensusWalkback(group *BackendGroup, safety string) {
 	consensusCLGroupWalkbackTotal.WithLabelValues(group.Name, safety).Inc()
+}
+
+func RecordCLBackendLocalSafeBlock(b *Backend, blockNumber hexutil.Uint64) {
+	consensusCLBackendLocalSafeBlock.WithLabelValues(b.Name).Set(float64(blockNumber))
+}
+
+func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64) {
+	consensusCLGroupLocalSafeBlock.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+func RecordCLBan(b *Backend, reason string) {
+	consensusCLBanTotal.WithLabelValues(b.Name, reason).Inc()
 }
 
 func RecordConsensusBackendUpdateDelay(b *Backend, lastUpdate time.Time) {

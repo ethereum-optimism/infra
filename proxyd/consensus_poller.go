@@ -357,6 +357,9 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	// if backend is not healthy state we'll only resume checking it after ban
 	if !be.IsHealthy() && !be.forcedCandidate {
 		log.Warn("backend banned - not healthy", "backend", be.Name)
+		if cp.consensusLayer {
+			RecordCLBan(be, "not_healthy")
+		}
 		cp.Ban(be)
 		return
 	}
@@ -451,6 +454,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			"safe", safeBlockNumber,
 			"local_safe", localSafeBlockNumber,
 		)
+		RecordCLBan(be, "interop_safe_gt_local_safe")
 		cp.Ban(be)
 		return
 	}
@@ -473,6 +477,9 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	RecordBackendLatestBlock(be, latestBlockNumber)
 	RecordBackendSafeBlock(be, safeBlockNumber)
 	RecordBackendFinalizedBlock(be, finalizedBlockNumber)
+	if cp.consensusLayer {
+		RecordCLBackendLocalSafeBlock(be, localSafeBlockNumber)
+	}
 
 	if changed {
 		log.Debug("backend state updated",
@@ -505,6 +512,9 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			"safeBlockNumber", safeBlockNumber,
 			"latestBlockNumber", latestBlockNumber,
 		)
+		if cp.consensusLayer {
+			RecordCLBan(be, "unexpected_block_tags")
+		}
 		cp.Ban(be)
 	}
 }
@@ -650,6 +660,9 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	RecordGroupConsensusLatestBlock(cp.backendGroup, proposedBlock)
 	RecordGroupConsensusSafeBlock(cp.backendGroup, lowestSafeBlock)
 	RecordGroupConsensusFinalizedBlock(cp.backendGroup, lowestFinalizedBlock)
+	if cp.consensusLayer {
+		RecordCLGroupLocalSafeBlock(cp.backendGroup, lowestLocalSafeBlock)
+	}
 
 	RecordGroupConsensusCount(cp.backendGroup, len(group))
 	RecordGroupConsensusFilteredCount(cp.backendGroup, len(filteredBackendsNames))
