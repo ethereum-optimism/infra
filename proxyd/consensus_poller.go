@@ -626,7 +626,6 @@ func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
-	cp.tracker.SetState(ConsensusTrackerState{})
 }
 
 // fetchBlock is a convenient wrapper to make a request to get a block directly from the backend
