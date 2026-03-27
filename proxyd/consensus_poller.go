@@ -92,18 +92,18 @@ func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
 }
 
 // GetLatestBlockNumber returns the `latest` agreed block number in a consensus
-func (ct *ConsensusPoller) GetLatestBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetState().Latest
+func (cp *ConsensusPoller) GetLatestBlockNumber() hexutil.Uint64 {
+	return cp.tracker.GetState().Latest
 }
 
 // GetSafeBlockNumber returns the `safe` agreed block number in a consensus
-func (ct *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetState().Safe
+func (cp *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
+	return cp.tracker.GetState().Safe
 }
 
 // GetFinalizedBlockNumber returns the `finalized` agreed block number in a consensus
-func (ct *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
-	return ct.tracker.GetState().Finalized
+func (cp *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
+	return cp.tracker.GetState().Finalized
 }
 
 func (cp *ConsensusPoller) Shutdown() {
