@@ -336,7 +336,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	inSync, err := cp.isInSync(ctx, be)
+	inSync, err := cp.isELInSync(ctx, be)
 	RecordConsensusBackendInSync(be, err == nil && inSync)
 	if err != nil {
 		log.Warn("error updating backend sync state", "name", be.Name, "err", err)
@@ -358,7 +358,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
-	latestBlockNumber, latestBlockHash, err := cp.fetchBlock(ctx, be, "latest")
+	latestBlockNumber, latestBlockHash, err := cp.fetchELBlock(ctx, be, "latest")
 	if err != nil {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
 		return
@@ -369,7 +369,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	safeBlockNumber, safeBlockHash, err := cp.fetchBlock(ctx, be, "safe")
+	safeBlockNumber, safeBlockHash, err := cp.fetchELBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
 		return
@@ -381,7 +381,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	finalizedBlockNumber, finalizedBlockHash, err := cp.fetchBlock(ctx, be, "finalized")
+	finalizedBlockNumber, finalizedBlockHash, err := cp.fetchELBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 		return
@@ -624,7 +624,7 @@ type blockHashFetcher func(ctx context.Context, be *Backend, bs *backendState, b
 
 // elBlockFetcher is a blockHashFetcher for EL backends; bs is unused.
 func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
-	return cp.fetchBlock(ctx, be, block.String())
+	return cp.fetchELBlock(ctx, be, block.String())
 }
 
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
@@ -677,9 +677,13 @@ func (cp *ConsensusPoller) findConsensusBlock(
 	}
 }
 
-// fetchBlock is a convenient wrapper to make a request to get a block directly from the backend
-func (cp *ConsensusPoller) fetchBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
+// fetchELBlock calls eth_getBlockByNumber and returns the block number and hash.
+func (cp *ConsensusPoller) fetchELBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
 	var rpcRes RPCRes
+	log.Trace("executing fetchELBlock for backend",
+		"backend", be.Name,
+		"block", block,
+	)
 	err = be.ForwardRPC(ctx, &rpcRes, "67", "eth_getBlockByNumber", block, false)
 	if err != nil {
 		return 0, "", err
@@ -689,14 +693,27 @@ func (cp *ConsensusPoller) fetchBlock(ctx context.Context, be *Backend, block st
 	if !ok {
 		return 0, "", fmt.Errorf("unexpected response to eth_getBlockByNumber on backend %s", be.Name)
 	}
-	blockNumber = hexutil.Uint64(hexutil.MustDecodeUint64(jsonMap["number"].(string)))
-	blockHash = jsonMap["hash"].(string)
+	numStr, ok := jsonMap["number"].(string)
+	if !ok {
+		return 0, "", fmt.Errorf("missing or invalid number in eth_getBlockByNumber response on backend %s", be.Name)
+	}
+	hashStr, ok := jsonMap["hash"].(string)
+	if !ok {
+		return 0, "", fmt.Errorf("missing or invalid hash in eth_getBlockByNumber response on backend %s", be.Name)
+	}
+	blockNumber = hexutil.Uint64(hexutil.MustDecodeUint64(numStr))
+	blockHash = hashStr
 
 	return
 }
 
-// getPeerCount is a convenient wrapper to retrieve the current peer count from the backend
+// getPeerCount retrieves the current peer count from the backend.
 func (cp *ConsensusPoller) getPeerCount(ctx context.Context, be *Backend) (count uint64, err error) {
+	return cp.fetchELPeerCount(ctx, be)
+}
+
+// fetchELPeerCount calls net_peerCount and returns the peer count.
+func (cp *ConsensusPoller) fetchELPeerCount(ctx context.Context, be *Backend) (count uint64, err error) {
 	var rpcRes RPCRes
 	err = be.ForwardRPC(ctx, &rpcRes, "67", "net_peerCount")
 	if err != nil {
@@ -713,8 +730,8 @@ func (cp *ConsensusPoller) getPeerCount(ctx context.Context, be *Backend) (count
 	return count, nil
 }
 
-// isInSync is a convenient wrapper to check if the backend is in sync from the network
-func (cp *ConsensusPoller) isInSync(ctx context.Context, be *Backend) (result bool, err error) {
+// isELInSync checks if an EL backend is in sync by calling eth_syncing.
+func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result bool, err error) {
 	var rpcRes RPCRes
 	err = be.ForwardRPC(ctx, &rpcRes, "67", "eth_syncing")
 	if err != nil {
