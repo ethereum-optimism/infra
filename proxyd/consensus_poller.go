@@ -623,8 +623,13 @@ func (cp *ConsensusPoller) Reset() {
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
 type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
 
+<<<<<<< HEAD
 // elBlockFetcher is a blockHashFetcher for EL backends.
 func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+=======
+// elBlockFetcher is a blockHashFetcher for EL backends; bs is unused.
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+>>>>>>> feb08d5 (refactor(proxyd): rename EL-specific functions and fix type assertion panics)
 	return cp.fetchELBlock(ctx, be, block.String())
 }
 
