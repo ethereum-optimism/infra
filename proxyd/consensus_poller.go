@@ -419,22 +419,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		}
 	}
 
-	if cp.consensusLayer && localSafeBlockNumber == 0 {
-		log.Warn("error backend responded with blockheight 0 for local_safe block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return
-	}
-
-	// On interop chains, cross-safe (safe_l2) always lags behind or equals local-safe.
-	// A backend reporting safe > local_safe is in an invalid state and must be excluded.
-	if cp.consensusLayer && safeBlockNumber > 0 && localSafeBlockNumber > 0 && safeBlockNumber > localSafeBlockNumber {
-		log.Warn("banning CL backend: safe > local_safe (invalid interop state)",
-			"backend", be.Name,
-			"safe", safeBlockNumber,
-			"local_safe", localSafeBlockNumber,
-		)
-		RecordCLBan(be, "interop_safe_gt_local_safe")
-		cp.Ban(be)
+	if cp.consensusLayer && !cp.validateCLBackendUpdate(be, safeBlockNumber, localSafeBlockNumber) {
 		return
 	}
 
@@ -551,20 +536,14 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 		if lowestFinalizedBlock == 0 || bs.finalizedBlockNumber < lowestFinalizedBlock {
 			lowestFinalizedBlock = bs.finalizedBlockNumber
-			if cp.consensusLayer {
-				lowestFinalizedBlockHash = bs.finalizedBlockHash
-			}
 		}
 		if lowestSafeBlock == 0 || bs.safeBlockNumber < lowestSafeBlock {
 			lowestSafeBlock = bs.safeBlockNumber
 			lowestSafeBlockHash = bs.safeBlockHash
 		}
-		if cp.consensusLayer {
-			if lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock {
-				lowestLocalSafeBlock = bs.localSafeBlockNumber
-				lowestLocalSafeBlockHash = bs.localSafeBlockHash
-			}
-		}
+	}
+	if cp.consensusLayer {
+		lowestFinalizedBlockHash, lowestLocalSafeBlock, lowestLocalSafeBlockHash = cp.computeCLGroupMinimums(candidates, lowestFinalizedBlock)
 	}
 
 	// find the proposed block among the candidates
@@ -587,24 +566,8 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, fetch, "unsafe")
 	}
 
-	// CL mode: warn if any backend's safe_l2 is far ahead of the peer minimum.
-	// This detects the op-node premature finalization bug (https://github.com/ethereum-optimism/optimism/issues/17631)
-	// where a node finishing EL sync incorrectly reports safe == finalized == unsafe == EL sync tip.
-	// The minimum-safe logic below already protects the served value; this is observability only.
-	if cp.consensusLayer && cp.clSafeLeapWarnThreshold > 0 && lowestSafeBlock > 0 {
-		for be, bs := range candidates {
-			leap := uint64(bs.safeBlockNumber) - uint64(lowestSafeBlock)
-			RecordCLBackendSafeLeap(be, leap)
-			if leap > cp.clSafeLeapWarnThreshold {
-				log.Warn("CL backend safe head far ahead of peer minimum — possible premature finalization",
-					"backend", be.Name,
-					"safe", bs.safeBlockNumber,
-					"peer_min_safe", lowestSafeBlock,
-					"leap", leap,
-					"threshold", cp.clSafeLeapWarnThreshold,
-				)
-			}
-		}
+	if cp.consensusLayer {
+		cp.warnCLSafeLeap(candidates, lowestSafeBlock)
 	}
 
 	// CL mode: hash-verify safe_l2 via walk-back. local_safe_l2 and finalized_l2 use

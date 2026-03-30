@@ -117,6 +117,73 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*C
 	return syncStatus, inSync, nil
 }
 
+// validateCLBackendUpdate performs CL-specific post-fetch validation before a backend's
+// state is written. Returns false if the backend should be excluded and the caller should
+// return early.
+func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber, localSafeBlockNumber hexutil.Uint64) bool {
+	if localSafeBlockNumber == 0 {
+		log.Warn("error backend responded with blockheight 0 for local_safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return false
+	}
+	// On interop chains, cross-safe (safe_l2) always lags behind or equals local-safe.
+	// A backend reporting safe > local_safe is in an invalid state and must be excluded.
+	if safeBlockNumber > 0 && safeBlockNumber > localSafeBlockNumber {
+		log.Warn("banning CL backend: safe > local_safe (invalid interop state)",
+			"backend", be.Name,
+			"safe", safeBlockNumber,
+			"local_safe", localSafeBlockNumber,
+		)
+		RecordCLBan(be, "interop_safe_gt_local_safe")
+		cp.Ban(be)
+		return false
+	}
+	return true
+}
+
+// computeCLGroupMinimums extracts CL-specific per-candidate minimums that are not
+// tracked in the shared candidate loop: the finalized block hash (needed for CL
+// hash-verified consensus) and the lowest local_safe_l2 block and hash.
+func (cp *ConsensusPoller) computeCLGroupMinimums(
+	candidates map[*Backend]*backendState,
+	lowestFinalizedBlock hexutil.Uint64,
+) (finalizedBlockHash string, lowestLocalSafeBlock hexutil.Uint64, lowestLocalSafeBlockHash string) {
+	for _, bs := range candidates {
+		if bs.finalizedBlockNumber == lowestFinalizedBlock && finalizedBlockHash == "" {
+			finalizedBlockHash = bs.finalizedBlockHash
+		}
+		if lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock {
+			lowestLocalSafeBlock = bs.localSafeBlockNumber
+			lowestLocalSafeBlockHash = bs.localSafeBlockHash
+		}
+	}
+	return
+}
+
+// warnCLSafeLeap records a metric and logs a warning for any candidate whose safe_l2
+// is more than clSafeLeapWarnThreshold blocks ahead of the peer minimum.
+// This detects the op-node premature finalization bug (https://github.com/ethereum-optimism/optimism/issues/17631)
+// where a node finishing EL sync incorrectly reports safe == finalized == unsafe == EL sync tip.
+// The minimum-safe consensus logic already protects the served value; this is observability only.
+func (cp *ConsensusPoller) warnCLSafeLeap(candidates map[*Backend]*backendState, lowestSafeBlock hexutil.Uint64) {
+	if cp.clSafeLeapWarnThreshold == 0 || lowestSafeBlock == 0 {
+		return
+	}
+	for be, bs := range candidates {
+		leap := uint64(bs.safeBlockNumber) - uint64(lowestSafeBlock)
+		RecordCLBackendSafeLeap(be, leap)
+		if leap > cp.clSafeLeapWarnThreshold {
+			log.Warn("CL backend safe head far ahead of peer minimum — possible premature finalization",
+				"backend", be.Name,
+				"safe", bs.safeBlockNumber,
+				"peer_min_safe", lowestSafeBlock,
+				"leap", leap,
+				"threshold", cp.clSafeLeapWarnThreshold,
+			)
+		}
+	}
+}
+
 // updateCLGroupConsensus runs a hash-verified walk-back for safe_l2 in CL mode.
 // EL mode uses raw minimums; CL enforces L1-derived safety guarantees for safe.
 // local_safe_l2 and finalized_l2 use their minimum block+hash directly (no walk-back needed:
