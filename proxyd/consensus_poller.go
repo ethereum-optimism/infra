@@ -325,11 +325,11 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		backendGroup: bg,
 		backendState: state,
 
-		banPeriod:          5 * time.Minute,
-		maxUpdateThreshold: 30 * time.Second,
-		maxBlockLag:        8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
-		minPeerCount:       3,
-		interval:           DefaultPollerInterval,
+		banPeriod:               5 * time.Minute,
+		maxUpdateThreshold:      30 * time.Second,
+		maxBlockLag:             8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
+		minPeerCount:            3,
+		interval:                DefaultPollerInterval,
 		clSyncThreshold:         10,              // 10 L1 blocks ~ 2 minutes
 		clHeadL1MaxAge:          5 * time.Minute, // L1 head older than this → node is stalled
 		clSafeLeapWarnThreshold: 1000,            // warn if a backend's safe is >1000 blocks ahead of peer minimum
