@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,6 +15,12 @@ import (
 
 const (
 	DefaultPollerInterval = 1 * time.Second
+)
+
+var (
+	errZeroLatestBlock    = errors.New("backend responded with blockheight 0 for latest block")
+	errZeroSafeBlock      = errors.New("backend responded with blockheight 0 for safe block")
+	errZeroFinalizedBlock = errors.New("backend responded with blockheight 0 for finalized block")
 )
 
 type OnConsensusBroken func()
@@ -358,38 +365,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		RecordConsensusBackendPeerCount(be, peerCount)
 	}
 
-	latestBlockNumber, latestBlockHash, err := cp.fetchELBlock(ctx, be, "latest")
+	latestBlockNumber, latestBlockHash, safeBlockNumber, safeBlockHash, finalizedBlockNumber, finalizedBlockHash, err := cp.updateELBackend(ctx, be)
 	if err != nil {
-		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
-		return
-	}
-	if latestBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return
-	}
-
-	safeBlockNumber, safeBlockHash, err := cp.fetchELBlock(ctx, be, "safe")
-	if err != nil {
-		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
-		return
-	}
-
-	if safeBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return
-	}
-
-	finalizedBlockNumber, finalizedBlockHash, err := cp.fetchELBlock(ctx, be, "finalized")
-	if err != nil {
-		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
-		return
-	}
-
-	if finalizedBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
 		return
 	}
 
@@ -675,6 +652,54 @@ func (cp *ConsensusPoller) findConsensusBlock(
 		proposedBlockHash = ""
 		log.Debug("no consensus, walking back", "label", label, "block", proposedBlock)
 	}
+}
+
+// updateELBackend fetches the EL sync state and block numbers for a single backend,
+// performing zero-value validation inline. It is the EL counterpart to updateCLBackend.
+// On success it returns the inSync flag, block numbers/hashes, and nil.
+// On any error or zero block number it returns a non-nil error; the caller should skip state updates.
+func (cp *ConsensusPoller) updateELBackend(ctx context.Context, be *Backend) (
+	latestBlockNumber hexutil.Uint64, latestBlockHash string,
+	safeBlockNumber hexutil.Uint64, safeBlockHash string,
+	finalizedBlockNumber hexutil.Uint64, finalizedBlockHash string,
+	err error,
+) {
+	latestBlockNumber, latestBlockHash, err = cp.fetchELBlock(ctx, be, "latest")
+	if err != nil {
+		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+	if latestBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		err = errZeroLatestBlock
+		return
+	}
+
+	safeBlockNumber, safeBlockHash, err = cp.fetchELBlock(ctx, be, "safe")
+	if err != nil {
+		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+	if safeBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		err = errZeroSafeBlock
+		return
+	}
+
+	finalizedBlockNumber, finalizedBlockHash, err = cp.fetchELBlock(ctx, be, "finalized")
+	if err != nil {
+		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
+		return
+	}
+	if finalizedBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		err = errZeroFinalizedBlock
+		return
+	}
+	return
 }
 
 // fetchELBlock calls eth_getBlockByNumber and returns the block number and hash.
