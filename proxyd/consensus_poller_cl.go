@@ -157,9 +157,22 @@ func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber,
 	return true
 }
 
-// computeCLGroupMinimums extracts CL-specific per-candidate minimums that are not
-// tracked in the shared candidate loop: the finalized block hash (needed for CL
-// hash-verified consensus) and the lowest local_safe_l2 block and hash.
+// computeCLGroupMinimums resolves two group-level values that the shared candidate
+// loop does not track because they have no EL equivalent.
+//
+// Finalized block hash: the shared loop identifies the lowest finalized block number
+// across all candidates, but not the corresponding hash. The hash is required by
+// updateCLGroupConsensus to anchor the hash-verified walk-back that finds a common
+// finalized block all candidates agree on. This function finds the hash by scanning
+// candidates for the first one whose finalized block number matches the group minimum.
+//
+// Lowest local_safe_l2: in op-node, local_safe_l2 is the highest L2 block whose
+// sequencer batches have been seen on L1 by this node specifically, before any
+// cross-chain safety checks (interop). safe_l2 (cross-safe) can only advance after
+// local_safe_l2 does, so taking the minimum local_safe_l2 across backends gives a
+// conservative view of what L2 data has actually landed on L1. This is surfaced as
+// a separate metric from safe_l2 to make derivation progress visible independently
+// of interop message validation.
 func (cp *ConsensusPoller) computeCLGroupMinimums(
 	candidates map[*Backend]*backendState,
 	lowestFinalizedBlock hexutil.Uint64,
@@ -189,6 +202,7 @@ func (cp *ConsensusPoller) warnCLSafeLeap(candidates map[*Backend]*backendState,
 		leap := uint64(bs.safeBlockNumber) - uint64(lowestSafeBlock)
 		RecordCLBackendSafeLeap(be, leap)
 		if leap > cp.clSafeLeapWarnThreshold {
+			RecordCLBackendSafeLeapWarning(be)
 			log.Warn("CL backend safe head far ahead of peer minimum — possible premature finalization",
 				"backend", be.Name,
 				"safe", bs.safeBlockNumber,

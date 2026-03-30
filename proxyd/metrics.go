@@ -461,6 +461,14 @@ var (
 		"backend_name",
 	})
 
+	consensusCLBackendSafeLeapTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_safe_leap_total",
+		Help:      "Number of polling cycles in which a CL backend's safe_l2 exceeded the safe-leap warning threshold, indicating possible premature finalization",
+	}, []string{
+		"backend_name",
+	})
+
 	consensusCLBanTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_cl_ban_total",
@@ -730,6 +738,10 @@ func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64
 
 func RecordCLBackendSafeLeap(b *Backend, leap uint64) {
 	consensusCLBackendSafeLeap.WithLabelValues(b.Name).Set(float64(leap))
+}
+
+func RecordCLBackendSafeLeapWarning(b *Backend) {
+	consensusCLBackendSafeLeapTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordCLBan(b *Backend, reason string) {
