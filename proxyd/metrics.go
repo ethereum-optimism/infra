@@ -453,6 +453,14 @@ var (
 		"backend_group_name",
 	})
 
+	consensusCLBackendSafeLeap = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_safe_leap",
+		Help:      "Blocks by which a CL backend's safe_l2 exceeds the peer minimum safe (non-zero indicates possible premature finalization)",
+	}, []string{
+		"backend_name",
+	})
+
 	consensusCLBanTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_cl_ban_total",
@@ -718,6 +726,10 @@ func RecordCLBackendLocalSafeBlock(b *Backend, blockNumber hexutil.Uint64) {
 
 func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64) {
 	consensusCLGroupLocalSafeBlock.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+func RecordCLBackendSafeLeap(b *Backend, leap uint64) {
+	consensusCLBackendSafeLeap.WithLabelValues(b.Name).Set(float64(leap))
 }
 
 func RecordCLBan(b *Backend, reason string) {

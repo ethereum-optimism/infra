@@ -50,9 +50,10 @@ type ConsensusPoller struct {
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
-	consensusLayer  bool
-	clSyncThreshold uint64
-	clHeadL1MaxAge  time.Duration
+	consensusLayer          bool
+	clSyncThreshold         uint64
+	clHeadL1MaxAge          time.Duration
+	clSafeLeapWarnThreshold uint64
 }
 
 type backendState struct {
@@ -329,8 +330,9 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:        8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:       3,
 		interval:           DefaultPollerInterval,
-		clSyncThreshold:    10,              // 10 L1 blocks ~ 2 minutes
-		clHeadL1MaxAge:     5 * time.Minute, // L1 head older than this → node is stalled
+		clSyncThreshold:         10,              // 10 L1 blocks ~ 2 minutes
+		clHeadL1MaxAge:          5 * time.Minute, // L1 head older than this → node is stalled
+		clSafeLeapWarnThreshold: 1000,            // warn if a backend's safe is >1000 blocks ahead of peer minimum
 	}
 
 	for _, opt := range opts {
@@ -540,8 +542,8 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	var lowestFinalizedBlockHash string // only populated in CL mode
 	var lowestSafeBlock hexutil.Uint64
 	var lowestSafeBlockHash string
-	var lowestLocalSafeBlock hexutil.Uint64    // only populated in CL mode
-	var lowestLocalSafeBlockHash string        // only populated in CL mode
+	var lowestLocalSafeBlock hexutil.Uint64 // only populated in CL mode
+	var lowestLocalSafeBlockHash string     // only populated in CL mode
 	for _, bs := range candidates {
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
@@ -583,6 +585,26 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			fetch = cp.clBlockFetcher
 		}
 		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, fetch, "unsafe")
+	}
+
+	// CL mode: warn if any backend's safe_l2 is far ahead of the peer minimum.
+	// This detects the op-node premature finalization bug (https://github.com/ethereum-optimism/optimism/issues/17631)
+	// where a node finishing EL sync incorrectly reports safe == finalized == unsafe == EL sync tip.
+	// The minimum-safe logic below already protects the served value; this is observability only.
+	if cp.consensusLayer && cp.clSafeLeapWarnThreshold > 0 && lowestSafeBlock > 0 {
+		for be, bs := range candidates {
+			leap := uint64(bs.safeBlockNumber) - uint64(lowestSafeBlock)
+			RecordCLBackendSafeLeap(be, leap)
+			if leap > cp.clSafeLeapWarnThreshold {
+				log.Warn("CL backend safe head far ahead of peer minimum — possible premature finalization",
+					"backend", be.Name,
+					"safe", bs.safeBlockNumber,
+					"peer_min_safe", lowestSafeBlock,
+					"leap", leap,
+					"threshold", cp.clSafeLeapWarnThreshold,
+				)
+			}
+		}
 	}
 
 	// CL mode: hash-verify safe_l2 via walk-back. local_safe_l2 and finalized_l2 use
@@ -699,7 +721,6 @@ func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
-	cp.tracker.SetState(ConsensusTrackerState{})
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.

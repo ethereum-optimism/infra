@@ -51,6 +51,17 @@ func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
 	}
 }
 
+// WithCLSafeLeapWarnThreshold sets the number of blocks by which a backend's safe_l2
+// may exceed the peer minimum before a warning is logged and a metric recorded.
+// This detects the op-node premature finalization bug (https://github.com/ethereum-optimism/optimism/issues/17631)
+// where a node finishing EL sync incorrectly reports safe == finalized == unsafe == EL sync tip.
+// The minimum-safe consensus logic already protects the served value; this adds observability.
+func WithCLSafeLeapWarnThreshold(threshold uint64) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.clSafeLeapWarnThreshold = threshold
+	}
+}
+
 // updateCLBackend fetches the op-node sync status for a single backend and
 // determines whether it is considered in sync. It encapsulates the CL branch of
 // UpdateBackend, keeping all op-node logic out of the shared poller file.
@@ -153,7 +164,6 @@ func (cp *ConsensusPoller) safeBlockFetcher(ctx context.Context, be *Backend, bs
 	}
 	return cp.fetchCLBlock(ctx, be, block.String())
 }
-
 
 // fetchCLBlock calls optimism_outputAtBlock and returns the block number and hash
 // from the blockRef in the response.
