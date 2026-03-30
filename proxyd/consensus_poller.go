@@ -397,16 +397,16 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		if err != nil {
 			return
 		}
-		latestBlockHash = syncStatus.LatestBlockHash
-		latestBlockNumber = syncStatus.LatestBlockNumber
-		safeBlockNumber = syncStatus.SafeBlockNumber
-		safeBlockHash = syncStatus.SafeBlockHash
-		localSafeBlockNumber = syncStatus.LocalSafeBlockNumber
-		localSafeBlockHash = syncStatus.LocalSafeBlockHash
-		finalizedBlockNumber = syncStatus.FinalizedBlockNumber
-		finalizedBlockHash = syncStatus.FinalizedBlockHash
 		inSync = clInSync
+		latestBlockNumber, latestBlockHash = syncStatus.LatestBlockNumber, syncStatus.LatestBlockHash
+		safeBlockNumber, safeBlockHash = syncStatus.SafeBlockNumber, syncStatus.SafeBlockHash
+		localSafeBlockNumber, localSafeBlockHash = syncStatus.LocalSafeBlockNumber, syncStatus.LocalSafeBlockHash
+		finalizedBlockNumber, finalizedBlockHash = syncStatus.FinalizedBlockNumber, syncStatus.FinalizedBlockHash
+		if !cp.validateCLBackendUpdate(be, safeBlockNumber, localSafeBlockNumber) {
+			return
+		}
 	} else {
+		var err error
 		inSync, err = cp.isELInSync(ctx, be)
 		RecordConsensusBackendInSync(be, err == nil && inSync)
 		if err != nil {
@@ -417,10 +417,6 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		if err != nil {
 			return
 		}
-	}
-
-	if cp.consensusLayer && !cp.validateCLBackendUpdate(be, safeBlockNumber, localSafeBlockNumber) {
-		return
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)

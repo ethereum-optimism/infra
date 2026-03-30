@@ -114,6 +114,27 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*C
 	inSync := l1BlockLagOK && l1TimestampOK
 	RecordConsensusBackendInSync(be, inSync)
 
+	if syncStatus.LatestBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return nil, false, fmt.Errorf("latest block is 0 for backend %s", be.Name)
+	}
+	if syncStatus.SafeBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return nil, false, fmt.Errorf("safe block is 0 for backend %s", be.Name)
+	}
+	if syncStatus.FinalizedBlockNumber == 0 {
+		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return nil, false, fmt.Errorf("finalized block is 0 for backend %s", be.Name)
+	}
+	if syncStatus.LocalSafeBlockNumber == 0 {
+		log.Warn("error backend responded with blockheight 0 for local_safe block", "name", be.Name)
+		be.intermittentErrorsSlidingWindow.Incr()
+		return nil, false, fmt.Errorf("local_safe block is 0 for backend %s", be.Name)
+	}
+
 	return syncStatus, inSync, nil
 }
 
@@ -121,11 +142,6 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*C
 // state is written. Returns false if the backend should be excluded and the caller should
 // return early.
 func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber, localSafeBlockNumber hexutil.Uint64) bool {
-	if localSafeBlockNumber == 0 {
-		log.Warn("error backend responded with blockheight 0 for local_safe block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return false
-	}
 	// On interop chains, cross-safe (safe_l2) always lags behind or equals local-safe.
 	// A backend reporting safe > local_safe is in an invalid state and must be excluded.
 	if safeBlockNumber > 0 && safeBlockNumber > localSafeBlockNumber {
