@@ -607,6 +607,7 @@ func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *b
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
 // label identifies the safety level ("unsafe", "safe") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+// If agreement cannot be reached down to genesis, it returns 0, "", true.
 func (cp *ConsensusPoller) findConsensusBlock(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -647,6 +648,9 @@ func (cp *ConsensusPoller) findConsensusBlock(
 		}
 		if allAgreed {
 			return proposedBlock, proposedBlockHash, broken
+		}
+		if proposedBlock == 0 {
+			return 0, "", true
 		}
 		proposedBlock -= 1
 		proposedBlockHash = ""
