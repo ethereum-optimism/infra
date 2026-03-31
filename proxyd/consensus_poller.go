@@ -418,7 +418,9 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			"latestBlockNumber", latestBlockNumber,
 			"latestBlockHash", latestBlockHash,
 			"safeBlockNumber", safeBlockNumber,
+			"safeBlockHash", safeBlockHash,
 			"finalizedBlockNumber", finalizedBlockNumber,
+			"finalizedBlockHash", finalizedBlockHash,
 			"lastUpdate", bs.lastUpdate)
 	}
 
