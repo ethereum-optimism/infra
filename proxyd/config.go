@@ -160,6 +160,8 @@ func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
 	switch b.RoutingStrategy {
 	case ConsensusAwareRoutingStrategy:
 		return true
+	case ConsensusAwareCLRoutingStrategy:
+		return true
 	case MulticallRoutingStrategy:
 		return true
 	case FallbackRoutingStrategy:
@@ -174,9 +176,10 @@ func (b *BackendGroupConfig) ValidateRoutingStrategy(bgName string) bool {
 }
 
 const (
-	ConsensusAwareRoutingStrategy RoutingStrategy = "consensus_aware"
-	MulticallRoutingStrategy      RoutingStrategy = "multicall"
-	FallbackRoutingStrategy       RoutingStrategy = "fallback"
+	ConsensusAwareRoutingStrategy   RoutingStrategy = "consensus_aware"
+	ConsensusAwareCLRoutingStrategy RoutingStrategy = "consensus_aware_consensus_layer"
+	MulticallRoutingStrategy        RoutingStrategy = "multicall"
+	FallbackRoutingStrategy         RoutingStrategy = "fallback"
 )
 
 type BackendGroupConfig struct {
@@ -203,6 +206,20 @@ type BackendGroupConfig struct {
 	// Will set Max Block Range for non-consensus eth_getLogs and eth_newFilter
 	// Will override consensus_max_block_range if consensus_max_block range is also set
 	MaxBlockRange uint64 `toml:"max_block_range"`
+
+	// consensus_cl_sync_threshold is the maximum number of L1 blocks a CL (op-node) backend
+	// may lag behind the network's head_l1 before it is considered out of sync and excluded
+	// from the consensus group. Computed as head_l1.number - current_l1.number.
+	// Default: 10 (~2 minutes at 12s L1 block time). Only applies when
+	// routing_strategy = "consensus_aware_consensus_layer".
+	ConsensusCLSyncThreshold uint64 `toml:"consensus_cl_sync_threshold"`
+
+	// consensus_cl_head_l1_max_age is the maximum age of a CL backend's head_l1 timestamp
+	// before the backend is considered stale and excluded from the consensus group.
+	// A backend whose L1 head is older than this duration has likely lost its L1 connection.
+	// Default: 5m. Set to 0 to disable the age check. Only applies when
+	// routing_strategy = "consensus_aware_consensus_layer".
+	ConsensusCLHeadL1MaxAge TOMLDuration `toml:"consensus_cl_head_l1_max_age"`
 
 	ConsensusHA                  bool         `toml:"consensus_ha"`
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`

@@ -1067,6 +1067,30 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
+	// Post-process CL consensus responses (e.g. override unsafe_l2 in optimism_syncStatus).
+	// This is a separate path from OverwriteConsensusResponses because it operates on the
+	// actual backend response rather than synthesizing a pre-flight override.
+	if bg.Consensus != nil && bg.Consensus.IsConsensusLayer() {
+		rctx := RewriteContext{
+			latest:         bg.Consensus.GetLatestBlockNumber(),
+			safe:           bg.Consensus.GetSafeBlockNumber(),
+			finalized:      bg.Consensus.GetFinalizedBlockNumber(),
+			maxBlockRange:  bg.Consensus.maxBlockRange,
+			latestHash:     bg.Consensus.GetLatestBlockHash(),
+			safeHash:       bg.Consensus.GetSafeBlockHash(),
+			localSafe:      bg.Consensus.GetLocalSafeBlockNumber(),
+			localSafeHash:  bg.Consensus.GetLocalSafeBlockHash(),
+			finalizedHash:  bg.Consensus.GetFinalizedBlockHash(),
+			consensusMode:  true,
+			consensusLayer: true,
+		}
+		for i, req := range rpcReqs {
+			if i < len(backendResp.RPCRes) {
+				RewriteConsensusBackendResponse(rctx, req, backendResp.RPCRes[i])
+			}
+		}
+	}
+
 	// re-apply overridden responses
 	log.Trace("successfully served request overriding responses",
 		"req_id", GetReqID(ctx),
@@ -1771,11 +1795,13 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 
 func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
 	rctx := RewriteContext{
-		latest:        bg.Consensus.GetLatestBlockNumber(),
-		safe:          bg.Consensus.GetSafeBlockNumber(),
-		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-		maxBlockRange: bg.Consensus.maxBlockRange,
-		consensusMode: true,
+		latest:         bg.Consensus.GetLatestBlockNumber(),
+		safe:           bg.Consensus.GetSafeBlockNumber(),
+		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
+		maxBlockRange:  bg.Consensus.maxBlockRange,
+		latestHash:     bg.Consensus.GetLatestBlockHash(),
+		consensusMode:  true,
+		consensusLayer: bg.Consensus.IsConsensusLayer(),
 	}
 
 	for i, req := range rpcReqs {

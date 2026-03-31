@@ -9,11 +9,17 @@ import (
 )
 
 type RewriteContext struct {
-	latest        hexutil.Uint64
-	safe          hexutil.Uint64
-	finalized     hexutil.Uint64
-	maxBlockRange uint64
-	consensusMode bool
+	latest         hexutil.Uint64
+	safe           hexutil.Uint64
+	finalized      hexutil.Uint64
+	maxBlockRange  uint64
+	consensusMode  bool
+	latestHash     string
+	safeHash       string
+	localSafe      hexutil.Uint64
+	localSafeHash  string
+	finalizedHash  string
+	consensusLayer bool
 }
 
 type RewriteResult uint8
@@ -47,8 +53,8 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 }
 
 // RewriteResponse modifies the response object to comply with the rewrite context
-// after the method has been called at the backend
-// RewriteResult informs the decision of the rewrite
+// before the backend is called (pre-processing). For synthetic responses that skip
+// the backend entirely (e.g. eth_blockNumber returning the consensus value).
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
 	switch req.Method {
 	case "eth_blockNumber":
@@ -56,6 +62,51 @@ func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResu
 		return RewriteOverrideResponse, nil
 	}
 	return RewriteNone, nil
+}
+
+// RewriteConsensusBackendResponse rewrites an actual backend response to enforce
+// consensus values. Unlike RewriteResponse, this is called post-backend with a
+// populated res.Result and only applies in CL (consensusLayer) mode.
+func RewriteConsensusBackendResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) bool {
+	if !rctx.consensusLayer || rctx.latestHash == "" || res == nil || res.Error != nil || res.Result == nil {
+		return false
+	}
+	switch req.Method {
+	case "optimism_syncStatus":
+		result, ok := res.Result.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		unsafeL2, ok := result["unsafe_l2"].(map[string]interface{})
+		if !ok {
+			return false
+		}
+		unsafeL2["number"] = float64(rctx.latest)
+		unsafeL2["hash"] = rctx.latestHash
+		if rctx.safeHash != "" {
+			safeL2, ok := result["safe_l2"].(map[string]interface{})
+			if ok {
+				safeL2["number"] = float64(rctx.safe)
+				safeL2["hash"] = rctx.safeHash
+			}
+		}
+		if rctx.localSafeHash != "" {
+			localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
+			if ok {
+				localSafeL2["number"] = float64(rctx.localSafe)
+				localSafeL2["hash"] = rctx.localSafeHash
+			}
+		}
+		if rctx.finalizedHash != "" {
+			finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+			if ok {
+				finalizedL2["number"] = float64(rctx.finalized)
+				finalizedL2["hash"] = rctx.finalizedHash
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // RewriteRequest modifies the request object to comply with the rewrite context
