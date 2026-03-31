@@ -76,9 +76,10 @@ func (mh *MockedHandler) Handler(w http.ResponseWriter, req *http.Request) {
 
 	var responses []string
 	for _, r := range requests {
-		method := r["method"]
+		method, _ := r["method"].(string)
 		block := ""
-		if method == "eth_getBlockByNumber" || method == "debug_getRawReceipts" || method == "optimism_outputAtBlock" {
+		switch method {
+		case "eth_getBlockByNumber", "debug_getRawReceipts", "optimism_outputAtBlock":
 			if params, ok := r["params"].([]interface{}); ok && len(params) > 0 {
 				if s, ok := params[0].(string); ok {
 					block = s
