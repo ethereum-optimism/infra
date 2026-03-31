@@ -596,11 +596,10 @@ func (cp *ConsensusPoller) Reset() {
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
-// bs is provided for fetchers that can use cached state; it may be ignored.
-type blockHashFetcher func(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error)
+type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
 
-// elBlockFetcher is a blockHashFetcher for EL backends; bs is unused.
-func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+// elBlockFetcher is a blockHashFetcher for EL backends.
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 	return cp.fetchBlock(ctx, be, block.String())
 }
 
@@ -622,8 +621,8 @@ func (cp *ConsensusPoller) findConsensusBlock(
 
 	for {
 		allAgreed := true
-		for be, bs := range candidates {
-			actualBlockNumber, actualHash, err := fetch(ctx, be, bs, proposedBlock)
+		for be := range candidates {
+			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
 				continue
