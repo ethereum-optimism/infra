@@ -484,6 +484,7 @@ func TestConsensusCL(t *testing.T) {
 
 	t.Run("ban backend if tags are messed - safe < finalized", func(t *testing.T) {
 		reset()
+		update() // establish baseline at finalized=193
 		// node1 reports safe (0xa1=161) < finalized (0xc1=193) — ordering violation
 		overrideSyncStatusFull("node1", 257, "hash_0x101", 161, 193)
 		update()
@@ -496,6 +497,7 @@ func TestConsensusCL(t *testing.T) {
 
 	t.Run("ban backend if tags are messed - latest < safe", func(t *testing.T) {
 		reset()
+		update() // establish baseline at finalized=193
 		// node1 reports latest (0xa1=161) < safe (0xe1=225) — ordering violation
 		overrideSyncStatusFull("node1", 161, "hash_0xa1", 225, 193)
 		update()
