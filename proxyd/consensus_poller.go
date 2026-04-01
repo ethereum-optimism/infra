@@ -369,7 +369,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	safeBlockNumber, safeBlockHash, err := cp.fetchBlock(ctx, be, "safe")
+	safeBlockNumber, safeBlockHash, err := cp.fetchELBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
 		return
@@ -381,7 +381,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		return
 	}
 
-	finalizedBlockNumber, finalizedBlockHash, err := cp.fetchBlock(ctx, be, "finalized")
+	finalizedBlockNumber, finalizedBlockHash, err := cp.fetchELBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 		return
@@ -625,7 +625,7 @@ type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint6
 
 // elBlockFetcher is a blockHashFetcher for EL backends.
 func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
-	return cp.fetchBlock(ctx, be, block.String())
+	return cp.fetchELBlock(ctx, be, block.String())
 }
 
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
