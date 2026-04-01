@@ -484,50 +484,17 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	// the proposed block needs have the same hash in the entire consensus group
 	proposedBlock := lowestLatestBlock
 	proposedBlockHash := lowestLatestBlockHash
-	hasConsensus := false
 	broken := false
 
 	if lowestLatestBlock > currentConsensusBlockNumber {
 		log.Debug("validating consensus on block", "lowestLatestBlock", lowestLatestBlock)
 	}
 
-	// if there is a block to propose, check if it is the same in all backends
+	// if there is a block to propose, verify all candidates agree on the same hash,
+	// walking back one block at a time until consensus is found.
 	if proposedBlock > 0 {
-		for !hasConsensus {
-			allAgreed := true
-			for be := range candidates {
-				actualBlockNumber, actualBlockHash, err := cp.fetchBlock(ctx, be, proposedBlock.String())
-				if err != nil {
-					log.Warn("error updating backend", "name", be.Name, "err", err)
-					continue
-				}
-				if proposedBlockHash == "" {
-					proposedBlockHash = actualBlockHash
-				}
-				blocksDontMatch := (actualBlockNumber != proposedBlock) || (actualBlockHash != proposedBlockHash)
-				if blocksDontMatch {
-					if currentConsensusBlockNumber >= actualBlockNumber {
-						log.Warn("backend broke consensus",
-							"name", be.Name,
-							"actualBlockNumber", actualBlockNumber,
-							"actualBlockHash", actualBlockHash,
-							"proposedBlock", proposedBlock,
-							"proposedBlockHash", proposedBlockHash)
-						broken = true
-					}
-					allAgreed = false
-					break
-				}
-			}
-			if allAgreed {
-				hasConsensus = true
-			} else {
-				// walk one block behind and try again
-				proposedBlock -= 1
-				proposedBlockHash = ""
-				log.Debug("no consensus, now trying", "block:", proposedBlock)
-			}
-		}
+		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(
+			ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
 	}
 
 	if broken {
@@ -625,6 +592,68 @@ func (cp *ConsensusPoller) Unban(be *Backend) {
 func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
+	}
+}
+
+// blockHashFetcher retrieves the block number and hash for a given block from a backend.
+type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
+
+// elBlockFetcher is a blockHashFetcher for EL backends.
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	return cp.fetchBlock(ctx, be, block.String())
+}
+
+// findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
+// label identifies the safety level ("unsafe", "safe") for log context.
+// It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+// If agreement cannot be reached down to genesis, it returns 0, "", true.
+func (cp *ConsensusPoller) findConsensusBlock(
+	ctx context.Context,
+	candidates map[*Backend]*backendState,
+	currentConsensusBlock hexutil.Uint64,
+	startBlock hexutil.Uint64,
+	startHash string,
+	fetch blockHashFetcher,
+	label string,
+) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool) {
+	proposedBlock = startBlock
+	proposedBlockHash = startHash
+
+	for {
+		allAgreed := true
+		for be := range candidates {
+			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
+			if err != nil {
+				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
+				continue
+			}
+			if proposedBlockHash == "" {
+				proposedBlockHash = actualHash
+			}
+			if actualBlockNumber != proposedBlock || actualHash != proposedBlockHash {
+				if currentConsensusBlock >= actualBlockNumber {
+					log.Warn("backend broke consensus",
+						"label", label,
+						"name", be.Name,
+						"actualBlockNumber", actualBlockNumber,
+						"actualHash", actualHash,
+						"proposedBlock", proposedBlock,
+						"proposedBlockHash", proposedBlockHash)
+					broken = true
+				}
+				allAgreed = false
+				break
+			}
+		}
+		if allAgreed {
+			return proposedBlock, proposedBlockHash, broken
+		}
+		if proposedBlock == 0 {
+			return 0, "", true
+		}
+		proposedBlock -= 1
+		proposedBlockHash = ""
+		log.Debug("no consensus, walking back", "label", label, "block", proposedBlock)
 	}
 }
 
