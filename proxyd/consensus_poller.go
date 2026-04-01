@@ -621,17 +621,17 @@ func (cp *ConsensusPoller) Reset() {
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
-// bs is provided for fetchers that can use cached state; it may be ignored.
-type blockHashFetcher func(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error)
+type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
 
-// elBlockFetcher is a blockHashFetcher for EL backends; bs is unused.
-func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+// elBlockFetcher is a blockHashFetcher for EL backends.
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 	return cp.fetchBlock(ctx, be, block.String())
 }
 
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
 // label identifies the safety level ("unsafe", "safe") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+// If agreement cannot be reached down to genesis, it returns 0, "", true.
 func (cp *ConsensusPoller) findConsensusBlock(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -646,8 +646,8 @@ func (cp *ConsensusPoller) findConsensusBlock(
 
 	for {
 		allAgreed := true
-		for be, bs := range candidates {
-			actualBlockNumber, actualHash, err := fetch(ctx, be, bs, proposedBlock)
+		for be := range candidates {
+			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
 				continue
@@ -672,6 +672,9 @@ func (cp *ConsensusPoller) findConsensusBlock(
 		}
 		if allAgreed {
 			return proposedBlock, proposedBlockHash, broken
+		}
+		if proposedBlock == 0 {
+			return 0, "", true
 		}
 		proposedBlock -= 1
 		proposedBlockHash = ""
