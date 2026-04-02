@@ -52,7 +52,7 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
 	switch req.Method {
 	case "eth_blockNumber":
-		res.Result = rctx.latest
+		res.Result = mustMarshalJSON(rctx.latest)
 		return RewriteOverrideResponse, nil
 	}
 	return RewriteNone, nil

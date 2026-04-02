@@ -17,7 +17,7 @@ func TestRPCResJSON(t *testing.T) {
 			"string result",
 			&RPCRes{
 				JSONRPC: JSONRPCVersion,
-				Result:  "foobar",
+				Result:  mustMarshalJSON("foobar"),
 				ID:      []byte("123"),
 			},
 			`{"jsonrpc":"2.0","result":"foobar","id":123}`,
@@ -26,11 +26,11 @@ func TestRPCResJSON(t *testing.T) {
 			"object result",
 			&RPCRes{
 				JSONRPC: JSONRPCVersion,
-				Result: struct {
+				Result: mustMarshalJSON(struct {
 					Str string `json:"str"`
 				}{
 					"test",
-				},
+				}),
 				ID: []byte("123"),
 			},
 			`{"jsonrpc":"2.0","result":{"str":"test"},"id":123}`,
@@ -73,7 +73,7 @@ func TestRPCResJSON(t *testing.T) {
 			"string ID",
 			&RPCRes{
 				JSONRPC: JSONRPCVersion,
-				Result:  "foobar",
+				Result:  mustMarshalJSON("foobar"),
 				ID:      []byte("\"123\""),
 			},
 			`{"jsonrpc":"2.0","result":"foobar","id":"123"}`,
