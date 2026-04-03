@@ -793,4 +793,72 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, hexutil.Uint64(193).String(), hexutil.Uint64(uint64(finalizedL2["number"].(float64))).String())
 		require.Equal(t, "hash_0xc1", finalizedL2["hash"])
 	})
+
+	t.Run("malformed optimism_syncStatus response triggers ErrBackendBadResponse", func(t *testing.T) {
+		reset()
+		update() // establish consensus so all hashes are non-empty
+
+		// Override both backends to return optimism_syncStatus where unsafe_l2 is a
+		// string instead of an object. RewriteConsensusBackendResponse should fail the
+		// type assertion and set ErrBackendBadResponse rather than silently returning
+		// partially-rewritten or raw data.
+		malformed := clSyncStatus(257, "hash_0x101")
+		malformed["unsafe_l2"] = "bad"
+		override("node1", "optimism_syncStatus", "", buildResponse(malformed))
+		override("node2", "optimism_syncStatus", "", buildResponse(malformed))
+
+		resRaw, _, err := client.SendRPC("optimism_syncStatus", nil)
+		require.NoError(t, err)
+
+		var jsonMap map[string]interface{}
+		err = json.Unmarshal(resRaw, &jsonMap)
+		require.NoError(t, err)
+
+		require.Nil(t, jsonMap["result"])
+		require.NotNil(t, jsonMap["error"])
+		errObj, ok := jsonMap["error"].(map[string]interface{})
+		require.True(t, ok, "error should be a JSON object")
+		require.Equal(t, float64(proxyd.ErrBackendBadResponse.Code), errObj["code"])
+	})
+
+	t.Run("batch optimism_syncStatus requests all rewritten to consensus values", func(t *testing.T) {
+		reset()
+		update() // consensus at 0x101 / hash_0x101
+
+		// Override backends to return unsafe_l2 at 0x102 — but do NOT call update() again.
+		// Consensus stays at 0x101. The rewrite should override 0x102 → 0x101 for
+		// every response in the batch, validating ApplyConsensusLayerRewrites iterates
+		// the full rpcReqs slice rather than stopping after the first entry.
+		overrideSyncStatus("node1", 258, "hash_0x102")
+		overrideSyncStatus("node2", 258, "hash_0x102")
+
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, "hash_0x101", bg.Consensus.GetLatestBlockHash())
+
+		req1 := NewRPCReq("1", "optimism_syncStatus", nil)
+		req2 := NewRPCReq("2", "optimism_syncStatus", nil)
+		resRaw, statusCode, err := client.SendBatchRPC(req1, req2)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+
+		var batchRes []map[string]interface{}
+		err = json.Unmarshal(resRaw, &batchRes)
+		require.NoError(t, err)
+		require.Len(t, batchRes, 2)
+
+		for i, r := range batchRes {
+			result, ok := r["result"].(map[string]interface{})
+			require.True(t, ok, "response %d result should be a map", i)
+
+			unsafeL2, ok := result["unsafe_l2"].(map[string]interface{})
+			require.True(t, ok, "response %d unsafe_l2 should be a map", i)
+			// Backend returned 0x102; consensus rewrites it to 0x101.
+			require.Equal(t, hexutil.Uint64(257).String(), hexutil.Uint64(uint64(unsafeL2["number"].(float64))).String(), "response %d unsafe_l2 number", i)
+			require.Equal(t, "hash_0x101", unsafeL2["hash"], "response %d unsafe_l2 hash", i)
+
+			// L1 fields pass through from the backend (confirming these are real responses).
+			require.NotNil(t, result["current_l1"], "response %d current_l1", i)
+			require.NotNil(t, result["head_l1"], "response %d head_l1", i)
+		}
+	})
 }

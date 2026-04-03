@@ -692,7 +692,7 @@ func TestRewriteResponse(t *testing.T) {
 		check    func(*testing.T, args)
 	}{
 		{
-			name: "eth_blockNumber latest",
+			name: "eth_blockNumber in EL mode returns consensus latest",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_blockNumber"},
@@ -701,6 +701,18 @@ func TestRewriteResponse(t *testing.T) {
 			expected: RewriteOverrideResponse,
 			check: func(t *testing.T, args args) {
 				require.Equal(t, args.res.Result, hexutil.Uint64(100))
+			},
+		},
+		{
+			name: "eth_blockNumber in CL mode is not synthesized — CL rewrites post-fetch instead",
+			args: args{
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true, consensusLayer: true},
+				req:  &RPCReq{Method: "eth_blockNumber"},
+				res:  &RPCRes{Result: hexutil.Uint64(200)},
+			},
+			expected: RewriteNone,
+			check: func(t *testing.T, args args) {
+				require.Equal(t, args.res.Result, hexutil.Uint64(200)) // unchanged
 			},
 		},
 	}
@@ -803,6 +815,211 @@ func TestRewriteRequest_NonConsensusMode(t *testing.T) {
 			require.Equal(t, tt.expected, result)
 			if tt.check != nil {
 				tt.check(t, tt.args)
+			}
+		})
+	}
+}
+
+// syncStatusResult builds a well-formed optimism_syncStatus result map for use in
+// RewriteConsensusBackendResponse tests.
+func syncStatusResult(unsafeNum, safeNum, localSafeNum, finalizedNum float64) map[string]interface{} {
+	block := func(n float64, h string) map[string]interface{} {
+		return map[string]interface{}{"number": n, "hash": h}
+	}
+	return map[string]interface{}{
+		"unsafe_l2":     block(unsafeNum, "0xold_unsafe"),
+		"safe_l2":       block(safeNum, "0xold_safe"),
+		"local_safe_l2": block(localSafeNum, "0xold_local_safe"),
+		"finalized_l2":  block(finalizedNum, "0xold_finalized"),
+	}
+}
+
+// fullCLRewriteContext returns a RewriteContext with all CL consensus fields populated.
+func fullCLRewriteContext() RewriteContext {
+	return RewriteContext{
+		consensusLayer: true,
+		latest:         hexutil.Uint64(100),
+		latestHash:     "0xnew_unsafe",
+		safe:           hexutil.Uint64(90),
+		safeHash:       "0xnew_safe",
+		localSafe:      hexutil.Uint64(95),
+		localSafeHash:  "0xnew_local_safe",
+		finalized:      hexutil.Uint64(80),
+		finalizedHash:  "0xnew_finalized",
+	}
+}
+
+func TestRewriteConsensusBackendResponse(t *testing.T) {
+	syncStatusReq := &RPCReq{Method: "optimism_syncStatus"}
+
+	tests := []struct {
+		name       string
+		rctx       RewriteContext
+		req        *RPCReq
+		res        *RPCRes
+		wantErrSet bool
+		check      func(*testing.T, *RPCRes)
+	}{
+		// --- no-op / early-exit conditions: result must be untouched ---
+		{
+			name: "non-CL mode: no rewrite",
+			rctx: RewriteContext{consensusLayer: false},
+			req:  syncStatusReq,
+			res:  &RPCRes{Result: syncStatusResult(99, 89, 94, 79)},
+		},
+		{
+			name: "empty latestHash: no rewrite",
+			rctx: RewriteContext{consensusLayer: true, latestHash: ""},
+			req:  syncStatusReq,
+			res:  &RPCRes{Result: syncStatusResult(99, 89, 94, 79)},
+		},
+		{
+			name: "nil res: no panic",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res:  nil,
+		},
+		{
+			name: "res already has error: no rewrite",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res:  &RPCRes{Error: ErrInternal},
+		},
+		{
+			name: "nil result: no rewrite",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res:  &RPCRes{Result: nil},
+		},
+		{
+			name: "non-syncStatus method: no rewrite",
+			rctx: fullCLRewriteContext(),
+			req:  &RPCReq{Method: "eth_blockNumber"},
+			res:  &RPCRes{Result: syncStatusResult(99, 89, 94, 79)},
+		},
+		// poller hasn't completed first cycle — all four hashes required, partial is a no-op
+		{
+			name: "missing safeHash: no rewrite, result untouched",
+			rctx: RewriteContext{
+				consensusLayer: true,
+				latest:         hexutil.Uint64(100),
+				latestHash:     "0xnew_unsafe",
+				// safeHash, localSafeHash, finalizedHash empty
+			},
+			req: syncStatusReq,
+			res: &RPCRes{Result: syncStatusResult(99, 89, 94, 79)},
+			check: func(t *testing.T, res *RPCRes) {
+				result := res.Result.(map[string]interface{})
+				unsafe := result["unsafe_l2"].(map[string]interface{})
+				require.Equal(t, float64(99), unsafe["number"])
+				require.Equal(t, "0xold_unsafe", unsafe["hash"])
+			},
+		},
+
+		// --- successful rewrite: all four L2 fields overwritten ---
+		{
+			name:  "all fields rewritten",
+			rctx:  fullCLRewriteContext(),
+			req:   syncStatusReq,
+			res:   &RPCRes{Result: syncStatusResult(99, 89, 94, 79)},
+			check: func(t *testing.T, res *RPCRes) {
+				result := res.Result.(map[string]interface{})
+				unsafe := result["unsafe_l2"].(map[string]interface{})
+				require.Equal(t, float64(100), unsafe["number"])
+				require.Equal(t, "0xnew_unsafe", unsafe["hash"])
+
+				safe := result["safe_l2"].(map[string]interface{})
+				require.Equal(t, float64(90), safe["number"])
+				require.Equal(t, "0xnew_safe", safe["hash"])
+
+				localSafe := result["local_safe_l2"].(map[string]interface{})
+				require.Equal(t, float64(95), localSafe["number"])
+				require.Equal(t, "0xnew_local_safe", localSafe["hash"])
+
+				finalized := result["finalized_l2"].(map[string]interface{})
+				require.Equal(t, float64(80), finalized["number"])
+				require.Equal(t, "0xnew_finalized", finalized["hash"])
+			},
+		},
+
+		// --- malformed backend response: res.Error set, res.Result cleared ---
+		{
+			name:       "result is not a map: sets ErrBackendBadResponse and clears result",
+			rctx:       fullCLRewriteContext(),
+			req:        syncStatusReq,
+			res:        &RPCRes{Result: "not-a-map"},
+			wantErrSet: true,
+			check: func(t *testing.T, res *RPCRes) {
+				require.Equal(t, ErrBackendBadResponse, res.Error)
+			},
+		},
+		{
+			name: "unsafe_l2 missing: sets error",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res: &RPCRes{Result: map[string]interface{}{
+				"safe_l2":       map[string]interface{}{"number": float64(89), "hash": "0xold_safe"},
+				"local_safe_l2": map[string]interface{}{"number": float64(94), "hash": "0xold_local_safe"},
+				"finalized_l2":  map[string]interface{}{"number": float64(79), "hash": "0xold_finalized"},
+			}},
+			wantErrSet: true,
+		},
+		{
+			name: "unsafe_l2 wrong type: sets error",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res: &RPCRes{Result: map[string]interface{}{
+				"unsafe_l2":     "not-a-map",
+				"safe_l2":       map[string]interface{}{"number": float64(89), "hash": "0xold_safe"},
+				"local_safe_l2": map[string]interface{}{"number": float64(94), "hash": "0xold_local_safe"},
+				"finalized_l2":  map[string]interface{}{"number": float64(79), "hash": "0xold_finalized"},
+			}},
+			wantErrSet: true,
+		},
+		{
+			name: "safe_l2 missing: sets error",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res: &RPCRes{Result: map[string]interface{}{
+				"unsafe_l2":     map[string]interface{}{"number": float64(99), "hash": "0xold_unsafe"},
+				"local_safe_l2": map[string]interface{}{"number": float64(94), "hash": "0xold_local_safe"},
+				"finalized_l2":  map[string]interface{}{"number": float64(79), "hash": "0xold_finalized"},
+			}},
+			wantErrSet: true,
+		},
+		{
+			name: "local_safe_l2 missing: sets error",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res: &RPCRes{Result: map[string]interface{}{
+				"unsafe_l2":    map[string]interface{}{"number": float64(99), "hash": "0xold_unsafe"},
+				"safe_l2":      map[string]interface{}{"number": float64(89), "hash": "0xold_safe"},
+				"finalized_l2": map[string]interface{}{"number": float64(79), "hash": "0xold_finalized"},
+			}},
+			wantErrSet: true,
+		},
+		{
+			name: "finalized_l2 missing: sets error",
+			rctx: fullCLRewriteContext(),
+			req:  syncStatusReq,
+			res: &RPCRes{Result: map[string]interface{}{
+				"unsafe_l2":     map[string]interface{}{"number": float64(99), "hash": "0xold_unsafe"},
+				"safe_l2":       map[string]interface{}{"number": float64(89), "hash": "0xold_safe"},
+				"local_safe_l2": map[string]interface{}{"number": float64(94), "hash": "0xold_local_safe"},
+			}},
+			wantErrSet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			RewriteConsensusBackendResponse(tt.rctx, tt.req, tt.res)
+			if tt.wantErrSet {
+				require.NotNil(t, tt.res.Error)
+				require.Nil(t, tt.res.Result)
+			}
+			if tt.check != nil {
+				tt.check(t, tt.res)
 			}
 		})
 	}

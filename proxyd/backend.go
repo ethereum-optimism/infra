@@ -1035,8 +1035,9 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// When routing_strategy is set to `consensus_aware` the backend group acts as a load balancer
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
+	var clRctx RewriteContext
 	if bg.Consensus != nil {
-		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+		rpcReqs, overriddenResponses, clRctx = bg.PrepareConsensusRequests(rpcReqs, overriddenResponses, rewrittenReqs)
 	} else if bg.maxBlockRange > 0 {
 		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
@@ -1067,29 +1068,10 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
-	// Post-process CL consensus responses (e.g. override unsafe_l2 in optimism_syncStatus).
-	// This is a separate path from OverwriteConsensusResponses because it operates on the
-	// actual backend response rather than synthesizing a pre-flight override.
-	if bg.Consensus != nil && bg.Consensus.IsConsensusLayer() {
-		rctx := RewriteContext{
-			latest:         bg.Consensus.GetLatestBlockNumber(),
-			safe:           bg.Consensus.GetSafeBlockNumber(),
-			finalized:      bg.Consensus.GetFinalizedBlockNumber(),
-			maxBlockRange:  bg.Consensus.maxBlockRange,
-			latestHash:     bg.Consensus.GetLatestBlockHash(),
-			safeHash:       bg.Consensus.GetSafeBlockHash(),
-			localSafe:      bg.Consensus.GetLocalSafeBlockNumber(),
-			localSafeHash:  bg.Consensus.GetLocalSafeBlockHash(),
-			finalizedHash:  bg.Consensus.GetFinalizedBlockHash(),
-			consensusMode:  true,
-			consensusLayer: true,
-		}
-		for i, req := range rpcReqs {
-			if i < len(backendResp.RPCRes) {
-				RewriteConsensusBackendResponse(rctx, req, backendResp.RPCRes[i])
-			}
-		}
-	}
+	// Apply CL post-fetch field rewrites (e.g. overwrite L2 block fields in
+	// optimism_syncStatus). The context was built in PrepareConsensusRequests;
+	// the rewrite runs here because it requires the real backend response.
+	bg.ApplyConsensusLayerRewrites(clRctx, rpcReqs, backendResp.RPCRes)
 
 	// re-apply overridden responses
 	log.Trace("successfully served request overriding responses",
@@ -1793,13 +1775,21 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 	return res
 }
 
-func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+// PrepareConsensusRequests partitions rpcReqs into responses that can be synthesized from
+// consensus state (overriddenResponses) and requests that still need a backend roundtrip
+// (rewrittenReqs). The returned RewriteContext should be passed to ApplyConsensusLayerRewrites
+// after the backend responds.
+func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes, RewriteContext) {
 	rctx := RewriteContext{
 		latest:         bg.Consensus.GetLatestBlockNumber(),
 		safe:           bg.Consensus.GetSafeBlockNumber(),
 		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
 		maxBlockRange:  bg.Consensus.maxBlockRange,
 		latestHash:     bg.Consensus.GetLatestBlockHash(),
+		safeHash:       bg.Consensus.GetSafeBlockHash(),
+		localSafe:      bg.Consensus.GetLocalSafeBlockNumber(),
+		localSafeHash:  bg.Consensus.GetLocalSafeBlockHash(),
+		finalizedHash:  bg.Consensus.GetFinalizedBlockHash(),
 		consensusMode:  true,
 		consensusLayer: bg.Consensus.IsConsensusLayer(),
 	}
@@ -1863,7 +1853,25 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 			rewrittenReqs = append(rewrittenReqs, req)
 		}
 	}
-	return rewrittenReqs, overriddenResponses
+	return rewrittenReqs, overriddenResponses, rctx
+}
+
+// ApplyConsensusLayerRewrites applies post-fetch field overwrites to CL backend responses.
+// It is called after ForwardRequestToBackendGroup returns, using the RewriteContext produced
+// by PrepareConsensusRequests. CL responses (e.g. optimism_syncStatus) cannot be
+// pre-synthesized because they contain passthrough fields (current_l1, head_l1, timestamps)
+// that the consensus poller does not track — the backend response must be fetched first, then
+// only the four consensus-tracked L2 fields are overwritten.
+func (bg *BackendGroup) ApplyConsensusLayerRewrites(rctx RewriteContext, rpcReqs []*RPCReq, responses []*RPCRes) {
+	if !rctx.consensusLayer {
+		return
+	}
+	for i, req := range rpcReqs {
+		// A backend may return fewer responses than requests (e.g. partial batch failure).
+		if i < len(responses) {
+			RewriteConsensusBackendResponse(rctx, req, responses[i])
+		}
+	}
 }
 
 func (bg *BackendGroup) OverwriteNonConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes) ([]*RPCReq, []*indexedReqRes) {

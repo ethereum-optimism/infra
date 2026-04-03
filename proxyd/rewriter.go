@@ -52,10 +52,13 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 	return RewriteRequest(rctx, req, res)
 }
 
-// RewriteResponse modifies the response object to comply with the rewrite context
-// before the backend is called (pre-processing). For synthetic responses that skip
-// the backend entirely (e.g. eth_blockNumber returning the consensus value).
+// RewriteResponse synthesizes responses from consensus state before the backend is called.
+// This is EL-only: CL mode always needs the real backend response (for passthrough fields
+// like current_l1 / head_l1) and rewrites specific fields post-fetch instead.
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
+	if rctx.consensusLayer {
+		return RewriteNone, nil
+	}
 	switch req.Method {
 	case "eth_blockNumber":
 		res.Result = rctx.latest
@@ -65,48 +68,54 @@ func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResu
 }
 
 // RewriteConsensusBackendResponse rewrites an actual backend response to enforce
-// consensus values. Unlike RewriteResponse, this is called post-backend with a
-// populated res.Result and only applies in CL (consensusLayer) mode.
-func RewriteConsensusBackendResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) bool {
-	if !rctx.consensusLayer || rctx.latestHash == "" || res == nil || res.Error != nil || res.Result == nil {
-		return false
+// consensus values. It operates on the real backend response rather than synthesizing
+// one pre-flight because optimism_syncStatus contains passthrough fields (current_l1,
+// head_l1, timestamps) that the consensus poller does not track — those must come from
+// the backend. Only the four L2 block fields are overwritten with consensus values.
+//
+// All four consensus hashes must be present before any field is written. A partial
+// rewrite — unsafe_l2 consensus but raw safe_l2 — is more dangerous than a no-op:
+// the client would see finality fields from a divergent or lagging backend.
+// If any hash is missing the poller hasn't completed its first cycle; the response is
+// passed through unchanged.
+//
+// On a malformed backend response (field missing or wrong type), res.Error is set to
+// ErrBackendBadResponse and res.Result is cleared, so no raw data reaches the client.
+func RewriteConsensusBackendResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) {
+	if !rctx.consensusLayer || rctx.latestHash == "" || rctx.safeHash == "" ||
+		rctx.localSafeHash == "" || rctx.finalizedHash == "" ||
+		res == nil || res.Error != nil || res.Result == nil {
+		return
 	}
-	switch req.Method {
-	case "optimism_syncStatus":
-		result, ok := res.Result.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		unsafeL2, ok := result["unsafe_l2"].(map[string]interface{})
-		if !ok {
-			return false
-		}
-		unsafeL2["number"] = float64(rctx.latest)
-		unsafeL2["hash"] = rctx.latestHash
-		if rctx.safeHash != "" {
-			safeL2, ok := result["safe_l2"].(map[string]interface{})
-			if ok {
-				safeL2["number"] = float64(rctx.safe)
-				safeL2["hash"] = rctx.safeHash
-			}
-		}
-		if rctx.localSafeHash != "" {
-			localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
-			if ok {
-				localSafeL2["number"] = float64(rctx.localSafe)
-				localSafeL2["hash"] = rctx.localSafeHash
-			}
-		}
-		if rctx.finalizedHash != "" {
-			finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
-			if ok {
-				finalizedL2["number"] = float64(rctx.finalized)
-				finalizedL2["hash"] = rctx.finalizedHash
-			}
-		}
-		return true
+	if req.Method != "optimism_syncStatus" {
+		return
 	}
-	return false
+	result, ok := res.Result.(map[string]interface{})
+	if !ok {
+		res.Result = nil
+		res.Error = ErrBackendBadResponse
+		return
+	}
+	fields := []struct {
+		key    string
+		number hexutil.Uint64
+		hash   string
+	}{
+		{"unsafe_l2", rctx.latest, rctx.latestHash},
+		{"safe_l2", rctx.safe, rctx.safeHash},
+		{"local_safe_l2", rctx.localSafe, rctx.localSafeHash},
+		{"finalized_l2", rctx.finalized, rctx.finalizedHash},
+	}
+	for _, f := range fields {
+		block, ok := result[f.key].(map[string]interface{})
+		if !ok {
+			res.Result = nil
+			res.Error = ErrBackendBadResponse
+			return
+		}
+		block["number"] = float64(f.number)
+		block["hash"] = f.hash
+	}
 }
 
 // RewriteRequest modifies the request object to comply with the rewrite context
