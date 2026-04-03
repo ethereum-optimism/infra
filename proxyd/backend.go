@@ -1035,9 +1035,8 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// When routing_strategy is set to `consensus_aware` the backend group acts as a load balancer
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
-	var clRctx RewriteContext
 	if bg.Consensus != nil {
-		rpcReqs, overriddenResponses, clRctx = bg.PrepareConsensusRequests(rpcReqs, overriddenResponses, rewrittenReqs)
+		rpcReqs, overriddenResponses = bg.PrepareConsensusRequests(rpcReqs, overriddenResponses, rewrittenReqs)
 	} else if bg.maxBlockRange > 0 {
 		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
@@ -1068,10 +1067,11 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
-	// Apply CL post-fetch field rewrites (e.g. overwrite L2 block fields in
-	// optimism_syncStatus). The context was built in PrepareConsensusRequests;
-	// the rewrite runs here because it requires the real backend response.
-	bg.ApplyConsensusLayerRewrites(clRctx, rpcReqs, backendResp.RPCRes)
+	// Overwrite current_l1 in CL responses with the stable consensus-minimum value.
+	// Runs post-fetch so it operates on the real backend response.
+	if bg.Consensus != nil {
+		bg.ApplyConsensusLayerRewrites(rpcReqs, backendResp.RPCRes)
+	}
 
 	// re-apply overridden responses
 	log.Trace("successfully served request overriding responses",
@@ -1777,19 +1777,13 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 
 // PrepareConsensusRequests partitions rpcReqs into responses that can be synthesized from
 // consensus state (overriddenResponses) and requests that still need a backend roundtrip
-// (rewrittenReqs). The returned RewriteContext should be passed to ApplyConsensusLayerRewrites
-// after the backend responds.
-func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes, RewriteContext) {
+// (rewrittenReqs).
+func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
 	rctx := RewriteContext{
 		latest:         bg.Consensus.GetLatestBlockNumber(),
 		safe:           bg.Consensus.GetSafeBlockNumber(),
 		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
 		maxBlockRange:  bg.Consensus.maxBlockRange,
-		latestHash:     bg.Consensus.GetLatestBlockHash(),
-		safeHash:       bg.Consensus.GetSafeBlockHash(),
-		localSafe:      bg.Consensus.GetLocalSafeBlockNumber(),
-		localSafeHash:  bg.Consensus.GetLocalSafeBlockHash(),
-		finalizedHash:  bg.Consensus.GetFinalizedBlockHash(),
 		consensusMode:  true,
 		consensusLayer: bg.Consensus.IsConsensusLayer(),
 	}
@@ -1853,23 +1847,22 @@ func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenRe
 			rewrittenReqs = append(rewrittenReqs, req)
 		}
 	}
-	return rewrittenReqs, overriddenResponses, rctx
+	return rewrittenReqs, overriddenResponses
 }
 
-// ApplyConsensusLayerRewrites applies post-fetch field overwrites to CL backend responses.
-// It is called after ForwardRequestToBackendGroup returns, using the RewriteContext produced
-// by PrepareConsensusRequests. CL responses (e.g. optimism_syncStatus) cannot be
-// pre-synthesized because they contain passthrough fields (current_l1, head_l1, timestamps)
-// that the consensus poller does not track — the backend response must be fetched first, then
-// only the four consensus-tracked L2 fields are overwritten.
-func (bg *BackendGroup) ApplyConsensusLayerRewrites(rctx RewriteContext, rpcReqs []*RPCReq, responses []*RPCRes) {
-	if !rctx.consensusLayer {
+// ApplyConsensusLayerRewrites overwrites the current_l1 field in CL backend responses
+// with the stable consensus-minimum value from the poller. This prevents the op-node
+// follow source from seeing erratic, non-monotonic current_l1 values caused by load
+// balancing across the consensus group.
+func (bg *BackendGroup) ApplyConsensusLayerRewrites(rpcReqs []*RPCReq, responses []*RPCRes) {
+	if !bg.Consensus.IsConsensusLayer() {
 		return
 	}
+	currentL1Number, currentL1Hash := bg.Consensus.GetConsensusCurrentL1()
 	for i, req := range rpcReqs {
 		// A backend may return fewer responses than requests (e.g. partial batch failure).
 		if i < len(responses) {
-			RewriteConsensusBackendResponse(rctx, req, responses[i])
+			RewriteCLCurrentL1(req, responses[i], currentL1Number, currentL1Hash)
 		}
 	}
 }

@@ -9,16 +9,11 @@ import (
 )
 
 type RewriteContext struct {
-	latest         hexutil.Uint64
-	safe           hexutil.Uint64
-	finalized      hexutil.Uint64
-	maxBlockRange  uint64
-	consensusMode  bool
-	latestHash     string
-	safeHash       string
-	localSafe      hexutil.Uint64
-	localSafeHash  string
-	finalizedHash  string
+	latest        hexutil.Uint64
+	safe          hexutil.Uint64
+	finalized     hexutil.Uint64
+	maxBlockRange uint64
+	consensusMode bool
 	consensusLayer bool
 }
 
@@ -53,8 +48,8 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 }
 
 // RewriteResponse synthesizes responses from consensus state before the backend is called.
-// This is EL-only: CL mode always needs the real backend response (for passthrough fields
-// like current_l1 / head_l1) and rewrites specific fields post-fetch instead.
+// This is EL-only: CL mode passes through real backend responses and applies targeted
+// field overwrites post-fetch via RewriteCLCurrentL1.
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
 	if rctx.consensusLayer {
 		return RewriteNone, nil
@@ -67,55 +62,47 @@ func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResu
 	return RewriteNone, nil
 }
 
-// RewriteConsensusBackendResponse rewrites an actual backend response to enforce
-// consensus values. It operates on the real backend response rather than synthesizing
-// one pre-flight because optimism_syncStatus contains passthrough fields (current_l1,
-// head_l1, timestamps) that the consensus poller does not track — those must come from
-// the backend. Only the four L2 block fields are overwritten with consensus values.
+// RewriteCLCurrentL1 overwrites the current_l1 field in a CL backend response with the
+// consensus-stable value from the poller. This ensures the op-node follow source sees a
+// monotonically advancing current_l1 rather than the random per-request variation that
+// load balancing across the consensus group would otherwise produce.
 //
-// All four consensus hashes must be present before any field is written. A partial
-// rewrite — unsafe_l2 consensus but raw safe_l2 — is more dangerous than a no-op:
-// the client would see finality fields from a divergent or lagging backend.
-// If any hash is missing the poller hasn't completed its first cycle; the response is
-// passed through unchanged.
+// Handles two methods:
+//   - optimism_syncStatus: overwrites result["current_l1"]
+//   - optimism_outputAtBlock: overwrites result["status"]["current_l1"]
 //
-// On a malformed backend response (field missing or wrong type), res.Error is set to
-// ErrBackendBadResponse and res.Result is cleared, so no raw data reaches the client.
-func RewriteConsensusBackendResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) {
-	if !rctx.consensusLayer || rctx.latestHash == "" || rctx.safeHash == "" ||
-		rctx.localSafeHash == "" || rctx.finalizedHash == "" ||
-		res == nil || res.Error != nil || res.Result == nil {
-		return
-	}
-	if req.Method != "optimism_syncStatus" {
+// If currentL1Hash is empty (poller not yet ready), the response is passed through unchanged.
+// Malformed responses (wrong result type, missing fields) are silently skipped — the response
+// reaches the client as-is rather than injecting an error for a non-critical field override.
+func RewriteCLCurrentL1(req *RPCReq, res *RPCRes, currentL1Number uint64, currentL1Hash string) {
+	if currentL1Hash == "" || res == nil || res.Error != nil || res.Result == nil {
 		return
 	}
 	result, ok := res.Result.(map[string]interface{})
 	if !ok {
-		res.Result = nil
-		res.Error = ErrBackendBadResponse
 		return
 	}
-	fields := []struct {
-		key    string
-		number hexutil.Uint64
-		hash   string
-	}{
-		{"unsafe_l2", rctx.latest, rctx.latestHash},
-		{"safe_l2", rctx.safe, rctx.safeHash},
-		{"local_safe_l2", rctx.localSafe, rctx.localSafeHash},
-		{"finalized_l2", rctx.finalized, rctx.finalizedHash},
-	}
-	for _, f := range fields {
-		block, ok := result[f.key].(map[string]interface{})
+	switch req.Method {
+	case "optimism_syncStatus":
+		overwriteBlockRefField(result, "current_l1", currentL1Number, currentL1Hash)
+	case "optimism_outputAtBlock":
+		status, ok := result["status"].(map[string]interface{})
 		if !ok {
-			res.Result = nil
-			res.Error = ErrBackendBadResponse
 			return
 		}
-		block["number"] = float64(f.number)
-		block["hash"] = f.hash
+		overwriteBlockRefField(status, "current_l1", currentL1Number, currentL1Hash)
 	}
+}
+
+// overwriteBlockRefField sets the number and hash on a named block-ref sub-map.
+// No-ops silently if the field is missing or the wrong type.
+func overwriteBlockRefField(m map[string]interface{}, key string, number uint64, hash string) {
+	ref, ok := m[key].(map[string]interface{})
+	if !ok {
+		return
+	}
+	ref["number"] = float64(number)
+	ref["hash"] = hash
 }
 
 // RewriteRequest modifies the request object to comply with the rewrite context
@@ -142,6 +129,10 @@ func RewriteRequest(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResul
 		"eth_getTransactionByBlockNumberAndIndex",
 		"eth_getUncleByBlockNumberAndIndex":
 		return rewriteParam(rctx, req, res, 0, false, false)
+	case "optimism_outputAtBlock":
+		if rctx.consensusLayer {
+			return rewriteParam(rctx, req, res, 0, true, false)
+		}
 	}
 	return RewriteNone, nil
 }

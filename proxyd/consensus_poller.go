@@ -68,6 +68,9 @@ type backendState struct {
 	finalizedBlockNumber hexutil.Uint64
 	finalizedBlockHash   string
 
+	currentL1Number uint64 // CL mode only; used for current_l1 override
+	currentL1Hash   string // CL mode only; used for current_l1 override
+
 	peerCount uint64
 	inSync    bool
 
@@ -152,6 +155,31 @@ func (cp *ConsensusPoller) GetFinalizedBlockHash() string {
 // IsConsensusLayer returns true if this poller is operating in CL (op-node) mode
 func (cp *ConsensusPoller) IsConsensusLayer() bool {
 	return cp.consensusLayer
+}
+
+// GetConsensusCurrentL1 returns the minimum current_l1 block number and hash across all
+// backends in the current consensus group. The minimum is the most conservative value —
+// it is a block all consensus backends have definitely processed — which gives the
+// op-node follow source a stable, monotonically-advancing current_l1 rather than the
+// random per-request variation that load balancing would otherwise produce.
+// Returns zero/empty string if the consensus group is empty or no backend has a hash yet.
+func (cp *ConsensusPoller) GetConsensusCurrentL1() (number uint64, hash string) {
+	cp.consensusGroupMux.Lock()
+	defer cp.consensusGroupMux.Unlock()
+	for _, be := range cp.consensusGroup {
+		bs := cp.backendState[be]
+		bs.backendStateMux.Lock()
+		n, h := bs.currentL1Number, bs.currentL1Hash
+		bs.backendStateMux.Unlock()
+		if h == "" {
+			continue
+		}
+		if hash == "" || n < number {
+			number = n
+			hash = h
+		}
+	}
+	return
 }
 
 func (cp *ConsensusPoller) Shutdown() {
@@ -392,6 +420,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	var inSync bool
 	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber hexutil.Uint64
 	var latestBlockHash, safeBlockHash, localSafeBlockHash, finalizedBlockHash string
+	var currentL1Number uint64
+	var currentL1Hash string
 	if cp.consensusLayer {
 		syncStatus, clInSync, err := cp.updateCLBackend(ctx, be)
 		if err != nil {
@@ -402,6 +432,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		safeBlockNumber, safeBlockHash = syncStatus.SafeBlockNumber, syncStatus.SafeBlockHash
 		localSafeBlockNumber, localSafeBlockHash = syncStatus.LocalSafeBlockNumber, syncStatus.LocalSafeBlockHash
 		finalizedBlockNumber, finalizedBlockHash = syncStatus.FinalizedBlockNumber, syncStatus.FinalizedBlockHash
+		currentL1Number, currentL1Hash = syncStatus.CurrentL1Number, syncStatus.CurrentL1Hash
 		if !cp.validateCLBackendUpdate(be, safeBlockNumber, localSafeBlockNumber) {
 			return
 		}
@@ -432,6 +463,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		localSafeBlockHash:   localSafeBlockHash,
 		finalizedBlockNumber: finalizedBlockNumber,
 		finalizedBlockHash:   finalizedBlockHash,
+		currentL1Number:      currentL1Number,
+		currentL1Hash:        currentL1Hash,
 	})
 
 	RecordBackendLatestBlock(be, latestBlockNumber)
@@ -915,6 +948,8 @@ type backendStateUpdate struct {
 	localSafeBlockHash   string
 	finalizedBlockNumber hexutil.Uint64
 	finalizedBlockHash   string
+	currentL1Number      uint64
+	currentL1Hash        string
 }
 
 func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) bool {
@@ -931,6 +966,8 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) 
 	bs.localSafeBlockHash = upd.localSafeBlockHash
 	bs.finalizedBlockNumber = upd.finalizedBlockNumber
 	bs.finalizedBlockHash = upd.finalizedBlockHash
+	bs.currentL1Number = upd.currentL1Number
+	bs.currentL1Hash = upd.currentL1Hash
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed

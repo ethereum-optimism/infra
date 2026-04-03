@@ -24,6 +24,7 @@ type CLSyncStatus struct {
 	FinalizedBlockNumber hexutil.Uint64
 	FinalizedBlockHash   string
 	CurrentL1Number      uint64
+	CurrentL1Hash        string
 	HeadL1Number         uint64
 	HeadL1Timestamp      uint64 // Unix seconds; used to detect L1 connection staleness
 }
@@ -332,7 +333,7 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, err
 	}
 
-	currentL1Number, _, err := parseCLSyncStatusBlock(syncStatusResult, "current_l1")
+	currentL1Number, currentL1Hash, err := parseCLSyncStatusBlock(syncStatusResult, "current_l1")
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +358,7 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		FinalizedBlockNumber: hexutil.Uint64(finalizedBlockNumber),
 		FinalizedBlockHash:   finalizedBlockHash,
 		CurrentL1Number:      currentL1Number,
+		CurrentL1Hash:        currentL1Hash,
 		HeadL1Number:         headL1Number,
 		HeadL1Timestamp:      headL1Timestamp,
 	}, nil

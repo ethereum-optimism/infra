@@ -413,17 +413,17 @@ func TestConsensusCL(t *testing.T) {
 		require.NotNil(t, result["head_l1"])
 	})
 
-	t.Run("rewrite uses consensus values even when individual backends differ", func(t *testing.T) {
+	t.Run("current_l1 is stable even when individual backends differ on unsafe_l2", func(t *testing.T) {
 		reset()
 
-		// node2 is one block ahead at 0x102
+		// node2 is one block ahead at 0x102; both use the default current_l1 (number=100)
 		overrideSyncStatus("node2", 258, "hash_0x102")
 		update()
 
-		// consensus is at 0x101 (the lower of the two)
+		// consensus is at 0x101 (the lower of the two); both backends remain in the group
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 
-		// optimism_syncStatus response should reflect consensus (0x101), not individual backend value
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
 		require.Equal(t, 200, statusCode)
@@ -433,13 +433,17 @@ func TestConsensusCL(t *testing.T) {
 		require.NoError(t, err)
 
 		result := jsonMap["result"].(map[string]interface{})
-		unsafeL2 := result["unsafe_l2"].(map[string]interface{})
-		require.Equal(t, hexutil.Uint64(257).String(), hexutil.Uint64(uint64(unsafeL2["number"].(float64))).String())
-		require.Equal(t, "hash_0x101", unsafeL2["hash"])
 
-		safeL2 := result["safe_l2"].(map[string]interface{})
-		require.Equal(t, hexutil.Uint64(225).String(), hexutil.Uint64(uint64(safeL2["number"].(float64))).String())
-		require.Equal(t, "hash_0xe1", safeL2["hash"])
+		// unsafe_l2 passes through from whichever backend was hit (0x101 or 0x102 — both valid)
+		unsafeL2, ok := result["unsafe_l2"].(map[string]interface{})
+		require.True(t, ok, "unsafe_l2 should be a map")
+		require.Contains(t, []float64{257, 258}, unsafeL2["number"])
+
+		// current_l1 is consistently overridden to the consensus minimum regardless of which backend served
+		currentL1, ok := result["current_l1"].(map[string]interface{})
+		require.True(t, ok, "current_l1 should be a map")
+		require.Equal(t, float64(100), currentL1["number"])
+		require.Equal(t, "hash_l1_100", currentL1["hash"])
 	})
 
 	t.Run("advance consensus", func(t *testing.T) {
@@ -742,14 +746,15 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 1, len(consensusGroup))
 	})
 
-	t.Run("rewrite local_safe_l2 uses consensus values", func(t *testing.T) {
+	t.Run("consensus tracks minimum local_safe_l2; response reflects backend value", func(t *testing.T) {
 		reset()
-		// node2 has a higher local_safe; consensus picks the lower (node1's) value
+		// node2 has a higher local_safe; poller picks the lower (node1's) value
 		s2 := clSyncStatus(257, "hash_0x101")
 		s2["local_safe_l2"] = map[string]interface{}{"hash": "hash_local_safe_high", "number": float64(240)}
 		override("node2", "optimism_syncStatus", "", buildResponse(s2))
 		update()
 
+		// Poller correctly tracks the minimum across the consensus group
 		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
 		require.Equal(t, "hash_0xe1", bg.Consensus.GetLocalSafeBlockHash())
 
@@ -762,22 +767,32 @@ func TestConsensusCL(t *testing.T) {
 		require.NoError(t, err)
 
 		result := jsonMap["result"].(map[string]interface{})
+		// local_safe_l2 is NOT rewritten; it comes from whichever backend was hit
 		localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
 		require.True(t, ok)
-		require.Equal(t, hexutil.Uint64(225).String(), hexutil.Uint64(uint64(localSafeL2["number"].(float64))).String())
-		require.Equal(t, "hash_0xe1", localSafeL2["hash"])
+		require.Contains(t, []float64{225, 240}, localSafeL2["number"])
+
+		// current_l1 is still overridden to the consensus value
+		currentL1, ok := result["current_l1"].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, float64(100), currentL1["number"])
+		require.Equal(t, "hash_l1_100", currentL1["hash"])
 	})
 
-	t.Run("rewrite finalized_l2 uses consensus values", func(t *testing.T) {
+	t.Run("current_l1 is overridden with consensus minimum value", func(t *testing.T) {
 		reset()
-		// node2 has a higher finalized; consensus picks node1's lower value
+		// node2 has a lower current_l1 than node1 (default=100); consensus picks the minimum
 		s2 := clSyncStatus(257, "hash_0x101")
-		s2["finalized_l2"] = map[string]interface{}{"hash": "hash_finalized_high", "number": float64(210)}
+		s2["current_l1"] = map[string]interface{}{
+			"hash":      "hash_l1_90",
+			"number":    float64(90),
+			"timestamp": float64(9999999999),
+		}
 		override("node2", "optimism_syncStatus", "", buildResponse(s2))
 		update()
 
-		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, "hash_0xc1", bg.Consensus.GetFinalizedBlockHash())
+		// Both nodes agree on unsafe_l2 (0x101), so both are in the consensus group.
+		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
@@ -788,52 +803,61 @@ func TestConsensusCL(t *testing.T) {
 		require.NoError(t, err)
 
 		result := jsonMap["result"].(map[string]interface{})
-		finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+		currentL1, ok := result["current_l1"].(map[string]interface{})
 		require.True(t, ok)
-		require.Equal(t, hexutil.Uint64(193).String(), hexutil.Uint64(uint64(finalizedL2["number"].(float64))).String())
-		require.Equal(t, "hash_0xc1", finalizedL2["hash"])
+		// Minimum across consensus group: node2=90 < node1=100 → 90
+		require.Equal(t, float64(90), currentL1["number"])
+		require.Equal(t, "hash_l1_90", currentL1["hash"])
 	})
 
-	t.Run("malformed optimism_syncStatus response triggers ErrBackendBadResponse", func(t *testing.T) {
+	t.Run("malformed L2 field in optimism_syncStatus passes through unchanged", func(t *testing.T) {
 		reset()
-		update() // establish consensus so all hashes are non-empty
+		update() // establish consensus so current_l1 poller cache is populated
 
-		// Override both backends to return optimism_syncStatus where unsafe_l2 is a
-		// string instead of an object. RewriteConsensusBackendResponse should fail the
-		// type assertion and set ErrBackendBadResponse rather than silently returning
-		// partially-rewritten or raw data.
+		// Override both backends with unsafe_l2 as a string instead of an object.
+		// RewriteCLCurrentL1 only touches current_l1 — it does not inspect L2 fields,
+		// so the malformed field passes through and no error is injected.
 		malformed := clSyncStatus(257, "hash_0x101")
 		malformed["unsafe_l2"] = "bad"
 		override("node1", "optimism_syncStatus", "", buildResponse(malformed))
 		override("node2", "optimism_syncStatus", "", buildResponse(malformed))
 
-		resRaw, _, err := client.SendRPC("optimism_syncStatus", nil)
+		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
 
 		var jsonMap map[string]interface{}
 		err = json.Unmarshal(resRaw, &jsonMap)
 		require.NoError(t, err)
 
-		require.Nil(t, jsonMap["result"])
-		require.NotNil(t, jsonMap["error"])
-		errObj, ok := jsonMap["error"].(map[string]interface{})
-		require.True(t, ok, "error should be a JSON object")
-		require.Equal(t, float64(proxyd.ErrBackendBadResponse.Code), errObj["code"])
+		// No error: the malformed field passes through as-is
+		require.Nil(t, jsonMap["error"])
+		result, ok := jsonMap["result"].(map[string]interface{})
+		require.True(t, ok, "result should be a map")
+		require.Equal(t, "bad", result["unsafe_l2"], "malformed unsafe_l2 passes through unchanged")
+
+		// current_l1 is still overridden with the consensus value
+		currentL1, ok := result["current_l1"].(map[string]interface{})
+		require.True(t, ok, "current_l1 should be a map")
+		require.Equal(t, float64(100), currentL1["number"])
+		require.Equal(t, "hash_l1_100", currentL1["hash"])
 	})
 
-	t.Run("batch optimism_syncStatus requests all rewritten to consensus values", func(t *testing.T) {
+	t.Run("batch optimism_syncStatus requests all have current_l1 overridden", func(t *testing.T) {
 		reset()
-		update() // consensus at 0x101 / hash_0x101
+		update() // establish consensus: current_l1 cached at number=100, hash="hash_l1_100"
 
-		// Override backends to return unsafe_l2 at 0x102 — but do NOT call update() again.
-		// Consensus stays at 0x101. The rewrite should override 0x102 → 0x101 for
-		// every response in the batch, validating ApplyConsensusLayerRewrites iterates
-		// the full rpcReqs slice rather than stopping after the first entry.
-		overrideSyncStatus("node1", 258, "hash_0x102")
-		overrideSyncStatus("node2", 258, "hash_0x102")
-
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, "hash_0x101", bg.Consensus.GetLatestBlockHash())
+		// Override backends to return current_l1 at 200 — but do NOT call update() again.
+		// The poller cache stays at 100. ApplyConsensusLayerRewrites should pin current_l1
+		// to 100 for every response in the batch, validating it iterates the full slice.
+		s := clSyncStatus(258, "hash_0x102")
+		s["current_l1"] = map[string]interface{}{
+			"hash":      "hash_l1_200",
+			"number":    float64(200),
+			"timestamp": float64(9999999999),
+		}
+		override("node1", "optimism_syncStatus", "", buildResponse(s))
+		override("node2", "optimism_syncStatus", "", buildResponse(s))
 
 		req1 := NewRPCReq("1", "optimism_syncStatus", nil)
 		req2 := NewRPCReq("2", "optimism_syncStatus", nil)
@@ -850,15 +874,16 @@ func TestConsensusCL(t *testing.T) {
 			result, ok := r["result"].(map[string]interface{})
 			require.True(t, ok, "response %d result should be a map", i)
 
+			// unsafe_l2 passes through from the backend unchanged
 			unsafeL2, ok := result["unsafe_l2"].(map[string]interface{})
 			require.True(t, ok, "response %d unsafe_l2 should be a map", i)
-			// Backend returned 0x102; consensus rewrites it to 0x101.
-			require.Equal(t, hexutil.Uint64(257).String(), hexutil.Uint64(uint64(unsafeL2["number"].(float64))).String(), "response %d unsafe_l2 number", i)
-			require.Equal(t, "hash_0x101", unsafeL2["hash"], "response %d unsafe_l2 hash", i)
+			require.Equal(t, float64(258), unsafeL2["number"], "response %d unsafe_l2 number passes through", i)
 
-			// L1 fields pass through from the backend (confirming these are real responses).
-			require.NotNil(t, result["current_l1"], "response %d current_l1", i)
-			require.NotNil(t, result["head_l1"], "response %d head_l1", i)
+			// current_l1 is overridden to the consensus cache (100), not the backend value (200)
+			currentL1, ok := result["current_l1"].(map[string]interface{})
+			require.True(t, ok, "response %d current_l1 should be a map", i)
+			require.Equal(t, float64(100), currentL1["number"], "response %d current_l1 number overridden to consensus", i)
+			require.Equal(t, "hash_l1_100", currentL1["hash"], "response %d current_l1 hash overridden to consensus", i)
 		}
 	})
 }
