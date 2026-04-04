@@ -1850,19 +1850,29 @@ func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenRe
 	return rewrittenReqs, overriddenResponses
 }
 
-// ApplyConsensusLayerRewrites overwrites the current_l1 field in CL backend responses
-// with the stable consensus-minimum value from the poller. This prevents the op-node
-// follow source from seeing erratic, non-monotonic current_l1 values caused by load
-// balancing across the consensus group.
+// ApplyConsensusLayerRewrites overwrites the fields in CL backend responses that the
+// op-node follow source uses for engine advancement, pinning them to the stable consensus
+// values from the poller. This prevents load balancing across the consensus group from
+// producing non-monotonic values that would cause the follow source to skip advancement cycles.
 func (bg *BackendGroup) ApplyConsensusLayerRewrites(rpcReqs []*RPCReq, responses []*RPCRes) {
 	if !bg.Consensus.IsConsensusLayer() {
 		return
 	}
 	currentL1Number, currentL1Hash := bg.Consensus.GetConsensusCurrentL1()
+	cl := CLConsensusFields{
+		SafeL2Number:      uint64(bg.Consensus.GetSafeBlockNumber()),
+		SafeL2Hash:        bg.Consensus.GetSafeBlockHash(),
+		LocalSafeL2Number: uint64(bg.Consensus.GetLocalSafeBlockNumber()),
+		LocalSafeL2Hash:   bg.Consensus.GetLocalSafeBlockHash(),
+		FinalizedL2Number: uint64(bg.Consensus.GetFinalizedBlockNumber()),
+		FinalizedL2Hash:   bg.Consensus.GetFinalizedBlockHash(),
+		CurrentL1Number:   currentL1Number,
+		CurrentL1Hash:     currentL1Hash,
+	}
 	for i, req := range rpcReqs {
 		// A backend may return fewer responses than requests (e.g. partial batch failure).
 		if i < len(responses) {
-			RewriteCLCurrentL1(req, responses[i], currentL1Number, currentL1Hash)
+			RewriteCLConsensusFields(req, responses[i], cl)
 		}
 	}
 }

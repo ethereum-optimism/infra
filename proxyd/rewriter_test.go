@@ -834,113 +834,127 @@ func syncStatusResult(unsafeNum, safeNum, localSafeNum, finalizedNum float64) ma
 	}
 }
 
-func TestRewriteCLCurrentL1(t *testing.T) {
-	makeResult := func(currentL1Number float64, currentL1Hash string) map[string]interface{} {
+func TestRewriteCLConsensusFields(t *testing.T) {
+	consensusFields := CLConsensusFields{
+		SafeL2Number:      200,
+		SafeL2Hash:        "0xsafe",
+		LocalSafeL2Number: 190,
+		LocalSafeL2Hash:   "0xlocal_safe",
+		FinalizedL2Number: 180,
+		FinalizedL2Hash:   "0xfinalized",
+		CurrentL1Number:   1001,
+		CurrentL1Hash:     "0xnew_l1",
+	}
+
+	makeSyncStatusResult := func() map[string]interface{} {
 		return map[string]interface{}{
-			"unsafe_l2": map[string]interface{}{"number": float64(99), "hash": "0xold_unsafe"},
-			"current_l1": map[string]interface{}{
-				"number": currentL1Number,
-				"hash":   currentL1Hash,
-			},
+			"unsafe_l2":     map[string]interface{}{"number": float64(99), "hash": "0xold_unsafe"},
+			"safe_l2":       map[string]interface{}{"number": float64(50), "hash": "0xold_safe"},
+			"local_safe_l2": map[string]interface{}{"number": float64(40), "hash": "0xold_local_safe"},
+			"finalized_l2":  map[string]interface{}{"number": float64(30), "hash": "0xold_finalized"},
+			"current_l1":    map[string]interface{}{"number": float64(1000), "hash": "0xold_l1"},
 		}
 	}
-	makeOutputAtBlockResult := func(currentL1Number float64, currentL1Hash string) map[string]interface{} {
+	makeOutputAtBlockResult := func() map[string]interface{} {
 		return map[string]interface{}{
 			"outputRoot": "0xroot",
 			"blockRef":   map[string]interface{}{"number": float64(99)},
 			"status": map[string]interface{}{
-				"current_l1": map[string]interface{}{
-					"number": currentL1Number,
-					"hash":   currentL1Hash,
-				},
+				"safe_l2":    map[string]interface{}{"number": float64(50), "hash": "0xold_safe"},
+				"current_l1": map[string]interface{}{"number": float64(1000), "hash": "0xold_l1"},
 			},
 		}
 	}
 
 	tests := []struct {
-		name            string
-		req             *RPCReq
-		res             *RPCRes
-		currentL1Number uint64
-		currentL1Hash   string
-		checkL1         func(*testing.T, *RPCRes)
+		name   string
+		req    *RPCReq
+		res    *RPCRes
+		cl     CLConsensusFields
+		check  func(*testing.T, *RPCRes)
 	}{
 		// --- no-op / early-exit conditions ---
 		{
-			name:          "empty hash: no rewrite",
-			req:           &RPCReq{Method: "optimism_syncStatus"},
-			res:           &RPCRes{Result: makeResult(1000, "0xold_l1")},
-			currentL1Hash: "",
+			name: "empty CurrentL1Hash: no rewrite",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Result: makeSyncStatusResult()},
+			cl:   CLConsensusFields{CurrentL1Hash: ""},
 		},
 		{
-			name:            "nil res: no panic",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             nil,
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "nil res: no panic",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  nil,
+			cl:   consensusFields,
 		},
 		{
-			name:            "res already has error: no rewrite",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             &RPCRes{Error: ErrInternal},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "res already has error: no rewrite",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Error: ErrInternal},
+			cl:   consensusFields,
 		},
 		{
-			name:            "nil result: no rewrite",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             &RPCRes{Result: nil},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "nil result: no rewrite",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Result: nil},
+			cl:   consensusFields,
 		},
 		{
-			name:            "unrelated method: no rewrite",
-			req:             &RPCReq{Method: "eth_blockNumber"},
-			res:             &RPCRes{Result: makeResult(1000, "0xold_l1")},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "unrelated method: no rewrite",
+			req:  &RPCReq{Method: "eth_blockNumber"},
+			res:  &RPCRes{Result: makeSyncStatusResult()},
+			cl:   consensusFields,
 		},
 		{
-			name:            "result not a map: silently skipped",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             &RPCRes{Result: "not-a-map"},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "result not a map: silently skipped",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Result: "not-a-map"},
+			cl:   consensusFields,
 		},
 
-		// --- optimism_syncStatus: current_l1 overwritten ---
+		// --- optimism_syncStatus: all four follow-source fields overwritten ---
 		{
-			name:            "syncStatus: current_l1 overwritten",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             &RPCRes{Result: makeResult(1000, "0xold_l1")},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
-			checkL1: func(t *testing.T, res *RPCRes) {
+			name: "syncStatus: safe_l2, local_safe_l2, finalized_l2, current_l1 overwritten; unsafe_l2 untouched",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Result: makeSyncStatusResult()},
+			cl:   consensusFields,
+			check: func(t *testing.T, res *RPCRes) {
 				result := res.Result.(map[string]interface{})
+				safe := result["safe_l2"].(map[string]interface{})
+				require.Equal(t, float64(200), safe["number"])
+				require.Equal(t, "0xsafe", safe["hash"])
+
+				localSafe := result["local_safe_l2"].(map[string]interface{})
+				require.Equal(t, float64(190), localSafe["number"])
+				require.Equal(t, "0xlocal_safe", localSafe["hash"])
+
+				finalized := result["finalized_l2"].(map[string]interface{})
+				require.Equal(t, float64(180), finalized["number"])
+				require.Equal(t, "0xfinalized", finalized["hash"])
+
 				l1 := result["current_l1"].(map[string]interface{})
 				require.Equal(t, float64(1001), l1["number"])
 				require.Equal(t, "0xnew_l1", l1["hash"])
-				// L2 fields untouched
+
+				// unsafe_l2 is not used by the follow source and passes through unchanged
 				unsafe := result["unsafe_l2"].(map[string]interface{})
 				require.Equal(t, float64(99), unsafe["number"])
+				require.Equal(t, "0xold_unsafe", unsafe["hash"])
 			},
 		},
 		{
-			name:            "syncStatus: missing current_l1 field silently skipped",
-			req:             &RPCReq{Method: "optimism_syncStatus"},
-			res:             &RPCRes{Result: map[string]interface{}{"unsafe_l2": map[string]interface{}{}}},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "syncStatus: missing fields silently skipped",
+			req:  &RPCReq{Method: "optimism_syncStatus"},
+			res:  &RPCRes{Result: map[string]interface{}{"unsafe_l2": map[string]interface{}{}}},
+			cl:   consensusFields,
 		},
 
-		// --- optimism_outputAtBlock: current_l1 overwritten inside status ---
+		// --- optimism_outputAtBlock: only current_l1 overwritten inside status ---
 		{
-			name:            "outputAtBlock: status.current_l1 overwritten",
-			req:             &RPCReq{Method: "optimism_outputAtBlock"},
-			res:             &RPCRes{Result: makeOutputAtBlockResult(1000, "0xold_l1")},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
-			checkL1: func(t *testing.T, res *RPCRes) {
+			name: "outputAtBlock: status.current_l1 overwritten; safe_l2 in status untouched",
+			req:  &RPCReq{Method: "optimism_outputAtBlock"},
+			res:  &RPCRes{Result: makeOutputAtBlockResult()},
+			cl:   consensusFields,
+			check: func(t *testing.T, res *RPCRes) {
 				result := res.Result.(map[string]interface{})
 				status := result["status"].(map[string]interface{})
 				l1 := status["current_l1"].(map[string]interface{})
@@ -948,22 +962,25 @@ func TestRewriteCLCurrentL1(t *testing.T) {
 				require.Equal(t, "0xnew_l1", l1["hash"])
 				// output root untouched
 				require.Equal(t, "0xroot", result["outputRoot"])
+				// safe_l2 in status passes through (only current_l1 is overwritten for outputAtBlock)
+				safe := status["safe_l2"].(map[string]interface{})
+				require.Equal(t, float64(50), safe["number"])
+				require.Equal(t, "0xold_safe", safe["hash"])
 			},
 		},
 		{
-			name:            "outputAtBlock: missing status field silently skipped",
-			req:             &RPCReq{Method: "optimism_outputAtBlock"},
-			res:             &RPCRes{Result: map[string]interface{}{"outputRoot": "0xroot"}},
-			currentL1Number: 1001,
-			currentL1Hash:   "0xnew_l1",
+			name: "outputAtBlock: missing status field silently skipped",
+			req:  &RPCReq{Method: "optimism_outputAtBlock"},
+			res:  &RPCRes{Result: map[string]interface{}{"outputRoot": "0xroot"}},
+			cl:   consensusFields,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			RewriteCLCurrentL1(tt.req, tt.res, tt.currentL1Number, tt.currentL1Hash)
-			if tt.checkL1 != nil {
-				tt.checkL1(t, tt.res)
+			RewriteCLConsensusFields(tt.req, tt.res, tt.cl)
+			if tt.check != nil {
+				tt.check(t, tt.res)
 			}
 		})
 	}

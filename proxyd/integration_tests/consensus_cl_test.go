@@ -439,7 +439,18 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, ok, "unsafe_l2 should be a map")
 		require.Contains(t, []float64{257, 258}, unsafeL2["number"])
 
-		// current_l1 is consistently overridden to the consensus minimum regardless of which backend served
+		// The follow-source fields are consistently overridden to the consensus values
+		// regardless of which backend served — safe/finalized both use default values (225/193)
+		safeL2, ok := result["safe_l2"].(map[string]interface{})
+		require.True(t, ok, "safe_l2 should be a map")
+		require.Equal(t, float64(225), safeL2["number"])
+		require.Equal(t, "hash_0xe1", safeL2["hash"])
+
+		finalizedL2, ok := result["finalized_l2"].(map[string]interface{})
+		require.True(t, ok, "finalized_l2 should be a map")
+		require.Equal(t, float64(193), finalizedL2["number"])
+		require.Equal(t, "hash_0xc1", finalizedL2["hash"])
+
 		currentL1, ok := result["current_l1"].(map[string]interface{})
 		require.True(t, ok, "current_l1 should be a map")
 		require.Equal(t, float64(100), currentL1["number"])
@@ -746,9 +757,9 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 1, len(consensusGroup))
 	})
 
-	t.Run("consensus tracks minimum local_safe_l2; response reflects backend value", func(t *testing.T) {
+	t.Run("consensus minimum local_safe_l2 is applied to response", func(t *testing.T) {
 		reset()
-		// node2 has a higher local_safe; poller picks the lower (node1's) value
+		// node2 has a higher local_safe; consensus minimum is node1's lower value
 		s2 := clSyncStatus(257, "hash_0x101")
 		s2["local_safe_l2"] = map[string]interface{}{"hash": "hash_local_safe_high", "number": float64(240)}
 		override("node2", "optimism_syncStatus", "", buildResponse(s2))
@@ -767,12 +778,13 @@ func TestConsensusCL(t *testing.T) {
 		require.NoError(t, err)
 
 		result := jsonMap["result"].(map[string]interface{})
-		// local_safe_l2 is NOT rewritten; it comes from whichever backend was hit
+		// local_safe_l2 is overridden to the consensus minimum (225), regardless of which backend served
 		localSafeL2, ok := result["local_safe_l2"].(map[string]interface{})
 		require.True(t, ok)
-		require.Contains(t, []float64{225, 240}, localSafeL2["number"])
+		require.Equal(t, float64(225), localSafeL2["number"])
+		require.Equal(t, "hash_0xe1", localSafeL2["hash"])
 
-		// current_l1 is still overridden to the consensus value
+		// current_l1 is also overridden to the consensus value
 		currentL1, ok := result["current_l1"].(map[string]interface{})
 		require.True(t, ok)
 		require.Equal(t, float64(100), currentL1["number"])
@@ -815,7 +827,7 @@ func TestConsensusCL(t *testing.T) {
 		update() // establish consensus so current_l1 poller cache is populated
 
 		// Override both backends with unsafe_l2 as a string instead of an object.
-		// RewriteCLCurrentL1 only touches current_l1 — it does not inspect L2 fields,
+		// RewriteCLConsensusFields does not touch unsafe_l2 (not used by follow source),
 		// so the malformed field passes through and no error is injected.
 		malformed := clSyncStatus(257, "hash_0x101")
 		malformed["unsafe_l2"] = "bad"
