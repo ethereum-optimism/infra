@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/ethereum-optimism/optimism v1.7.8-0.20240620182338-0bb839cfd664
 	github.com/ethereum/go-ethereum v1.13.15
-	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/mux v1.8.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/rs/cors v1.11.0
