@@ -19,7 +19,7 @@ func TestFindConsensusBlock_exhaustsAtGenesis(t *testing.T) {
 		be2: {},
 	}
 
-	fetch := func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	fetch := func(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 		if be == be1 {
 			return block, "hash-a", nil
 		}
@@ -43,7 +43,7 @@ func TestFindConsensusBlock_agreesAtBlockZero(t *testing.T) {
 		be2: {},
 	}
 
-	fetch := func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+	fetch := func(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 		switch uint64(block) {
 		case 1:
 			if be == be1 {

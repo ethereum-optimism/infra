@@ -1036,7 +1036,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
-		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+		rpcReqs, overriddenResponses = bg.PrepareConsensusRequests(rpcReqs, overriddenResponses, rewrittenReqs)
 	} else if bg.maxBlockRange > 0 {
 		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
@@ -1769,16 +1769,36 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 	return res
 }
 
-func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+// PrepareConsensusRequests partitions rpcReqs into responses that can be synthesized from
+// consensus state (overriddenResponses) and requests that still need a backend roundtrip
+// (rewrittenReqs).
+func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
 	rctx := RewriteContext{
-		latest:        bg.Consensus.GetLatestBlockNumber(),
-		safe:          bg.Consensus.GetSafeBlockNumber(),
-		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-		maxBlockRange: bg.Consensus.maxBlockRange,
-		consensusMode: true,
+		latest:         bg.Consensus.GetLatestBlockNumber(),
+		safe:           bg.Consensus.GetSafeBlockNumber(),
+		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
+		maxBlockRange:  bg.Consensus.maxBlockRange,
+		consensusMode:  true,
+		consensusLayer: bg.Consensus.IsConsensusLayer(),
 	}
 
 	for i, req := range rpcReqs {
+		// CL mode: serve optimism_syncStatus directly from the pin-backend cache.
+		// The cache holds the full response from the backend with the lowest current_l1,
+		// ensuring all fields are internally consistent (single-backend snapshot).
+		if rctx.consensusLayer && req.Method == "optimism_syncStatus" {
+			if body := bg.Consensus.GetConsensusSyncStatusBody(); body != nil {
+				res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Result: body}
+				overriddenResponses = append(overriddenResponses, &indexedReqRes{
+					index: i,
+					req:   req,
+					res:   &res,
+				})
+				continue
+			}
+			// body is nil (first cycle not yet complete) — fall through to backend forwarding
+		}
+
 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
 		result, err := RewriteTags(rctx, req, &res)
 		switch result {

@@ -9,11 +9,12 @@ import (
 )
 
 type RewriteContext struct {
-	latest        hexutil.Uint64
-	safe          hexutil.Uint64
-	finalized     hexutil.Uint64
-	maxBlockRange uint64
-	consensusMode bool
+	latest         hexutil.Uint64
+	safe           hexutil.Uint64
+	finalized      hexutil.Uint64
+	maxBlockRange  uint64
+	consensusMode  bool
+	consensusLayer bool
 }
 
 type RewriteResult uint8
@@ -46,10 +47,13 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 	return RewriteRequest(rctx, req, res)
 }
 
-// RewriteResponse modifies the response object to comply with the rewrite context
-// after the method has been called at the backend
-// RewriteResult informs the decision of the rewrite
+// RewriteResponse synthesizes responses from consensus state before the backend is called.
+// This is EL-only: CL mode always needs the real backend response (for passthrough fields
+// like current_l1 / head_l1) and rewrites specific fields post-fetch instead.
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
+	if rctx.consensusLayer {
+		return RewriteNone, nil
+	}
 	switch req.Method {
 	case "eth_blockNumber":
 		res.Result = rctx.latest

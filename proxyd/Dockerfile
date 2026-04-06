@@ -1,4 +1,7 @@
-FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
+ARG BUILDER_IMAGE=golang:1.26.1-alpine3.23
+ARG RUNTIME_IMAGE=alpine:3.23
+
+FROM ${BUILDER_IMAGE} AS builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
@@ -12,7 +15,7 @@ WORKDIR /app
 
 RUN make proxyd
 
-FROM dhi.io/alpine-base:3.23
+FROM ${RUNTIME_IMAGE}
 
 EXPOSE 8080
 

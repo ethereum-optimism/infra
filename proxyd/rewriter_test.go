@@ -692,7 +692,7 @@ func TestRewriteResponse(t *testing.T) {
 		check    func(*testing.T, args)
 	}{
 		{
-			name: "eth_blockNumber latest",
+			name: "eth_blockNumber in EL mode returns consensus latest",
 			args: args{
 				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true},
 				req:  &RPCReq{Method: "eth_blockNumber"},
@@ -701,6 +701,18 @@ func TestRewriteResponse(t *testing.T) {
 			expected: RewriteOverrideResponse,
 			check: func(t *testing.T, args args) {
 				require.Equal(t, args.res.Result, hexutil.Uint64(100))
+			},
+		},
+		{
+			name: "eth_blockNumber in CL mode is not synthesized — CL rewrites post-fetch instead",
+			args: args{
+				rctx: RewriteContext{latest: hexutil.Uint64(100), consensusMode: true, consensusLayer: true},
+				req:  &RPCReq{Method: "eth_blockNumber"},
+				res:  &RPCRes{Result: hexutil.Uint64(200)},
+			},
+			expected: RewriteNone,
+			check: func(t *testing.T, args args) {
+				require.Equal(t, args.res.Result, hexutil.Uint64(200)) // unchanged
 			},
 		},
 	}
