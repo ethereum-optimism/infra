@@ -86,7 +86,7 @@ func (cp *ConsensusPoller) logCLConfigWarnings() {
 // determination, and nil. On error it logs and returns a non-nil error; the
 // caller should skip state updates.
 func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*clSyncStatus, json.RawMessage, bool, error) {
-	syncStatus, rawBody, err := cp.fetchclSyncStatus(ctx, be)
+	syncStatus, rawBody, err := cp.fetchCLSyncStatus(ctx, be)
 	if err != nil {
 		log.Warn("error updating CL backend - backend will not be updated", "name", be.Name, "err", err)
 		return nil, nil, false, err
@@ -168,7 +168,7 @@ func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber,
 			"safe", safeBlockNumber,
 			"local_safe", localSafeBlockNumber,
 		)
-		RecordCLBan(be, "interop_safe_gt_local_safe")
+		RecordCLBanInteropSafeGtLocalSafe(be)
 		cp.Ban(be)
 		return false
 	}
@@ -235,12 +235,12 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 	)
 }
 
-// fetchclSyncStatus calls optimism_syncStatus and parses the full sync status
+// fetchCLSyncStatus calls optimism_syncStatus and parses the full sync status
 // for a CL (op-node) backend. It returns both the parsed status and the raw JSON
 // result body so the caller can cache it for serving.
-func (cp *ConsensusPoller) fetchclSyncStatus(ctx context.Context, be *Backend) (*clSyncStatus, json.RawMessage, error) {
+func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (*clSyncStatus, json.RawMessage, error) {
 	var rpcRes RPCRes
-	log.Trace("executing fetchclSyncStatus for backend",
+	log.Trace("executing fetchCLSyncStatus for backend",
 		"backend", be.Name,
 	)
 	if err := be.ForwardRPC(ctx, &rpcRes, "67", "optimism_syncStatus"); err != nil {
@@ -256,37 +256,37 @@ func (cp *ConsensusPoller) fetchclSyncStatus(ctx context.Context, be *Backend) (
 		return nil, nil, fmt.Errorf("unexpected response to optimism_syncStatus on backend %s", be.Name)
 	}
 
-	if len(rpcRes.rawResult) == 0 {
-		return nil, nil, fmt.Errorf("empty raw result for optimism_syncStatus on backend %s", be.Name)
+	rawBody, err := json.Marshal(syncStatusResult)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal syncStatus for backend %s: %w", be.Name, err)
 	}
-	rawBody := rpcRes.rawResult
 
-	latestBlockNumber, latestBlockHash, err := parseclSyncStatusBlock(syncStatusResult, "unsafe_l2")
+	latestBlockNumber, latestBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "unsafe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	safeBlockNumber, _, err := parseclSyncStatusBlock(syncStatusResult, "safe_l2")
+	safeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	localSafeBlockNumber, _, err := parseclSyncStatusBlock(syncStatusResult, "local_safe_l2")
+	localSafeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	finalizedBlockNumber, _, err := parseclSyncStatusBlock(syncStatusResult, "finalized_l2")
+	finalizedBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	currentL1Number, _, err := parseclSyncStatusBlock(syncStatusResult, "current_l1")
+	currentL1Number, _, err := parseCLSyncStatusBlock(syncStatusResult, "current_l1")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	headL1Number, _, err := parseclSyncStatusBlock(syncStatusResult, "head_l1")
+	headL1Number, _, err := parseCLSyncStatusBlock(syncStatusResult, "head_l1")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -345,7 +345,6 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 	var wg sync.WaitGroup
 	for be := range candidates {
 		wg.Add(1)
-		be := be
 		go func() {
 			defer wg.Done()
 			root, err := cp.fetchCLOutputRoot(ctx, be, safeBlock)
@@ -427,7 +426,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 				"safe_block", safeBlock,
 			)
 			RecordCLOutputRootDisagreement(r.be)
-			RecordCLBan(r.be, "output_root_mismatch")
+			RecordCLBanOutputRootMismatch(r.be)
 			cp.Ban(r.be)
 			delete(candidates, r.be)
 		}
@@ -499,9 +498,9 @@ func parseCLBlockTimestamp(jsonMap map[string]interface{}, key string) (uint64, 
 	return uint64(tsVal), nil
 }
 
-// parseclSyncStatusBlock parses the block number and hash from a named field
+// parseCLSyncStatusBlock parses the block number and hash from a named field
 // (e.g. "unsafe_l2", "safe_l2") within an optimism_syncStatus response map.
-func parseclSyncStatusBlock(jsonMap map[string]interface{}, safety string) (blockNumber uint64, blockHash string, err error) {
+func parseCLSyncStatusBlock(jsonMap map[string]interface{}, safety string) (blockNumber uint64, blockHash string, err error) {
 	safetyMap, ok := jsonMap[safety].(map[string]interface{})
 	if !ok {
 		return 0, "", fmt.Errorf("unexpected unmarshall to optimism_syncStatus on consensus layer backend safety %s", safety)

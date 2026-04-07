@@ -14,11 +14,10 @@ type RPCReq struct {
 }
 
 type RPCRes struct {
-	JSONRPC   string
-	Result    interface{}
-	Error     *RPCErr
-	ID        json.RawMessage
-	rawResult json.RawMessage // raw bytes of the Result field from the backend response
+	JSONRPC string
+	Result  interface{}
+	Error   *RPCErr
+	ID      json.RawMessage
 }
 
 type rpcResJSON struct {

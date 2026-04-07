@@ -865,14 +865,6 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		if err := json.Unmarshal(resB, &singleRes); err != nil {
 			return nil, ErrBackendBadResponse
 		}
-		// Also capture raw result bytes so callers can serve the original
-		// backend response without re-encoding through interface{}.
-		var rawExtract struct {
-			Result json.RawMessage `json:"result"`
-		}
-		if err := json.Unmarshal(resB, &rawExtract); err == nil {
-			singleRes.rawResult = rawExtract.Result
-		}
 		rpcRes = []*RPCRes{
 			&singleRes,
 		}

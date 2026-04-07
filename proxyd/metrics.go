@@ -789,17 +789,20 @@ func RecordCLOutputRootDisagreement(b *Backend) {
 	consensusCLOutputRootDisagreementTotal.WithLabelValues(b.Name).Inc()
 }
 
-func RecordCLBan(b *Backend, reason string) {
-	switch reason {
-	case "not_healthy":
-		consensusCLBanNotHealthyTotal.WithLabelValues(b.Name).Inc()
-	case "unexpected_block_tags":
-		consensusCLBanUnexpectedBlockTagsTotal.WithLabelValues(b.Name).Inc()
-	case "interop_safe_gt_local_safe":
-		consensusCLBanInteropSafeGtLocalSafeTotal.WithLabelValues(b.Name).Inc()
-	case "output_root_mismatch":
-		consensusCLBanOutputRootMismatchTotal.WithLabelValues(b.Name).Inc()
-	}
+func RecordCLBanNotHealthy(b *Backend) {
+	consensusCLBanNotHealthyTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanUnexpectedBlockTags(b *Backend) {
+	consensusCLBanUnexpectedBlockTagsTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanInteropSafeGtLocalSafe(b *Backend) {
+	consensusCLBanInteropSafeGtLocalSafeTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanOutputRootMismatch(b *Backend) {
+	consensusCLBanOutputRootMismatchTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordConsensusBackendUpdateDelay(b *Backend, lastUpdate time.Time) {

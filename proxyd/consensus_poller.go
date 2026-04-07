@@ -358,7 +358,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	if !be.IsHealthy() && !be.forcedCandidate {
 		log.Warn("backend banned - not healthy", "backend", be.Name)
 		if cp.consensusLayer {
-			RecordCLBan(be, "not_healthy")
+			RecordCLBanNotHealthy(be)
 		}
 		cp.Ban(be)
 		return
@@ -476,7 +476,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			"latestBlockNumber", latestBlockNumber,
 		)
 		if cp.consensusLayer {
-			RecordCLBan(be, "unexpected_block_tags")
+			RecordCLBanUnexpectedBlockTags(be)
 		}
 		cp.Ban(be)
 	}
