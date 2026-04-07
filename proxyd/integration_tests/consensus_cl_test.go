@@ -19,6 +19,7 @@ import (
 func setupCL(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *ProxydHTTPClient, func()) {
 	node1 := NewMockBackend(nil)
 	node2 := NewMockBackend(nil)
+	node3 := NewMockBackend(nil)
 
 	dir, err := os.Getwd()
 	require.NoError(t, err)
@@ -35,12 +36,19 @@ func setupCL(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *Proxy
 		Autoload:     true,
 		AutoloadFile: responses,
 	}
+	h3 := ms.MockedHandler{
+		Overrides:    []*ms.MethodTemplate{},
+		Autoload:     true,
+		AutoloadFile: responses,
+	}
 
 	require.NoError(t, os.Setenv("NODE1_URL", node1.URL()))
 	require.NoError(t, os.Setenv("NODE2_URL", node2.URL()))
+	require.NoError(t, os.Setenv("NODE3_URL", node3.URL()))
 
 	node1.SetHandler(http.HandlerFunc(h1.Handler))
 	node2.SetHandler(http.HandlerFunc(h2.Handler))
+	node3.SetHandler(http.HandlerFunc(h3.Handler))
 
 	config := ReadConfig("consensus_cl")
 	svr, shutdown, err := proxyd.Start(config)
@@ -51,7 +59,7 @@ func setupCL(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *Proxy
 	bg := svr.BackendGroups["node"]
 	require.NotNil(t, bg)
 	require.NotNil(t, bg.Consensus)
-	require.Equal(t, 2, len(bg.Backends))
+	require.Equal(t, 3, len(bg.Backends))
 
 	nodes := map[string]nodeContext{
 		"node1": {
@@ -63,6 +71,11 @@ func setupCL(t *testing.T) (map[string]nodeContext, *proxyd.BackendGroup, *Proxy
 			mockBackend: node2,
 			backend:     bg.Backends[1],
 			handler:     &h2,
+		},
+		"node3": {
+			mockBackend: node3,
+			backend:     bg.Backends[2],
+			handler:     &h3,
 		},
 	}
 
@@ -154,6 +167,7 @@ func TestConsensusCL(t *testing.T) {
 	nodes, bg, client, shutdown := setupCL(t)
 	defer nodes["node1"].mockBackend.Close()
 	defer nodes["node2"].mockBackend.Close()
+	defer nodes["node3"].mockBackend.Close()
 	defer shutdown()
 
 	ctx := context.Background()
@@ -242,7 +256,7 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("prevent using a backend with low peer count", func(t *testing.T) {
@@ -253,7 +267,7 @@ func TestConsensusCL(t *testing.T) {
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("prevent using a backend not in sync", func(t *testing.T) {
@@ -264,7 +278,7 @@ func TestConsensusCL(t *testing.T) {
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("prevent using a backend with stale L1 head", func(t *testing.T) {
@@ -275,7 +289,7 @@ func TestConsensusCL(t *testing.T) {
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("prevent using a backend that is initializing (all-zero syncStatus)", func(t *testing.T) {
@@ -289,8 +303,8 @@ func TestConsensusCL(t *testing.T) {
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(consensusGroup))
-		// node2 still healthy; consensus at default values
+		require.Equal(t, 2, len(consensusGroup))
+		// node2 and node3 still healthy; consensus at default values
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 	})
 
@@ -302,7 +316,7 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("lagging backend excluded", func(t *testing.T) {
@@ -312,13 +326,14 @@ func TestConsensusCL(t *testing.T) {
 		overrideSyncStatus("node2", 266, "hash_0x10a")
 		update()
 
-		// node1 is lagging, excluded
+		// node1 and node3 are lagging, excluded; only node2 in group
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.NotContains(t, consensusGroup, nodes["node3"].backend)
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.Equal(t, 1, len(consensusGroup))
 
-		// consensus is at node2's block since node1 is excluded
+		// consensus is at node2's block since node1 and node3 are excluded
 		require.Equal(t, "0x10a", bg.Consensus.GetLatestBlockNumber().String())
 	})
 
@@ -329,8 +344,8 @@ func TestConsensusCL(t *testing.T) {
 		overrideSyncStatus("node2", 265, "hash_0x109")
 		update()
 
-		// both should be in the consensus group since lag = 8 = maxBlockLag (not exceeded)
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		// all three should be in the consensus group since lag = 8 = maxBlockLag (not exceeded)
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 		// consensus at node1's block (lowest)
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 	})
@@ -348,9 +363,10 @@ func TestConsensusCL(t *testing.T) {
 		update()
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
-		// advance both nodes to 0x102
+		// advance all nodes to 0x102
 		overrideSyncStatus("node1", 258, "hash_0x102")
 		overrideSyncStatus("node2", 258, "hash_0x102")
+		overrideSyncStatus("node3", 258, "hash_0x102")
 		update()
 		require.Equal(t, "0x102", bg.Consensus.GetLatestBlockNumber().String())
 
@@ -362,8 +378,8 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, "0x102", bg.Consensus.GetLatestBlockNumber().String())
 		// no broken event fired: hash divergence on unsafe block is not a consensus failure
 		require.False(t, listenerCalled)
-		// both backends still in the consensus group
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		// all backends still in the consensus group
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("optimism_syncStatus served from pin-backend cache", func(t *testing.T) {
@@ -451,17 +467,18 @@ func TestConsensusCL(t *testing.T) {
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
-		// node2 advances one block; consensus holds at node1's lower block
+		// node2 and node3 advance one block; consensus holds at node1's lower block
 		overrideSyncStatus("node2", 258, "hash_0x102")
+		overrideSyncStatus("node3", 258, "hash_0x102")
 		update()
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 
-		// node1 also advances; both agree at 0x102
+		// node1 also advances; all three agree at 0x102
 		overrideSyncStatus("node1", 258, "hash_0x102")
 		update()
 		require.Equal(t, "0x102", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("should use lowest safe and finalized", func(t *testing.T) {
@@ -476,9 +493,10 @@ func TestConsensusCL(t *testing.T) {
 
 	t.Run("advance safe and finalized", func(t *testing.T) {
 		reset()
-		// both nodes advance safe and finalized to higher values
+		// all nodes advance safe and finalized to higher values
 		overrideSyncStatusFull("node1", 257, "hash_0x101", 241, 209) // safe=0xf1, finalized=0xd1
 		overrideSyncStatusFull("node2", 257, "hash_0x101", 241, 209)
+		overrideSyncStatusFull("node3", 257, "hash_0x101", 241, 209)
 		update()
 
 		require.Equal(t, "0xf1", bg.Consensus.GetSafeBlockNumber().String())
@@ -495,7 +513,7 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("ban backend if tags are messed - latest < safe", func(t *testing.T) {
@@ -508,7 +526,7 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("ban backend if safe dropped", func(t *testing.T) {
@@ -522,8 +540,8 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.Equal(t, 1, len(consensusGroup))
-		// node2 still healthy; consensus safe unchanged
+		require.Equal(t, 2, len(consensusGroup))
+		// node2 and node3 still healthy; consensus safe unchanged
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
 	})
 
@@ -538,7 +556,7 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
 	})
 
@@ -550,7 +568,7 @@ func TestConsensusCL(t *testing.T) {
 		overrideSyncStatusFull("node1", 257, "hash_0x101", 225, 161)
 		update()
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 
 		// unban and restore node1 to healthy state
 		bg.Consensus.Unban(nodes["node1"].backend)
@@ -558,7 +576,7 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("stays banned if unhealthy state persists after unban", func(t *testing.T) {
@@ -576,7 +594,7 @@ func TestConsensusCL(t *testing.T) {
 
 		// should be immediately re-banned
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("deep hash divergence does not affect consensus in CL mode", func(t *testing.T) {
@@ -589,9 +607,10 @@ func TestConsensusCL(t *testing.T) {
 		update()
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
-		// both advance to 0x103
+		// all advance to 0x103
 		overrideSyncStatus("node1", 259, "hash_0x103")
 		overrideSyncStatus("node2", 259, "hash_0x103")
+		overrideSyncStatus("node3", 259, "hash_0x103")
 		update()
 		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
 
@@ -602,7 +621,7 @@ func TestConsensusCL(t *testing.T) {
 		// CL mode: no walk-back — consensus stays at 0x103 (minimum latest block)
 		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
 		require.False(t, listenerCalled)
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("fork at new height does not affect consensus in CL mode", func(t *testing.T) {
@@ -615,14 +634,15 @@ func TestConsensusCL(t *testing.T) {
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
-		// both nodes jump to 0x103 but on different forks
+		// all nodes jump to 0x103 but node2 on a different fork
 		overrideSyncStatus("node1", 259, "node1_hash_0x103")
 		overrideSyncStatus("node2", 259, "node2_hash_0x103")
+		overrideSyncStatus("node3", 259, "node1_hash_0x103")
 		update()
 
 		// CL mode: no walk-back — consensus is the minimum latest block (0x103)
 		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 		require.False(t, listenerCalled)
 	})
 
@@ -639,9 +659,9 @@ func TestConsensusCL(t *testing.T) {
 
 		update()
 
-		// node1 excluded; consensus finalized holds at 0xc1 backed by node2 alone
+		// node1 excluded; consensus finalized holds at 0xc1 backed by node2 and node3
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 		// unsafe and safe consensus unaffected
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
@@ -661,19 +681,20 @@ func TestConsensusCL(t *testing.T) {
 
 		update()
 
-		// node1 excluded; consensus local_safe holds at 0xe1 backed by node2 alone
+		// node1 excluded; consensus local_safe holds at 0xe1 backed by node2 and node3
 		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
-		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 		// unsafe and safe consensus unaffected
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
 	})
 
-	t.Run("no consensus when both backends are out of sync", func(t *testing.T) {
+	t.Run("no consensus when all backends are out of sync", func(t *testing.T) {
 		reset()
 		overrideNotInSync("node1")
 		overrideNotInSync("node2")
+		overrideNotInSync("node3")
 		update()
 
 		require.Equal(t, 0, len(bg.Consensus.GetConsensusGroup()))
@@ -684,14 +705,14 @@ func TestConsensusCL(t *testing.T) {
 		overrideNotInSync("node1")
 		update()
 
-		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 
 		// node1 catches up: clear the override, L1 lag is gone
 		nodes["node1"].handler.ResetOverrides()
 		update()
 
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 		require.Contains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 	})
 
@@ -707,7 +728,7 @@ func TestConsensusCL(t *testing.T) {
 		require.True(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		consensusGroup := bg.Consensus.GetConsensusGroup()
 		require.NotContains(t, consensusGroup, nodes["node1"].backend)
-		require.Equal(t, 1, len(consensusGroup))
+		require.Equal(t, 2, len(consensusGroup))
 	})
 
 	t.Run("rewrite local_safe_l2 uses consensus values", func(t *testing.T) {
@@ -764,14 +785,15 @@ func TestConsensusCL(t *testing.T) {
 		reset()
 		update() // populate cache with valid pin-backend body
 
-		// Override both backends to return malformed optimism_syncStatus.
+		// Override all backends to return malformed optimism_syncStatus.
 		// fetchCLSyncStatus will fail to parse it, so the update cycle stores no new body.
 		// The cached body from the previous successful update should still be served.
 		malformed := clSyncStatus(257, "hash_0x101")
 		malformed["unsafe_l2"] = "bad"
 		override("node1", "optimism_syncStatus", "", buildResponse(malformed))
 		override("node2", "optimism_syncStatus", "", buildResponse(malformed))
-		update() // both backends fail parse; cache is not updated
+		override("node3", "optimism_syncStatus", "", buildResponse(malformed))
+		update() // all backends fail parse; cache is not updated
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
@@ -832,9 +854,12 @@ func TestConsensusCL(t *testing.T) {
 	t.Run("pin selection uses backend with lowest current_l1", func(t *testing.T) {
 		reset()
 
-		// node1 at current_l1=95, node2 at current_l1=98 — both at same unsafe block
-		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 95)))
-		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 98)))
+		// Use l1 values >= 100 (the default from YAML) so they are above the monotonicity floor
+		// that may have been established by a previous test cycle.
+		// node1 at current_l1=101, node2 at current_l1=104, node3 at current_l1=106.
+		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 101)))
+		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 104)))
+		override("node3", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 106)))
 		update()
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
@@ -847,16 +872,18 @@ func TestConsensusCL(t *testing.T) {
 
 		result := jsonMap["result"].(map[string]interface{})
 		currentL1 := result["current_l1"].(map[string]interface{})
-		// node1 (current_l1=95) should be the pin — lower L1 means more conservative view
-		require.Equal(t, float64(95), currentL1["number"])
+		// node1 (current_l1=101) should be the pin — lower L1 means more conservative view
+		require.Equal(t, float64(101), currentL1["number"])
 	})
 
 	t.Run("pin monotonicity: does not regress to lower current_l1", func(t *testing.T) {
 		reset()
 
-		// First poll: node1 at current_l1=100 is pin (lower than node2's 102)
-		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 100)))
-		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 102)))
+		// Use l1 values well above the floor that may have been set by the previous test.
+		// First poll: node1 at current_l1=110 is pin (lowest of 110, 115, 112).
+		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 110)))
+		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 115)))
+		override("node3", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 112)))
 		update()
 
 		resRaw, _, err := client.SendRPC("optimism_syncStatus", nil)
@@ -864,35 +891,35 @@ func TestConsensusCL(t *testing.T) {
 		var jsonMap map[string]interface{}
 		require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
 		currentL1 := jsonMap["result"].(map[string]interface{})["current_l1"].(map[string]interface{})
-		require.Equal(t, float64(100), currentL1["number"], "first poll: node1 at 100 is pin")
+		require.Equal(t, float64(110), currentL1["number"], "first poll: node1 at 110 is pin")
 
-		// Second poll: node1 regresses to current_l1=95 (stale or reorg), node2 advances to 105
-		// Monotonicity floor is 100, so node1 (95 < 100) is excluded; node2 (105 >= 100) wins
-		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 95)))
-		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 105)))
+		// Second poll: node1 and node3 regress to current_l1=105 (stale or reorg), node2 advances to 120
+		// Monotonicity floor is 110, so node1 and node3 (105 < 110) are excluded; node2 (120 >= 110) wins
+		override("node1", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 105)))
+		override("node2", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 120)))
+		override("node3", "optimism_syncStatus", "", buildResponse(clSyncStatusWithL1(257, "hash_0x101", 105)))
 		update()
 
 		resRaw, _, err = client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
 		currentL1 = jsonMap["result"].(map[string]interface{})["current_l1"].(map[string]interface{})
-		require.Equal(t, float64(105), currentL1["number"], "second poll: node1 regressed, node2 at 105 is pin")
+		require.Equal(t, float64(120), currentL1["number"], "second poll: node1 and node3 regressed, node2 at 120 is pin")
 	})
 
-	t.Run("output root agreement: both backends agree, both stay in consensus group", func(t *testing.T) {
-		// Default YAML fixture has both nodes returning outputRoot "output_root_0xe1" for 0xe1.
+	t.Run("output root agreement: all backends agree, all stay in consensus group", func(t *testing.T) {
+		// Default YAML fixture has all nodes returning outputRoot "output_root_0xe1" for 0xe1.
 		reset()
 		update()
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node3"].backend))
 	})
 
-	t.Run("output root mismatch (2-backend tie): warns but neither banned", func(t *testing.T) {
-		// With exactly 2 backends and different output roots there is no majority (1v1 tie).
-		// Neither backend is banned — we can't determine which derivation is correct.
-		// A warning is emitted for operator visibility.
-		// In a deployment with ≥3 backends, the minority backend would be banned.
+	t.Run("output root mismatch: minority backend banned by majority", func(t *testing.T) {
+		// node1 and node3 agree on the correct output root; node2 has a wrong root.
+		// 2/3 majority — node2 is identified as the minority and gets banned.
 		reset()
 		override("node2", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
 			"outputRoot": "WRONG_output_root",
@@ -900,9 +927,10 @@ func TestConsensusCL(t *testing.T) {
 		}))
 		update()
 
-		// Tie: neither backend is banned
+		// node2 is the minority — banned
+		require.True(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
-		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node3"].backend))
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
@@ -919,26 +947,33 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("first cycle fallback: no cache, falls through to backend", func(t *testing.T) {
-		// reset() clears the pin cache (consensusSyncBody = nil, lastServedCLL1Num = 0).
-		// Without calling update(), GetConsensusSyncStatusBody() returns nil, so
-		// OverwriteConsensusResponses falls through to backend forwarding.
-		reset()
-		// Do NOT call update() — cache is empty
+}
 
-		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
-		require.NoError(t, err)
-		require.Equal(t, 200, statusCode)
+// TestConsensusCLFirstCycle verifies that before the first consensus cycle completes
+// (cache is nil), optimism_syncStatus returns a JSON-RPC error rather than falling
+// through to an arbitrary backend.
+func TestConsensusCLFirstCycle(t *testing.T) {
+	nodes, bg, client, shutdown := setupCL(t)
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer nodes["node3"].mockBackend.Close()
+	defer shutdown()
 
-		var jsonMap map[string]interface{}
-		err = json.Unmarshal(resRaw, &jsonMap)
-		require.NoError(t, err)
+	// Do NOT call update() — cache is nil on first boot
+	_ = bg
 
-		// Response comes from the backend directly (not an error)
-		require.NotNil(t, jsonMap["result"], "should get a backend response, not an error")
-		require.Nil(t, jsonMap["error"])
-	})
+	resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
+	require.NoError(t, err)
+	require.Equal(t, 503, statusCode)
+
+	var jsonMap map[string]interface{}
+	require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
+
+	require.Nil(t, jsonMap["result"], "should return an error, not a backend result")
+	require.NotNil(t, jsonMap["error"], "should return an RPC error when cache is not yet populated")
+	rpcErr := jsonMap["error"].(map[string]interface{})
+	require.Equal(t, float64(-32025), rpcErr["code"])
 }

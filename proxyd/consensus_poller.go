@@ -302,7 +302,7 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
-func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller {
+func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) (*ConsensusPoller, error) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	state := make(map[*Backend]*backendState, len(bg.Backends))
@@ -327,7 +327,10 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 	}
 
 	if cp.consensusLayer {
-		cp.logCLConfigWarnings()
+		if err := cp.validateCLConfig(); err != nil {
+			cancelFunc()
+			return nil, err
+		}
 	}
 
 	if cp.tracker == nil {
@@ -341,7 +344,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 	cp.Reset()
 	cp.asyncHandler.Init()
 
-	return cp
+	return cp, nil
 }
 
 // UpdateBackend refreshes the consensus state of a single backend
@@ -927,6 +930,11 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 
 // filterCandidates find out what backends are the candidates to be in the consensus group
 // and create a copy of current their state
+//
+// Note: exclusion here is a per-cycle soft filter — a backend can be excluded this cycle
+// and pass next cycle with no penalty, and it continues to be polled via UpdateBackend.
+// This is distinct from a ban, which is a time-bounded penalty (default 5 min) that stops
+// all polling of the backend and resets its block state.
 //
 // a candidate is a serving node within the following conditions:
 //   - not banned

@@ -644,7 +644,10 @@ func Start(config *Config) (*Server, func(), error) {
 				copts = append(copts, WithTracker(tracker))
 			}
 
-			cp := NewConsensusPoller(bg, copts...)
+			cp, err := NewConsensusPoller(bg, copts...)
+			if err != nil {
+				return nil, nil, err
+			}
 			bg.Consensus = cp
 
 			if bgcfg.ConsensusHA {

@@ -41,10 +41,8 @@ type clSyncStatus struct {
 // catches derivation divergences between heterogeneous CL clients (e.g. op-node
 // vs kona-node) before incorrect data reaches consumers.
 //
-// Deployment recommendation: use an odd number of backends (e.g. 3, 5) so that
-// a majority is always unambiguous. With an even number of backends, a perfect
-// split in output roots cannot be resolved automatically — disagreement is
-// detected and logged but no backend is evicted until the tie is broken.
+// An odd number of backends is required (enforced at initialization) so that
+// a majority is always unambiguous.
 func WithCLConsensusMode() ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.consensusLayer = true
@@ -67,15 +65,14 @@ func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
 	}
 }
 
-// logCLConfigWarnings logs startup warnings for CL-mode configuration issues.
-// Called once from NewConsensusPoller after all options have been applied.
-func (cp *ConsensusPoller) logCLConfigWarnings() {
+// validateCLConfig checks CL-mode configuration requirements and returns an
+// error if the backend group is misconfigured. Called once during initialization.
+func (cp *ConsensusPoller) validateCLConfig() error {
 	n := len(cp.backendGroup.Backends)
 	if n%2 == 0 {
-		log.Warn("CL consensus: backend group has an even number of backends — output root verification requires a majority (≥2 agreeing backends) to evict a diverging backend; with an even-sized group a tie cannot be resolved automatically. Add one backend to ensure unambiguous majority.",
-			"backend_count", n,
-		)
+		return fmt.Errorf("CL consensus requires an odd number of backends (got %d): output root verification needs a majority to evict a diverging backend; an even-sized group cannot resolve a tie", n)
 	}
+	return nil
 }
 
 // updateCLBackend fetches the op-node sync status for a single backend and
@@ -320,14 +317,11 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 // This check catches such derivation divergences before incorrect data is served.
 //
 // Majority semantics: a backend is banned only when the agreed root has ≥2 votes.
-// This means:
-//   - 2 backends disagree (1v1 tie): no ban — cannot determine which is correct.
-//     A warning is logged; operators should investigate.
-//   - 3+ backends, one disagrees (e.g. 2v1): the minority backend is banned.
+// With an odd number of backends (enforced at init), the majority is always unambiguous:
+//   - 2v1: the minority backend is banned.
 //   - All backends error (outputAtBlock unsupported): graceful degradation,
 //     candidates returned unchanged.
 //
-// Deployment note: use an odd number of backends so ties cannot occur.
 // Returns the filtered candidates map and recomputed lowestSafeBlock / lowestLocalSafeBlock.
 func (cp *ConsensusPoller) verifyCLOutputRoots(
 	ctx context.Context,
@@ -389,7 +383,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 	if maxCount < 2 {
 		// Cannot establish a clear majority:
 		//   - all backends errored (maxCount == 0), or
-		//   - every root has exactly 1 vote (2-backend tie or all-unique).
+		//   - every backend returned a unique root (all-disagree, no quorum).
 		// Don't ban anyone — we can't determine which backend is correct.
 		if len(counts) > 1 {
 			backendNames := make([]string, 0, len(results))
@@ -399,7 +393,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 					RecordCLOutputRootDisagreement(r.be)
 				}
 			}
-			log.Error("CL output root disagreement detected but no majority — cannot determine correct root; add a third backend to enable automatic eviction",
+			log.Error("CL output root disagreement detected but no majority — cannot determine correct root",
 				"safe_block", safeBlock,
 				"distinct_roots", len(counts),
 				"backends", backendNames,

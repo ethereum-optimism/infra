@@ -133,6 +133,12 @@ var (
 		HTTPErrorCode: 400,
 	}
 
+	ErrCLConsensusSyncNotReady = &RPCErr{
+		Code:          JSONRPCErrorInternal - 25,
+		Message:       "optimism_syncStatus not available: CL consensus poller has not completed a cycle",
+		HTTPErrorCode: 503,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
@@ -1043,6 +1049,11 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	rpcRequestsTotal.Inc()
 
+	// If every request was overridden, skip backend forwarding — no RPCs to forward.
+	if len(rpcReqs) == 0 {
+		return OverrideResponses(nil, overriddenResponses), "", nil
+	}
+
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
@@ -1784,18 +1795,24 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		// The cache holds the full response from the backend with the lowest current_l1,
 		// ensuring all fields are internally consistent (single-backend snapshot).
 		if rctx.consensusLayer && req.Method == "optimism_syncStatus" {
-			if body := bg.Consensus.GetConsensusSyncStatusBody(); body != nil {
+			body := bg.Consensus.GetConsensusSyncStatusBody()
+			var res RPCRes
+			if body != nil {
 				RecordCLSyncStatusCacheHit(bg)
-				res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Result: body}
-				overriddenResponses = append(overriddenResponses, &indexedReqRes{
-					index: i,
-					req:   req,
-					res:   &res,
-				})
-				continue
+				res = RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Result: body}
+			} else {
+				// Cache not yet populated (first consensus cycle not complete).
+				// Return an error rather than forwarding to an arbitrary backend,
+				// which would bypass consensus guarantees.
+				RecordCLSyncStatusCacheMiss(bg)
+				res = RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Error: ErrCLConsensusSyncNotReady}
 			}
-			// body is nil (first cycle not yet complete) — fall through to backend forwarding
-			RecordCLSyncStatusCacheMiss(bg)
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			continue
 		}
 
 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
