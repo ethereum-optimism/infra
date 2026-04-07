@@ -67,14 +67,6 @@ func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
 
 // validateCLConfig checks CL-mode configuration requirements and returns an
 // error if the backend group is misconfigured. Called once during initialization.
-func (cp *ConsensusPoller) validateCLConfig() error {
-	n := len(cp.backendGroup.Backends)
-	if n%2 == 0 {
-		return fmt.Errorf("CL consensus requires an odd number of backends (got %d): output root verification needs a majority to evict a diverging backend; an even-sized group cannot resolve a tie", n)
-	}
-	return nil
-}
-
 // updateCLBackend fetches the op-node sync status for a single backend and
 // determines whether it is considered in sync. It encapsulates the CL branch of
 // UpdateBackend, keeping all op-node logic out of the shared poller file.

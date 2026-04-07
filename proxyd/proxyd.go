@@ -582,6 +582,12 @@ func Start(config *Config) (*Server, func(), error) {
 
 			if bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
 				copts = append(copts, WithCLConsensusMode())
+				if n := len(bg.Backends); n%2 == 0 {
+					log.Crit("CL consensus requires an odd number of backends: output root verification needs a majority to evict a diverging backend; an even-sized group cannot resolve a tie",
+						"backend_group", bgName,
+						"backend_count", n,
+					)
+				}
 			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))
@@ -644,11 +650,7 @@ func Start(config *Config) (*Server, func(), error) {
 				copts = append(copts, WithTracker(tracker))
 			}
 
-			cp, err := NewConsensusPoller(bg, copts...)
-			if err != nil {
-				return nil, nil, err
-			}
-			bg.Consensus = cp
+			bg.Consensus = NewConsensusPoller(bg, copts...)
 
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()

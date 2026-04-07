@@ -302,7 +302,7 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
-func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) (*ConsensusPoller, error) {
+func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	state := make(map[*Backend]*backendState, len(bg.Backends))
@@ -326,13 +326,6 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) (*ConsensusPolle
 		opt(cp)
 	}
 
-	if cp.consensusLayer {
-		if err := cp.validateCLConfig(); err != nil {
-			cancelFunc()
-			return nil, err
-		}
-	}
-
 	if cp.tracker == nil {
 		cp.tracker = NewInMemoryConsensusTracker()
 	}
@@ -344,7 +337,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) (*ConsensusPolle
 	cp.Reset()
 	cp.asyncHandler.Init()
 
-	return cp, nil
+	return cp
 }
 
 // UpdateBackend refreshes the consensus state of a single backend
