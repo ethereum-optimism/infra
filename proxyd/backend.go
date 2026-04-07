@@ -865,6 +865,14 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		if err := json.Unmarshal(resB, &singleRes); err != nil {
 			return nil, ErrBackendBadResponse
 		}
+		// Also capture raw result bytes so callers can serve the original
+		// backend response without re-encoding through interface{}.
+		var rawExtract struct {
+			Result json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(resB, &rawExtract); err == nil {
+			singleRes.rawResult = rawExtract.Result
+		}
 		rpcRes = []*RPCRes{
 			&singleRes,
 		}
@@ -1785,6 +1793,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		// ensuring all fields are internally consistent (single-backend snapshot).
 		if rctx.consensusLayer && req.Method == "optimism_syncStatus" {
 			if body := bg.Consensus.GetConsensusSyncStatusBody(); body != nil {
+				RecordCLSyncStatusCacheHit(bg)
 				res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Result: body}
 				overriddenResponses = append(overriddenResponses, &indexedReqRes{
 					index: i,
@@ -1794,6 +1803,7 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 				continue
 			}
 			// body is nil (first cycle not yet complete) — fall through to backend forwarding
+			RecordCLSyncStatusCacheMiss(bg)
 		}
 
 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}

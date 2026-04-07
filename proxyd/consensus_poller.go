@@ -51,17 +51,16 @@ type ConsensusPoller struct {
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
-	consensusLayer          bool
-	clSyncThreshold         uint64
-	clHeadL1MaxAge          time.Duration
-	clSafeLeapWarnThreshold uint64
+	consensusLayer  bool
+	clSyncThreshold uint64
+	clHeadL1MaxAge  time.Duration
 
 	// Pin-backend cache for optimism_syncStatus (CL mode only).
 	// selectConsensusSyncStatusBody selects the pin backend after each consensus
 	// cycle and stores its full response body here for serving.
-	syncStatusBodyMu   sync.RWMutex
-	consensusSyncBody  json.RawMessage // served response body for optimism_syncStatus
-	lastServedCLL1Num  uint64          // monotonicity floor for pin selection
+	syncStatusBodyMu  sync.RWMutex
+	consensusSyncBody json.RawMessage // served response body for optimism_syncStatus
+	lastServedCLL1Num uint64          // monotonicity floor for pin selection
 }
 
 type backendState struct {
@@ -109,8 +108,8 @@ func (bs *backendState) GetFinalizedBlockNumber() hexutil.Uint64 {
 
 // GetConsensusGroup returns the backend members that are agreeing in a consensus
 func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
-	defer cp.consensusGroupMux.Unlock()
 	cp.consensusGroupMux.Lock()
+	defer cp.consensusGroupMux.Unlock()
 
 	g := make([]*Backend, len(cp.consensusGroup))
 	copy(g, cp.consensusGroup)
@@ -142,7 +141,6 @@ func (cp *ConsensusPoller) GetLocalSafeBlockNumber() hexutil.Uint64 {
 func (cp *ConsensusPoller) IsConsensusLayer() bool {
 	return cp.consensusLayer
 }
-
 
 func (cp *ConsensusPoller) Shutdown() {
 	cp.asyncHandler.Shutdown()
@@ -320,9 +318,8 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:             8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:            3,
 		interval:                DefaultPollerInterval,
-		clSyncThreshold:         10,              // 10 L1 blocks ~ 2 minutes
-		clHeadL1MaxAge:          5 * time.Minute, // L1 head older than this → node is stalled
-		clSafeLeapWarnThreshold: 1000,            // warn if a backend's safe is >1000 blocks ahead of peer minimum
+		clSyncThreshold: 10,              // 10 L1 blocks ~ 2 minutes
+		clHeadL1MaxAge:  5 * time.Minute, // L1 head older than this → node is stalled
 	}
 
 	for _, opt := range opts {
@@ -565,10 +562,6 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
 	}
 
-	if cp.consensusLayer {
-		cp.warnCLSafeLeap(candidates, lowestSafeBlock)
-	}
-
 	if broken {
 		// propagate event to other interested parts, such as cache invalidator
 		for _, l := range cp.listeners {
@@ -630,16 +623,16 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 // IsBanned checks if a specific backend is banned
 func (cp *ConsensusPoller) IsBanned(be *Backend) bool {
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 	return bs.IsBanned()
 }
 
-// IsBanned checks if a specific backend is banned
+// BannedUntil returns the time until which the backend is banned
 func (cp *ConsensusPoller) BannedUntil(be *Backend) time.Time {
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 	return bs.bannedUntil
 }
 
@@ -650,8 +643,8 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 	}
 
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 	bs.bannedUntil = time.Now().Add(cp.banPeriod)
 
 	// when we ban a node, we give it the chance to start from any block when it is back
@@ -663,8 +656,8 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 // Unban removes any bans from the backends
 func (cp *ConsensusPoller) Unban(be *Backend) {
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 	bs.bannedUntil = time.Now().Add(-10 * time.Hour)
 }
 
@@ -682,11 +675,11 @@ func (cp *ConsensusPoller) Reset() {
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
 // bs is provided for fetchers that can use cached state (e.g. CL); it may be ignored.
-type blockHashFetcher func(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error)
+type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
 
 // elBlockFetcher returns a blockHashFetcher for EL backends.
 // It always calls fetchELBlock; bs is unused.
-func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, _ *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 	return cp.fetchELBlock(ctx, be, block.String())
 }
 
@@ -707,8 +700,8 @@ func (cp *ConsensusPoller) findConsensusBlock(
 
 	for {
 		allAgreed := true
-		for be, bs := range candidates {
-			actualBlockNumber, actualHash, err := fetch(ctx, be, bs, proposedBlock)
+		for be := range candidates {
+			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
 				continue
@@ -747,41 +740,41 @@ func (cp *ConsensusPoller) findConsensusBlock(
 // tags from a single EL backend, performing zero-value validation inline.
 // It is the EL counterpart to updateCLBackend.
 // On any error or zero block number it returns a non-nil error; the caller should skip state updates.
-func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlockState, error) {
-	var s ELBlockState
+func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (elBlockState, error) {
+	var s elBlockState
 	var err error
 
 	s.LatestBlockNumber, s.LatestBlockHash, err = cp.fetchELBlock(ctx, be, "latest")
 	if err != nil {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
+		return elBlockState{}, err
 	}
 	if s.LatestBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroLatestBlock
+		return elBlockState{}, errZeroLatestBlock
 	}
 
 	s.SafeBlockNumber, _, err = cp.fetchELBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
+		return elBlockState{}, err
 	}
 	if s.SafeBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroSafeBlock
+		return elBlockState{}, errZeroSafeBlock
 	}
 
 	s.FinalizedBlockNumber, _, err = cp.fetchELBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
+		return elBlockState{}, err
 	}
 	if s.FinalizedBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroFinalizedBlock
+		return elBlockState{}, errZeroFinalizedBlock
 	}
 
 	return s, nil
@@ -873,8 +866,8 @@ func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result 
 // GetBackendState creates a copy of backend state so that the caller can use it without locking
 func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 
 	return &backendState{
 		latestBlockNumber:    bs.latestBlockNumber,
@@ -891,13 +884,13 @@ func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 
 func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	bs := cp.backendState[be]
-	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
+	defer bs.backendStateMux.Unlock()
 	return bs.lastUpdate
 }
 
-// ELBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
-type ELBlockState struct {
+// elBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
+type elBlockState struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
@@ -999,7 +992,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 		// The checks are vacuous when consensus values are 0 (uninitialized tracker).
 		if cp.consensusLayer {
 			if consensusFinalized > 0 && bs.finalizedBlockNumber < consensusFinalized {
-				log.Debug("backend excluded: finalized block below consensus",
+				log.Warn("backend excluded: finalized block below consensus",
 					"backend_name", be.Name,
 					"backend_finalized", bs.finalizedBlockNumber,
 					"consensus_finalized", consensusFinalized,
@@ -1007,7 +1000,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 				continue
 			}
 			if consensusLocalSafe > 0 && bs.localSafeBlockNumber < consensusLocalSafe {
-				log.Debug("backend excluded: local_safe block below consensus",
+				log.Warn("backend excluded: local_safe block below consensus",
 					"backend_name", be.Name,
 					"backend_local_safe", bs.localSafeBlockNumber,
 					"consensus_local_safe", consensusLocalSafe,
