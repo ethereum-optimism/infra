@@ -108,8 +108,8 @@ func (bs *backendState) GetFinalizedBlockNumber() hexutil.Uint64 {
 
 // GetConsensusGroup returns the backend members that are agreeing in a consensus
 func (cp *ConsensusPoller) GetConsensusGroup() []*Backend {
-	cp.consensusGroupMux.Lock()
 	defer cp.consensusGroupMux.Unlock()
+	cp.consensusGroupMux.Lock()
 
 	g := make([]*Backend, len(cp.consensusGroup))
 	copy(g, cp.consensusGroup)
@@ -427,7 +427,6 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		finalizedBlockNumber: finalizedBlockNumber,
 	})
 
-	// CL-only: set CL-specific fields directly, outside the shared state update path.
 	if cp.consensusLayer {
 		clbs := cp.backendState[be]
 		clbs.backendStateMux.Lock()
@@ -537,8 +536,6 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 	}
 
-	// CL mode: verify all candidates derived the same output root at the safe block.
-	// This catches cross-client derivation divergence (e.g. op-node vs kona-node).
 	if cp.consensusLayer && lowestSafeBlock > 0 {
 		candidates, lowestSafeBlock, lowestLocalSafeBlock = cp.verifyCLOutputRoots(ctx, candidates, lowestSafeBlock)
 	}
@@ -623,16 +620,16 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 // IsBanned checks if a specific backend is banned
 func (cp *ConsensusPoller) IsBanned(be *Backend) bool {
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 	return bs.IsBanned()
 }
 
-// BannedUntil returns the time until which the backend is banned
+// IsBanned checks if a specific backend is banned
 func (cp *ConsensusPoller) BannedUntil(be *Backend) time.Time {
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 	return bs.bannedUntil
 }
 
@@ -643,8 +640,8 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 	}
 
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 	bs.bannedUntil = time.Now().Add(cp.banPeriod)
 
 	// when we ban a node, we give it the chance to start from any block when it is back
@@ -656,29 +653,22 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 // Unban removes any bans from the backends
 func (cp *ConsensusPoller) Unban(be *Backend) {
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 	bs.bannedUntil = time.Now().Add(-10 * time.Hour)
 }
 
-// Reset resets all backend states and clears the consensus tracker.
-// This ensures the monotonicity filters in FilterCandidates start from a clean baseline.
+// Reset resets all backend states.
 func (cp *ConsensusPoller) Reset() {
 	for _, be := range cp.backendGroup.Backends {
 		cp.backendState[be] = &backendState{}
 	}
-	cp.syncStatusBodyMu.Lock()
-	cp.consensusSyncBody = nil
-	cp.lastServedCLL1Num = 0
-	cp.syncStatusBodyMu.Unlock()
 }
 
 // blockHashFetcher retrieves the block number and hash for a given block from a backend.
-// bs is provided for fetchers that can use cached state (e.g. CL); it may be ignored.
 type blockHashFetcher func(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error)
 
-// elBlockFetcher returns a blockHashFetcher for EL backends.
-// It always calls fetchELBlock; bs is unused.
+// elBlockFetcher is a blockHashFetcher for EL backends.
 func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
 	return cp.fetchELBlock(ctx, be, block.String())
 }
@@ -738,43 +728,41 @@ func (cp *ConsensusPoller) findConsensusBlock(
 
 // fetchELState fetches the block numbers and hashes for the latest, safe, and finalized
 // tags from a single EL backend, performing zero-value validation inline.
-// It is the EL counterpart to updateCLBackend.
-// On any error or zero block number it returns a non-nil error; the caller should skip state updates.
-func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (elBlockState, error) {
-	var s elBlockState
+func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlockState, error) {
+	var s ELBlockState
 	var err error
 
 	s.LatestBlockNumber, s.LatestBlockHash, err = cp.fetchELBlock(ctx, be, "latest")
 	if err != nil {
 		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
-		return elBlockState{}, err
+		return ELBlockState{}, err
 	}
 	if s.LatestBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return elBlockState{}, errZeroLatestBlock
+		return ELBlockState{}, errZeroLatestBlock
 	}
 
 	s.SafeBlockNumber, _, err = cp.fetchELBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
-		return elBlockState{}, err
+		return ELBlockState{}, err
 	}
 	if s.SafeBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return elBlockState{}, errZeroSafeBlock
+		return ELBlockState{}, errZeroSafeBlock
 	}
 
 	s.FinalizedBlockNumber, _, err = cp.fetchELBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
-		return elBlockState{}, err
+		return ELBlockState{}, err
 	}
 	if s.FinalizedBlockNumber == 0 {
 		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return elBlockState{}, errZeroFinalizedBlock
+		return ELBlockState{}, errZeroFinalizedBlock
 	}
 
 	return s, nil
@@ -866,8 +854,8 @@ func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result 
 // GetBackendState creates a copy of backend state so that the caller can use it without locking
 func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 
 	return &backendState{
 		latestBlockNumber:    bs.latestBlockNumber,
@@ -884,13 +872,13 @@ func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 
 func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	bs := cp.backendState[be]
-	bs.backendStateMux.Lock()
 	defer bs.backendStateMux.Unlock()
+	bs.backendStateMux.Lock()
 	return bs.lastUpdate
 }
 
-// elBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
-type elBlockState struct {
+// ELBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
+type ELBlockState struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
@@ -953,9 +941,6 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 
 	candidates := make(map[*Backend]*backendState, len(cp.backendGroup.Backends))
 
-	// Snapshot consensus values once for CL monotonicity checks below.
-	// Both are 0 when the tracker is uninitialized (fresh start or in-memory restart),
-	// in which case the checks are vacuous and all backends pass.
 	var consensusFinalized, consensusLocalSafe hexutil.Uint64
 	if cp.consensusLayer {
 		consensusFinalized = cp.GetFinalizedBlockNumber()
@@ -986,10 +971,6 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 		if !be.skipIsSyncingCheck && !bs.inSync {
 			continue
 		}
-		// CL mode: exclude backends whose finalized or local_safe block is behind the current
-		// group consensus. This prevents a restarting backend from pulling consensus backward,
-		// which would cause unnecessary EL sync cycles on downstream light nodes.
-		// The checks are vacuous when consensus values are 0 (uninitialized tracker).
 		if cp.consensusLayer {
 			if consensusFinalized > 0 && bs.finalizedBlockNumber < consensusFinalized {
 				log.Warn("backend excluded: finalized block below consensus",
