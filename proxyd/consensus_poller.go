@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,11 +70,8 @@ type backendState struct {
 	latestBlockNumber    hexutil.Uint64
 	latestBlockHash      string
 	safeBlockNumber      hexutil.Uint64
-	safeBlockHash        string
 	localSafeBlockNumber hexutil.Uint64
-	localSafeBlockHash   string
 	finalizedBlockNumber hexutil.Uint64
-	finalizedBlockHash   string
 
 	// CL mode only: used for pin-backend selection.
 	currentL1Number uint64
@@ -137,29 +133,9 @@ func (cp *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
 	return cp.tracker.GetState().Finalized
 }
 
-// GetLatestBlockHash returns the hash of the `latest` agreed block in a consensus
-func (cp *ConsensusPoller) GetLatestBlockHash() string {
-	return cp.tracker.GetState().LatestHash
-}
-
-// GetSafeBlockHash returns the hash of the `safe` agreed block in a consensus
-func (cp *ConsensusPoller) GetSafeBlockHash() string {
-	return cp.tracker.GetState().SafeHash
-}
-
 // GetLocalSafeBlockNumber returns the `local_safe` agreed block number in a consensus (CL mode only)
 func (cp *ConsensusPoller) GetLocalSafeBlockNumber() hexutil.Uint64 {
 	return cp.tracker.GetState().LocalSafe
-}
-
-// GetLocalSafeBlockHash returns the hash of the `local_safe` agreed block in a consensus (CL mode only)
-func (cp *ConsensusPoller) GetLocalSafeBlockHash() string {
-	return cp.tracker.GetState().LocalSafeHash
-}
-
-// GetFinalizedBlockHash returns the hash of the `finalized` agreed block in a consensus
-func (cp *ConsensusPoller) GetFinalizedBlockHash() string {
-	return cp.tracker.GetState().FinalizedHash
 }
 
 // IsConsensusLayer returns true if this poller is operating in CL (op-node) mode
@@ -167,53 +143,6 @@ func (cp *ConsensusPoller) IsConsensusLayer() bool {
 	return cp.consensusLayer
 }
 
-// GetConsensusSyncStatusBody returns the cached optimism_syncStatus response body
-// from the current pin backend. Returns nil if no poll cycle has completed yet.
-func (cp *ConsensusPoller) GetConsensusSyncStatusBody() json.RawMessage {
-	cp.syncStatusBodyMu.RLock()
-	defer cp.syncStatusBodyMu.RUnlock()
-	return cp.consensusSyncBody
-}
-
-// selectConsensusSyncStatusBody selects the consensus-group backend with the lowest
-// current_l1.number (subject to a monotonicity floor) and caches its full
-// optimism_syncStatus response body. This ensures the served response is internally
-// consistent — all fields come from one backend snapshot, not a mix of backends.
-func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backend) {
-	var pinBackend *Backend
-	var lowestL1 uint64 = math.MaxUint64
-
-	cp.syncStatusBodyMu.RLock()
-	floor := cp.lastServedCLL1Num
-	cp.syncStatusBodyMu.RUnlock()
-
-	for _, be := range consensusGroup {
-		bs := cp.backendState[be]
-		bs.backendStateMux.Lock()
-		l1Num := bs.currentL1Number
-		hasBody := len(bs.syncStatusRaw) > 0
-		bs.backendStateMux.Unlock()
-
-		if hasBody && l1Num >= floor && l1Num < lowestL1 {
-			lowestL1 = l1Num
-			pinBackend = be
-		}
-	}
-
-	if pinBackend == nil {
-		return // no valid pin candidate; keep existing body
-	}
-
-	bs := cp.backendState[pinBackend]
-	bs.backendStateMux.Lock()
-	body := bs.syncStatusRaw
-	bs.backendStateMux.Unlock()
-
-	cp.syncStatusBodyMu.Lock()
-	cp.consensusSyncBody = body
-	cp.lastServedCLL1Num = lowestL1
-	cp.syncStatusBodyMu.Unlock()
-}
 
 func (cp *ConsensusPoller) Shutdown() {
 	cp.asyncHandler.Shutdown()
@@ -400,6 +329,10 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		opt(cp)
 	}
 
+	if cp.consensusLayer {
+		cp.logCLConfigWarnings()
+	}
+
 	if cp.tracker == nil {
 		cp.tracker = NewInMemoryConsensusTracker()
 	}
@@ -452,7 +385,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 
 	var inSync bool
 	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber hexutil.Uint64
-	var latestBlockHash, safeBlockHash, localSafeBlockHash, finalizedBlockHash string
+	var latestBlockHash string
 	var currentL1Number uint64
 	var syncStatusRaw json.RawMessage
 	if cp.consensusLayer {
@@ -462,11 +395,10 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		}
 		inSync = clInSync
 		latestBlockNumber, latestBlockHash = syncStatus.LatestBlockNumber, syncStatus.LatestBlockHash
-		safeBlockNumber, safeBlockHash = syncStatus.SafeBlockNumber, syncStatus.SafeBlockHash
-		localSafeBlockNumber, localSafeBlockHash = syncStatus.LocalSafeBlockNumber, syncStatus.LocalSafeBlockHash
-		finalizedBlockNumber, finalizedBlockHash = syncStatus.FinalizedBlockNumber, syncStatus.FinalizedBlockHash
-		currentL1Number = syncStatus.CurrentL1Number
-		syncStatusRaw = rawBody
+		safeBlockNumber = syncStatus.SafeBlockNumber
+		localSafeBlockNumber = syncStatus.LocalSafeBlockNumber
+		finalizedBlockNumber = syncStatus.FinalizedBlockNumber
+		currentL1Number, syncStatusRaw = syncStatus.CurrentL1Number, rawBody
 		if !cp.validateCLBackendUpdate(be, safeBlockNumber, localSafeBlockNumber) {
 			return
 		}
@@ -483,8 +415,8 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			return
 		}
 		latestBlockNumber, latestBlockHash = els.LatestBlockNumber, els.LatestBlockHash
-		safeBlockNumber, safeBlockHash = els.SafeBlockNumber, els.SafeBlockHash
-		finalizedBlockNumber, finalizedBlockHash = els.FinalizedBlockNumber, els.FinalizedBlockHash
+		safeBlockNumber = els.SafeBlockNumber
+		finalizedBlockNumber = els.FinalizedBlockNumber
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
@@ -495,14 +427,18 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockNumber:    latestBlockNumber,
 		latestBlockHash:      latestBlockHash,
 		safeBlockNumber:      safeBlockNumber,
-		safeBlockHash:        safeBlockHash,
-		localSafeBlockNumber: localSafeBlockNumber,
-		localSafeBlockHash:   localSafeBlockHash,
 		finalizedBlockNumber: finalizedBlockNumber,
-		finalizedBlockHash:   finalizedBlockHash,
-		currentL1Number:      currentL1Number,
-		syncStatusRaw:        syncStatusRaw,
 	})
+
+	// CL-only: set CL-specific fields directly, outside the shared state update path.
+	if cp.consensusLayer {
+		clbs := cp.backendState[be]
+		clbs.backendStateMux.Lock()
+		clbs.localSafeBlockNumber = localSafeBlockNumber
+		clbs.currentL1Number = currentL1Number
+		clbs.syncStatusRaw = syncStatusRaw
+		clbs.backendStateMux.Unlock()
+	}
 
 	RecordBackendLatestBlock(be, latestBlockNumber)
 	RecordBackendSafeBlock(be, safeBlockNumber)
@@ -519,9 +455,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			"latestBlockNumber", latestBlockNumber,
 			"latestBlockHash", latestBlockHash,
 			"safeBlockNumber", safeBlockNumber,
-			"safeBlockHash", safeBlockHash,
 			"finalizedBlockNumber", finalizedBlockNumber,
-			"finalizedBlockHash", finalizedBlockHash,
 			"lastUpdate", bs.lastUpdate)
 	}
 
@@ -585,18 +519,11 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	// get the candidates for the consensus group
 	candidates := cp.getConsensusCandidates()
 
-	// update the lowest latest block number and hash
-	//        the lowest safe block number and hash
-	//        the lowest finalized block number
-	//        the lowest local-safe block number and finalized hash (CL mode only)
 	var lowestLatestBlock hexutil.Uint64
 	var lowestLatestBlockHash string
 	var lowestFinalizedBlock hexutil.Uint64
-	var lowestFinalizedBlockHash string // only populated in CL mode
 	var lowestSafeBlock hexutil.Uint64
-	var lowestSafeBlockHash string
 	var lowestLocalSafeBlock hexutil.Uint64 // only populated in CL mode
-	var lowestLocalSafeBlockHash string     // only populated in CL mode
 	for _, bs := range candidates {
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
@@ -607,11 +534,16 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 		if lowestSafeBlock == 0 || bs.safeBlockNumber < lowestSafeBlock {
 			lowestSafeBlock = bs.safeBlockNumber
-			lowestSafeBlockHash = bs.safeBlockHash
+		}
+		if cp.consensusLayer && (lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock) {
+			lowestLocalSafeBlock = bs.localSafeBlockNumber
 		}
 	}
-	if cp.consensusLayer {
-		lowestFinalizedBlockHash, lowestLocalSafeBlock, lowestLocalSafeBlockHash = cp.computeCLGroupMinimums(candidates, lowestFinalizedBlock)
+
+	// CL mode: verify all candidates derived the same output root at the safe block.
+	// This catches cross-client derivation divergence (e.g. op-node vs kona-node).
+	if cp.consensusLayer && lowestSafeBlock > 0 {
+		candidates, lowestSafeBlock, lowestLocalSafeBlock = cp.verifyCLOutputRoots(ctx, candidates, lowestSafeBlock)
 	}
 
 	// find the proposed block among the candidates
@@ -626,25 +558,15 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 
 	// if there is a block to propose, verify all candidates agree on the same hash,
 	// walking back one block at a time until consensus is found.
-	if proposedBlock > 0 {
-		fetch := cp.elBlockFetcher
-		if cp.consensusLayer {
-			fetch = cp.clBlockFetcher
-		}
-		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, fetch, "unsafe")
+	// CL mode: no hash walk-back needed — optimism_syncStatus is served from the pin
+	// backend cache (a single-backend snapshot), so unsafe block hash consensus is irrelevant.
+	// optimism_outputAtBlock also does not work for unsafe blocks.
+	if proposedBlock > 0 && !cp.consensusLayer {
+		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
 	}
 
 	if cp.consensusLayer {
 		cp.warnCLSafeLeap(candidates, lowestSafeBlock)
-	}
-
-	// CL mode: hash-verify safe_l2 via walk-back. local_safe_l2 and finalized_l2 use
-	// their minimum block+hash directly — both are L1-derived/immutable so hash divergence
-	// indicates a broken backend, not a fork requiring walk-back.
-	// EL mode uses raw minimums for all fields.
-	if cp.consensusLayer {
-		lowestSafeBlock, lowestSafeBlockHash = cp.updateCLGroupConsensus(
-			ctx, candidates, lowestSafeBlock, lowestSafeBlockHash)
 	}
 
 	if broken {
@@ -660,14 +582,10 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 
 	// update tracker
 	cp.tracker.SetState(ConsensusTrackerState{
-		Latest:        proposedBlock,
-		Safe:          lowestSafeBlock,
-		Finalized:     lowestFinalizedBlock,
-		LatestHash:    proposedBlockHash,
-		SafeHash:      lowestSafeBlockHash,
-		LocalSafe:     lowestLocalSafeBlock,
-		LocalSafeHash: lowestLocalSafeBlockHash,
-		FinalizedHash: lowestFinalizedBlockHash,
+		Latest:    proposedBlock,
+		Safe:      lowestSafeBlock,
+		Finalized: lowestFinalizedBlock,
+		LocalSafe: lowestLocalSafeBlock,
 	})
 
 	// update consensus group
@@ -844,7 +762,7 @@ func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlo
 		return ELBlockState{}, errZeroLatestBlock
 	}
 
-	s.SafeBlockNumber, s.SafeBlockHash, err = cp.fetchELBlock(ctx, be, "safe")
+	s.SafeBlockNumber, _, err = cp.fetchELBlock(ctx, be, "safe")
 	if err != nil {
 		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
 		return ELBlockState{}, err
@@ -855,7 +773,7 @@ func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlo
 		return ELBlockState{}, errZeroSafeBlock
 	}
 
-	s.FinalizedBlockNumber, s.FinalizedBlockHash, err = cp.fetchELBlock(ctx, be, "finalized")
+	s.FinalizedBlockNumber, _, err = cp.fetchELBlock(ctx, be, "finalized")
 	if err != nil {
 		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
 		return ELBlockState{}, err
@@ -962,13 +880,8 @@ func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 		latestBlockNumber:    bs.latestBlockNumber,
 		latestBlockHash:      bs.latestBlockHash,
 		safeBlockNumber:      bs.safeBlockNumber,
-		safeBlockHash:        bs.safeBlockHash,
 		localSafeBlockNumber: bs.localSafeBlockNumber,
-		localSafeBlockHash:   bs.localSafeBlockHash,
 		finalizedBlockNumber: bs.finalizedBlockNumber,
-		finalizedBlockHash:   bs.finalizedBlockHash,
-		currentL1Number:      bs.currentL1Number,
-		syncStatusRaw:        bs.syncStatusRaw,
 		peerCount:            bs.peerCount,
 		inSync:               bs.inSync,
 		lastUpdate:           bs.lastUpdate,
@@ -983,15 +896,12 @@ func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	return bs.lastUpdate
 }
 
-// ELBlockState holds the latest, safe, and finalized block number and hash
-// fetched from an EL backend in a single polling cycle.
+// ELBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
 type ELBlockState struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
-	SafeBlockHash        string
 	FinalizedBlockNumber hexutil.Uint64
-	FinalizedBlockHash   string
 }
 
 // backendStateUpdate is a value object passed to setBackendState to avoid
@@ -1002,14 +912,7 @@ type backendStateUpdate struct {
 	latestBlockNumber    hexutil.Uint64
 	latestBlockHash      string
 	safeBlockNumber      hexutil.Uint64
-	safeBlockHash        string
-	localSafeBlockNumber hexutil.Uint64
-	localSafeBlockHash   string
 	finalizedBlockNumber hexutil.Uint64
-	finalizedBlockHash   string
-	// CL mode only
-	currentL1Number uint64
-	syncStatusRaw   json.RawMessage
 }
 
 func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) bool {
@@ -1021,13 +924,7 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) 
 	bs.latestBlockNumber = upd.latestBlockNumber
 	bs.latestBlockHash = upd.latestBlockHash
 	bs.safeBlockNumber = upd.safeBlockNumber
-	bs.safeBlockHash = upd.safeBlockHash
-	bs.localSafeBlockNumber = upd.localSafeBlockNumber
-	bs.localSafeBlockHash = upd.localSafeBlockHash
 	bs.finalizedBlockNumber = upd.finalizedBlockNumber
-	bs.finalizedBlockHash = upd.finalizedBlockHash
-	bs.currentL1Number = upd.currentL1Number
-	bs.syncStatusRaw = upd.syncStatusRaw
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed

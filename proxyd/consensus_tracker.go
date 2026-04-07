@@ -25,14 +25,10 @@ type ConsensusTracker interface {
 // ConsensusTrackerState holds the full consensus state in one snapshot.
 // Adding a new field only requires changing this struct and update().
 type ConsensusTrackerState struct {
-	Latest        hexutil.Uint64 `json:"latest"`
-	Safe          hexutil.Uint64 `json:"safe"`
-	Finalized     hexutil.Uint64 `json:"finalized"`
-	LatestHash    string         `json:"latest_hash"`
-	SafeHash      string         `json:"safe_hash"`
-	LocalSafe     hexutil.Uint64 `json:"local_safe"`
-	LocalSafeHash string         `json:"local_safe_hash"`
-	FinalizedHash string         `json:"finalized_hash"`
+	Latest    hexutil.Uint64 `json:"latest"`
+	Safe      hexutil.Uint64 `json:"safe"`
+	Finalized hexutil.Uint64 `json:"finalized"`
+	LocalSafe hexutil.Uint64 `json:"local_safe"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -42,11 +38,7 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Latest = o.Latest
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
-	ct.state.LatestHash = o.LatestHash
-	ct.state.SafeHash = o.SafeHash
 	ct.state.LocalSafe = o.LocalSafe
-	ct.state.LocalSafeHash = o.LocalSafeHash
-	ct.state.FinalizedHash = o.FinalizedHash
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe

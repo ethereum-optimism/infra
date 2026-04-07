@@ -8,15 +8,16 @@
       }
     }
 - method: optimism_outputAtBlock
-  block: "0x101"
+  block: "0xe1"
   response: >
     {
       "jsonrpc": "2.0",
       "id": 67,
       "result": {
+        "outputRoot": "output_root_0xe1",
         "blockRef": {
-          "hash": "hash_0x101",
-          "number": 257
+          "hash": "hash_0xe1",
+          "number": 225
         }
       }
     }

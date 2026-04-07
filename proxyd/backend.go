@@ -1036,7 +1036,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
-		rpcReqs, overriddenResponses = bg.PrepareConsensusRequests(rpcReqs, overriddenResponses, rewrittenReqs)
+		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
 	} else if bg.maxBlockRange > 0 {
 		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
@@ -1769,10 +1769,7 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 	return res
 }
 
-// PrepareConsensusRequests partitions rpcReqs into responses that can be synthesized from
-// consensus state (overriddenResponses) and requests that still need a backend roundtrip
-// (rewrittenReqs).
-func (bg *BackendGroup) PrepareConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
 	rctx := RewriteContext{
 		latest:         bg.Consensus.GetLatestBlockNumber(),
 		safe:           bg.Consensus.GetSafeBlockNumber(),

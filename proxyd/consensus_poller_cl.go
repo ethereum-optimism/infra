@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -19,17 +20,30 @@ type CLSyncStatus struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
-	SafeBlockHash        string
 	LocalSafeBlockNumber hexutil.Uint64
-	LocalSafeBlockHash   string
 	FinalizedBlockNumber hexutil.Uint64
-	FinalizedBlockHash   string
 	CurrentL1Number      uint64
 	HeadL1Number         uint64
 	HeadL1Timestamp      uint64 // Unix seconds; used to detect L1 connection staleness
 }
 
-// WithCLConsensusMode enables CL (op-node) consensus mode.
+// WithCLConsensusMode enables CL (op-node / consensus layer) consensus mode.
+//
+// In this mode the poller queries optimism_syncStatus and optimism_outputAtBlock
+// instead of eth_getBlockByNumber, and serves optimism_syncStatus responses from
+// a cached pin backend (the consensus group member with the lowest current_l1
+// derivation position) rather than rewriting individual fields.
+//
+// Output root verification: each poll cycle the poller calls
+// optimism_outputAtBlock at the consensus safe block on every candidate backend
+// and bans any backend whose output root disagrees with the majority. This
+// catches derivation divergences between heterogeneous CL clients (e.g. op-node
+// vs kona-node) before incorrect data reaches consumers.
+//
+// Deployment recommendation: use an odd number of backends (e.g. 3, 5) so that
+// a majority is always unambiguous. With an even number of backends, a perfect
+// split in output roots cannot be resolved automatically — disagreement is
+// detected and logged but no backend is evicted until the tie is broken.
 func WithCLConsensusMode() ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.consensusLayer = true
@@ -60,6 +74,17 @@ func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
 func WithCLSafeLeapWarnThreshold(threshold uint64) ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.clSafeLeapWarnThreshold = threshold
+	}
+}
+
+// logCLConfigWarnings logs startup warnings for CL-mode configuration issues.
+// Called once from NewConsensusPoller after all options have been applied.
+func (cp *ConsensusPoller) logCLConfigWarnings() {
+	n := len(cp.backendGroup.Backends)
+	if n%2 == 0 {
+		log.Warn("CL consensus: backend group has an even number of backends — output root verification requires a majority (≥2 agreeing backends) to evict a diverging backend; with an even-sized group a tie cannot be resolved automatically. Add one backend to ensure unambiguous majority.",
+			"backend_count", n,
+		)
 	}
 }
 
@@ -159,37 +184,6 @@ func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber,
 	return true
 }
 
-// computeCLGroupMinimums resolves two group-level values that the shared candidate
-// loop does not track because they have no EL equivalent.
-//
-// Finalized block hash: the shared loop identifies the lowest finalized block number
-// across all candidates, but not the corresponding hash. The hash is required by
-// updateCLGroupConsensus to anchor the hash-verified walk-back that finds a common
-// finalized block all candidates agree on. This function finds the hash by scanning
-// candidates for the first one whose finalized block number matches the group minimum.
-//
-// Lowest local_safe_l2: in op-node, local_safe_l2 is the highest L2 block whose
-// sequencer batches have been seen on L1 by this node specifically, before any
-// cross-chain safety checks (interop). safe_l2 (cross-safe) can only advance after
-// local_safe_l2 does, so taking the minimum local_safe_l2 across backends gives a
-// conservative view of what L2 data has actually landed on L1. This is surfaced as
-// a separate metric from safe_l2 to make derivation progress visible independently
-// of interop message validation.
-func (cp *ConsensusPoller) computeCLGroupMinimums(
-	candidates map[*Backend]*backendState,
-	lowestFinalizedBlock hexutil.Uint64,
-) (finalizedBlockHash string, lowestLocalSafeBlock hexutil.Uint64, lowestLocalSafeBlockHash string) {
-	for _, bs := range candidates {
-		if bs.finalizedBlockNumber == lowestFinalizedBlock && finalizedBlockHash == "" {
-			finalizedBlockHash = bs.finalizedBlockHash
-		}
-		if lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock {
-			lowestLocalSafeBlock = bs.localSafeBlockNumber
-			lowestLocalSafeBlockHash = bs.localSafeBlockHash
-		}
-	}
-	return
-}
 
 // warnCLSafeLeap records a metric and logs a warning for any candidate whose safe_l2
 // is more than clSafeLeapWarnThreshold blocks ahead of the peer minimum.
@@ -216,81 +210,52 @@ func (cp *ConsensusPoller) warnCLSafeLeap(candidates map[*Backend]*backendState,
 	}
 }
 
-// updateCLGroupConsensus runs a hash-verified walk-back for safe_l2 in CL mode.
-// EL mode uses raw minimums; CL enforces L1-derived safety guarantees for safe.
-// local_safe_l2 and finalized_l2 use their minimum block+hash directly (no walk-back needed:
-// local_safe is L1-derived and finalized is immutable — hash divergence is a backend bug, not a fork).
-//
-// It returns the agreed (safeBlock, safeHash) after walk-back.
-func (cp *ConsensusPoller) updateCLGroupConsensus(
-	ctx context.Context,
-	candidates map[*Backend]*backendState,
-	lowestSafeBlock hexutil.Uint64, lowestSafeBlockHash string,
-) (hexutil.Uint64, string) {
-	if lowestSafeBlock > 0 {
-		var safeBroken bool
-		lowestSafeBlock, lowestSafeBlockHash, safeBroken = cp.findConsensusBlock(
-			ctx, candidates, cp.GetSafeBlockNumber(),
-			lowestSafeBlock, lowestSafeBlockHash, cp.safeBlockFetcher, "safe")
-		if safeBroken {
-			log.Warn("safe consensus broken",
-				"currentConsensusSafeBlock", cp.GetSafeBlockNumber(),
-				"proposedSafeBlock", lowestSafeBlock,
-				"proposedSafeBlockHash", lowestSafeBlockHash)
-			RecordCLGroupConsensusWalkback(cp.backendGroup, "safe")
+// GetConsensusSyncStatusBody returns the cached optimism_syncStatus response body
+// from the current pin backend. Returns nil if no poll cycle has completed yet.
+func (cp *ConsensusPoller) GetConsensusSyncStatusBody() json.RawMessage {
+	cp.syncStatusBodyMu.RLock()
+	defer cp.syncStatusBodyMu.RUnlock()
+	return cp.consensusSyncBody
+}
+
+// selectConsensusSyncStatusBody selects the consensus-group backend with the lowest
+// current_l1.number (subject to a monotonicity floor) and caches its full
+// optimism_syncStatus response body. This ensures the served response is internally
+// consistent — all fields come from one backend snapshot, not a mix of backends.
+func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backend) {
+	var pinBackend *Backend
+	var lowestL1 uint64 = math.MaxUint64
+
+	cp.syncStatusBodyMu.RLock()
+	floor := cp.lastServedCLL1Num
+	cp.syncStatusBodyMu.RUnlock()
+
+	for _, be := range consensusGroup {
+		bs := cp.backendState[be]
+		bs.backendStateMux.Lock()
+		l1Num := bs.currentL1Number
+		hasBody := len(bs.syncStatusRaw) > 0
+		bs.backendStateMux.Unlock()
+
+		if hasBody && l1Num >= floor && l1Num < lowestL1 {
+			lowestL1 = l1Num
+			pinBackend = be
 		}
 	}
-	return lowestSafeBlock, lowestSafeBlockHash
-}
 
-// clBlockFetcher is a blockHashFetcher for CL unsafe blocks.
-// Uses the cached latest hash when the backend is at exactly the proposed block
-// to avoid an extra RPC call; otherwise calls optimism_outputAtBlock.
-func (cp *ConsensusPoller) clBlockFetcher(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
-	if bs.latestBlockNumber == block {
-		return bs.latestBlockNumber, bs.latestBlockHash, nil
-	}
-	return cp.fetchCLBlock(ctx, be, block.String())
-}
-
-// safeBlockFetcher is a blockHashFetcher for CL safe blocks.
-// Uses the cached safe hash when the backend is at exactly the proposed block,
-// otherwise calls optimism_outputAtBlock. All candidates have safeBlockNumber >=
-// lowestSafeBlock >= proposedBlock at every walk-back step, so no abstain is needed.
-func (cp *ConsensusPoller) safeBlockFetcher(ctx context.Context, be *Backend, bs *backendState, block hexutil.Uint64) (hexutil.Uint64, string, error) {
-	if bs.safeBlockNumber == block {
-		return bs.safeBlockNumber, bs.safeBlockHash, nil
-	}
-	return cp.fetchCLBlock(ctx, be, block.String())
-}
-
-// fetchCLBlock calls optimism_outputAtBlock and returns the block number and hash
-// from the blockRef in the response.
-func (cp *ConsensusPoller) fetchCLBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
-	var rpcRes RPCRes
-	log.Trace("executing fetchCLBlock for backend",
-		"backend", be.Name,
-		"block", block,
-	)
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "optimism_outputAtBlock", block)
-	if err != nil {
-		return 0, "", err
+	if pinBackend == nil {
+		return // no valid pin candidate; keep existing body
 	}
 
-	jsonMap, ok := rpcRes.Result.(map[string]interface{})
-	if !ok {
-		return 0, "", fmt.Errorf("unexpected response to optimism_outputAtBlock on backend %s", be.Name)
-	}
-	blockRef, ok := jsonMap["blockRef"].(map[string]interface{})
-	if !ok {
-		return 0, "", fmt.Errorf("missing blockRef in optimism_outputAtBlock response on backend %s", be.Name)
-	}
-	numberVal, nOk := blockRef["number"].(float64)
-	hashVal, hOk := blockRef["hash"].(string)
-	if !nOk || !hOk {
-		return 0, "", fmt.Errorf("missing or invalid number/hash in blockRef on backend %s", be.Name)
-	}
-	return hexutil.Uint64(uint64(numberVal)), hashVal, nil
+	bs := cp.backendState[pinBackend]
+	bs.backendStateMux.Lock()
+	body := bs.syncStatusRaw
+	bs.backendStateMux.Unlock()
+
+	cp.syncStatusBodyMu.Lock()
+	cp.consensusSyncBody = body
+	cp.lastServedCLL1Num = lowestL1
+	cp.syncStatusBodyMu.Unlock()
 }
 
 // fetchCLSyncStatus calls optimism_syncStatus and parses the full sync status
@@ -324,17 +289,17 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, nil, err
 	}
 
-	safeBlockNumber, safeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
+	safeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	localSafeBlockNumber, localSafeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
+	localSafeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	finalizedBlockNumber, finalizedBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
+	finalizedBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -358,15 +323,140 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		LatestBlockNumber:    hexutil.Uint64(latestBlockNumber),
 		LatestBlockHash:      latestBlockHash,
 		SafeBlockNumber:      hexutil.Uint64(safeBlockNumber),
-		SafeBlockHash:        safeBlockHash,
 		LocalSafeBlockNumber: hexutil.Uint64(localSafeBlockNumber),
-		LocalSafeBlockHash:   localSafeBlockHash,
 		FinalizedBlockNumber: hexutil.Uint64(finalizedBlockNumber),
-		FinalizedBlockHash:   finalizedBlockHash,
 		CurrentL1Number:      currentL1Number,
 		HeadL1Number:         headL1Number,
 		HeadL1Timestamp:      headL1Timestamp,
 	}, json.RawMessage(rawBody), nil
+}
+
+// verifyCLOutputRoots calls optimism_outputAtBlock(safeBlock) on every candidate
+// and bans any backend whose outputRoot disagrees with the majority.
+//
+// The outputRoot is a cryptographic commitment to the full L2 state at a block:
+//
+//	keccak256(version || stateRoot || withdrawalStorageRoot || l2BlockHash)
+//
+// If two CL clients (e.g. op-node and kona-node) derive different state from
+// the same L1 data, their output roots will differ at the same safe block number.
+// This check catches such derivation divergences before incorrect data is served.
+//
+// Majority semantics: a backend is banned only when the agreed root has ≥2 votes.
+// This means:
+//   - 2 backends disagree (1v1 tie): no ban — cannot determine which is correct.
+//     A warning is logged; operators should investigate.
+//   - 3+ backends, one disagrees (e.g. 2v1): the minority backend is banned.
+//   - All backends error (outputAtBlock unsupported): graceful degradation,
+//     candidates returned unchanged.
+//
+// Deployment note: use an odd number of backends so ties cannot occur.
+// Returns the filtered candidates map and recomputed lowestSafeBlock / lowestLocalSafeBlock.
+func (cp *ConsensusPoller) verifyCLOutputRoots(
+	ctx context.Context,
+	candidates map[*Backend]*backendState,
+	safeBlock hexutil.Uint64,
+) (map[*Backend]*backendState, hexutil.Uint64, hexutil.Uint64) {
+	type result struct {
+		be         *Backend
+		outputRoot string
+		err        error
+	}
+
+	results := make([]result, 0, len(candidates))
+	for be := range candidates {
+		root, err := cp.fetchCLOutputRoot(ctx, be, safeBlock)
+		results = append(results, result{be: be, outputRoot: root, err: err})
+	}
+
+	// Count successful responses per output root.
+	counts := make(map[string]int)
+	for _, r := range results {
+		if r.err == nil {
+			counts[r.outputRoot]++
+		}
+	}
+
+	// Find the most common root.
+	var agreedRoot string
+	var maxCount int
+	for root, count := range counts {
+		if count > maxCount {
+			maxCount = count
+			agreedRoot = root
+		}
+	}
+
+	lowestFromCandidates := func() (hexutil.Uint64, hexutil.Uint64) {
+		var lowestSafe, lowestLocalSafe hexutil.Uint64
+		for _, bs := range candidates {
+			if lowestSafe == 0 || bs.safeBlockNumber < lowestSafe {
+				lowestSafe = bs.safeBlockNumber
+			}
+			if lowestLocalSafe == 0 || bs.localSafeBlockNumber < lowestLocalSafe {
+				lowestLocalSafe = bs.localSafeBlockNumber
+			}
+		}
+		return lowestSafe, lowestLocalSafe
+	}
+
+	if maxCount < 2 {
+		// Cannot establish a clear majority:
+		//   - all backends errored (maxCount == 0), or
+		//   - every root has exactly 1 vote (2-backend tie or all-unique).
+		// Don't ban anyone — we can't determine which backend is correct.
+		// Log a warning when there is actual disagreement (distinct roots > 1).
+		if len(counts) > 1 {
+			log.Warn("CL output root disagreement detected but no majority — cannot determine correct root (≥3 agreeing backends required to ban)",
+				"safe_block", safeBlock,
+				"distinct_roots", len(counts),
+			)
+		}
+		lowestSafe, lowestLocalSafe := lowestFromCandidates()
+		return candidates, lowestSafe, lowestLocalSafe
+	}
+
+	for _, r := range results {
+		if r.err != nil {
+			log.Warn("error fetching CL output root, skipping verification for backend",
+				"backend", r.be.Name,
+				"safe_block", safeBlock,
+				"err", r.err,
+			)
+			continue
+		}
+		if r.outputRoot != agreedRoot {
+			log.Warn("banning CL backend: output root disagrees with consensus",
+				"backend", r.be.Name,
+				"backend_root", r.outputRoot,
+				"agreed_root", agreedRoot,
+				"safe_block", safeBlock,
+			)
+			RecordCLBan(r.be, "output_root_mismatch")
+			cp.Ban(r.be)
+			delete(candidates, r.be)
+		}
+	}
+
+	lowestSafe, lowestLocalSafe := lowestFromCandidates()
+	return candidates, lowestSafe, lowestLocalSafe
+}
+
+// fetchCLOutputRoot calls optimism_outputAtBlock and returns the outputRoot hash.
+func (cp *ConsensusPoller) fetchCLOutputRoot(ctx context.Context, be *Backend, block hexutil.Uint64) (string, error) {
+	var rpcRes RPCRes
+	if err := be.ForwardRPC(ctx, &rpcRes, "67", "optimism_outputAtBlock", block.String()); err != nil {
+		return "", err
+	}
+	jsonMap, ok := rpcRes.Result.(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected response to optimism_outputAtBlock on backend %s", be.Name)
+	}
+	outputRoot, ok := jsonMap["outputRoot"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing or invalid outputRoot in optimism_outputAtBlock response on backend %s", be.Name)
+	}
+	return outputRoot, nil
 }
 
 // fetchCLPeerCount calls opp2p_peerStats and returns the connected peer count.

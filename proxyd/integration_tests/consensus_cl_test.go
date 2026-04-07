@@ -231,13 +231,6 @@ func TestConsensusCL(t *testing.T) {
 		override(node, "optimism_syncStatus", "", buildResponse(s))
 	}
 
-	// outputAtBlock builds the JSON response for an optimism_outputAtBlock call.
-	outputAtBlock := func(num float64, hash string) string {
-		return buildResponse(map[string]interface{}{
-			"blockRef": map[string]interface{}{"number": num, "hash": hash},
-		})
-	}
-
 	t.Run("initial consensus", func(t *testing.T) {
 		reset()
 
@@ -342,7 +335,10 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 	})
 
-	t.Run("broken consensus - hash divergence walks back to agreeable block", func(t *testing.T) {
+	t.Run("hash divergence does not affect consensus in CL mode", func(t *testing.T) {
+		// Architecture 4: optimism_syncStatus is served from the pin-backend cache.
+		// Hash agreement on the latest (unsafe) block is not required — we don't mix
+		// fields across backends. Diverging hashes are irrelevant to the consensus block.
 		reset()
 		listenerCalled := false
 		bg.Consensus.AddListener(func() {
@@ -355,29 +351,19 @@ func TestConsensusCL(t *testing.T) {
 		// advance both nodes to 0x102
 		overrideSyncStatus("node1", 258, "hash_0x102")
 		overrideSyncStatus("node2", 258, "hash_0x102")
-		// provide outputAtBlock for 0x101 so walk-back can verify agreement there
-		override("node1", "optimism_outputAtBlock", "0x102", buildResponse(map[string]interface{}{
-			"blockRef": map[string]interface{}{"number": float64(258), "hash": "hash_0x102"},
-		}))
-		override("node2", "optimism_outputAtBlock", "0x102", buildResponse(map[string]interface{}{
-			"blockRef": map[string]interface{}{"number": float64(258), "hash": "hash_0x102"},
-		}))
 		update()
 		require.Equal(t, "0x102", bg.Consensus.GetLatestBlockNumber().String())
 
 		// node2 diverges: same block number but different hash
 		overrideSyncStatus("node2", 258, "wrong_hash_0x102")
-		// walk-back will query optimism_outputAtBlock("0x101") on both nodes;
-		// the default YAML response returns "hash_0x101" — so both agree at 0x101
 		update()
 
-		// consensus walks back to 0x101 where hashes agree
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.True(t, listenerCalled)
-
-		// both backends still in the consensus group (no ban for hash divergence)
-		consensusGroup := bg.Consensus.GetConsensusGroup()
-		require.Equal(t, 2, len(consensusGroup))
+		// CL mode: no walk-back — consensus stays at the minimum latest block (0x102)
+		require.Equal(t, "0x102", bg.Consensus.GetLatestBlockNumber().String())
+		// no broken event fired: hash divergence on unsafe block is not a consensus failure
+		require.False(t, listenerCalled)
+		// both backends still in the consensus group
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("optimism_syncStatus served from pin-backend cache", func(t *testing.T) {
@@ -385,9 +371,7 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, "hash_0x101", bg.Consensus.GetLatestBlockHash())
 		require.Equal(t, "0xe1", bg.Consensus.GetSafeBlockNumber().String())
-		require.Equal(t, "hash_0xe1", bg.Consensus.GetSafeBlockHash())
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
@@ -595,7 +579,9 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("broken consensus with depth 2", func(t *testing.T) {
+	t.Run("deep hash divergence does not affect consensus in CL mode", func(t *testing.T) {
+		// Architecture 4: no hash walk-back in CL mode. Even multi-block hash divergence
+		// does not change the consensus block — it stays at the minimum latest block.
 		reset()
 		listenerCalled := false
 		bg.Consensus.AddListener(func() { listenerCalled = true })
@@ -606,26 +592,22 @@ func TestConsensusCL(t *testing.T) {
 		// both advance to 0x103
 		overrideSyncStatus("node1", 259, "hash_0x103")
 		overrideSyncStatus("node2", 259, "hash_0x103")
-		override("node1", "optimism_outputAtBlock", "0x101", outputAtBlock(257, "hash_0x101"))
-		override("node2", "optimism_outputAtBlock", "0x101", outputAtBlock(257, "hash_0x101"))
 		update()
 		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
 
-		// node2 diverges at both 0x103 and 0x102; 0x101 still agrees (YAML default)
+		// node2 diverges at 0x103 (and hypothetically 0x102 too)
 		overrideSyncStatus("node2", 259, "wrong_hash_0x103")
-		override("node1", "optimism_outputAtBlock", "0x103", outputAtBlock(259, "hash_0x103"))
-		override("node2", "optimism_outputAtBlock", "0x103", outputAtBlock(259, "wrong_hash_0x103"))
-		override("node1", "optimism_outputAtBlock", "0x102", outputAtBlock(258, "hash_0x102"))
-		override("node2", "optimism_outputAtBlock", "0x102", outputAtBlock(258, "wrong_hash_0x102"))
 		update()
 
-		// walk-back finds agreement at 0x101
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.True(t, listenerCalled)
+		// CL mode: no walk-back — consensus stays at 0x103 (minimum latest block)
+		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
+		require.False(t, listenerCalled)
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("fork in advanced block - no prior consensus at new height", func(t *testing.T) {
+	t.Run("fork at new height does not affect consensus in CL mode", func(t *testing.T) {
+		// Architecture 4: hash divergence (even from the start at a new height) is ignored.
+		// Consensus uses minimum latest block number regardless of hash agreement.
 		reset()
 		listenerCalled := false
 		bg.Consensus.AddListener(func() { listenerCalled = true })
@@ -633,46 +615,15 @@ func TestConsensusCL(t *testing.T) {
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 
-		// both nodes jump to 0x103 but on different forks (never agreed at 0x102 or 0x103)
+		// both nodes jump to 0x103 but on different forks
 		overrideSyncStatus("node1", 259, "node1_hash_0x103")
 		overrideSyncStatus("node2", 259, "node2_hash_0x103")
-		override("node1", "optimism_outputAtBlock", "0x103", outputAtBlock(259, "node1_hash_0x103"))
-		override("node2", "optimism_outputAtBlock", "0x103", outputAtBlock(259, "node2_hash_0x103"))
-		override("node1", "optimism_outputAtBlock", "0x102", outputAtBlock(258, "node1_hash_0x102"))
-		override("node2", "optimism_outputAtBlock", "0x102", outputAtBlock(258, "node2_hash_0x102"))
-		// 0x101 uses YAML default — both agree
 		update()
 
-		// resolves to last common ancestor (0x101)
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+		// CL mode: no walk-back — consensus is the minimum latest block (0x103)
+		require.Equal(t, "0x103", bg.Consensus.GetLatestBlockNumber().String())
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
-		// listener NOT fired: we never had prior consensus at 0x103 or 0x102
 		require.False(t, listenerCalled)
-	})
-
-	t.Run("safe hash divergence - walks back to agreed safe block", func(t *testing.T) {
-		reset()
-
-		// node2 reports a different hash at safe block 0xe1 (225)
-		s2 := clSyncStatus(257, "hash_0x101")
-		s2["safe_l2"] = map[string]interface{}{
-			"hash":   "wrong_safe_hash",
-			"number": float64(225),
-		}
-		override("node2", "optimism_syncStatus", "", buildResponse(s2))
-
-		// both agree at 0xe0 (224) one block back
-		override("node1", "optimism_outputAtBlock", "0xe0", outputAtBlock(224, "agreed_safe_hash"))
-		override("node2", "optimism_outputAtBlock", "0xe0", outputAtBlock(224, "agreed_safe_hash"))
-
-		update()
-
-		// safe walks back to last agreed block
-		require.Equal(t, "0xe0", bg.Consensus.GetSafeBlockNumber().String())
-		require.Equal(t, "agreed_safe_hash", bg.Consensus.GetSafeBlockHash())
-		// unsafe consensus unaffected
-		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
 	t.Run("finalized below consensus - lagging backend excluded from candidates", func(t *testing.T) {
@@ -690,7 +641,6 @@ func TestConsensusCL(t *testing.T) {
 
 		// node1 excluded; consensus finalized holds at 0xc1 backed by node2 alone
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, "hash_0xc1", bg.Consensus.GetFinalizedBlockHash())
 		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
 		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 		// unsafe and safe consensus unaffected
@@ -713,7 +663,6 @@ func TestConsensusCL(t *testing.T) {
 
 		// node1 excluded; consensus local_safe holds at 0xe1 backed by node2 alone
 		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
-		require.Equal(t, "hash_0xe1", bg.Consensus.GetLocalSafeBlockHash())
 		require.Equal(t, 1, len(bg.Consensus.GetConsensusGroup()))
 		require.NotContains(t, bg.Consensus.GetConsensusGroup(), nodes["node1"].backend)
 		// unsafe and safe consensus unaffected
@@ -770,7 +719,6 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.Equal(t, "0xe1", bg.Consensus.GetLocalSafeBlockNumber().String())
-		require.Equal(t, "hash_0xe1", bg.Consensus.GetLocalSafeBlockHash())
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
@@ -796,7 +744,6 @@ func TestConsensusCL(t *testing.T) {
 		update()
 
 		require.Equal(t, "0xc1", bg.Consensus.GetFinalizedBlockNumber().String())
-		require.Equal(t, "hash_0xc1", bg.Consensus.GetFinalizedBlockHash())
 
 		resRaw, statusCode, err := client.SendRPC("optimism_syncStatus", nil)
 		require.NoError(t, err)
@@ -854,7 +801,6 @@ func TestConsensusCL(t *testing.T) {
 		overrideSyncStatus("node2", 258, "hash_0x102")
 
 		require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
-		require.Equal(t, "hash_0x101", bg.Consensus.GetLatestBlockHash())
 
 		req1 := NewRPCReq("1", "optimism_syncStatus", nil)
 		req2 := NewRPCReq("2", "optimism_syncStatus", nil)
@@ -933,10 +879,53 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, float64(105), currentL1["number"], "second poll: node1 regressed, node2 at 105 is pin")
 	})
 
+	t.Run("output root agreement: both backends agree, both stay in consensus group", func(t *testing.T) {
+		// Default YAML fixture has both nodes returning outputRoot "output_root_0xe1" for 0xe1.
+		reset()
+		update()
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+	})
+
+	t.Run("output root mismatch (2-backend tie): warns but neither banned", func(t *testing.T) {
+		// With exactly 2 backends and different output roots there is no majority (1v1 tie).
+		// Neither backend is banned — we can't determine which derivation is correct.
+		// A warning is emitted for operator visibility.
+		// In a deployment with ≥3 backends, the minority backend would be banned.
+		reset()
+		override("node2", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
+			"outputRoot": "WRONG_output_root",
+			"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+		}))
+		update()
+
+		// Tie: neither backend is banned
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+	})
+
+	t.Run("output root error: backend that errors is skipped, not banned", func(t *testing.T) {
+		// If a backend does not support optimism_outputAtBlock (e.g. old version),
+		// it should not be penalised — verification is skipped for that backend.
+		reset()
+		// Override node2 to return a non-200 / error response for outputAtBlock.
+		// When all-but-one error, the single successful response is the agreed root
+		// and the erroring backend is only warned, not banned.
+		// Here we test the simpler case: node2 errors, node1 succeeds.
+		// node2 should remain in consensus (error ≠ mismatch).
+		override("node2", "optimism_outputAtBlock", "0xe1", `{"jsonrpc":"2.0","id":67,"error":{"code":-32601,"message":"method not found"}}`)
+		update()
+
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+	})
+
 	t.Run("first cycle fallback: no cache, falls through to backend", func(t *testing.T) {
 		// reset() clears the pin cache (consensusSyncBody = nil, lastServedCLL1Num = 0).
 		// Without calling update(), GetConsensusSyncStatusBody() returns nil, so
-		// PrepareConsensusRequests falls through to backend forwarding.
+		// OverwriteConsensusResponses falls through to backend forwarding.
 		reset()
 		// Do NOT call update() — cache is empty
 
