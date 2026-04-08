@@ -48,8 +48,8 @@ func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, 
 }
 
 // RewriteResponse synthesizes responses from consensus state before the backend is called.
-// This is EL-only: CL mode always needs the real backend response (for passthrough fields
-// like current_l1 / head_l1) and rewrites specific fields post-fetch instead.
+// This is EL-only: CL mode intercepts optimism_syncStatus entirely in OverwriteConsensusResponses
+// and serves it from the pin-backend cache, so no rewriting is needed here.
 func RewriteResponse(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
 	if rctx.consensusLayer {
 		return RewriteNone, nil
