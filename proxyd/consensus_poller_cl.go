@@ -413,6 +413,15 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		return lowestSafe, lowestLocalSafe
 	}
 
+	// Reset timeout counter for every backend that successfully returned an output root,
+	// regardless of whether a majority was established. The counter tracks consecutive
+	// fetch failures; any successful response proves the backend is responsive.
+	for _, r := range results {
+		if r.err == nil {
+			candidates[r.be].clOutputRootTimeouts = 0
+		}
+	}
+
 	if maxCount < 2 {
 		// Cannot establish a clear majority:
 		//   - all backends errored (maxCount == 0), or
@@ -448,8 +457,6 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 			// timedOut already handled above
 			continue
 		}
-		// Successful fetch: reset the consecutive timeout counter.
-		candidates[r.be].clOutputRootTimeouts = 0
 		if r.outputRoot != agreedRoot {
 			log.Error("banning CL backend: output root disagrees with consensus majority",
 				"backend", r.be.Name,

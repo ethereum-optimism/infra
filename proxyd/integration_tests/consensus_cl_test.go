@@ -934,6 +934,50 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
+	t.Run("output root: all backends disagree, no majority — nobody banned", func(t *testing.T) {
+		// 3 backends each return a unique output root → no backend has ≥2 votes.
+		// Without a majority we cannot determine who is correct, so nobody should be banned.
+		reset()
+		override("node1", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
+			"outputRoot": "root_A",
+			"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+		}))
+		override("node2", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
+			"outputRoot": "root_B",
+			"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+		}))
+		override("node3", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
+			"outputRoot": "root_C",
+			"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+		}))
+		update()
+
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.False(t, bg.Consensus.IsBanned(nodes["node3"].backend))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
+	})
+
+	t.Run("output root ban recovery", func(t *testing.T) {
+		// Ban a backend via output root mismatch, then unban and verify it re-enters consensus.
+		reset()
+		override("node2", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
+			"outputRoot": "WRONG_output_root",
+			"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+		}))
+		update()
+
+		require.True(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
+
+		bg.Consensus.Unban(nodes["node2"].backend)
+		nodes["node2"].handler.ResetOverrides()
+		update()
+
+		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
+		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
+	})
+
 	t.Run("output root error: backend that errors is skipped, not banned", func(t *testing.T) {
 		// If a backend does not support optimism_outputAtBlock (e.g. old version),
 		// it should not be penalised — verification is skipped for that backend.
