@@ -1,0 +1,73 @@
+- method: opp2p_peerStats
+  response: >
+    {
+      "jsonrpc": "2.0",
+      "id": 67,
+      "result": {
+        "connected": 10
+      }
+    }
+- method: optimism_outputAtBlock
+  block: "0xe1"
+  response: >
+    {
+      "jsonrpc": "2.0",
+      "id": 67,
+      "result": {
+        "outputRoot": "output_root_0xe1",
+        "blockRef": {
+          "hash": "hash_0xe1",
+          "number": 225
+        }
+      }
+    }
+- method: optimism_syncStatus
+  response: >
+    {
+      "jsonrpc": "2.0",
+      "id": 67,
+      "result": {
+        "unsafe_l2": {
+          "hash": "hash_0x101",
+          "number": 257,
+          "timestamp": 1700000101,
+          "parentHash": "hash_0x100",
+          "l1origin": {"hash": "hash_l1_100", "number": 100},
+          "sequenceNumber": 0
+        },
+        "safe_l2": {
+          "hash": "hash_0xe1",
+          "number": 225,
+          "timestamp": 1700000061,
+          "parentHash": "hash_0xe0",
+          "l1origin": {"hash": "hash_l1_90", "number": 90},
+          "sequenceNumber": 0
+        },
+        "local_safe_l2": {
+          "hash": "hash_0xe1",
+          "number": 225,
+          "timestamp": 1700000061,
+          "parentHash": "hash_0xe0",
+          "l1origin": {"hash": "hash_l1_90", "number": 90},
+          "sequenceNumber": 0
+        },
+        "finalized_l2": {
+          "hash": "hash_0xc1",
+          "number": 193,
+          "timestamp": 1700000029,
+          "parentHash": "hash_0xc0",
+          "l1origin": {"hash": "hash_l1_80", "number": 80},
+          "sequenceNumber": 0
+        },
+        "current_l1": {
+          "hash": "hash_l1_100",
+          "number": 100,
+          "timestamp": 9999999999
+        },
+        "head_l1": {
+          "hash": "hash_l1_100",
+          "number": 100,
+          "timestamp": 9999999999
+        }
+      }
+    }

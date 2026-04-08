@@ -328,6 +328,16 @@ func TestBlockHeightZero(t *testing.T) {
 		require.Equal(t, nodes["node2"].intermittentNetErrorWindow.Count(), uint(0))
 	})
 
+	// isELInSync is now called after getPeerCount (inside the else branch), so failing
+	// cycles contribute one fewer network request than before. With max_error_rate_threshold=0.25
+	// the ban fires after 3 failing cycles instead of 5.
+	//
+	// Per-cycle accounting (initial successful update: 6 network requests):
+	//   cycles 1-2: getPeerCount(500) [+1 network, +1 error] + findConsensusBlock [+1 network] = +2/+1
+	//   cycle  3:   getPeerCount(500) [+1 network, +1 error]; node1 IsHealthy=false → excluded from
+	//               findConsensusBlock candidates → no extra network request
+	// After cycle 3: network=11, errors=3, rate=3/11≈0.27 ≥ 0.25 → IsHealthy=false
+	// Cycle 4: UpdateBackend sees !IsHealthy → bans; getPeerCount is never called → count stays at 3.
 	t.Run("Test that if it breaches the network error threshold the node will be banned", func(t *testing.T) {
 		reset()
 		update()
@@ -336,12 +346,12 @@ func TestBlockHeightZero(t *testing.T) {
 		overrideBlock("node1", "finalized", "0x0", 403)
 		overridePeerCount("node1", 0, 500)
 
-		for i := 1; i < 7; i++ {
+		for i := 1; i < 5; i++ {
 			require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend), "Execpted node 1 to be not banned on iteration ", i)
 			require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend), "Execpted node 2 to be not banned on iteration ", i)
 			update()
-			// On the 5th update (i=6), node 1 will be banned due to error rate and not increment window
-			if i < 6 {
+			// On the 4th update (i=4), node1 will be banned due to error rate and will not increment window
+			if i < 4 {
 				require.Equal(t, nodes["node1"].intermittentNetErrorWindow.Count(), uint(i))
 			}
 			require.Equal(t, nodes["node2"].intermittentNetErrorWindow.Count(), uint(0))

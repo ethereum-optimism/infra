@@ -133,6 +133,12 @@ var (
 		HTTPErrorCode: 400,
 	}
 
+	ErrCLConsensusSyncNotReady = &RPCErr{
+		Code:          JSONRPCErrorInternal - 25,
+		Message:       "optimism_syncStatus not available: CL consensus poller has not completed a cycle",
+		HTTPErrorCode: 503,
+	}
+
 	ErrBackendUnexpectedJSONRPC = errors.New("backend returned an unexpected JSON-RPC response")
 
 	ErrConsensusGetReceiptsCantBeBatched = errors.New("consensus_getReceipts cannot be batched")
@@ -1043,6 +1049,11 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 
 	rpcRequestsTotal.Inc()
 
+	// If every request was overridden, skip backend forwarding — no RPCs to forward.
+	if len(rpcReqs) == 0 {
+		return OverrideResponses(nil, overriddenResponses), "", nil
+	}
+
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
@@ -1771,14 +1782,39 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 
 func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
 	rctx := RewriteContext{
-		latest:        bg.Consensus.GetLatestBlockNumber(),
-		safe:          bg.Consensus.GetSafeBlockNumber(),
-		finalized:     bg.Consensus.GetFinalizedBlockNumber(),
-		maxBlockRange: bg.Consensus.maxBlockRange,
-		consensusMode: true,
+		latest:         bg.Consensus.GetLatestBlockNumber(),
+		safe:           bg.Consensus.GetSafeBlockNumber(),
+		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
+		maxBlockRange:  bg.Consensus.maxBlockRange,
+		consensusMode:  true,
+		consensusLayer: bg.Consensus.IsConsensusLayer(),
 	}
 
 	for i, req := range rpcReqs {
+		// CL mode: serve optimism_syncStatus directly from the pin-backend cache.
+		// The cache holds the full response from the backend with the lowest current_l1,
+		// ensuring all fields are internally consistent (single-backend snapshot).
+		if rctx.consensusLayer && req.Method == "optimism_syncStatus" {
+			body := bg.Consensus.GetConsensusSyncStatusBody()
+			var res RPCRes
+			if body != nil {
+				RecordCLSyncStatusCacheHit(bg)
+				res = RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Result: body}
+			} else {
+				// Cache not yet populated (first consensus cycle not complete).
+				// Return an error rather than forwarding to an arbitrary backend,
+				// which would bypass consensus guarantees.
+				RecordCLSyncStatusCacheMiss(bg)
+				res = RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID, Error: ErrCLConsensusSyncNotReady}
+			}
+			overriddenResponses = append(overriddenResponses, &indexedReqRes{
+				index: i,
+				req:   req,
+				res:   &res,
+			})
+			continue
+		}
+
 		res := RPCRes{JSONRPC: JSONRPCVersion, ID: req.ID}
 		result, err := RewriteTags(rctx, req, &res)
 		switch result {
