@@ -588,6 +588,14 @@ func Start(config *Config) (*Server, func(), error) {
 						"backend_count", n,
 					)
 				}
+				for _, be := range bg.Backends {
+					if be.client.Timeout == 0 {
+						log.Crit("CL consensus requires a backend timeout; set response_timeout_seconds or response_timeout_milliseconds",
+							"backend_group", bgName,
+							"backend", be.Name,
+						)
+					}
+				}
 			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))
@@ -615,6 +623,9 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 			if bgcfg.ConsensusCLHeadL1MaxAge > 0 {
 				copts = append(copts, WithCLHeadL1MaxAge(time.Duration(bgcfg.ConsensusCLHeadL1MaxAge)))
+			}
+			if bgcfg.ConsensusCLOutputRootBanThreshold > 0 {
+				copts = append(copts, WithCLOutputRootBanThreshold(bgcfg.ConsensusCLOutputRootBanThreshold))
 			}
 
 			for _, be := range bgcfg.Backends {

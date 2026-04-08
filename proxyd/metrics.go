@@ -500,6 +500,12 @@ var (
 		Help:      "Count of CL backend bans due to output root disagreement with the majority at the consensus safe block.",
 	}, []string{"backend_name"})
 
+	consensusCLBanOutputRootTimeoutTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_output_root_timeout_total",
+		Help:      "Count of CL backend bans due to repeated optimism_outputAtBlock fetch timeouts.",
+	}, []string{"backend_name"})
+
 	// consensusCLOutputRootDisagreementTotal fires once per backend that is found to
 	// disagree on the output root, regardless of whether a ban was issued (mismatch with
 	// majority) or a tie was detected (no majority). Use backend_name to identify which
@@ -803,6 +809,10 @@ func RecordCLBanInteropSafeGtLocalSafe(b *Backend) {
 
 func RecordCLBanOutputRootMismatch(b *Backend) {
 	consensusCLBanOutputRootMismatchTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanOutputRootTimeout(b *Backend) {
+	consensusCLBanOutputRootTimeoutTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordConsensusBackendUpdateDelay(b *Backend, lastUpdate time.Time) {

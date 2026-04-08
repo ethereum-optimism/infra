@@ -7,6 +7,7 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -62,6 +63,14 @@ func WithCLSyncThreshold(threshold uint64) ConsensusOpt {
 func WithCLHeadL1MaxAge(maxAge time.Duration) ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.clHeadL1MaxAge = maxAge
+	}
+}
+
+// WithCLOutputRootBanThreshold sets the number of consecutive per-cycle
+// optimism_outputAtBlock timeouts before a CL backend is banned.
+func WithCLOutputRootBanThreshold(threshold uint) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.clOutputRootBanThreshold = threshold
 	}
 }
 
@@ -324,6 +333,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		be         *Backend
 		outputRoot string
 		err        error
+		timedOut   bool
 	}
 
 	results := make([]result, 0, len(candidates))
@@ -334,12 +344,43 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		go func() {
 			defer wg.Done()
 			root, err := cp.fetchCLOutputRoot(ctx, be, safeBlock)
+			timedOut := errors.Is(err, context.DeadlineExceeded)
 			mu.Lock()
-			results = append(results, result{be: be, outputRoot: root, err: err})
+			results = append(results, result{be: be, outputRoot: root, err: err, timedOut: timedOut})
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
+
+	// Process timeouts first. Consecutive timeouts accumulate toward a ban threshold;
+	// a single timeout is tolerated to avoid banning on transient slowness.
+	// This runs unconditionally so the counter advances even when no majority is established.
+	for _, r := range results {
+		if !r.timedOut {
+			continue
+		}
+		bs := candidates[r.be]
+		bs.clOutputRootTimeouts++
+		if bs.clOutputRootTimeouts >= cp.clOutputRootBanThreshold {
+			log.Error("banning CL backend: repeated optimism_outputAtBlock timeouts",
+				"backend", r.be.Name,
+				"consecutive_timeouts", bs.clOutputRootTimeouts,
+				"threshold", cp.clOutputRootBanThreshold,
+				"safe_block", safeBlock,
+			)
+			RecordCLBanOutputRootTimeout(r.be)
+			cp.Ban(r.be)
+			delete(candidates, r.be)
+			bs.clOutputRootTimeouts = 0
+		} else {
+			log.Warn("CL output root fetch timed out, tolerating until threshold",
+				"backend", r.be.Name,
+				"consecutive_timeouts", bs.clOutputRootTimeouts,
+				"threshold", cp.clOutputRootBanThreshold,
+				"safe_block", safeBlock,
+			)
+		}
+	}
 
 	// Count successful responses per output root.
 	counts := make(map[string]int)
@@ -397,13 +438,18 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 
 	for _, r := range results {
 		if r.err != nil {
-			log.Warn("error fetching CL output root, skipping verification for backend",
-				"backend", r.be.Name,
-				"safe_block", safeBlock,
-				"err", r.err,
-			)
+			if !r.timedOut {
+				log.Warn("error fetching CL output root, skipping verification for backend",
+					"backend", r.be.Name,
+					"safe_block", safeBlock,
+					"err", r.err,
+				)
+			}
+			// timedOut already handled above
 			continue
 		}
+		// Successful fetch: reset the consecutive timeout counter.
+		candidates[r.be].clOutputRootTimeouts = 0
 		if r.outputRoot != agreedRoot {
 			log.Error("banning CL backend: output root disagrees with consensus majority",
 				"backend", r.be.Name,
@@ -411,7 +457,6 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 				"agreed_root", agreedRoot,
 				"safe_block", safeBlock,
 			)
-			RecordCLOutputRootDisagreement(r.be)
 			RecordCLBanOutputRootMismatch(r.be)
 			cp.Ban(r.be)
 			delete(candidates, r.be)

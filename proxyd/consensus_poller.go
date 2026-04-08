@@ -51,9 +51,10 @@ type ConsensusPoller struct {
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
-	consensusLayer  bool
-	clSyncThreshold uint64
-	clHeadL1MaxAge  time.Duration
+	consensusLayer           bool
+	clSyncThreshold          uint64
+	clHeadL1MaxAge           time.Duration
+	clOutputRootBanThreshold uint
 
 	// Pin-backend cache for optimism_syncStatus (CL mode only).
 	// selectConsensusSyncStatusBody selects the pin backend after each consensus
@@ -82,6 +83,10 @@ type backendState struct {
 	lastUpdate time.Time
 
 	bannedUntil time.Time
+
+	// CL mode only: counts consecutive output root fetch timeouts.
+	// Resets to 0 on a successful fetch. Reaching clOutputRootBanThreshold triggers a ban.
+	clOutputRootTimeouts uint
 }
 
 func (bs *backendState) IsBanned() bool {
@@ -313,13 +318,14 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		backendGroup: bg,
 		backendState: state,
 
-		banPeriod:               5 * time.Minute,
-		maxUpdateThreshold:      30 * time.Second,
-		maxBlockLag:             8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
-		minPeerCount:            3,
-		interval:                DefaultPollerInterval,
-		clSyncThreshold: 10,              // 10 L1 blocks ~ 2 minutes
-		clHeadL1MaxAge:  5 * time.Minute, // L1 head older than this → node is stalled
+		banPeriod:                5 * time.Minute,
+		maxUpdateThreshold:       30 * time.Second,
+		maxBlockLag:              8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
+		minPeerCount:             3,
+		interval:                 DefaultPollerInterval,
+		clSyncThreshold:          10,              // 10 L1 blocks ~ 2 minutes
+		clHeadL1MaxAge:           5 * time.Minute, // L1 head older than this → node is stalled
+		clOutputRootBanThreshold: 3,
 	}
 
 	for _, opt := range opts {

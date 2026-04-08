@@ -221,6 +221,12 @@ type BackendGroupConfig struct {
 	// routing_strategy = "consensus_aware_consensus_layer".
 	ConsensusCLHeadL1MaxAge TOMLDuration `toml:"consensus_cl_head_l1_max_age"`
 
+	// consensus_cl_output_root_ban_threshold is the number of consecutive per-cycle
+	// optimism_outputAtBlock timeouts before a CL backend is banned. The counter resets
+	// to 0 on any successful fetch. Default: 3. Only applies when
+	// routing_strategy = "consensus_aware_consensus_layer".
+	ConsensusCLOutputRootBanThreshold uint `toml:"consensus_cl_output_root_ban_threshold"`
+
 	ConsensusHA                  bool         `toml:"consensus_ha"`
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`
 	ConsensusHALockPeriod        TOMLDuration `toml:"consensus_ha_lock_period"`
