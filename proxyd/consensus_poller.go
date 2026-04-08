@@ -572,14 +572,6 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			"proposedBlockHash", proposedBlockHash)
 	}
 
-	// update tracker
-	cp.tracker.SetState(ConsensusTrackerState{
-		Latest:    proposedBlock,
-		Safe:      lowestSafeBlock,
-		Finalized: lowestFinalizedBlock,
-		LocalSafe: lowestLocalSafeBlock,
-	})
-
 	// update consensus group
 	group := make([]*Backend, 0, len(candidates))
 	consensusBackendsNames := make([]string, 0, len(candidates))
@@ -598,8 +590,35 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	cp.consensusGroup = group
 	cp.consensusGroupMux.Unlock()
 
+	// Select the pin backend before SetState so the body is included in the
+	// state snapshot posted to Redis (enabling followers to serve the same response).
 	if cp.consensusLayer {
 		cp.selectConsensusSyncStatusBody(group)
+	}
+
+	// update tracker
+	cp.syncStatusBodyMu.RLock()
+	syncBody := cp.consensusSyncBody
+	cp.syncStatusBodyMu.RUnlock()
+	cp.tracker.SetState(ConsensusTrackerState{
+		Latest:    proposedBlock,
+		Safe:      lowestSafeBlock,
+		Finalized: lowestFinalizedBlock,
+		LocalSafe: lowestLocalSafeBlock,
+		SyncBody:  syncBody,
+	})
+
+	// Apply the body from GetState so all instances serve an identical
+	// optimism_syncStatus response. For leaders (InMemory or Redis) GetState
+	// returns the local state just written above, so this is a no-op. For
+	// Redis followers GetState returns ct.remote (populated from Redis by the
+	// heartbeat goroutine), so they adopt the leader's body.
+	if cp.consensusLayer {
+		if remoteBody := cp.tracker.GetState().SyncBody; len(remoteBody) > 0 {
+			cp.syncStatusBodyMu.Lock()
+			cp.consensusSyncBody = remoteBody
+			cp.syncStatusBodyMu.Unlock()
+		}
 	}
 
 	RecordGroupConsensusLatestBlock(cp.backendGroup, proposedBlock)

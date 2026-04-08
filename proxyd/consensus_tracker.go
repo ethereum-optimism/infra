@@ -25,10 +25,15 @@ type ConsensusTracker interface {
 // ConsensusTrackerState holds the full consensus state in one snapshot.
 // Adding a new field only requires changing this struct and update().
 type ConsensusTrackerState struct {
-	Latest    hexutil.Uint64 `json:"latest"`
-	Safe      hexutil.Uint64 `json:"safe"`
-	Finalized hexutil.Uint64 `json:"finalized"`
-	LocalSafe hexutil.Uint64 `json:"local_safe"`
+	Latest    hexutil.Uint64  `json:"latest"`
+	Safe      hexutil.Uint64  `json:"safe"`
+	Finalized hexutil.Uint64  `json:"finalized"`
+	LocalSafe hexutil.Uint64  `json:"local_safe"`
+	// SyncBody is the raw optimism_syncStatus JSON body from the pin backend.
+	// Set by the leader each cycle; followers read this to serve a consistent
+	// response body across all proxyd instances in Redis HA mode.
+	// Nil in EL mode.
+	SyncBody  json.RawMessage `json:"sync_body,omitempty"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -39,6 +44,7 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
 	ct.state.LocalSafe = o.LocalSafe
+	ct.state.SyncBody = o.SyncBody
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
@@ -270,6 +276,9 @@ func (ct *RedisConsensusTracker) key(tag string) string {
 }
 
 func (ct *RedisConsensusTracker) GetState() ConsensusTrackerState {
+	if ct.leader {
+		return ct.local.GetState()
+	}
 	return ct.remote.GetState()
 }
 

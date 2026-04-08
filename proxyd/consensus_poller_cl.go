@@ -225,7 +225,8 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 	cp.lastServedCLL1Num = lowestL1
 	cp.syncStatusBodyMu.Unlock()
 
-	RecordCLGroupPinL1(cp.backendGroup, pinBackend, lowestL1)
+	RecordCLGroupCurrentL1(cp.backendGroup, lowestL1)
+	RecordCLGroupPinActive(cp.backendGroup, pinBackend)
 	log.Debug("CL pin backend selected for optimism_syncStatus cache",
 		"backend", pinBackend.Name,
 		"current_l1_number", lowestL1,

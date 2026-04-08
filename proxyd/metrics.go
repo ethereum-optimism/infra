@@ -409,10 +409,16 @@ var (
 		Help:      "Current L1 block number that each CL backend has derived up to (current_l1.number from optimism_syncStatus).",
 	}, []string{"backend_name"})
 
-	consensusCLGroupPinL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	consensusCLGroupCurrentL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
-		Name:      "consensus_cl_group_pin_l1",
-		Help:      "The current_l1 block number of the pin backend whose optimism_syncStatus response is being served to clients.",
+		Name:      "consensus_cl_group_current_l1",
+		Help:      "The current_l1 block number the group is currently serving optimism_syncStatus from (i.e. the pin backend's L1 position). Group-level scalar — use this to track L1 derivation progress over time. To identify which backend is pinned, use consensus_cl_group_pin_active.",
+	}, []string{"backend_group_name"})
+
+	consensusCLGroupPinActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_group_pin_active",
+		Help:      "1 if this backend is currently selected as the pin serving optimism_syncStatus, 0 otherwise. Set for every backend in the group every poll cycle. Use this for state timeline graphs and pin-change alerting.",
 	}, []string{"backend_group_name", "backend_name"})
 
 	consensusCLSyncStatusCacheHitTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -758,8 +764,21 @@ func RecordCLBackendCurrentL1(b *Backend, blockNumber uint64) {
 	consensusCLBackendCurrentL1.WithLabelValues(b.Name).Set(float64(blockNumber))
 }
 
-func RecordCLGroupPinL1(group *BackendGroup, pinBackend *Backend, blockNumber uint64) {
-	consensusCLGroupPinL1.WithLabelValues(group.Name, pinBackend.Name).Set(float64(blockNumber))
+func RecordCLGroupCurrentL1(group *BackendGroup, blockNumber uint64) {
+	consensusCLGroupCurrentL1.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+// RecordCLGroupPinActive sets the pin-active gauge to 1 for pinBackend and 0 for all
+// other backends in the group. Called every poll cycle so the state timeline reflects
+// the current selection without relying on metric staleness heuristics.
+func RecordCLGroupPinActive(group *BackendGroup, pinBackend *Backend) {
+	for _, be := range group.Backends {
+		v := float64(0)
+		if be == pinBackend {
+			v = 1
+		}
+		consensusCLGroupPinActive.WithLabelValues(group.Name, be.Name).Set(v)
+	}
 }
 
 func RecordCLSyncStatusCacheHit(group *BackendGroup) {
