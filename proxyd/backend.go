@@ -135,7 +135,7 @@ var (
 
 	ErrCLConsensusSyncNotReady = &RPCErr{
 		Code:          JSONRPCErrorInternal - 25,
-		Message:       "optimism_syncStatus not available: CL consensus poller has not completed a cycle",
+		Message:       "optimism_syncStatus not available",
 		HTTPErrorCode: 503,
 	}
 
