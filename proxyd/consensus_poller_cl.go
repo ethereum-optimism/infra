@@ -74,8 +74,6 @@ func WithCLOutputRootBanThreshold(threshold uint) ConsensusOpt {
 	}
 }
 
-// validateCLConfig checks CL-mode configuration requirements and returns an
-// error if the backend group is misconfigured. Called once during initialization.
 // updateCLBackend fetches the op-node sync status for a single backend and
 // determines whether it is considered in sync. It encapsulates the CL branch of
 // UpdateBackend, keeping all op-node logic out of the shared poller file.
@@ -186,8 +184,13 @@ func (cp *ConsensusPoller) GetConsensusSyncStatusBody() json.RawMessage {
 // optimism_syncStatus response body. This ensures the served response is internally
 // consistent — all fields come from one backend snapshot, not a mix of backends.
 func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backend) {
-	var pinBackend *Backend
-	var lowestL1 uint64 = math.MaxUint64
+	type pinCandidate struct {
+		be   *Backend
+		l1   uint64
+		body json.RawMessage
+	}
+	var pin *pinCandidate
+	lowestL1 := uint64(math.MaxUint64)
 
 	cp.syncStatusBodyMu.RLock()
 	floor := cp.lastServedCLL1Num
@@ -197,16 +200,16 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 		bs := cp.backendState[be]
 		bs.backendStateMux.Lock()
 		l1Num := bs.currentL1Number
-		hasBody := len(bs.syncStatusRaw) > 0
+		body := bs.syncStatusRaw
 		bs.backendStateMux.Unlock()
 
-		if hasBody && l1Num >= floor && l1Num < lowestL1 {
+		if len(body) > 0 && l1Num >= floor && l1Num < lowestL1 {
 			lowestL1 = l1Num
-			pinBackend = be
+			pin = &pinCandidate{be: be, l1: l1Num, body: body}
 		}
 	}
 
-	if pinBackend == nil {
+	if pin == nil {
 		RecordCLNoPinCandidate(cp.backendGroup)
 		log.Warn("CL pin selection: no valid candidate in consensus group",
 			"floor", floor,
@@ -215,20 +218,15 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 		return
 	}
 
-	bs := cp.backendState[pinBackend]
-	bs.backendStateMux.Lock()
-	body := bs.syncStatusRaw
-	bs.backendStateMux.Unlock()
-
 	cp.syncStatusBodyMu.Lock()
-	cp.consensusSyncBody = body
-	cp.lastServedCLL1Num = lowestL1
+	cp.consensusSyncBody = pin.body
+	cp.lastServedCLL1Num = pin.l1
 	cp.syncStatusBodyMu.Unlock()
 
-	RecordCLGroupPinL1(cp.backendGroup, pinBackend, lowestL1)
+	RecordCLGroupPinL1(cp.backendGroup, pin.be, pin.l1)
 	log.Debug("CL pin backend selected for optimism_syncStatus cache",
-		"backend", pinBackend.Name,
-		"current_l1_number", lowestL1,
+		"backend", pin.be.Name,
+		"current_l1_number", pin.l1,
 		"floor", floor,
 	)
 }
@@ -355,38 +353,48 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 	// Process timeouts first. Consecutive timeouts accumulate toward a ban threshold;
 	// a single timeout is tolerated to avoid banning on transient slowness.
 	// This runs unconditionally so the counter advances even when no majority is established.
+	// Access cp.backendState directly (under lock) so the counter persists across cycles;
+	// candidates holds copies from GetBackendState and does not carry clOutputRootTimeouts.
 	for _, r := range results {
 		if !r.timedOut {
 			continue
 		}
-		bs := candidates[r.be]
+		bs := cp.backendState[r.be]
+		bs.backendStateMux.Lock()
 		bs.clOutputRootTimeouts++
-		if bs.clOutputRootTimeouts >= cp.clOutputRootBanThreshold {
+		timeouts := bs.clOutputRootTimeouts
+		bs.backendStateMux.Unlock()
+		if timeouts >= cp.clOutputRootBanThreshold {
 			log.Error("banning CL backend: repeated optimism_outputAtBlock timeouts",
 				"backend", r.be.Name,
-				"consecutive_timeouts", bs.clOutputRootTimeouts,
+				"consecutive_timeouts", timeouts,
 				"threshold", cp.clOutputRootBanThreshold,
 				"safe_block", safeBlock,
 			)
 			RecordCLBanOutputRootTimeout(r.be)
 			cp.Ban(r.be)
 			delete(candidates, r.be)
-			bs.clOutputRootTimeouts = 0
 		} else {
 			log.Warn("CL output root fetch timed out, tolerating until threshold",
 				"backend", r.be.Name,
-				"consecutive_timeouts", bs.clOutputRootTimeouts,
+				"consecutive_timeouts", timeouts,
 				"threshold", cp.clOutputRootBanThreshold,
 				"safe_block", safeBlock,
 			)
 		}
 	}
 
-	// Count successful responses per output root.
+	// Count successful responses per output root and reset the timeout counter for any
+	// backend that responded successfully. The counter tracks consecutive fetch failures;
+	// any successful response proves the backend is responsive regardless of majority.
 	counts := make(map[string]int)
 	for _, r := range results {
 		if r.err == nil {
 			counts[r.outputRoot]++
+			bs := cp.backendState[r.be]
+			bs.backendStateMux.Lock()
+			bs.clOutputRootTimeouts = 0
+			bs.backendStateMux.Unlock()
 		}
 	}
 
@@ -411,15 +419,6 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 			}
 		}
 		return lowestSafe, lowestLocalSafe
-	}
-
-	// Reset timeout counter for every backend that successfully returned an output root,
-	// regardless of whether a majority was established. The counter tracks consecutive
-	// fetch failures; any successful response proves the backend is responsive.
-	for _, r := range results {
-		if r.err == nil {
-			candidates[r.be].clOutputRootTimeouts = 0
-		}
 	}
 
 	if maxCount < 2 {

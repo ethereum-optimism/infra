@@ -650,6 +650,7 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 	bs.latestBlockNumber = 0
 	bs.safeBlockNumber = 0
 	bs.finalizedBlockNumber = 0
+	bs.clOutputRootTimeouts = 0
 }
 
 // Unban removes any bans from the backends
