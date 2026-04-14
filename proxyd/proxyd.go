@@ -567,16 +567,36 @@ func Start(config *Config) (*Server, func(), error) {
 		bgcfg := config.BackendGroups[bgName]
 
 		if !bgcfg.ValidateRoutingStrategy(bgName) {
-			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, \"\"", "name", bgName)
+			log.Crit("Invalid routing strategy provided. Valid options: fallback, multicall, consensus_aware, consensus_aware_consensus_layer \"\"", "name", bgName)
 		}
 
 		log.Info("configuring routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 
-		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy {
-			log.Info("creating poller for consensus aware backend_group", "name", bgName)
+		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy || bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
+			log.Info("creating poller for consensus aware backend_group",
+				"name", bgName,
+				"routing_strategy", bgcfg.RoutingStrategy,
+			)
 
 			copts := make([]ConsensusOpt, 0)
 
+			if bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
+				copts = append(copts, WithCLConsensusMode())
+				if n := len(bg.Backends); n%2 == 0 {
+					log.Crit("CL consensus requires an odd number of backends: output root verification needs a majority to evict a diverging backend; an even-sized group cannot resolve a tie",
+						"backend_group", bgName,
+						"backend_count", n,
+					)
+				}
+				for _, be := range bg.Backends {
+					if be.client.Timeout == 0 {
+						log.Crit("CL consensus requires a backend timeout; set response_timeout_seconds or response_timeout_milliseconds",
+							"backend_group", bgName,
+							"backend", be.Name,
+						)
+					}
+				}
+			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))
 			}
@@ -597,6 +617,15 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
+			}
+			if bgcfg.ConsensusCLSyncThreshold > 0 {
+				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))
+			}
+			if bgcfg.ConsensusCLHeadL1MaxAge > 0 {
+				copts = append(copts, WithCLHeadL1MaxAge(time.Duration(bgcfg.ConsensusCLHeadL1MaxAge)))
+			}
+			if bgcfg.ConsensusCLOutputRootBanThreshold > 0 {
+				copts = append(copts, WithCLOutputRootBanThreshold(bgcfg.ConsensusCLOutputRootBanThreshold))
 			}
 
 			for _, be := range bgcfg.Backends {
@@ -632,8 +661,7 @@ func Start(config *Config) (*Server, func(), error) {
 				copts = append(copts, WithTracker(tracker))
 			}
 
-			cp := NewConsensusPoller(bg, copts...)
-			bg.Consensus = cp
+			bg.Consensus = NewConsensusPoller(bg, copts...)
 
 			if bgcfg.ConsensusHA {
 				tracker.(*RedisConsensusTracker).Init()

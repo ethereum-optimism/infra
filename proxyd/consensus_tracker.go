@@ -25,12 +25,10 @@ type ConsensusTracker interface {
 // ConsensusTrackerState holds the full consensus state in one snapshot.
 // Adding a new field only requires changing this struct and update().
 type ConsensusTrackerState struct {
-	Latest        hexutil.Uint64 `json:"latest"`
-	Safe          hexutil.Uint64 `json:"safe"`
-	Finalized     hexutil.Uint64 `json:"finalized"`
-	LatestHash    string         `json:"latest_hash"`
-	SafeHash      string         `json:"safe_hash"`
-	FinalizedHash string         `json:"finalized_hash"`
+	Latest    hexutil.Uint64 `json:"latest"`
+	Safe      hexutil.Uint64 `json:"safe"`
+	Finalized hexutil.Uint64 `json:"finalized"`
+	LocalSafe hexutil.Uint64 `json:"local_safe"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -40,9 +38,7 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Latest = o.Latest
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
-	ct.state.LatestHash = o.LatestHash
-	ct.state.SafeHash = o.SafeHash
-	ct.state.FinalizedHash = o.FinalizedHash
+	ct.state.LocalSafe = o.LocalSafe
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
@@ -66,9 +62,13 @@ func (ct *InMemoryConsensusTracker) Valid() bool {
 func (ct *InMemoryConsensusTracker) Behind(other *InMemoryConsensusTracker) bool {
 	local := ct.GetState()
 	remote := other.GetState()
+	// LocalSafe is only non-zero in CL mode; in EL mode both sides are always 0
+	// so this condition never fires for EL deployments.
+	localSafeBehind := local.LocalSafe > 0 && local.LocalSafe < remote.LocalSafe
 	return local.Latest < remote.Latest ||
 		local.Safe < remote.Safe ||
-		local.Finalized < remote.Finalized
+		local.Finalized < remote.Finalized ||
+		localSafeBehind
 }
 
 func (ct *InMemoryConsensusTracker) GetState() ConsensusTrackerState {

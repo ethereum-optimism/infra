@@ -403,6 +403,120 @@ var (
 		"backend_name",
 	})
 
+	consensusCLBackendCurrentL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_current_l1",
+		Help:      "Current L1 block number that each CL backend has derived up to (current_l1.number from optimism_syncStatus).",
+	}, []string{"backend_name"})
+
+	consensusCLGroupPinL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_group_pin_l1",
+		Help:      "The current_l1 block number of the pin backend whose optimism_syncStatus response is being served to clients.",
+	}, []string{"backend_group_name", "backend_name"})
+
+	consensusCLSyncStatusCacheHitTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_sync_status_cache_hit_total",
+		Help:      "Count of optimism_syncStatus requests served from the pin-backend cache.",
+	}, []string{"backend_group_name"})
+
+	consensusCLSyncStatusCacheMissTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_sync_status_cache_miss_total",
+		Help:      "Count of optimism_syncStatus requests that fell through to a backend (cache not yet populated).",
+	}, []string{"backend_group_name"})
+
+	consensusCLNoPinCandidateTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_no_pin_candidate_total",
+		Help:      "Count of poll cycles where no valid pin candidate was found (all backends below monotonicity floor or have no body).",
+	}, []string{"backend_group_name"})
+
+	consensusCLBackendL1Lag = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_lag",
+		Help:      "L1 block lag for CL (op-node) backends (head_l1 - current_l1)",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLBackendL1LagHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_lag_histogram",
+		Help:      "Distribution of L1 block lag across CL (op-node) backends (head_l1 - current_l1)",
+		Buckets:   []float64{0, 1, 2, 5, 10, 20, 50, 100},
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLBackendL1Stale = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_l1_stale",
+		Help:      "Bool gauge for CL backends with a stale L1 head timestamp",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLBackendLocalSafeBlock = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_backend_local_safe_block",
+		Help:      "Current local_safe_l2 block observed per CL (op-node) backend",
+	}, []string{
+		"backend_name",
+	})
+
+	consensusCLGroupLocalSafeBlock = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_group_local_safe_block",
+		Help:      "Consensus local_safe_l2 block for the CL (op-node) backend group",
+	}, []string{
+		"backend_group_name",
+	})
+
+	// Per-reason CL ban counters. All follow the pattern consensus_cl_ban_*_total
+	// so they can be queried together with a single regex: proxyd_consensus_cl_ban_.*_total
+	consensusCLBanNotHealthyTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_not_healthy_total",
+		Help:      "Count of CL backend bans due to backend failing health check.",
+	}, []string{"backend_name"})
+
+	consensusCLBanUnexpectedBlockTagsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_unexpected_block_tags_total",
+		Help:      "Count of CL backend bans due to unexpected block tag ordering (latest/safe/finalized drift).",
+	}, []string{"backend_name"})
+
+	consensusCLBanInteropSafeGtLocalSafeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_interop_safe_gt_local_safe_total",
+		Help:      "Count of CL backend bans due to safe_l2 advancing ahead of local_safe_l2 (interop violation).",
+	}, []string{"backend_name"})
+
+	consensusCLBanOutputRootMismatchTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_output_root_mismatch_total",
+		Help:      "Count of CL backend bans due to output root disagreement with the majority at the consensus safe block.",
+	}, []string{"backend_name"})
+
+	consensusCLBanOutputRootTimeoutTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ban_output_root_timeout_total",
+		Help:      "Count of CL backend bans due to repeated optimism_outputAtBlock fetch timeouts.",
+	}, []string{"backend_name"})
+
+	// consensusCLOutputRootDisagreementTotal fires once per backend that is found to
+	// disagree on the output root, regardless of whether a ban was issued (mismatch with
+	// majority) or a tie was detected (no majority). Use backend_name to identify which
+	// backend(s) are producing a divergent root.
+	// Query all disagreements with: proxyd_consensus_cl_output_root_disagreement_total
+	consensusCLOutputRootDisagreementTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_output_root_disagreement_total",
+		Help:      "Count of output root disagreement events per backend. Incremented for every backend whose output root does not match the rest of the group, whether or not a ban was issued.",
+	}, []string{"backend_name"})
+
 	consensusUpdateDelayBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_backend_update_delay",
@@ -638,6 +752,67 @@ func RecordConsensusBackendPeerCount(b *Backend, peerCount uint64) {
 
 func RecordConsensusBackendInSync(b *Backend, inSync bool) {
 	consensusInSyncBackend.WithLabelValues(b.Name).Set(boolToFloat64(inSync))
+}
+
+func RecordCLBackendCurrentL1(b *Backend, blockNumber uint64) {
+	consensusCLBackendCurrentL1.WithLabelValues(b.Name).Set(float64(blockNumber))
+}
+
+func RecordCLGroupPinL1(group *BackendGroup, pinBackend *Backend, blockNumber uint64) {
+	consensusCLGroupPinL1.WithLabelValues(group.Name, pinBackend.Name).Set(float64(blockNumber))
+}
+
+func RecordCLSyncStatusCacheHit(group *BackendGroup) {
+	consensusCLSyncStatusCacheHitTotal.WithLabelValues(group.Name).Inc()
+}
+
+func RecordCLSyncStatusCacheMiss(group *BackendGroup) {
+	consensusCLSyncStatusCacheMissTotal.WithLabelValues(group.Name).Inc()
+}
+
+func RecordCLNoPinCandidate(group *BackendGroup) {
+	consensusCLNoPinCandidateTotal.WithLabelValues(group.Name).Inc()
+}
+
+func RecordCLBackendL1Lag(b *Backend, lag uint64) {
+	consensusCLBackendL1Lag.WithLabelValues(b.Name).Set(float64(lag))
+	consensusCLBackendL1LagHistogram.WithLabelValues(b.Name).Observe(float64(lag))
+}
+
+func RecordCLBackendL1Stale(b *Backend, stale bool) {
+	consensusCLBackendL1Stale.WithLabelValues(b.Name).Set(boolToFloat64(stale))
+}
+
+func RecordCLBackendLocalSafeBlock(b *Backend, blockNumber hexutil.Uint64) {
+	consensusCLBackendLocalSafeBlock.WithLabelValues(b.Name).Set(float64(blockNumber))
+}
+
+func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64) {
+	consensusCLGroupLocalSafeBlock.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+func RecordCLOutputRootDisagreement(b *Backend) {
+	consensusCLOutputRootDisagreementTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanNotHealthy(b *Backend) {
+	consensusCLBanNotHealthyTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanUnexpectedBlockTags(b *Backend) {
+	consensusCLBanUnexpectedBlockTagsTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanInteropSafeGtLocalSafe(b *Backend) {
+	consensusCLBanInteropSafeGtLocalSafeTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanOutputRootMismatch(b *Backend) {
+	consensusCLBanOutputRootMismatchTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLBanOutputRootTimeout(b *Backend) {
+	consensusCLBanOutputRootTimeoutTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordConsensusBackendUpdateDelay(b *Backend, lastUpdate time.Time) {
