@@ -322,6 +322,9 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 //     candidates returned unchanged.
 //
 // Returns the filtered candidates map and recomputed lowestSafeBlock / lowestLocalSafeBlock.
+//
+// clOutputRootTimeouts mutations are protected by backendStateMux, which synchronizes
+// with concurrent Ban/Unban and UpdateBackend callers.
 func (cp *ConsensusPoller) verifyCLOutputRoots(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -408,6 +411,11 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		}
 	}
 
+	// candidates holds *backendState values that are copies produced by GetBackendState,
+	// not live pointers into cp.backendState. Reading them here without holding
+	// backendStateMux is safe — they are point-in-time snapshots. Any banned backend
+	// was already removed from candidates by delete() above, so stale entries are not
+	// a concern.
 	lowestFromCandidates := func() (hexutil.Uint64, hexutil.Uint64) {
 		var lowestSafe, lowestLocalSafe hexutil.Uint64
 		for _, bs := range candidates {
