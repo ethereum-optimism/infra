@@ -1,0 +1,59 @@
+{
+  "shared_paths": [
+    ".github/workflows/branches.yaml",
+    ".github/images.json",
+    "go.mod"
+  ],
+  "images": {
+    "cci-stats": {
+      "context": ".",
+      "dockerfile": "cci-stats/Dockerfile",
+      "paths": ["cci-stats/**"]
+    },
+    "op-acceptor": {
+      "context": ".",
+      "dockerfile": "op-acceptor/Dockerfile",
+      "paths": ["op-acceptor/**"]
+    },
+    "op-conductor-mon": {
+      "context": ".",
+      "dockerfile": "op-conductor-mon/Dockerfile",
+      "paths": ["op-conductor-mon/**"]
+    },
+    "op-conductor-ops": {
+      "context": ".",
+      "dockerfile": "op-conductor-ops/Dockerfile",
+      "paths": ["op-conductor-ops/**"]
+    },
+    "op-signer": {
+      "context": ".",
+      "dockerfile": "op-signer/Dockerfile",
+      "paths": ["op-signer/**"]
+    },
+    "op-txproxy": {
+      "context": ".",
+      "dockerfile": "op-txproxy/Dockerfile",
+      "paths": ["op-txproxy/**"]
+    },
+    "op-ufm": {
+      "context": ".",
+      "dockerfile": "op-ufm/Dockerfile",
+      "paths": ["op-ufm/**"]
+    },
+    "peer-mgmt-service": {
+      "context": ".",
+      "dockerfile": "peer-mgmt-service/Dockerfile",
+      "paths": ["peer-mgmt-service/**"]
+    },
+    "proxyd": {
+      "context": ".",
+      "dockerfile": "proxyd/Dockerfile",
+      "paths": ["proxyd/**"]
+    },
+    "replica-healthcheck": {
+      "context": ".",
+      "dockerfile": "replica-healthcheck/Dockerfile",
+      "paths": ["replica-healthcheck/**"]
+    }
+  }
+}
