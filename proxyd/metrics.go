@@ -38,7 +38,6 @@ var (
 	}, []string{
 		"version",
 		"commit",
-		"date",
 	})
 
 	rpcRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -623,8 +622,8 @@ var (
 	})
 )
 
-func RecordBuildInfo(version, commit, date string) {
-	buildInfo.WithLabelValues(version, commit, date).Set(1)
+func RecordBuildInfo(version, commit string) {
+	buildInfo.WithLabelValues(version, commit).Set(1)
 }
 
 func RecordRedisError(source string) {
