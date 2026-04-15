@@ -66,6 +66,7 @@ func main() {
 	if err != nil {
 		log.Crit("error starting proxyd", "err", err)
 	}
+	proxyd.RecordBuildInfo(GitVersion, GitCommit, GitDate)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

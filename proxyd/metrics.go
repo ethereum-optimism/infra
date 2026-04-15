@@ -31,6 +31,16 @@ var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 
 var MillisecondDurationBuckets = []float64{1, 10, 50, 100, 500, 1000, 5000, 10000, 100000}
 
 var (
+	buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "up",
+		Help:      "Set to 1 at startup with version info labels.",
+	}, []string{
+		"version",
+		"commit",
+		"date",
+	})
+
 	rpcRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_requests_total",
@@ -612,6 +622,10 @@ var (
 		"backend_name",
 	})
 )
+
+func RecordBuildInfo(version, commit, date string) {
+	buildInfo.WithLabelValues(version, commit, date).Set(1)
+}
 
 func RecordRedisError(source string) {
 	redisErrorsTotal.WithLabelValues(source).Inc()
