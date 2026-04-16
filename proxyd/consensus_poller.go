@@ -613,10 +613,24 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	RecordGroupConsensusFilteredCount(cp.backendGroup, len(filteredBackendsNames))
 	RecordGroupTotalCount(cp.backendGroup, len(cp.backendGroup.Backends))
 
-	log.Debug("group state",
-		"proposedBlock", proposedBlock,
-		"consensusBackends", strings.Join(consensusBackendsNames, ", "),
-		"filteredBackends", strings.Join(filteredBackendsNames, ", "))
+	if cp.consensusLayer {
+		log.Info("CL consensus cycle complete",
+			"healthy_candidates", len(group),
+			"filtered_candidates", len(filteredBackendsNames),
+			"total_backends", len(cp.backendGroup.Backends),
+			"consensus_backends", strings.Join(consensusBackendsNames, ", "),
+			"filtered_backends", strings.Join(filteredBackendsNames, ", "),
+			"proposedBlock", proposedBlock,
+			"safeBlock", lowestSafeBlock,
+			"localSafeBlock", lowestLocalSafeBlock,
+			"finalizedBlock", lowestFinalizedBlock,
+		)
+	} else {
+		log.Debug("group state",
+			"proposedBlock", proposedBlock,
+			"consensusBackends", strings.Join(consensusBackendsNames, ", "),
+			"filteredBackends", strings.Join(filteredBackendsNames, ", "))
+	}
 }
 
 // IsBanned checks if a specific backend is banned
