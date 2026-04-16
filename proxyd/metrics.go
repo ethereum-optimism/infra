@@ -31,6 +31,12 @@ var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 
 var MillisecondDurationBuckets = []float64{1, 10, 50, 100, 500, 1000, 5000, 10000, 100000}
 
 var (
+	up = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "up",
+		Help:      "Set to 1 when proxyd is running.",
+	})
+
 	rpcRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_requests_total",
@@ -612,6 +618,10 @@ var (
 		"backend_name",
 	})
 )
+
+func RecordUp() {
+	up.Set(1)
+}
 
 func RecordRedisError(source string) {
 	redisErrorsTotal.WithLabelValues(source).Inc()
