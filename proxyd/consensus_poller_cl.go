@@ -224,7 +224,7 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 	cp.syncStatusBodyMu.Unlock()
 
 	RecordCLGroupPinL1(cp.backendGroup, pin.be, pin.l1)
-	log.Debug("CL pin backend selected for optimism_syncStatus cache",
+	log.Info("CL pin backend selected",
 		"backend", pin.be.Name,
 		"current_l1_number", pin.l1,
 		"floor", floor,
@@ -451,6 +451,13 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		lowestSafe, lowestLocalSafe := lowestFromCandidates()
 		return candidates, lowestSafe, lowestLocalSafe
 	}
+
+	log.Info("CL output root verification",
+		"agreed_root", agreedRoot,
+		"safe_block", safeBlock,
+		"agreeing_backends", maxCount,
+		"total_responding", len(counts),
+	)
 
 	for _, r := range results {
 		if r.err != nil {
