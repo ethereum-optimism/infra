@@ -34,18 +34,11 @@ test-%:
 	go test -v ./... -test.run ^Test$*$$
 .PHONY: test-%
 
-GITCOMMIT ?= $(shell git rev-parse HEAD)
-GITDATE ?= $(shell git show -s --format='%ct')
-GITVERSION ?= $(shell git describe --tags --always)
-
 docker:
 	docker build \
 		--platform $(PLATFORM) \
 		--build-arg BUILDER_IMAGE=$(DHI_BUILDER_IMAGE) \
 		--build-arg RUNTIME_IMAGE=$(DHI_RUNTIME_IMAGE) \
-		--build-arg GITCOMMIT=$(GITCOMMIT) \
-		--build-arg GITDATE=$(GITDATE) \
-		--build-arg GITVERSION=$(GITVERSION) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ..
 .PHONY: docker
@@ -55,9 +48,6 @@ docker-dev:
 		--platform $(PLATFORM) \
 		--build-arg BUILDER_IMAGE=$(DEV_BUILDER_IMAGE) \
 		--build-arg RUNTIME_IMAGE=$(DEV_RUNTIME_IMAGE) \
-		--build-arg GITCOMMIT=$(GITCOMMIT) \
-		--build-arg GITDATE=$(GITDATE) \
-		--build-arg GITVERSION=$(GITVERSION) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ..
 .PHONY: docker-dev
