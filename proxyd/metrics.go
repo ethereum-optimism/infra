@@ -31,13 +31,10 @@ var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 
 var MillisecondDurationBuckets = []float64{1, 10, 50, 100, 500, 1000, 5000, 10000, 100000}
 
 var (
-	buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	up = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "up",
-		Help:      "Set to 1 at startup with version info labels.",
-	}, []string{
-		"version",
-		"commit",
+		Help:      "Set to 1 when proxyd is running.",
 	})
 
 	rpcRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -622,8 +619,8 @@ var (
 	})
 )
 
-func RecordBuildInfo(version, commit string) {
-	buildInfo.WithLabelValues(version, commit).Set(1)
+func RecordUp() {
+	up.Set(1)
 }
 
 func RecordRedisError(source string) {
