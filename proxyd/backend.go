@@ -399,6 +399,10 @@ func WithTLSConfig(tlsConfig *tls.Config) BackendOpt {
 			b.client.Transport = &http.Transport{}
 		}
 		b.client.Transport.(*http.Transport).TLSClientConfig = tlsConfig
+		if b.dialer == nil {
+			b.dialer = &websocket.Dialer{}
+		}
+		b.dialer.TLSClientConfig = tlsConfig
 	}
 }
 
