@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/ethereum-optimism/optimism v1.5.0-rc.3.0.20240131131533-152d1e0a458d
 	github.com/ethereum/go-ethereum v1.13.8
-	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/mux v1.8.1
 	github.com/libp2p/go-libp2p v0.32.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
