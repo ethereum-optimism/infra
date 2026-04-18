@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -34,6 +35,9 @@ type Config struct {
 	TestDir      string
 	// Skip behavior
 	ExcludeGates []string
+	// Sharding (gateless mode only)
+	ShardIndex int // Zero-based shard index (-1 = no sharding)
+	ShardTotal int // Total number of shards (0 = no sharding)
 }
 
 // NewRegistry creates a new registry instance
@@ -99,6 +103,25 @@ func (r *Registry) loadGatelessValidators() error {
 	}
 
 	r.config.Log.Debug("Found test packages", "count", len(packages), "packages", packages)
+
+	// Apply shard filtering if configured
+	if r.config.ShardTotal > 0 && r.config.ShardIndex >= 0 {
+		sort.Strings(packages) // deterministic ordering before sharding
+		var sharded []string
+		for i, pkg := range packages {
+			if i%r.config.ShardTotal == r.config.ShardIndex {
+				sharded = append(sharded, pkg)
+			}
+		}
+		r.config.Log.Info("Shard filtering applied",
+			"shard", fmt.Sprintf("%d/%d", r.config.ShardIndex, r.config.ShardTotal),
+			"before", len(packages), "after", len(sharded))
+		packages = sharded
+		if len(packages) == 0 {
+			r.config.Log.Warn("Shard has no test packages",
+				"shardIndex", r.config.ShardIndex, "shardTotal", r.config.ShardTotal)
+		}
+	}
 
 	// Create synthetic validators for each discovered package
 	var validators []types.ValidatorMetadata
