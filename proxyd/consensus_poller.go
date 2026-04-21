@@ -144,6 +144,11 @@ func (ah *PollerAsyncHandler) Init() {
 	log.Info("total number of fallback candidates", "fallbacks", len(ah.cp.backendGroup.Fallbacks()))
 
 	for _, be := range ah.cp.backendGroup.Primaries() {
+		if be.forcedCandidate {
+			log.Info("skipping consensus polling for forced candidate backend",
+				"backend", be.Name)
+			continue
+		}
 		go func(be *Backend) {
 			for {
 				timer := time.NewTimer(ah.cp.interval)
@@ -159,6 +164,11 @@ func (ah *PollerAsyncHandler) Init() {
 	}
 
 	for _, be := range ah.cp.backendGroup.Fallbacks() {
+		if be.forcedCandidate {
+			log.Info("skipping consensus polling for forced candidate fallback backend",
+				"backend", be.Name)
+			continue
+		}
 		go func(be *Backend) {
 			for {
 				timer := time.NewTimer(ah.cp.interval)
@@ -448,7 +458,12 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	var lowestLatestBlockHash string
 	var lowestFinalizedBlock hexutil.Uint64
 	var lowestSafeBlock hexutil.Uint64
-	for _, bs := range candidates {
+	for be, bs := range candidates {
+		// forced candidates are not polled so they have no block state,
+		// skip them when computing consensus block numbers
+		if be.forcedCandidate {
+			continue
+		}
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
 			lowestLatestBlockHash = bs.latestBlockHash
@@ -477,6 +492,10 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		for !hasConsensus {
 			allAgreed := true
 			for be := range candidates {
+				// forced candidates are not polled, skip hash verification
+				if be.forcedCandidate {
+					continue
+				}
 				actualBlockNumber, actualBlockHash, err := cp.fetchBlock(ctx, be, proposedBlock.String())
 				if err != nil {
 					log.Warn("error updating backend", "name", be.Name, "err", err)
@@ -783,6 +802,10 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 	// find the highest common ancestor block
 	lagging := make([]*Backend, 0, len(candidates))
 	for be, bs := range candidates {
+		// forced candidates are not polled, so skip the lag check
+		if be.forcedCandidate {
+			continue
+		}
 		// check if backend is lagging behind the highest block
 		if uint64(highestLatestBlock-bs.latestBlockNumber) > cp.maxBlockLag {
 			lagging = append(lagging, be)
