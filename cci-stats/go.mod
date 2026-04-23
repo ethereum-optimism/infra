@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/axelKingsley/go-circleci v0.9.1
-	github.com/jackc/pgx/v5 v5.7.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/sourcegraph/conc v0.3.0
 )
 
@@ -15,7 +15,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 )
