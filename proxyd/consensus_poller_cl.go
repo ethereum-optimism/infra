@@ -174,9 +174,8 @@ func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber,
 // GetConsensusSyncStatusBody returns the cached optimism_syncStatus response body
 // from the current pin backend. Returns nil if no poll cycle has completed yet.
 func (cp *ConsensusPoller) GetConsensusSyncStatusBody() json.RawMessage {
-	cp.syncStatusBodyMu.RLock()
-	defer cp.syncStatusBodyMu.RUnlock()
-	return cp.consensusSyncBody
+	body, _ := cp.tracker.GetCLSyncBody()
+	return body
 }
 
 // selectConsensusSyncStatusBody selects the consensus-group backend with the lowest
@@ -192,9 +191,7 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 	var pin *pinCandidate
 	lowestL1 := uint64(math.MaxUint64)
 
-	cp.syncStatusBodyMu.RLock()
-	floor := cp.lastServedCLL1Num
-	cp.syncStatusBodyMu.RUnlock()
+	_, floor := cp.tracker.GetCLSyncBody()
 
 	for _, be := range consensusGroup {
 		bs := cp.backendState[be]
@@ -218,10 +215,7 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 		return
 	}
 
-	cp.syncStatusBodyMu.Lock()
-	cp.consensusSyncBody = pin.body
-	cp.lastServedCLL1Num = pin.l1
-	cp.syncStatusBodyMu.Unlock()
+	cp.tracker.SetCLSyncBody(pin.body, pin.l1)
 
 	RecordCLGroupPinL1(cp.backendGroup, pin.be, pin.l1)
 	log.Info("CL pin backend selected",
