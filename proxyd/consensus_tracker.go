@@ -20,6 +20,13 @@ import (
 type ConsensusTracker interface {
 	GetState() ConsensusTrackerState
 	SetState(state ConsensusTrackerState)
+
+	// GetCLSyncBody returns the cached optimism_syncStatus response body and the
+	// L1 block number it was derived from (used as a monotonicity floor).
+	GetCLSyncBody() (body json.RawMessage, lastServedL1Num uint64)
+
+	// SetCLSyncBody stores the optimism_syncStatus response body and its L1 number.
+	SetCLSyncBody(body json.RawMessage, l1Num uint64)
 }
 
 // ConsensusTrackerState holds the full consensus state in one snapshot.
@@ -45,6 +52,10 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 type InMemoryConsensusTracker struct {
 	mutex sync.Mutex
 	state *ConsensusTrackerState
+
+	clSyncMu   sync.RWMutex
+	clSyncBody json.RawMessage
+	clSyncL1Num uint64
 }
 
 func NewInMemoryConsensusTracker() ConsensusTracker {
@@ -81,6 +92,19 @@ func (ct *InMemoryConsensusTracker) SetState(state ConsensusTrackerState) {
 	ct.update(&state)
 }
 
+func (ct *InMemoryConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
+	ct.clSyncMu.RLock()
+	defer ct.clSyncMu.RUnlock()
+	return ct.clSyncBody, ct.clSyncL1Num
+}
+
+func (ct *InMemoryConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
+	ct.clSyncMu.Lock()
+	defer ct.clSyncMu.Unlock()
+	ct.clSyncBody = body
+	ct.clSyncL1Num = l1Num
+}
+
 // RedisConsensusTracker store and retrieve in a shared Redis cluster, with leader election
 type RedisConsensusTracker struct {
 	ctx          context.Context
@@ -101,6 +125,15 @@ type RedisConsensusTracker struct {
 	// holds a copy of the remote shared state
 	// when leader, updates the remote with the local state
 	remote *InMemoryConsensusTracker
+
+	// CL sync body: local copy (set by poller on leader), remote copy (read from Redis on follower).
+	// SetCLSyncBody updates both local and remote immediately so GetCLSyncBody always
+	// returns fresh data on the leader without checking ct.leader.
+	clSyncMu         sync.RWMutex
+	clLocalSyncBody  json.RawMessage
+	clLocalL1Num     uint64
+	clRemoteSyncBody json.RawMessage
+	clRemoteL1Num    uint64
 }
 
 type RedisConsensusTrackerOpt func(cp *RedisConsensusTracker)
@@ -196,17 +229,18 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			}
 			ct.postPayload(val)
 		} else {
+			lockToken := val // capture before inner val shadows it
 			// retrieve current leader
-			leaderName, err := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("leader:%s", val))).Result()
+			leaderName, err := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("leader:%s", lockToken))).Result()
 			if err != nil && err != redis.Nil {
 				log.Error("failed to read the remote leader", "err", err)
 				RecordGroupConsensusError(ct.backendGroup, "read_leader", err)
 				return
 			}
 			ct.leaderName = leaderName
-			log.Debug("following", "val", val, "leader", leaderName)
+			log.Debug("following", "val", lockToken, "leader", leaderName)
 			// retrieve payload
-			val, err := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("state:%s", val))).Result()
+			val, err := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("state:%s", lockToken))).Result()
 			if err != nil && err != redis.Nil {
 				log.Error("failed to read the remote state", "err", err)
 				RecordGroupConsensusError(ct.backendGroup, "read_state", err)
@@ -232,6 +266,27 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			RecordGroupConsensusHALatestBlock(ct.backendGroup, leaderName, remoteState.Latest)
 			RecordGroupConsensusHASafeBlock(ct.backendGroup, leaderName, remoteState.Safe)
 			RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leaderName, remoteState.Finalized)
+
+			// Read CL sync body from Redis (best-effort).
+			// On error we continue serving the last-known CL body rather than
+			// clearing it — stale CL data is preferable to no CL data.
+			clRaw, clErr := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("cl_sync_body:%s", lockToken))).Result()
+			if clErr != nil && clErr != redis.Nil {
+				log.Warn("follower: failed to read CL sync body from Redis, serving last-known", "err", clErr)
+				RecordGroupConsensusError(ct.backendGroup, "follower_read_cl_sync_body", clErr)
+			} else if clRaw != "" {
+				var clPayload clSyncBodyPayload
+				if clErr := json.Unmarshal([]byte(clRaw), &clPayload); clErr != nil {
+					log.Warn("follower: failed to unmarshal CL sync body, serving last-known", "err", clErr)
+					RecordGroupConsensusError(ct.backendGroup, "follower_unmarshal_cl_sync_body", clErr)
+				} else {
+					ct.clSyncMu.Lock()
+					ct.clRemoteSyncBody = clPayload.Body
+					ct.clRemoteL1Num = clPayload.L1Num
+					ct.clSyncMu.Unlock()
+					log.Debug("follower: updated CL sync body from Redis", "l1_num", clPayload.L1Num, "body_len", len(clPayload.Body))
+				}
+			}
 		}
 	} else {
 		if !ct.local.Valid() {
@@ -277,7 +332,31 @@ func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
 	ct.local.SetState(state)
 }
 
-func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
+// clSyncBodyPayload is the wire format for the CL sync body stored in Redis.
+type clSyncBodyPayload struct {
+	Body  json.RawMessage `json:"body"`
+	L1Num uint64          `json:"l1_num"`
+}
+
+func (ct *RedisConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
+	ct.clSyncMu.RLock()
+	defer ct.clSyncMu.RUnlock()
+	return ct.clRemoteSyncBody, ct.clRemoteL1Num
+}
+
+func (ct *RedisConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
+	ct.clSyncMu.Lock()
+	defer ct.clSyncMu.Unlock()
+	// Update both local and remote copies immediately. This ensures GetCLSyncBody
+	// returns fresh data on the leader without needing to check ct.leader — the
+	// remote copy is the canonical read path for both leader and follower.
+	ct.clLocalSyncBody = body
+	ct.clLocalL1Num = l1Num
+	ct.clRemoteSyncBody = body
+	ct.clRemoteL1Num = l1Num
+}
+
+func (ct *RedisConsensusTracker) postPayload(lockToken string) {
 	state := ct.local.GetState()
 	jsonState, err := json.Marshal(state)
 	if err != nil {
@@ -286,7 +365,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 		ct.leader = false
 		return
 	}
-	err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("state:%s", mutexVal)), jsonState, ct.lockPeriod).Err()
+	err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("state:%s", lockToken)), jsonState, ct.lockPeriod).Err()
 	if err != nil {
 		log.Error("failed to post the state", "err", err)
 		RecordGroupConsensusError(ct.backendGroup, "leader_post_state", err)
@@ -295,7 +374,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	}
 
 	leader, _ := os.LookupEnv("HOSTNAME")
-	err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("leader:%s", mutexVal)), leader, ct.lockPeriod).Err()
+	err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("leader:%s", lockToken)), leader, ct.lockPeriod).Err()
 	if err != nil {
 		log.Error("failed to post the leader", "err", err)
 		RecordGroupConsensusError(ct.backendGroup, "leader_post_leader", err)
@@ -312,4 +391,30 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	RecordGroupConsensusHALatestBlock(ct.backendGroup, leader, remoteState.Latest)
 	RecordGroupConsensusHASafeBlock(ct.backendGroup, leader, remoteState.Safe)
 	RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leader, remoteState.Finalized)
+
+	// Propagate CL sync body to Redis for followers.
+	// CL body failures are degraded state, not leadership failures — the leader
+	// continues serving EL state and followers get stale CL data until the next
+	// successful propagation.
+	ct.clSyncMu.RLock()
+	clBody := ct.clLocalSyncBody
+	clL1 := ct.clLocalL1Num
+	ct.clSyncMu.RUnlock()
+
+	if len(clBody) > 0 {
+		payload := clSyncBodyPayload{Body: clBody, L1Num: clL1}
+		clJSON, err := json.Marshal(payload)
+		if err != nil {
+			log.Error("failed to marshal CL sync body for Redis", "err", err)
+			RecordGroupConsensusError(ct.backendGroup, "leader_marshal_cl_sync_body", err)
+		} else {
+			err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("cl_sync_body:%s", lockToken)), clJSON, ct.lockPeriod).Err()
+			if err != nil {
+				log.Error("failed to post CL sync body to Redis", "err", err)
+				RecordGroupConsensusError(ct.backendGroup, "leader_post_cl_sync_body", err)
+			} else {
+				log.Debug("posted CL sync body", "l1_num", clL1, "body_len", len(clBody))
+			}
+		}
+	}
 }
