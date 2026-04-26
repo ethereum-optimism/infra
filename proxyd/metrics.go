@@ -523,6 +523,12 @@ var (
 		Help:      "Count of output root disagreement events per backend. Incremented for every backend whose output root does not match the rest of the group, whether or not a ban was issued.",
 	}, []string{"backend_name"})
 
+	consensusCLRankedTiebreakTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ranked_tiebreak_total",
+		Help:      "Count of output root disagreements resolved via ranked tiebreaking. Labels identify the winning backend.",
+	}, []string{"backend_name"})
+
 	consensusUpdateDelayBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_backend_update_delay",
@@ -819,6 +825,10 @@ func RecordCLBanInteropSafeGtLocalSafe(b *Backend) {
 
 func RecordCLBanOutputRootMismatch(b *Backend) {
 	consensusCLBanOutputRootMismatchTotal.WithLabelValues(b.Name).Inc()
+}
+
+func RecordCLRankedTiebreak(b *Backend) {
+	consensusCLRankedTiebreakTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordCLBanOutputRootTimeout(b *Backend) {
