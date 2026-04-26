@@ -517,6 +517,12 @@ var (
 	// majority) or a tie was detected (no majority). Use backend_name to identify which
 	// backend(s) are producing a divergent root.
 	// Query all disagreements with: proxyd_consensus_cl_output_root_disagreement_total
+	consensusCLRankedTiebreakTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_ranked_tiebreak_total",
+		Help:      "Count of CL output root tiebreaks resolved via ranked priority",
+	}, []string{"backend_name"})
+
 	consensusCLOutputRootDisagreementTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_cl_output_root_disagreement_total",
@@ -799,6 +805,10 @@ func RecordCLBackendLocalSafeBlock(b *Backend, blockNumber hexutil.Uint64) {
 
 func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64) {
 	consensusCLGroupLocalSafeBlock.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+func RecordCLRankedTiebreak(b *Backend) {
+	consensusCLRankedTiebreakTotal.WithLabelValues(b.Name).Inc()
 }
 
 func RecordCLOutputRootDisagreement(b *Backend) {
