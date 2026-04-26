@@ -173,16 +173,19 @@ func (cp *ConsensusPoller) validateCLBackendUpdate(be *Backend, safeBlockNumber,
 
 // GetConsensusSyncStatusBody returns the cached optimism_syncStatus response body
 // from the current pin backend. Returns nil if no poll cycle has completed yet.
+// When Redis HA is configured, this reads from the shared Redis cache so all
+// pods serve the same response regardless of which pod the LB routes to.
 func (cp *ConsensusPoller) GetConsensusSyncStatusBody() json.RawMessage {
-	cp.syncStatusBodyMu.RLock()
-	defer cp.syncStatusBodyMu.RUnlock()
-	return cp.consensusSyncBody
+	body, _ := cp.tracker.GetCLSyncBody()
+	return body
 }
 
 // selectConsensusSyncStatusBody selects the consensus-group backend with the lowest
 // current_l1.number (subject to a monotonicity floor) and caches its full
-// optimism_syncStatus response body. This ensures the served response is internally
-// consistent — all fields come from one backend snapshot, not a mix of backends.
+// optimism_syncStatus response body via the tracker. This ensures the served response
+// is internally consistent — all fields come from one backend snapshot, not a mix of
+// backends. When Redis HA is configured, the tracker propagates the body to Redis so
+// all pods serve the same response.
 func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backend) {
 	type pinCandidate struct {
 		be   *Backend
@@ -192,9 +195,7 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 	var pin *pinCandidate
 	lowestL1 := uint64(math.MaxUint64)
 
-	cp.syncStatusBodyMu.RLock()
-	floor := cp.lastServedCLL1Num
-	cp.syncStatusBodyMu.RUnlock()
+	_, floor := cp.tracker.GetCLSyncBody()
 
 	for _, be := range consensusGroup {
 		bs := cp.backendState[be]
@@ -218,10 +219,7 @@ func (cp *ConsensusPoller) selectConsensusSyncStatusBody(consensusGroup []*Backe
 		return
 	}
 
-	cp.syncStatusBodyMu.Lock()
-	cp.consensusSyncBody = pin.body
-	cp.lastServedCLL1Num = pin.l1
-	cp.syncStatusBodyMu.Unlock()
+	cp.tracker.SetCLSyncBody(pin.body, pin.l1)
 
 	RecordCLGroupPinL1(cp.backendGroup, pin.be, pin.l1)
 	log.Info("CL pin backend selected",
