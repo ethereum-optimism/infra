@@ -433,8 +433,54 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		// Cannot establish a clear majority:
 		//   - all backends errored (maxCount == 0), or
 		//   - every backend returned a unique root (all-disagree, no quorum).
-		// Don't ban anyone — we can't determine which backend is correct.
+		// Attempt ranked tiebreaking before giving up.
 		if len(counts) > 1 {
+			// Build clOutputRootResult slice from the local results.
+			tiebreakResults := make([]clOutputRootResult, 0, len(results))
+			for _, r := range results {
+				tiebreakResults = append(tiebreakResults, clOutputRootResult{
+					be:         r.be,
+					outputRoot: r.outputRoot,
+					err:        r.err,
+				})
+			}
+
+			winner, winningRoot, found := resolveCLOutputRootTiebreak(tiebreakResults)
+			if found {
+				log.Warn("CL output root disagreement resolved via ranked tiebreaking",
+					"safe_block", safeBlock,
+					"winner", winner.Name,
+					"winner_rank", winner.clRank,
+					"winning_root", winningRoot,
+					"distinct_roots", len(counts),
+				)
+				RecordCLRankedTiebreak(winner)
+
+				// Ban backends with a different root (losers only).
+				for _, r := range results {
+					if r.err != nil {
+						continue
+					}
+					if r.outputRoot != winningRoot {
+						log.Error("banning CL backend: output root disagrees with ranked tiebreak winner",
+							"backend", r.be.Name,
+							"backend_root", r.outputRoot,
+							"winning_root", winningRoot,
+							"winner", winner.Name,
+							"safe_block", safeBlock,
+						)
+						RecordCLOutputRootDisagreement(r.be)
+						RecordCLBanOutputRootMismatch(r.be)
+						cp.Ban(r.be)
+						delete(candidates, r.be)
+					}
+				}
+
+				lowestSafe, lowestLocalSafe := lowestFromCandidates()
+				return candidates, lowestSafe, lowestLocalSafe
+			}
+
+			// No ranked backends — fall through to existing no-ban behavior.
 			backendNames := make([]string, 0, len(results))
 			for _, r := range results {
 				if r.err == nil {
@@ -442,7 +488,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 					RecordCLOutputRootDisagreement(r.be)
 				}
 			}
-			log.Error("CL output root disagreement detected but no majority — cannot determine correct root",
+			log.Error("CL output root disagreement detected but no majority and no ranked backends — cannot determine correct root",
 				"safe_block", safeBlock,
 				"distinct_roots", len(counts),
 				"backends", backendNames,
@@ -486,6 +532,35 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 
 	lowestSafe, lowestLocalSafe := lowestFromCandidates()
 	return candidates, lowestSafe, lowestLocalSafe
+}
+
+// clOutputRootResult holds the output root fetch result for a single backend.
+type clOutputRootResult struct {
+	be         *Backend
+	outputRoot string
+	err        error
+}
+
+// resolveCLOutputRootTiebreak resolves an output root disagreement using ranked
+// backend priority. It returns the winning backend and its output root.
+//
+// Backends with err != nil or clRank == 0 (unranked) are skipped.
+// The backend with the lowest clRank wins. If no ranked backends exist,
+// found is false and the caller should fall back to default behavior.
+func resolveCLOutputRootTiebreak(results []clOutputRootResult) (winner *Backend, winningRoot string, found bool) {
+	var bestRank int
+	for _, r := range results {
+		if r.err != nil || r.be.clRank == 0 {
+			continue
+		}
+		if !found || r.be.clRank < bestRank {
+			winner = r.be
+			winningRoot = r.outputRoot
+			bestRank = r.be.clRank
+			found = true
+		}
+	}
+	return
 }
 
 // fetchCLOutputRoot calls optimism_outputAtBlock and returns the outputRoot hash.

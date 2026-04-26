@@ -333,6 +333,7 @@ type Backend struct {
 	intermittentErrorsSlidingWindow *sw.AvgSlidingWindow
 
 	weight             int
+	clRank             int
 	allowedStatusCodes []int
 }
 
@@ -447,6 +448,12 @@ func WithConsensusForcedCandidate(forcedCandidate bool) BackendOpt {
 func WithWeight(weight int) BackendOpt {
 	return func(b *Backend) {
 		b.weight = weight
+	}
+}
+
+func WithCLRank(rank int) BackendOpt {
+	return func(b *Backend) {
+		b.clRank = rank
 	}
 }
 

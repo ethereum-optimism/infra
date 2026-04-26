@@ -107,6 +107,94 @@ func TestVerifyCLOutputRoots_TimeoutCounterResetsOnSuccess(t *testing.T) {
 	require.False(t, cp.IsBanned(be))
 }
 
+func TestResolveCLOutputRootTiebreak(t *testing.T) {
+	beRank1 := &Backend{Name: "rank1", clRank: 1}
+	beRank2 := &Backend{Name: "rank2", clRank: 2}
+	beRank3 := &Backend{Name: "rank3", clRank: 3}
+	beUnranked := &Backend{Name: "unranked", clRank: 0}
+
+	tests := []struct {
+		name       string
+		results    []clOutputRootResult
+		wantWinner *Backend
+		wantRoot   string
+		wantFound  bool
+	}{
+		{
+			name: "lowest rank wins",
+			results: []clOutputRootResult{
+				{be: beRank2, outputRoot: "root_B"},
+				{be: beRank1, outputRoot: "root_A"},
+				{be: beRank3, outputRoot: "root_C"},
+			},
+			wantWinner: beRank1,
+			wantRoot:   "root_A",
+			wantFound:  true,
+		},
+		{
+			name: "no ranked backends returns found=false",
+			results: []clOutputRootResult{
+				{be: beUnranked, outputRoot: "root_A"},
+				{be: &Backend{Name: "unranked2", clRank: 0}, outputRoot: "root_B"},
+			},
+			wantWinner: nil,
+			wantRoot:   "",
+			wantFound:  false,
+		},
+		{
+			name: "single ranked among unranked wins",
+			results: []clOutputRootResult{
+				{be: beUnranked, outputRoot: "root_A"},
+				{be: beRank2, outputRoot: "root_B"},
+				{be: &Backend{Name: "unranked2", clRank: 0}, outputRoot: "root_C"},
+			},
+			wantWinner: beRank2,
+			wantRoot:   "root_B",
+			wantFound:  true,
+		},
+		{
+			name: "errored backends are skipped",
+			results: []clOutputRootResult{
+				{be: beRank1, outputRoot: "", err: context.DeadlineExceeded},
+				{be: beRank2, outputRoot: "root_B"},
+			},
+			wantWinner: beRank2,
+			wantRoot:   "root_B",
+			wantFound:  true,
+		},
+		{
+			name:       "empty results returns found=false",
+			results:    []clOutputRootResult{},
+			wantWinner: nil,
+			wantRoot:   "",
+			wantFound:  false,
+		},
+		{
+			name: "all errored returns found=false",
+			results: []clOutputRootResult{
+				{be: beRank1, outputRoot: "", err: context.DeadlineExceeded},
+				{be: beRank2, outputRoot: "", err: context.DeadlineExceeded},
+			},
+			wantWinner: nil,
+			wantRoot:   "",
+			wantFound:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			winner, root, found := resolveCLOutputRootTiebreak(tt.results)
+			require.Equal(t, tt.wantFound, found, "found mismatch")
+			require.Equal(t, tt.wantRoot, root, "root mismatch")
+			if tt.wantWinner == nil {
+				require.Nil(t, winner, "expected nil winner")
+			} else {
+				require.Equal(t, tt.wantWinner, winner, "winner mismatch")
+			}
+		})
+	}
+}
+
 func TestVerifyCLOutputRoots_ConfigurableBanThreshold(t *testing.T) {
 	srv := httptest.NewServer(hangingHandler())
 	defer srv.Close()
