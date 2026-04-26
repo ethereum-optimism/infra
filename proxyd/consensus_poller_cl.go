@@ -433,7 +433,6 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		// Cannot establish a clear majority:
 		//   - all backends errored (maxCount == 0), or
 		//   - every backend returned a unique root (all-disagree, no quorum).
-		// Don't ban anyone — we can't determine which backend is correct.
 		if len(counts) > 1 {
 			backendNames := make([]string, 0, len(results))
 			for _, r := range results {
@@ -442,7 +441,57 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 					RecordCLOutputRootDisagreement(r.be)
 				}
 			}
-			log.Error("CL output root disagreement detected but no majority — cannot determine correct root",
+
+			// Attempt ranked tiebreaking: pick the output root from the highest-priority
+			// (lowest clRank) backend. Backends with clRank == 0 are unranked and ignored.
+			var bestRank int
+			var rankedRoot string
+			var rankedWinner *Backend
+			for _, r := range results {
+				if r.err != nil {
+					continue
+				}
+				if r.be.clRank > 0 && (bestRank == 0 || r.be.clRank < bestRank) {
+					bestRank = r.be.clRank
+					rankedRoot = r.outputRoot
+					rankedWinner = r.be
+				}
+			}
+
+			if bestRank > 0 {
+				RecordCLRankedTiebreak(rankedWinner)
+				log.Warn("CL output root disagreement resolved via ranked tiebreaking",
+					"safe_block", safeBlock,
+					"distinct_roots", len(counts),
+					"backends", backendNames,
+					"ranked_winner", rankedWinner.Name,
+					"ranked_winner_rank", bestRank,
+					"canonical_root", rankedRoot,
+				)
+				// Ban backends whose output root disagrees with the ranked winner.
+				for _, r := range results {
+					if r.err != nil {
+						continue
+					}
+					if r.outputRoot != rankedRoot {
+						log.Error("banning CL backend: output root disagrees with ranked tiebreaker",
+							"backend", r.be.Name,
+							"backend_root", r.outputRoot,
+							"canonical_root", rankedRoot,
+							"ranked_winner", rankedWinner.Name,
+							"safe_block", safeBlock,
+						)
+						RecordCLBanOutputRootMismatch(r.be)
+						cp.Ban(r.be)
+						delete(candidates, r.be)
+					}
+				}
+				lowestSafe, lowestLocalSafe := lowestFromCandidates()
+				return candidates, lowestSafe, lowestLocalSafe
+			}
+
+			// No ranked backends available — cannot resolve the tie.
+			log.Error("CL output root disagreement detected but no majority and no ranked backends — cannot determine correct root",
 				"safe_block", safeBlock,
 				"distinct_roots", len(counts),
 				"backends", backendNames,
