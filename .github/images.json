@@ -32,10 +32,8 @@
       "paths": ["op-conductor-ops/**"]
     },
     "op-signer": {
-      "mode": "ko",
-      "ko_working_directory": "op-signer",
-      "ko_importpath": "./cmd",
-      "env": "VERSION=v0.0.0",
+      "context": ".",
+      "dockerfile": "op-signer/Dockerfile",
       "paths": ["op-signer/**"]
     },
     "op-txproxy": {
