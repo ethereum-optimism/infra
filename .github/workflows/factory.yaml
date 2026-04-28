@@ -50,6 +50,7 @@ jobs:
       build_args: ${{ matrix.build_args || '' }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
+      skip_arm64: true
     permissions:
       contents: read
       id-token: write
