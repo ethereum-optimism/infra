@@ -1,13 +1,17 @@
 {
   "shared_paths": [
-    ".github/workflows/branches.yaml",
+    ".github/workflows/factory.yaml",
     ".github/images.json",
-    "go.mod"
+    ".ko.yaml",
+    "go.mod",
+    "go.sum"
   ],
   "images": {
     "cci-stats": {
-      "context": ".",
-      "dockerfile": "cci-stats/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "cci-stats",
+      "ko_importpath": "./cmd/runner",
+      "env": "VERSION=v0.0.0",
       "paths": ["cci-stats/**"]
     },
     "op-acceptor": {
@@ -16,8 +20,10 @@
       "paths": ["op-acceptor/**"]
     },
     "op-conductor-mon": {
-      "context": ".",
-      "dockerfile": "op-conductor-mon/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "op-conductor-mon",
+      "ko_importpath": "./cmd/monitor",
+      "env": "VERSION=v0.0.0",
       "paths": ["op-conductor-mon/**"]
     },
     "op-conductor-ops": {
@@ -26,28 +32,38 @@
       "paths": ["op-conductor-ops/**"]
     },
     "op-signer": {
-      "context": ".",
-      "dockerfile": "op-signer/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "op-signer",
+      "ko_importpath": "./cmd",
+      "env": "VERSION=v0.0.0",
       "paths": ["op-signer/**"]
     },
     "op-txproxy": {
-      "context": ".",
-      "dockerfile": "op-txproxy/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "op-txproxy",
+      "ko_importpath": "./cmd",
+      "env": "VERSION=v0.0.0",
       "paths": ["op-txproxy/**"]
     },
     "op-ufm": {
-      "context": ".",
-      "dockerfile": "op-ufm/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "op-ufm",
+      "ko_importpath": "./cmd/ufm",
+      "env": "VERSION=v0.0.0",
       "paths": ["op-ufm/**"]
     },
     "peer-mgmt-service": {
-      "context": ".",
-      "dockerfile": "peer-mgmt-service/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "peer-mgmt-service",
+      "ko_importpath": "./cmd/pms",
+      "env": "VERSION=v0.0.0",
       "paths": ["peer-mgmt-service/**"]
     },
     "proxyd": {
-      "context": ".",
-      "dockerfile": "proxyd/Dockerfile",
+      "mode": "ko",
+      "ko_working_directory": "proxyd",
+      "ko_importpath": "./cmd/proxyd",
+      "env": "VERSION=v0.0.0",
       "paths": ["proxyd/**"]
     },
     "replica-healthcheck": {
