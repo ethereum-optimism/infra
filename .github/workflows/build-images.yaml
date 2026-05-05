@@ -27,47 +27,23 @@ jobs:
           fetch-depth: 0
       - name: Plan
         id: plan
-        uses: ethereum-optimism/factory/actions/plan@b03c7dce427d3288cc3b19233c07fa455c110fa3
+        uses: ethereum-optimism/factory/actions/plan@aced2657632c849ce64a84cc72e3d2940883d374
 
-  local:
+  build:
     needs: [plan]
-    if: needs.plan.outputs.has_builds == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+    if: needs.plan.outputs.has_builds == 'true'
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@b03c7dce427d3288cc3b19233c07fa455c110fa3
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@aced2657632c849ce64a84cc72e3d2940883d374
     with:
-      mode: ${{ matrix.mode || 'build' }}
       image_name: ${{ matrix.image_name }}
-      context: ${{ matrix.context || '.' }}
-      dockerfile: ${{ matrix.dockerfile || 'Dockerfile' }}
-      target: ${{ matrix.target || '' }}
-      build_args: ${{ matrix.build_args || '' }}
-      skip_arm64: ${{ matrix.skip_arm64 || false }}
+      context: ${{ matrix.context }}
+      dockerfile: ${{ matrix.dockerfile }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
     permissions:
       contents: read
       id-token: write
       attestations: write
-
-  fork:
-    needs: [plan]
-    if: needs.plan.outputs.has_builds == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@b03c7dce427d3288cc3b19233c07fa455c110fa3
-    with:
-      mode: ${{ matrix.mode || 'build' }}
-      image_name: ${{ matrix.image_name }}
-      context: ${{ matrix.context || '.' }}
-      dockerfile: ${{ matrix.dockerfile || 'Dockerfile' }}
-      target: ${{ matrix.target || '' }}
-      build_args: ${{ matrix.build_args || '' }}
-      skip_arm64: ${{ matrix.skip_arm64 || false }}
-      registry: ttl.sh/${{ github.sha }}
-    permissions:
-      contents: read
