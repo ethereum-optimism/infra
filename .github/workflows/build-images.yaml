@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
       - name: Plan
         id: plan
-        uses: ethereum-optimism/factory/actions/plan@aced2657632c849ce64a84cc72e3d2940883d374
+        uses: ethereum-optimism/factory/actions/plan@34c087314cb7efc271e486e0c7fd84ae0905a135 # falcorocks/internal-fork-detection
 
   build:
     needs: [plan]
@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@aced2657632c849ce64a84cc72e3d2940883d374
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@34c087314cb7efc271e486e0c7fd84ae0905a135 # falcorocks/internal-fork-detection
     with:
       image_name: ${{ matrix.image_name }}
       context: ${{ matrix.context }}
