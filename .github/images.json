@@ -1,6 +1,6 @@
 {
   "shared_paths": [
-    ".github/workflows/branches.yaml",
+    ".github/workflows/build-images.yaml",
     ".github/images.json",
     "go.mod"
   ],
