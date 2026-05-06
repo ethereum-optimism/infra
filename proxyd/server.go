@@ -266,6 +266,7 @@ func (s *Server) RPCListenAndServe(host string, port int) error {
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
+	hdlr.HandleFunc("/readyz", s.HandleReadyz).Methods("GET")
 	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
 	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
 	c := cors.New(cors.Options{
@@ -322,6 +323,23 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	if s.isDraining.Load() {
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
+	}
+	_, _ = w.Write([]byte("OK"))
+}
+
+func (s *Server) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	if s.isDraining.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
+	for name, bg := range s.BackendGroups {
+		if bg.Consensus == nil {
+			continue
+		}
+		if len(bg.Consensus.GetConsensusGroup()) == 0 || bg.Consensus.GetLatestBlockNumber() == 0 {
+			http.Error(w, fmt.Sprintf("consensus not ready: %s", name), http.StatusServiceUnavailable)
+			return
+		}
 	}
 	_, _ = w.Write([]byte("OK"))
 }
