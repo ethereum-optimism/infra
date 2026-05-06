@@ -56,12 +56,6 @@ type ConsensusPoller struct {
 	clHeadL1MaxAge           time.Duration
 	clOutputRootBanThreshold uint
 
-	// Pin-backend cache for optimism_syncStatus (CL mode only).
-	// selectConsensusSyncStatusBody selects the pin backend after each consensus
-	// cycle and stores its full response body here for serving.
-	syncStatusBodyMu  sync.RWMutex
-	consensusSyncBody json.RawMessage // served response body for optimism_syncStatus
-	lastServedCLL1Num uint64          // monotonicity floor for pin selection
 }
 
 type backendState struct {
