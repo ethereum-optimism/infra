@@ -1,0 +1,36 @@
+package:
+  name: op-conductor-ops
+  version: 0.0.1
+  epoch: 0
+  description: CLI tool for managing op-conductor sequencer clusters
+  copyright:
+    - license: MIT
+  dependencies:
+    # Runtime closure mirrors pyproject.toml [tool.poetry.dependencies]
+    # under Wolfi's apk naming convention (`py<py-version>-<pypi-name>`).
+    runtime:
+      - py${{vars.py-version}}-typer
+      - py${{vars.py-version}}-requests
+      - py${{vars.py-version}}-toml
+      - python-${{vars.py-version}}
+
+vars:
+  py-version: "3.12"
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - py${{vars.py-version}}-build
+      - py${{vars.py-version}}-installer
+      - py${{vars.py-version}}-poetry-core
+      - python-${{vars.py-version}}
+
+pipeline:
+  - name: Python Build
+    uses: python/build-wheel

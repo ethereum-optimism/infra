@@ -4,6 +4,16 @@
     ".github/images.json",
     "go.mod"
   ],
+  "groups": {
+    "op-conductor-ops": {
+      "mode": "apko",
+      "melange_config": "op-conductor-ops/melange.yaml",
+      "apko_config_dir": "op-conductor-ops/apko",
+      "melange_workdir": "op-conductor-ops",
+      "services": ["op-conductor-ops"],
+      "paths": ["op-conductor-ops/**"]
+    }
+  },
   "images": {
     "cci-stats": {
       "context": ".",
@@ -19,11 +29,6 @@
       "context": ".",
       "dockerfile": "op-conductor-mon/Dockerfile",
       "paths": ["op-conductor-mon/**"]
-    },
-    "op-conductor-ops": {
-      "context": ".",
-      "dockerfile": "op-conductor-ops/Dockerfile",
-      "paths": ["op-conductor-ops/**"]
     },
     "op-signer": {
       "context": ".",

@@ -19,7 +19,9 @@ jobs:
       contents: read
     outputs:
       matrix_json: ${{ steps.plan.outputs.matrix_json }}
+      groups_matrix_json: ${{ steps.plan.outputs.groups_matrix_json }}
       has_builds: ${{ steps.plan.outputs.has_builds }}
+      has_group_builds: ${{ steps.plan.outputs.has_group_builds }}
     steps:
       - name: Checkout
         uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e # v6
@@ -29,7 +31,7 @@ jobs:
         id: plan
         uses: ethereum-optimism/factory/actions/plan@d1304a6e3ef93a8fcb0f672707f5f2ae9737a59d
 
-  build:
+  docker:
     needs: [plan]
     if: needs.plan.outputs.has_builds == 'true'
     strategy:
@@ -47,3 +49,28 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+
+  apko:
+    needs: [plan]
+    if: needs.plan.outputs.has_group_builds == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.groups_matrix_json) }}
+    uses: ethereum-optimism/factory/.github/workflows/apko.yaml@d1304a6e3ef93a8fcb0f672707f5f2ae9737a59d
+    with:
+      name: ${{ matrix.group_name }}
+      melange_config: ${{ matrix.melange_config }}
+      melange_workdir: ${{ matrix.melange_workdir || '' }}
+      apko_config_dir: ${{ matrix.apko_config_dir }}
+      services: ${{ join(matrix.services, ' ') }}
+      smoke_test: ${{ join(matrix.smoke_test, ' ') }}
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
+      gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+  # No fork-PR variant for apko: factory/.github/workflows/apko.yaml's nested
+  # jobs unconditionally request id-token: write and attestations: write, which
+  # the workflow validator refuses on fork-originating runs.
