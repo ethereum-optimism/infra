@@ -3,9 +3,11 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,6 +95,84 @@ func TestIsValidAPIKey(t *testing.T) {
 			if got != tt.expected {
 				t.Errorf("isValidAPIKey() = %v, want %v: %s", got, tt.expected, tt.description)
 			}
+		})
+	}
+}
+
+func TestHandleReadyz(t *testing.T) {
+	newConsensusGroup := func(members int, latest hexutil.Uint64) *BackendGroup {
+		bg := &BackendGroup{}
+		cg := make([]*Backend, members)
+		for i := range cg {
+			cg[i] = &Backend{}
+		}
+		tracker := NewInMemoryConsensusTracker()
+		tracker.SetState(ConsensusTrackerState{Latest: latest})
+		bg.Consensus = &ConsensusPoller{
+			backendGroup:   bg,
+			consensusGroup: cg,
+			tracker:        tracker,
+		}
+		return bg
+	}
+
+	tests := []struct {
+		name     string
+		draining bool
+		groups   map[string]*BackendGroup
+		want     int
+	}{
+		{
+			name:     "draining returns 503",
+			draining: true,
+			groups:   map[string]*BackendGroup{"main": newConsensusGroup(2, 100)},
+			want:     503,
+		},
+		{
+			name:   "no backend groups returns 200",
+			groups: map[string]*BackendGroup{},
+			want:   200,
+		},
+		{
+			name:   "group without consensus is skipped",
+			groups: map[string]*BackendGroup{"main": {}},
+			want:   200,
+		},
+		{
+			name:   "empty consensus group returns 503",
+			groups: map[string]*BackendGroup{"main": newConsensusGroup(0, 100)},
+			want:   503,
+		},
+		{
+			name:   "consensus group with latest=0 returns 503",
+			groups: map[string]*BackendGroup{"main": newConsensusGroup(2, 0)},
+			want:   503,
+		},
+		{
+			name:   "ready consensus group returns 200",
+			groups: map[string]*BackendGroup{"main": newConsensusGroup(2, 100)},
+			want:   200,
+		},
+		{
+			name: "any unready group fails the gate",
+			groups: map[string]*BackendGroup{
+				"main":  newConsensusGroup(2, 100),
+				"other": newConsensusGroup(0, 100),
+			},
+			want: 503,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{BackendGroups: tt.groups}
+			s.isDraining.Store(tt.draining)
+
+			req := httptest.NewRequest("GET", "/readyz", nil)
+			rec := httptest.NewRecorder()
+			s.HandleReadyz(rec, req)
+
+			require.Equal(t, tt.want, rec.Code)
 		})
 	}
 }

@@ -37,6 +37,14 @@ type ServerConfig struct {
 	// GracefulShutdownSeconds is the duration to wait during drain before shutting down.
 	// Defaults to 0 (no drain delay). Set to a positive value to enable graceful drain.
 	GracefulShutdownSeconds int `toml:"graceful_shutdown_seconds"`
+
+	// GracefulShutdownIdle, when true, replaces the drain-then-sleep shutdown
+	// behaviour with an idle-based one: on shutdown signal /readyz starts
+	// returning 503 (so k8s removes the pod from the Service), but the RPC
+	// and WS endpoints keep serving. The process exits only after no
+	// non-healthcheck request has been received for GracefulShutdownIdleSeconds.
+	GracefulShutdownIdle        bool `toml:"graceful_shutdown_idle"`
+	GracefulShutdownIdleSeconds int  `toml:"graceful_shutdown_idle_seconds"`
 }
 
 type CacheConfig struct {
