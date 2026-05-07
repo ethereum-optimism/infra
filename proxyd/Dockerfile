@@ -9,7 +9,7 @@ ARG GITVERSION=docker
 
 RUN apk add make jq git gcc musl-dev linux-headers
 
-COPY ./ /app
+COPY ./proxyd /app
 
 WORKDIR /app
 
