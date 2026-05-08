@@ -121,12 +121,6 @@ type RedisConsensusTracker struct {
 	// holds a copy of the remote shared state
 	// when leader, updates the remote with the local state
 	remote *InMemoryConsensusTracker
-
-	clSyncMu           sync.RWMutex
-	clLocalSyncBody    json.RawMessage
-	clLocalL1Num       uint64
-	clRemoteSyncBody   json.RawMessage
-	clRemoteL1Num      uint64
 }
 
 type RedisConsensusTrackerOpt func(cp *RedisConsensusTracker)
@@ -271,10 +265,7 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 					log.Error("failed to unmarshal remote CL sync body", "err", err)
 					RecordGroupConsensusError(ct.backendGroup, "read_unmarshal_cl_sync_body", err)
 				} else {
-					ct.clSyncMu.Lock()
-					ct.clRemoteSyncBody = payload.Body
-					ct.clRemoteL1Num = payload.L1Num
-					ct.clSyncMu.Unlock()
+					ct.remote.SetCLSyncBody(payload.Body, payload.L1Num)
 					RecordGroupConsensusHACLPinL1(ct.backendGroup, leaderName, payload.L1Num)
 					log.Debug("updated CL sync body from remote", "l1_num", payload.L1Num, "body_len", len(payload.Body))
 				}
@@ -325,19 +316,13 @@ func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
 }
 
 func (ct *RedisConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
-	ct.clSyncMu.RLock()
-	defer ct.clSyncMu.RUnlock()
-	return ct.clRemoteSyncBody, ct.clRemoteL1Num
+	return ct.remote.GetCLSyncBody()
 }
 
 func (ct *RedisConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
-	ct.clSyncMu.Lock()
-	defer ct.clSyncMu.Unlock()
-	ct.clLocalSyncBody = body
-	ct.clLocalL1Num = l1Num
+	ct.local.SetCLSyncBody(body, l1Num)
 	// Mirror to remote so GetCLSyncBody returns fresh data on the leader immediately.
-	ct.clRemoteSyncBody = body
-	ct.clRemoteL1Num = l1Num
+	ct.remote.SetCLSyncBody(body, l1Num)
 }
 
 // clSyncBodyPayload is the JSON envelope stored in Redis for the CL sync status body.
@@ -382,10 +367,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	RecordGroupConsensusHASafeBlock(ct.backendGroup, leader, remoteState.Safe)
 	RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leader, remoteState.Finalized)
 
-	ct.clSyncMu.RLock()
-	localBody := ct.clLocalSyncBody
-	localL1 := ct.clLocalL1Num
-	ct.clSyncMu.RUnlock()
+	localBody, localL1 := ct.local.GetCLSyncBody()
 
 	if len(localBody) > 0 {
 		RecordGroupConsensusHACLPinL1(ct.backendGroup, leader, localL1)
