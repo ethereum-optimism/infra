@@ -257,7 +257,7 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			// Read CL sync body from Redis (best-effort; stale data preferred over none).
 			clVal, err := ct.client.Get(ct.ctx, ct.key(fmt.Sprintf("cl_sync_body:%s", mutexVal))).Result()
 			if err != nil && err != redis.Nil {
-				log.Error("failed to read remote CL sync body", "err", err)
+				log.Warn("serving stale CL sync body, redis unavailable", "err", err)
 				RecordGroupConsensusError(ct.backendGroup, "read_cl_sync_body", err)
 			} else if clVal != "" {
 				var payload clSyncBodyPayload
