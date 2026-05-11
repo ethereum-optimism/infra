@@ -320,6 +320,18 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.AccessListSizeLimit = defaultInteropAccessListSizeLimit
 	}
 
+	if config.InteropValidationConfig.EnforceCrossUnsafeLatest {
+		if len(config.InteropValidationConfig.Urls) == 0 {
+			return nil, nil, errors.New("interop_validation.enforce_cross_unsafe_latest is enabled but no urls are configured")
+		}
+		if config.InteropValidationConfig.ChainID == 0 {
+			return nil, nil, errors.New("interop_validation.enforce_cross_unsafe_latest is enabled but chain_id is not configured")
+		}
+		if config.InteropValidationConfig.CrossUnsafeLatestPollInterval == 0 {
+			config.InteropValidationConfig.CrossUnsafeLatestPollInterval = TOMLDuration(DefaultPollerInterval)
+		}
+	}
+
 	log.Info("configured interop validation urls", "urls", config.InteropValidationConfig.Urls)
 	log.Info("configured interop validation strategy", "strategy", config.InteropValidationConfig.Strategy)
 
@@ -376,6 +388,7 @@ func Start(config *Config) (*Server, func(), error) {
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
 			maxBlockRange:          maxBlockRange,
+			crossUnsafeBypassAuth:  NewStringSetFromStrings(config.InteropValidationConfig.CrossUnsafeLatestBypassAuth),
 		}
 	}
 
@@ -512,6 +525,17 @@ func Start(config *Config) (*Server, func(), error) {
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
+	}
+
+	if config.InteropValidationConfig.EnforceCrossUnsafeLatest {
+		for _, bg := range backendGroups {
+			bg.crossUnsafeLatest = NewCrossUnsafeLatestPoller(
+				config.InteropValidationConfig.Urls,
+				config.InteropValidationConfig.ChainID,
+				time.Duration(config.InteropValidationConfig.CrossUnsafeLatestPollInterval),
+			)
+			bg.crossUnsafeLatest.Start()
+		}
 	}
 
 	// Enable to support browser websocket connections.

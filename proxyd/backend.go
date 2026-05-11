@@ -23,6 +23,7 @@ import (
 	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/websocket"
@@ -1000,6 +1001,8 @@ type BackendGroup struct {
 	routingStrategy        RoutingStrategy
 	multicallRPCErrorCheck bool
 	maxBlockRange          uint64
+	crossUnsafeLatest      *CrossUnsafeLatestPoller
+	crossUnsafeBypassAuth  *StringSet
 }
 
 func (bg *BackendGroup) GetRoutingStrategy() RoutingStrategy {
@@ -1042,7 +1045,7 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// serving traffic from any backend that agrees in the consensus group
 	// We also rewrite block tags to enforce compliance with consensus
 	if bg.Consensus != nil {
-		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(rpcReqs, overriddenResponses, rewrittenReqs)
+		rpcReqs, overriddenResponses = bg.OverwriteConsensusResponses(ctx, rpcReqs, overriddenResponses, rewrittenReqs)
 	} else if bg.maxBlockRange > 0 {
 		rpcReqs, overriddenResponses = bg.OverwriteNonConsensusRequests(rpcReqs, overriddenResponses)
 	}
@@ -1333,6 +1336,9 @@ func (bg *BackendGroup) loadBalancedConsensusGroup() []*Backend {
 func (bg *BackendGroup) Shutdown() {
 	if bg.Consensus != nil {
 		bg.Consensus.Shutdown()
+	}
+	if bg.crossUnsafeLatest != nil {
+		bg.crossUnsafeLatest.Shutdown()
 	}
 }
 
@@ -1780,9 +1786,20 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 	return res
 }
 
-func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+func (bg *BackendGroup) OverwriteConsensusResponses(ctx context.Context, rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {
+	latest := bg.Consensus.GetLatestBlockNumber()
+	if bg.crossUnsafeLatest != nil && !bg.bypassesCrossUnsafeLatest(ctx) {
+		if block, ok := bg.crossUnsafeLatest.LatestBlock(); ok {
+			if block.Number < uint64(latest) {
+				latest = hexutil.Uint64(block.Number)
+			}
+		} else {
+			latest = 0
+		}
+	}
+
 	rctx := RewriteContext{
-		latest:         bg.Consensus.GetLatestBlockNumber(),
+		latest:         latest,
 		safe:           bg.Consensus.GetSafeBlockNumber(),
 		finalized:      bg.Consensus.GetFinalizedBlockNumber(),
 		maxBlockRange:  bg.Consensus.maxBlockRange,
@@ -1874,6 +1891,13 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		}
 	}
 	return rewrittenReqs, overriddenResponses
+}
+
+func (bg *BackendGroup) bypassesCrossUnsafeLatest(ctx context.Context) bool {
+	if bg.crossUnsafeBypassAuth == nil {
+		return false
+	}
+	return bg.crossUnsafeBypassAuth.Has(GetAuthCtx(ctx))
 }
 
 func (bg *BackendGroup) OverwriteNonConsensusRequests(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes) ([]*RPCReq, []*indexedReqRes) {
