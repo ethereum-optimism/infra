@@ -49,9 +49,9 @@ type InMemoryConsensusTracker struct {
 	mutex sync.Mutex
 	state *ConsensusTrackerState
 
-	clSyncMu        sync.RWMutex
-	clSyncBody      json.RawMessage
-	clLastServedL1  uint64
+	clSyncMu       sync.RWMutex
+	clSyncBody     json.RawMessage
+	clLastServedL1 uint64
 }
 
 func NewInMemoryConsensusTracker() ConsensusTracker {

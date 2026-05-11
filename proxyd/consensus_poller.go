@@ -55,7 +55,6 @@ type ConsensusPoller struct {
 	clSyncThreshold          uint64
 	clHeadL1MaxAge           time.Duration
 	clOutputRootBanThreshold uint
-
 }
 
 type backendState struct {
