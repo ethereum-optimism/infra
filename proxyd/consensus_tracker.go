@@ -385,6 +385,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 			RecordGroupConsensusError(ct.backendGroup, "leader_post_cl_sync_body", err)
 			return
 		}
+		ct.remote.SetCLSyncBody(localBody, localL1)
 		log.Debug("posted CL sync body", "l1_num", localL1, "body_len", len(localBody))
 	}
 }
