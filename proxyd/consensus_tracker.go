@@ -375,6 +375,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 		jsonPayload, err := json.Marshal(payload)
 		if err != nil {
 			log.Error("failed to marshal CL sync body payload", "err", err)
+			ct.leader = false
 			RecordGroupConsensusError(ct.backendGroup, "leader_marshal_cl_sync_body", err)
 			return
 		}
