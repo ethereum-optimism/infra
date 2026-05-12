@@ -206,7 +206,7 @@ func fetchPipelines(ctx context.Context, config config.Config, cutoff time.Time,
 
 		var done bool
 		for _, p := range pipelines.Items {
-			if !config.BranchPatternRegex.MatchString(p.Vcs.Branch) {
+			if p.Vcs == nil || !config.BranchPatternRegex.MatchString(p.Vcs.Branch) {
 				continue
 			}
 			if p.CreatedAt.Before(cutoff) {
