@@ -49,9 +49,9 @@ type InMemoryConsensusTracker struct {
 	mutex sync.Mutex
 	state *ConsensusTrackerState
 
-	clSyncMu       sync.RWMutex
-	clSyncBody     json.RawMessage
-	clLastServedL1 uint64
+	clSyncMu        sync.RWMutex
+	clSyncBody      json.RawMessage
+	clLastServedL1  uint64
 }
 
 func NewInMemoryConsensusTracker() ConsensusTracker {
@@ -321,8 +321,7 @@ func (ct *RedisConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
 
 func (ct *RedisConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
 	ct.local.SetCLSyncBody(body, l1Num)
-	// Mirror to remote so GetCLSyncBody returns fresh data on the leader immediately.
-	ct.remote.SetCLSyncBody(body, l1Num)
+	// updates to remote should only happen via a leader-only section of code like in postPayload function
 }
 
 // clSyncBodyPayload is the JSON envelope stored in Redis for the CL sync status body.
