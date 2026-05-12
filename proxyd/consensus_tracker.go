@@ -381,6 +381,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 		err = ct.client.Set(ct.ctx, ct.key(fmt.Sprintf("cl_sync_body:%s", mutexVal)), jsonPayload, ct.lockPeriod).Err()
 		if err != nil {
 			log.Error("failed to post CL sync body", "err", err)
+			ct.leader = false
 			RecordGroupConsensusError(ct.backendGroup, "leader_post_cl_sync_body", err)
 			return
 		}
