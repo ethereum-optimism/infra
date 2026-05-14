@@ -329,6 +329,15 @@ var (
 		"leader",
 	})
 
+	consensusHACLPinL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "group_consensus_ha_cl_pin_l1",
+		Help:      "CL pin L1 block number propagated via Redis HA (reported by both leader and follower).",
+	}, []string{
+		"backend_group_name",
+		"leader",
+	})
+
 	backendLatestBlockBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "backend_latest_block",
@@ -706,6 +715,10 @@ func RecordGroupConsensusHASafeBlock(group *BackendGroup, leader string, blockNu
 
 func RecordGroupConsensusHAFinalizedBlock(group *BackendGroup, leader string, blockNumber hexutil.Uint64) {
 	consensusHAFinalizedBlock.WithLabelValues(group.Name, leader).Set(float64(blockNumber))
+}
+
+func RecordGroupConsensusHACLPinL1(group *BackendGroup, leader string, l1Num uint64) {
+	consensusHACLPinL1.WithLabelValues(group.Name, leader).Set(float64(l1Num))
 }
 
 func RecordGroupConsensusLatestBlock(group *BackendGroup, blockNumber hexutil.Uint64) {

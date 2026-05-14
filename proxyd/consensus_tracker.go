@@ -20,6 +20,9 @@ import (
 type ConsensusTracker interface {
 	GetState() ConsensusTrackerState
 	SetState(state ConsensusTrackerState)
+
+	GetCLSyncBody() (body json.RawMessage, lastServedL1Num uint64)
+	SetCLSyncBody(body json.RawMessage, l1Num uint64)
 }
 
 // ConsensusTrackerState holds the full consensus state in one snapshot.
@@ -29,6 +32,9 @@ type ConsensusTrackerState struct {
 	Safe      hexutil.Uint64 `json:"safe"`
 	Finalized hexutil.Uint64 `json:"finalized"`
 	LocalSafe hexutil.Uint64 `json:"local_safe"`
+
+	CLSyncBody json.RawMessage `json:"cl_sync_body,omitempty"`
+	CLL1Num    uint64          `json:"cl_l1_num,omitempty"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -39,6 +45,13 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
 	ct.state.LocalSafe = o.LocalSafe
+
+	// Only overwrite CL fields when the source has them set.
+	// SetState (EL path) does not populate CL fields; SetCLSyncBody does.
+	if len(o.CLSyncBody) > 0 {
+		ct.state.CLSyncBody = o.CLSyncBody
+		ct.state.CLL1Num = o.CLL1Num
+	}
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
@@ -79,6 +92,19 @@ func (ct *InMemoryConsensusTracker) GetState() ConsensusTrackerState {
 
 func (ct *InMemoryConsensusTracker) SetState(state ConsensusTrackerState) {
 	ct.update(&state)
+}
+
+func (ct *InMemoryConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
+	ct.mutex.Lock()
+	defer ct.mutex.Unlock()
+	return ct.state.CLSyncBody, ct.state.CLL1Num
+}
+
+func (ct *InMemoryConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
+	ct.mutex.Lock()
+	defer ct.mutex.Unlock()
+	ct.state.CLSyncBody = body
+	ct.state.CLL1Num = l1Num
 }
 
 // RedisConsensusTracker store and retrieve in a shared Redis cluster, with leader election
@@ -232,6 +258,9 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			RecordGroupConsensusHALatestBlock(ct.backendGroup, leaderName, remoteState.Latest)
 			RecordGroupConsensusHASafeBlock(ct.backendGroup, leaderName, remoteState.Safe)
 			RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leaderName, remoteState.Finalized)
+			if remoteState.CLL1Num > 0 {
+				RecordGroupConsensusHACLPinL1(ct.backendGroup, leaderName, remoteState.CLL1Num)
+			}
 		}
 	} else {
 		if !ct.local.Valid() {
@@ -277,6 +306,15 @@ func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
 	ct.local.SetState(state)
 }
 
+func (ct *RedisConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
+	return ct.remote.GetCLSyncBody()
+}
+
+func (ct *RedisConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
+	ct.local.SetCLSyncBody(body, l1Num)
+	// updates to remote should only happen via a leader-only section of code like in postPayload function
+}
+
 func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	state := ct.local.GetState()
 	jsonState, err := json.Marshal(state)
@@ -312,4 +350,7 @@ func (ct *RedisConsensusTracker) postPayload(mutexVal string) {
 	RecordGroupConsensusHALatestBlock(ct.backendGroup, leader, remoteState.Latest)
 	RecordGroupConsensusHASafeBlock(ct.backendGroup, leader, remoteState.Safe)
 	RecordGroupConsensusHAFinalizedBlock(ct.backendGroup, leader, remoteState.Finalized)
+	if remoteState.CLL1Num > 0 {
+		RecordGroupConsensusHACLPinL1(ct.backendGroup, leader, remoteState.CLL1Num)
+	}
 }
