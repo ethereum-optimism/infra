@@ -212,7 +212,7 @@ jobs:
         environment:
           POSTGRES_USER: opc
           POSTGRES_HOST_AUTH_METHOD: trust
-    resource_class: medium
+    resource_class: medium.gen2
     steps:
       - run:
           name: Install codecov
@@ -260,7 +260,7 @@ jobs:
         type: string
     docker:
       - image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:latest
-    resource_class: large
+    resource_class: large.gen2
     steps:
       - setup_remote_docker
       - gcp-cli/install
@@ -294,7 +294,7 @@ jobs:
     docker:
       - image: cimg/go:1.26
         user: root
-    resource_class: medium
+    resource_class: medium.gen2
     steps:
       - circleci-utils/checkout-with-mise
       - run:
