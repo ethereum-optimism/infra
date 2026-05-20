@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM dhi.io/python:3.12-debian13-dev
 
 # Set working directory
 WORKDIR /app
