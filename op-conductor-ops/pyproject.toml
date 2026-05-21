@@ -13,7 +13,7 @@ requests = "^2.32.4"
 toml = "^0.10.2"
 
 [tool.poetry.group.dev.dependencies]
-black = "^25.1.0"
+black = "^26.3.1"
 
 [build-system]
 requires = ["poetry-core"]
