@@ -137,6 +137,22 @@ type BackendConfig struct {
 	ConsensusForcedCandidate    bool   `toml:"consensus_forced_candidate"`
 	ConsensusReceiptsTarget     string `toml:"consensus_receipts_target"`
 	AllowedStatusCodes          []int  `toml:"allowed_status_codes"`
+
+	// ConsensusCLRank sets the priority for this backend when resolving output root
+	// disagreements in consensus_aware_consensus_layer mode.
+	//
+	// Behavior:
+	//   - 0 (default): unranked — backend does not participate in ranked tiebreaking
+	//   - 1+: ranked — lower values have higher priority (rank 1 beats rank 2)
+	//
+	// When backends disagree on output roots and no majority exists:
+	//   - If ranked backends exist, the lowest-ranked backend's root wins
+	//   - Backends with a different root are temporarily banned
+	//   - If no backends are ranked, no tiebreaking occurs (no bans)
+	//
+	// Duplicate ranks within a backend group cause a fatal startup error.
+	// Only applies when routing_strategy = "consensus_aware_consensus_layer".
+	ConsensusCLRank int `toml:"consensus_cl_rank"`
 }
 
 type BackendsConfig map[string]*BackendConfig

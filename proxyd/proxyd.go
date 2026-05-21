@@ -234,6 +234,10 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		opts = append(opts, WithConsensusReceiptTarget(receiptsTarget))
 
+		if cfg.ConsensusCLRank > 0 {
+			opts = append(opts, WithCLRank(cfg.ConsensusCLRank))
+		}
+
 		back := NewBackend(name, rpcURL, wsURL, rpcRequestSemaphore, opts...)
 		backendNames = append(backendNames, name)
 		backendsByName[name] = back
@@ -376,6 +380,38 @@ func Start(config *Config) (*Server, func(), error) {
 			routingStrategy:        bg.RoutingStrategy,
 			multicallRPCErrorCheck: bg.MulticallRPCErrorCheck,
 			maxBlockRange:          maxBlockRange,
+		}
+
+		// Validate consensus_cl_rank for each backend in this group.
+		seenRanks := make(map[int]string) // rank -> backend name
+		for _, bName := range bg.Backends {
+			cfg := config.Backends[bName]
+			if cfg.ConsensusCLRank < 0 {
+				log.Warn("consensus_cl_rank is negative, treating as unranked",
+					"backend", bName,
+					"backend_group", bgName,
+					"consensus_cl_rank", cfg.ConsensusCLRank,
+				)
+			}
+			if cfg.ConsensusCLRank > 0 && bg.RoutingStrategy != ConsensusAwareCLRoutingStrategy {
+				log.Warn("consensus_cl_rank is set but routing_strategy is not consensus_aware_consensus_layer; rank will have no effect",
+					"backend", bName,
+					"backend_group", bgName,
+					"routing_strategy", bg.RoutingStrategy,
+					"consensus_cl_rank", cfg.ConsensusCLRank,
+				)
+			}
+			if cfg.ConsensusCLRank > 0 {
+				if other, exists := seenRanks[cfg.ConsensusCLRank]; exists {
+					log.Crit("duplicate consensus_cl_rank within backend group",
+						"backend_group", bgName,
+						"rank", cfg.ConsensusCLRank,
+						"backend_a", other,
+						"backend_b", bName,
+					)
+				}
+				seenRanks[cfg.ConsensusCLRank] = bName
+			}
 		}
 	}
 
