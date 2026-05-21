@@ -140,6 +140,8 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		nil,                                    // limExemptKeys
 		TxValidationMiddlewareConfig{},         // txValidationConfig
 		10*time.Second,                         // gracefulShutdownDuration
+		false,                                  // gracefulShutdownIdle
+		10*time.Second,                         // gracefulShutdownIdleDuration
 	)
 	require.NoError(t, err)
 
