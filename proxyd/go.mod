@@ -19,7 +19,7 @@ require (
 	github.com/redis/go-redis/v9 v9.2.1
 	github.com/rs/cors v1.11.0
 	github.com/stretchr/testify v1.10.0
-	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a
+	github.com/syndtr/goleveldb v1.0.1-0.20220721030215-126854af5e6d
 	github.com/xaionaro-go/weightedshuffle v0.0.0-20211213010739-6a74fbc7d24a
 	golang.org/x/sync v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
