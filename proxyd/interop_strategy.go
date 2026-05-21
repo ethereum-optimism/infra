@@ -7,13 +7,14 @@ import (
 	"sync"
 	"time"
 
+	messages "github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
+	"github.com/ethereum-optimism/optimism/op-service/eth/safety"
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
-	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/holiman/uint256"
 )
 
 type InteropStrategy interface {
@@ -308,11 +309,15 @@ func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.H
 }
 
 func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string, chainID eth.ChainID) (int, string, error) {
-	validatingBackend := interop.NewInteropClient(url)
-	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-		ChainID:   uint256.Int(chainID),
-		Timestamp: getInteropExecutingDescriptorTimestamp(),
-	})
+	cl, err := client.NewRPC(ctx, log.Root(), url)
+	if err == nil {
+		interopFilter := sources.NewInteropFilterClient(cl)
+		defer interopFilter.Close()
+		err = interopFilter.CheckAccessList(ctx, accessList, safety.CrossUnsafe, messages.ExecutingDescriptor{
+			ChainID:   chainID,
+			Timestamp: getInteropExecutingDescriptorTimestamp(),
+		})
+	}
 
 	var httpCode int
 	var rpcErrorCode string
