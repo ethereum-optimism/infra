@@ -218,10 +218,13 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 
-	closed := false
+	closed := make(chan struct{}, 1)
 	originalHandler := client.conn.CloseHandler()
 	client.conn.SetCloseHandler(func(code int, text string) error {
-		closed = true
+		select {
+		case closed <- struct{}{}:
+		default:
+		}
 		return originalHandler(code, text)
 	})
 
@@ -236,6 +239,10 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 		[]byte(clientReq),
 	)
 	require.Error(t, err)
-	require.True(t, closed)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("expected client close handler to run")
+	}
 
 }
