@@ -185,6 +185,18 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "EXCLUDE_GATES"),
 		Usage:   "Comma-separated list of gate IDs to blacklist globally across all modes.",
 	}
+	ShardIndex = &cli.IntFlag{
+		Name:    "shard-index",
+		Value:   -1,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SHARD_INDEX"),
+		Usage:   "Zero-based shard index for this worker. Must be used with --shard-total. Only applies in gateless mode.",
+	}
+	ShardTotal = &cli.IntFlag{
+		Name:    "shard-total",
+		Value:   0,
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "SHARD_TOTAL"),
+		Usage:   "Total number of shards. Must be used with --shard-index. Only applies in gateless mode.",
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -211,6 +223,8 @@ var optionalFlags = []cli.Flag{
 	FlakeShake,
 	FlakeShakeIterations,
 	ExcludeGates,
+	ShardIndex,
+	ShardTotal,
 	DryRun,
 }
 var Flags []cli.Flag

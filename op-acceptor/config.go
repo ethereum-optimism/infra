@@ -37,6 +37,8 @@ type Config struct {
 	FlakeShake           bool                   // Enable flake-shake mode for test stability validation
 	FlakeShakeIterations int                    // Number of times to run each test in flake-shake mode
 	DryRun               bool                   // If true, show what tests would be run without executing them
+	ShardIndex           int                    // Zero-based shard index (-1 = no sharding)
+	ShardTotal           int                    // Total number of shards (0 = no sharding)
 	Log                  log.Logger
 	ExcludeGates         []string // List of gate IDs whose tests should be excluded
 }
@@ -122,6 +124,21 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 
 	excludeGates := parseExcludeGates(ctx.String(flags.ExcludeGates.Name))
 
+	// Parse and validate shard flags
+	shardIndex := ctx.Int(flags.ShardIndex.Name)
+	shardTotal := ctx.Int(flags.ShardTotal.Name)
+	if shardIndex >= 0 || shardTotal > 0 {
+		if shardTotal <= 0 {
+			return nil, fmt.Errorf("--shard-total must be > 0 when --shard-index is set")
+		}
+		if shardIndex < 0 || shardIndex >= shardTotal {
+			return nil, fmt.Errorf("--shard-index must be in range [0, %d)", shardTotal)
+		}
+		if !gatelessMode {
+			return nil, fmt.Errorf("--shard-index/--shard-total can only be used in gateless mode (without --gate)")
+		}
+	}
+
 	// Conflict: selected gates are also excluded
 	for _, g := range gates {
 		for _, eg := range excludeGates {
@@ -153,6 +170,8 @@ func NewConfig(ctx *cli.Context, log log.Logger, testDir string, validatorConfig
 		FlakeShake:           ctx.Bool(flags.FlakeShake.Name),
 		FlakeShakeIterations: ctx.Int(flags.FlakeShakeIterations.Name),
 		DryRun:               ctx.Bool(flags.DryRun.Name),
+		ShardIndex:           shardIndex,
+		ShardTotal:           shardTotal,
 		LogDir:               logDir,
 		Log:                  log,
 		ExcludeGates:         excludeGates,

@@ -113,6 +113,8 @@ func New(ctx context.Context, config *Config, version string, shutdownCallback f
 		GatelessMode:        config.GatelessMode,
 		TestDir:             config.TestDir,
 		ExcludeGates:        config.ExcludeGates,
+		ShardIndex:          config.ShardIndex,
+		ShardTotal:          config.ShardTotal,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry: %w", err)
