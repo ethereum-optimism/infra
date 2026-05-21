@@ -6,7 +6,7 @@ COPY ./replica-healthcheck .
 RUN yarn install --frozen-lockfile && yarn cache clean
 RUN yarn build
 
-FROM chainguard/node:latest
+FROM dhi.io/node:22-alpine3.23
 
 WORKDIR /opt/optimism/replica-healthcheck
 
