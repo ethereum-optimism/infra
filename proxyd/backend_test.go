@@ -2,12 +2,16 @@ package proxyd
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/eth"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +31,79 @@ func TestStripXFF(t *testing.T) {
 		actual := stripXFF(test.in)
 		assert.Equal(t, test.out, actual)
 	}
+}
+
+func TestOverwriteConsensusResponsesCrossUnsafeLatestCap(t *testing.T) {
+	tracker := NewInMemoryConsensusTracker()
+	tracker.SetState(ConsensusTrackerState{
+		Latest:    hexutil.Uint64(100),
+		Safe:      hexutil.Uint64(90),
+		Finalized: hexutil.Uint64(80),
+	})
+	cap := NewCrossUnsafeLatestPoller(nil, 900, time.Second)
+	cap.SetLatestBlock(eth.BlockID{Hash: common.HexToHash("0x01"), Number: 95})
+
+	bg := &BackendGroup{
+		Consensus:         &ConsensusPoller{tracker: tracker},
+		crossUnsafeLatest: cap,
+	}
+
+	t.Run("eth_blockNumber uses cross-unsafe cap", func(t *testing.T) {
+		req := &RPCReq{
+			JSONRPC: JSONRPCVersion,
+			Method:  "eth_blockNumber",
+			ID:      json.RawMessage("1"),
+		}
+		rewritten, overridden := bg.OverwriteConsensusResponses(context.Background(), []*RPCReq{req}, nil, nil)
+
+		require.Empty(t, rewritten)
+		require.Len(t, overridden, 1)
+		require.Equal(t, hexutil.Uint64(95), overridden[0].res.Result)
+	})
+
+	t.Run("latest tag uses cross-unsafe cap", func(t *testing.T) {
+		req := &RPCReq{
+			JSONRPC: JSONRPCVersion,
+			Method:  "eth_getBlockByNumber",
+			Params:  mustMarshalJSON([]interface{}{"latest", false}),
+			ID:      json.RawMessage("1"),
+		}
+		rewritten, overridden := bg.OverwriteConsensusResponses(context.Background(), []*RPCReq{req}, nil, nil)
+
+		require.Empty(t, overridden)
+		require.Len(t, rewritten, 1)
+		require.JSONEq(t, `["0x5f",false]`, string(req.Params))
+	})
+
+	t.Run("missing cap fails closed", func(t *testing.T) {
+		bg.crossUnsafeLatest = NewCrossUnsafeLatestPoller(nil, 900, time.Second)
+		req := &RPCReq{
+			JSONRPC: JSONRPCVersion,
+			Method:  "eth_blockNumber",
+			ID:      json.RawMessage("1"),
+		}
+		rewritten, overridden := bg.OverwriteConsensusResponses(context.Background(), []*RPCReq{req}, nil, nil)
+
+		require.Empty(t, rewritten)
+		require.Len(t, overridden, 1)
+		require.Equal(t, hexutil.Uint64(0), overridden[0].res.Result)
+	})
+
+	t.Run("bypass auth uses consensus latest", func(t *testing.T) {
+		bg.crossUnsafeLatest = cap
+		bg.crossUnsafeBypassAuth = NewStringSetFromStrings([]string{"interop-filter"})
+		ctx := context.WithValue(context.Background(), ContextKeyAuth, "interop-filter") // nolint:staticcheck
+		req := &RPCReq{
+			JSONRPC: JSONRPCVersion,
+			Method:  "eth_blockNumber",
+			ID:      json.RawMessage("1"),
+		}
+		rewritten, overridden := bg.OverwriteConsensusResponses(ctx, []*RPCReq{req}, nil, nil)
+
+		require.Empty(t, rewritten)
+		require.Len(t, overridden, 1)
+		require.Equal(t, hexutil.Uint64(100), overridden[0].res.Result)
+	})
 }
 
 func TestLimitedHTTPClientDoLimited(t *testing.T) {

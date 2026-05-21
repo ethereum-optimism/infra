@@ -281,6 +281,9 @@ type InteropValidationConfig struct {
 	LoadBalancingUnhealthinessTimeout time.Duration             `toml:"load_balancing_unhealthiness_timeout"`
 	ReqSizeLimit                      int                       `toml:"req_size_limit"`
 	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`
+	EnforceCrossUnsafeLatest          bool                      `toml:"enforce_cross_unsafe_latest"`
+	CrossUnsafeLatestPollInterval     TOMLDuration              `toml:"cross_unsafe_latest_poll_interval"`
+	CrossUnsafeLatestBypassAuth       []string                  `toml:"cross_unsafe_latest_bypass_auth"`
 	RateLimit                         SenderRateLimitConfig     `toml:"sender_rate_limit"`
 }
 
