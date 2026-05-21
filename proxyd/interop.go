@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
+	interopMessages "github.com/ethereum-optimism/optimism/op-core/interop/messages"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
 
-func accessObjectToKey(accessObject supervisorTypes.Access) string {
+func accessObjectToKey(accessObject interopMessages.Access) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%s", accessObject.ChainID, accessObject.BlockNumber, accessObject.LogIndex, accessObject.Timestamp, accessObject.Checksum)
 }
 
@@ -26,12 +26,12 @@ func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]co
 		return nil, nil
 	}
 
-	var deduplicatedAccessObjects []supervisorTypes.Access
+	var deduplicatedAccessObjects []interopMessages.Access
 
 	alreadySeenAccessObjectsSet := map[string]bool{}
 
 	for len(entriesToParse) > 0 {
-		remaining, parsedAccessObject, err := supervisorTypes.ParseAccess(entriesToParse)
+		remaining, parsedAccessObject, err := interopMessages.ParseAccess(entriesToParse)
 		if err != nil {
 			return nil, err
 		}
@@ -46,7 +46,7 @@ func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]co
 		entriesToParse = remaining
 	}
 
-	deduplicatedAccessListEntries := supervisorTypes.EncodeAccessList(deduplicatedAccessObjects)
+	deduplicatedAccessListEntries := interopMessages.EncodeAccessList(deduplicatedAccessObjects)
 
 	return deduplicatedAccessListEntries, nil
 }

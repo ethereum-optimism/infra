@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	interopMessages "github.com/ethereum-optimism/optimism/op-core/interop/messages"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -35,18 +36,18 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 }
 
 func fakeTxBuilder(txModifiers ...func(tx *types.AccessListTx)) *types.Transaction {
-	checksumArgs := supervisorTypes.ChecksumArgs{
+	checksumArgs := interopMessages.ChecksumArgs{
 		BlockNumber: 3519561,
 		Timestamp:   1746536469,
 		LogIndex:    1,
 		ChainID:     eth.ChainIDFromUInt64(420120003),
-		LogHash: supervisorTypes.PayloadHashToLogHash(
+		LogHash: interopMessages.PayloadHashToLogHash(
 			crypto.Keccak256Hash([]byte("Hello, World!")),
 			common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 		),
 	}
 
-	accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+	accessListEntries := interopMessages.EncodeAccessList([]interopMessages.Access{
 		checksumArgs.Access(),
 	})
 
@@ -392,12 +393,12 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 
 	fakeTx := fakeTxBuilder(func(tx *types.AccessListTx) {
 		// corresponds to ["0x01...", "0x03..."] storage keys
-		checksumArgs1 := supervisorTypes.ChecksumArgs{
+		checksumArgs1 := interopMessages.ChecksumArgs{
 			BlockNumber: 3519561,
 			Timestamp:   1746536469,
 			LogIndex:    1,
 			ChainID:     eth.ChainIDFromUInt64(420120003),
-			LogHash: supervisorTypes.PayloadHashToLogHash(
+			LogHash: interopMessages.PayloadHashToLogHash(
 				crypto.Keccak256Hash([]byte("Hello, World!")),
 				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 			),
@@ -406,18 +407,18 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 		// corresponds to ["0x01...", "0x02...","0x03..."] storage keys
 		// (0x02 is the chainIDExtension entry which is a consequence of a larger than uint64 chainID)
 		bigchainId, _ := new(big.Int).SetString("42012000398765432123456765432", 10)
-		checksumArgs2 := supervisorTypes.ChecksumArgs{
+		checksumArgs2 := interopMessages.ChecksumArgs{
 			BlockNumber: 3519561,
 			Timestamp:   1746536469,
 			LogIndex:    1,
 			ChainID:     eth.ChainIDFromBig(bigchainId),
-			LogHash: supervisorTypes.PayloadHashToLogHash(
+			LogHash: interopMessages.PayloadHashToLogHash(
 				crypto.Keccak256Hash([]byte("Hello, World!")),
 				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 			),
 		}
 
-		accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+		accessListEntries := interopMessages.EncodeAccessList([]interopMessages.Access{
 			checksumArgs1.Access(), // 2 entries
 			checksumArgs2.Access(), // 3 entries
 		})
