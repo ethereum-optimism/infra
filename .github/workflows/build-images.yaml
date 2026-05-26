@@ -39,8 +39,11 @@ jobs:
     uses: ethereum-optimism/factory/.github/workflows/docker.yaml@d1304a6e3ef93a8fcb0f672707f5f2ae9737a59d
     with:
       image_name: ${{ matrix.image_name }}
+      tag: ${{ matrix.tag }}
       context: ${{ matrix.context }}
       dockerfile: ${{ matrix.dockerfile }}
+      env: ${{ matrix.env }}
+      build_args: ${{ matrix.build_args }}
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
       registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
     permissions:
