@@ -766,7 +766,9 @@ def bootstrap_standby_cluster(
         print_error(f"Could not find current leader in network {network}")
         raise typer.Exit(code=1)
 
-    typer.echo(f"Found bootstrapped leader: {leader.sequencer_id}. Updating cluster membership...")
+    typer.echo(
+        f"Found bootstrapped leader: {leader.sequencer_id}. Updating cluster membership..."
+    )
 
     update_cluster_membership(network)
 
