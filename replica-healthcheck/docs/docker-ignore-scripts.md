@@ -1,6 +1,6 @@
 # Docker Node install scripts policy
 
-Dependency installs in `Dockerfile` use `--ignore-scripts` by default.
+Dependency installs in `Dockerfile` use `--ignore-scripts` by default (see `replica-healthcheck/.yarnrc`).
 
 ## Allowlist
 
