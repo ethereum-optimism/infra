@@ -735,14 +735,14 @@ def bootstrap_standby_cluster(
     network_obj = get_network(network)
 
     wait_for_condition(
-        "all sequencers to start",
+        "all conductor/sequencer RPCs to become reachable",
         lambda: network_obj.update_successful,
         update_func=network_obj.update,
         timeout_seconds=sequencer_start_timeout,
         retry_seconds=10,
     )
 
-    typer.echo("All sequencers are running. Bootstrapping standby cluster...")
+    typer.echo("All RPCs reachable. Bootstrapping standby cluster...")
 
     for sequencer in network_obj.sequencers:
         if sequencer.sequencer_active:
