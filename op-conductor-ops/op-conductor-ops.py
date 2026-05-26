@@ -706,5 +706,77 @@ def bootstrap_cluster(
     typer.echo("Conductors resumed. Bootstrap complete.")
 
 
+@app.command()
+def bootstrap_standby_cluster(
+    network: str,
+    sequencer_start_timeout: Annotated[
+        int,
+        typer.Option(
+            "--sequencer-start-timeout",
+            help="Timeout for sequencer start in seconds. Default is 300 seconds.",
+            envvar="BOOTSTRAP_SEQUENCER_START_TIMEOUT",
+        ),
+    ] = 300,
+):
+    """Bootstraps a new cluster in standby mode.
+
+    Forms the raft cluster across all conductor/sequencer pairs but leaves every
+    conductor paused and does not start a sequencer. Intended for standing up a
+    new set of nodes that will follow an existing network as verifiers, ready to
+    take over sequencing later via `resume` and `force-active-sequencer`.
+
+    Preconditions:
+    - All sequencer/conductor RPCs reachable.
+    - No sequencer is currently active.
+    - All conductors are paused.
+    - Exactly one conductor was started with raftBootstrap=true and reports itself
+      as leader.
+    """
+    network_obj = get_network(network)
+
+    wait_for_condition(
+        "all conductor/sequencer RPCs to become reachable",
+        lambda: network_obj.update_successful,
+        update_func=network_obj.update,
+        timeout_seconds=sequencer_start_timeout,
+        retry_seconds=10,
+    )
+
+    typer.echo("All RPCs reachable. Bootstrapping standby cluster...")
+
+    for sequencer in network_obj.sequencers:
+        if sequencer.sequencer_active:
+            print_error(
+                f"Sequencer {sequencer.sequencer_id} is active; "
+                f"bootstrap-standby-cluster expects all sequencers paused / verifier-only."
+            )
+            raise typer.Exit(code=1)
+
+    for sequencer in network_obj.sequencers:
+        if sequencer.conductor_active:
+            print_error(
+                f"Conductor for {sequencer.sequencer_id} is not paused. "
+                f"bootstrap-standby-cluster requires all conductors paused. "
+                f"Please run the `pause` command first."
+            )
+            raise typer.Exit(code=1)
+
+    leader = network_obj.find_conductor_leader()
+    if leader is None:
+        print_error(f"Could not find current leader in network {network}")
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"Found bootstrapped leader: {leader.sequencer_id}. Updating cluster membership..."
+    )
+
+    update_cluster_membership(network)
+
+    typer.echo(
+        "Standby cluster formed. All conductors remain paused; no sequencer started. "
+        "Use `resume` and `force-active-sequencer` when ready to take over sequencing."
+    )
+
+
 if __name__ == "__main__":
     app()
