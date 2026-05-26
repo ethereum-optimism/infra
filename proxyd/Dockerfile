@@ -1,5 +1,5 @@
 ARG BUILDER_IMAGE=golang:1.26.1-alpine3.23
-ARG RUNTIME_IMAGE=alpine:3.23
+ARG RUNTIME_IMAGE=dhi.io/alpine-base:3.23
 
 FROM ${BUILDER_IMAGE} AS builder
 

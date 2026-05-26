@@ -1,27 +1,17 @@
-FROM python:3.12-slim-bookworm
+FROM chainguard/wolfi-base:latest
 
-# Set working directory
+RUN apk add --no-cache python-3.12 py3.12-poetry && \
+    printf '#!/bin/sh\nexec python3.12 -m poetry "$@"\n' > /usr/bin/poetry && \
+    chmod +x /usr/bin/poetry
+
 WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
-ENV PATH="/root/.local/bin:$PATH"
 
 # Copy only the dependency files initially to leverage Docker caching
 COPY /op-conductor-ops/pyproject.toml /op-conductor-ops/poetry.lock* ./
 
-# Configure Poetry to not use virtualenvs inside the container
-RUN poetry config virtualenvs.create false
-
-# Install dependencies
-RUN poetry install --no-interaction --no-ansi
+# Install dependencies into the system Python (no venv)
+RUN python3.12 -m poetry config virtualenvs.create false \
+ && python3.12 -m poetry install --no-interaction --no-ansi
 
 # Copy the rest of the application
 COPY /op-conductor-ops/ .
@@ -29,5 +19,4 @@ COPY /op-conductor-ops/ .
 # Set permissions for the executable
 RUN chmod +x op-conductor-ops
 
-# Set the entrypoint to use the CLI
 ENTRYPOINT ["./op-conductor-ops"]
