@@ -7,13 +7,15 @@ import (
 	"sync"
 	"time"
 
+	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
+	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
+	"github.com/ethereum-optimism/optimism/op-service/eth/safety"
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
-	"github.com/ethereum/go-ethereum/eth/interop"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/holiman/uint256"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type InteropStrategy interface {
@@ -96,7 +98,7 @@ func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.
 			"req_id", GetReqID(ctx),
 			"method", "eth_sendRawTransaction",
 		)
-		return nil, false, supervisorTypes.ErrNoRPCSource
+		return nil, false, interopErrors.ErrNoRPCSource
 	}
 	var err error
 	if s.validateAndDeduplicateInteropAccessList {
@@ -308,9 +310,16 @@ func (b *healthAwareBackend) Validate(ctx context.Context, accessList []common.H
 }
 
 func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url string, chainID eth.ChainID) (int, string, error) {
-	validatingBackend := interop.NewInteropClient(url)
-	err := validatingBackend.CheckAccessList(ctx, accessList, interoptypes.CrossUnsafe, interoptypes.ExecutingDescriptor{
-		ChainID:   uint256.Int(chainID),
+	rpcClient, err := rpc.DialContext(ctx, url)
+	if err != nil {
+		log.Error("failed to dial interop filter backend", "url", url, "req_id", GetReqID(ctx), "err", err)
+		return 0, "", fmt.Errorf("interop filter backend unavailable")
+	}
+	defer rpcClient.Close()
+
+	validatingBackend := sources.NewInteropFilterClient(client.NewBaseRPCClient(rpcClient))
+	err = validatingBackend.CheckAccessList(ctx, accessList, safety.CrossUnsafe, messages.ExecutingDescriptor{
+		ChainID:   chainID,
 		Timestamp: getInteropExecutingDescriptorTimestamp(),
 	})
 

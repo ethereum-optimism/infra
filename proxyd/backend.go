@@ -20,8 +20,7 @@ import (
 	"time"
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
-	supervisorBackend "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend"
-	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
+	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -174,61 +173,61 @@ Summary:
 	  -321501 DATA_CORRUPTION
 */
 var interopRPCErrorMap = map[error]*RPCErr{
-	supervisorTypes.ErrUninitialized: {
+	interopErrors.ErrUninitialized: {
 		Code:          -320400,
 		HTTPErrorCode: 400,
 	},
-	supervisorTypes.ErrSkipped: {
+	interopErrors.ErrSkipped: {
 		Code:          -320500,
 		HTTPErrorCode: 422,
 	},
-	supervisorTypes.ErrUnknownChain: {
+	interopErrors.ErrUnknownChain: {
 		Code:          -320501,
 		HTTPErrorCode: 404,
 	},
-	supervisorTypes.ErrConflict: {
+	interopErrors.ErrConflict: {
 		Code:          -320600,
 		HTTPErrorCode: 409,
 	},
-	supervisorTypes.ErrIneffective: {
+	interopErrors.ErrIneffective: {
 		Code:          -320601,
 		HTTPErrorCode: 422,
 	},
-	supervisorTypes.ErrOutOfOrder: {
+	interopErrors.ErrOutOfOrder: {
 		Code:          -320900,
 		HTTPErrorCode: 409,
 	},
-	supervisorTypes.ErrAwaitReplacementBlock: {
+	interopErrors.ErrAwaitReplacementBlock: {
 		Code:          -320901,
 		HTTPErrorCode: 409,
 	},
-	supervisorTypes.ErrStop: {
+	interopErrors.ErrStop: {
 		Code:          -321000,
 		HTTPErrorCode: 400,
 	},
-	supervisorTypes.ErrOutOfScope: {
+	interopErrors.ErrOutOfScope: {
 		Code:          -321100,
 		HTTPErrorCode: 400,
 	},
-	supervisorTypes.ErrPreviousToFirst: {
+	interopErrors.ErrPreviousToFirst: {
 		Code:          -321200,
 		HTTPErrorCode: 404,
 	},
-	supervisorTypes.ErrFuture: {
+	interopErrors.ErrFuture: {
 		Code:          -321401,
 		HTTPErrorCode: 422,
 	},
-	supervisorTypes.ErrNotExact: {
+	interopErrors.ErrNotExact: {
 		Code:          -321500,
 		HTTPErrorCode: 404,
 	},
-	supervisorTypes.ErrDataCorruption: {
+	interopErrors.ErrDataCorruption: {
 		Code:          -321501,
 		HTTPErrorCode: 422,
 	},
-	supervisorBackend.ErrUnexpectedMinSafetyLevel: {
-		Code:          -32602, // invalid params
-		HTTPErrorCode: 400,
+	interopErrors.ErrFailsafeEnabled: {
+		Code:          -32602, // not in interop spec — filter returns this when failsafe is on
+		HTTPErrorCode: 503,
 	},
 	errors.New("stopped acces-list check early"): {
 		Code:          -32602, // invalid params
