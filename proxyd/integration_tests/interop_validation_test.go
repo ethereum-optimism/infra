@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
+	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
+	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	supervisorTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -35,18 +36,18 @@ func convertTxToReqParams(tx *types.Transaction) (string, error) {
 }
 
 func fakeTxBuilder(txModifiers ...func(tx *types.AccessListTx)) *types.Transaction {
-	checksumArgs := supervisorTypes.ChecksumArgs{
+	checksumArgs := messages.ChecksumArgs{
 		BlockNumber: 3519561,
 		Timestamp:   1746536469,
 		LogIndex:    1,
 		ChainID:     eth.ChainIDFromUInt64(420120003),
-		LogHash: supervisorTypes.PayloadHashToLogHash(
+		LogHash: messages.PayloadHashToLogHash(
 			crypto.Keccak256Hash([]byte("Hello, World!")),
 			common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 		),
 	}
 
-	accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+	accessListEntries := messages.EncodeAccessList([]messages.Access{
 		checksumArgs.Access(),
 	})
 
@@ -85,11 +86,11 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
+	errResp1 := fmt.Sprintf(errResTmpl, -32000, interopErrors.ErrConflict.Error())
 	badValidatingBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badValidatingBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
+	errResp2 := fmt.Sprintf(errResTmpl, -32000, interopErrors.ErrDataCorruption.Error())
 	badValidatingBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badValidatingBackend2.Close()
 
@@ -103,8 +104,8 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
 
-	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
-	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
+	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, interopErrors.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
+	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, interopErrors.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
 
 	type respDetails struct {
 		code         int
@@ -153,11 +154,11 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 			multiplePossibilities: true,
 			possibilities: []respDetails{
 				{
-					code:         409, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
+					code:         409, // http code corresponding to interopErrors.ErrDataCorruption from interopRPCErrorMap
 					jsonResponse: []byte(expectedErrResp1),
 				},
 				{
-					code:         422, // http code corresponding to supervisorTypes.ErrDataCorruption from interopRPCErrorMap
+					code:         422, // http code corresponding to interopErrors.ErrDataCorruption from interopRPCErrorMap
 					jsonResponse: []byte(expectedErrResp2),
 				},
 			},
@@ -392,12 +393,12 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 
 	fakeTx := fakeTxBuilder(func(tx *types.AccessListTx) {
 		// corresponds to ["0x01...", "0x03..."] storage keys
-		checksumArgs1 := supervisorTypes.ChecksumArgs{
+		checksumArgs1 := messages.ChecksumArgs{
 			BlockNumber: 3519561,
 			Timestamp:   1746536469,
 			LogIndex:    1,
 			ChainID:     eth.ChainIDFromUInt64(420120003),
-			LogHash: supervisorTypes.PayloadHashToLogHash(
+			LogHash: messages.PayloadHashToLogHash(
 				crypto.Keccak256Hash([]byte("Hello, World!")),
 				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 			),
@@ -406,18 +407,18 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 		// corresponds to ["0x01...", "0x02...","0x03..."] storage keys
 		// (0x02 is the chainIDExtension entry which is a consequence of a larger than uint64 chainID)
 		bigchainId, _ := new(big.Int).SetString("42012000398765432123456765432", 10)
-		checksumArgs2 := supervisorTypes.ChecksumArgs{
+		checksumArgs2 := messages.ChecksumArgs{
 			BlockNumber: 3519561,
 			Timestamp:   1746536469,
 			LogIndex:    1,
 			ChainID:     eth.ChainIDFromBig(bigchainId),
-			LogHash: supervisorTypes.PayloadHashToLogHash(
+			LogHash: messages.PayloadHashToLogHash(
 				crypto.Keccak256Hash([]byte("Hello, World!")),
 				common.HexToAddress("0x7A23c3fC3dA9a5364b97E0e4c47E7777BaE5C8Cd"),
 			),
 		}
 
-		accessListEntries := supervisorTypes.EncodeAccessList([]supervisorTypes.Access{
+		accessListEntries := messages.EncodeAccessList([]messages.Access{
 			checksumArgs1.Access(), // 2 entries
 			checksumArgs2.Access(), // 3 entries
 		})
@@ -658,11 +659,11 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 
 	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
 
-	errResp1 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrConflict.Error())
+	errResp1 := fmt.Sprintf(errResTmpl, -32000, interopErrors.ErrConflict.Error())
 	badHealthyBackend1 := NewMockBackend(SingleResponseHandler(409, errResp1))
 	defer badHealthyBackend1.Close()
 
-	errResp2 := fmt.Sprintf(errResTmpl, -32000, supervisorTypes.ErrDataCorruption.Error())
+	errResp2 := fmt.Sprintf(errResTmpl, -32000, interopErrors.ErrDataCorruption.Error())
 	badHealthyBackend2 := NewMockBackend(SingleResponseHandler(400, errResp2))
 	defer badHealthyBackend2.Close()
 
@@ -678,8 +679,8 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_SomeHealthyBackends(
 	unhealthyBackend3 := NewMockBackend(SingleResponseHandler(502, errResp5))
 	defer unhealthyBackend3.Close()
 
-	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, supervisorTypes.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
-	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, supervisorTypes.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
+	expectedErrResp1 := fmt.Sprintf(errResTmpl, -320600, interopErrors.ErrConflict.Error())       // although the backend returns -32000, proxyd should correctly map it to -320600
+	expectedErrResp2 := fmt.Sprintf(errResTmpl, -321501, interopErrors.ErrDataCorruption.Error()) // although the backend returns -32000, proxyd should correctly map it to -321501
 
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
