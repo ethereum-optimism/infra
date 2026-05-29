@@ -9,8 +9,8 @@ from rich.table import Table
 import typer
 from typing_extensions import Annotated
 
-from config import read_config
-from utils import make_rpc_payload, print_boolean, print_warn, print_error
+from .config import read_config
+from .utils import make_rpc_payload, print_boolean, print_warn, print_error
 
 
 app = typer.Typer(

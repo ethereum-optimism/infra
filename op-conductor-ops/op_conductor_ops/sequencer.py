@@ -3,7 +3,7 @@ import concurrent.futures
 import requests
 import typer
 
-from utils import make_rpc_payload
+from .utils import make_rpc_payload
 
 
 class Sequencer:
