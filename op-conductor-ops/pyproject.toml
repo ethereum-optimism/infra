@@ -1,16 +1,21 @@
 [tool.poetry]
 name = "op-conductor-ops"
+version = "0.1.0"
 description = "CLI tool for managing op-conductor sequencer clusters"
 authors = ["Zach Howard <zach@oplabs.co>"]
 license = "MIT"
 readme = "README.md"
-package-mode = false
+packages = [{include = "op_conductor_ops"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
 typer = "^0.12.3"
 requests = "^2.32.4"
 toml = "^0.10.2"
+rich = "^13.0.0"
+
+[tool.poetry.scripts]
+op-conductor-ops = "op_conductor_ops.cli:app"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"

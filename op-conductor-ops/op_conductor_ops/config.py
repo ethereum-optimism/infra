@@ -1,5 +1,5 @@
-from network import Network
-from sequencer import Sequencer
+from .network import Network
+from .sequencer import Sequencer
 import toml
 
 
