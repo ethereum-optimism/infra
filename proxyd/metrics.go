@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -75,6 +76,14 @@ var (
 		"http_code",
 		"rpc_error_code",
 		"strategy",
+	})
+
+	interopAgreementOutcomesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "interop_agreement_outcomes_total",
+		Help:      "Count of agreement-strategy interop validation outcomes.",
+	}, []string{
+		"outcome",
 	})
 
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -889,4 +898,36 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+const (
+	agreementOutcomeAccept            = "accept"
+	agreementOutcomeRejectAgreed      = "reject_agreed"
+	agreementOutcomeRejectDisagree    = "reject_disagreement"
+	agreementOutcomeRejectQuorumUnmet = "reject_quorum_not_reached"
+)
+
+// recordAgreementOutcome classifies an agreement-strategy decision from the
+// definitive verdict tallies and increments the corresponding metric.
+func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int) {
+	var outcome string
+	switch {
+	case valid+invalid < minResponses:
+		outcome = agreementOutcomeRejectQuorumUnmet
+	case invalid == 0:
+		outcome = agreementOutcomeAccept
+	case valid == 0:
+		outcome = agreementOutcomeRejectAgreed
+	default:
+		outcome = agreementOutcomeRejectDisagree
+	}
+	interopAgreementOutcomesTotal.WithLabelValues(outcome).Inc()
+	log.Debug(
+		"interop agreement outcome",
+		"req_id", GetReqID(ctx),
+		"outcome", outcome,
+		"valid", valid,
+		"invalid", invalid,
+		"min_responses", minResponses,
+	)
 }

@@ -282,6 +282,10 @@ type InteropValidationConfig struct {
 	ReqSizeLimit                      int                       `toml:"req_size_limit"`
 	AccessListSizeLimit               int                       `toml:"access_list_size_limit"`
 	RateLimit                         SenderRateLimitConfig     `toml:"sender_rate_limit"`
+	// MinResponses is the quorum required by the agreement strategy: the number
+	// of definitive verdicts that must be collected before deciding. Defaults to
+	// len(Urls) (unanimity) when unset.
+	MinResponses int `toml:"min_responses"`
 }
 
 type InteropValidationStrategy string
@@ -291,6 +295,7 @@ const (
 	FirstSupervisorStrategy          InteropValidationStrategy = "first-supervisor"
 	MulticallStrategy                InteropValidationStrategy = "multicall"
 	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
+	AgreementStrategy                InteropValidationStrategy = "agreement"
 )
 
 func ReadFromEnvOrConfig(value string) (string, error) {

@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -209,6 +210,154 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		}
 	}
 	return ParseInteropError(firstErr)
+}
+
+// agreementStrategyImpl fans every check out to all configured urls
+// concurrently and decides once minResponses definitive verdicts arrive. A
+// "definitive verdict" is either a successful validation (valid) or a known
+// supervisor validation rejection (invalid); transport errors, timeouts, 5xx
+// and cancellations are non-responses and never count. Once the quorum of
+// definitive verdicts is reached the in-flight requests are cancelled rather
+// than awaited, so a slow endpoint cannot delay the decision.
+//
+// Decision once the quorum is met: all-valid accepts, all-invalid rejects with
+// the real rejection error, a mix logs an error and rejects. Fewer than
+// minResponses definitive verdicts fails closed (quorum-not-reached).
+//
+// Disagreement detection is best-effort: breaking at minResponses means a slow
+// dissenter past the quorum is never observed. Guaranteed detection would need
+// an all-wait audit mode, which is out of scope.
+type agreementStrategyImpl struct {
+	*commonInteropStrategy
+	minResponses int
+}
+
+var _ InteropStrategy = (*agreementStrategyImpl)(nil)
+
+func NewAgreementStrategy(urls []string, minResponses int, opts ...commonStrategyOpt) *agreementStrategyImpl {
+	return &agreementStrategyImpl{
+		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
+		minResponses:          minResponses,
+	}
+}
+
+func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
+	if err != nil {
+		return err
+	}
+
+	if !proceedFurther {
+		return nil
+	}
+
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, AgreementStrategy) // nolint:staticcheck
+
+	type verdict struct {
+		valid bool
+		err   error
+	}
+
+	// Buffered to len(urls) so every goroutine can always write its verdict and
+	// exit even after we break early, avoiding goroutine leaks.
+	results := make(chan verdict, len(s.urls))
+
+	// Cancelled on break to abort in-flight requests to endpoints that have not
+	// yet responded once the quorum is reached.
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for _, url := range s.urls {
+		go func(url string) {
+			_, _, e := performCheckAccessListOp(cctx, accessListToValidate, url, s.chainID)
+			switch {
+			case e == nil:
+				results <- verdict{valid: true}
+			case isDefinitiveInteropRejection(e):
+				results <- verdict{valid: false, err: e}
+			default:
+				results <- verdict{} // non-response: transport/timeout/5xx/cancel
+			}
+		}(url)
+	}
+
+	var valid, invalid int
+	var firstInvalid error
+	for range s.urls {
+		v := <-results
+		switch {
+		case v.valid:
+			valid++
+		case v.err != nil:
+			invalid++
+			if firstInvalid == nil {
+				firstInvalid = v.err
+			}
+		default:
+			continue // non-response; keep waiting for definitive verdicts
+		}
+		if valid+invalid >= s.minResponses {
+			break
+		}
+	}
+
+	recordAgreementOutcome(ctx, valid, invalid, s.minResponses)
+
+	if valid+invalid < s.minResponses {
+		return ParseInteropError(fmt.Errorf("interop quorum not reached: %d definitive responses, %d required", valid+invalid, s.minResponses))
+	}
+
+	switch {
+	case invalid == 0:
+		return nil
+	case valid == 0:
+		return firstInvalid // all reachable endpoints agree the tx is invalid
+	default:
+		log.Error(
+			"interop endpoints disagreed; rejecting",
+			"req_id", GetReqID(ctx),
+			"valid", valid,
+			"invalid", invalid,
+		)
+		return firstInvalid
+	}
+}
+
+// definitiveInteropRejectionCodes is the set of supervisor verdict codes that
+// count as a definitive INVALID verdict for the agreement strategy. It is the
+// interopRPCErrorMap codes minus everything coded -32602 (the generic params
+// fallbacks and ErrFailsafeEnabled, which is -32602/503). A failsafe 503 is a
+// non-response, so if all reachable endpoints are in failsafe the quorum is not
+// met and we fail closed. This mirrors the codes op-reth accepts as
+// SuperchainDAError so both sides agree on what counts as a rejection.
+var definitiveInteropRejectionCodes = buildDefinitiveRejectionSet()
+
+func buildDefinitiveRejectionSet() map[int]struct{} {
+	codes := make(map[int]struct{})
+	for _, rpcErr := range interopRPCErrorMap {
+		if rpcErr.Code == -32602 {
+			continue
+		}
+		codes[rpcErr.Code] = struct{}{}
+	}
+	return codes
+}
+
+// isDefinitiveInteropRejection reports whether err is a definitive INVALID
+// verdict from a supervisor. A cancelled request yields context.Canceled / HTTP
+// 499 and must never count (it is the agreement strategy's own cancellation, or
+// an upstream client disconnect), so it is explicitly excluded even though it
+// lives in the 4xx band.
+func isDefinitiveInteropRejection(err error) bool {
+	var e *RPCErr
+	if !errors.As(err, &e) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || e.HTTPErrorCode == 499 {
+		return false
+	}
+	_, ok := definitiveInteropRejectionCodes[e.Code]
+	return ok
 }
 
 type healthAwareLoadBalancingStrategyImpl struct {
