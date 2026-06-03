@@ -220,6 +220,15 @@ func Start(config *Config) (*Server, func(), error) {
 		opts = append(opts, WithConsensusSkipPeerCountCheck(cfg.ConsensusSkipPeerCountCheck))
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
+		if cfg.ConsensusCLRank < 0 {
+			log.Warn("negative consensus_cl_rank is invalid and will be ignored — use a positive integer for ranking or 0 for unranked",
+				"backend", name,
+				"consensus_cl_rank", cfg.ConsensusCLRank,
+			)
+		}
+		if cfg.ConsensusCLRank > 0 {
+			opts = append(opts, WithCLRank(cfg.ConsensusCLRank))
+		}
 		if len(cfg.AllowedStatusCodes) > 0 {
 			opts = append(opts, WithAllowedStatusCodes(cfg.AllowedStatusCodes))
 		}
@@ -572,6 +581,20 @@ func Start(config *Config) (*Server, func(), error) {
 
 		log.Info("configuring routing strategy for backend_group", "name", bgName, "routing_strategy", bgcfg.RoutingStrategy)
 
+		// Warn if consensus_cl_rank is set on backends in a group that doesn't use CL routing.
+		if bgcfg.RoutingStrategy != ConsensusAwareCLRoutingStrategy {
+			for _, be := range bg.Backends {
+				if be.clRank > 0 {
+					log.Warn("consensus_cl_rank is set but routing strategy is not consensus_aware_consensus_layer — rank will be ignored",
+						"backend", be.Name,
+						"backend_group", bgName,
+						"routing_strategy", bgcfg.RoutingStrategy,
+						"consensus_cl_rank", be.clRank,
+					)
+				}
+			}
+		}
+
 		if bgcfg.RoutingStrategy == ConsensusAwareRoutingStrategy || bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
 			log.Info("creating poller for consensus aware backend_group",
 				"name", bgName,
@@ -594,6 +617,21 @@ func Start(config *Config) (*Server, func(), error) {
 							"backend_group", bgName,
 							"backend", be.Name,
 						)
+					}
+				}
+				// Validate consensus_cl_rank values within this CL group.
+				rankSeen := make(map[int]string) // rank -> backend name
+				for _, be := range bg.Backends {
+					if be.clRank > 0 {
+						if prev, dup := rankSeen[be.clRank]; dup {
+							log.Crit("duplicate consensus_cl_rank values in backend group — each ranked backend must have a unique rank",
+								"backend_group", bgName,
+								"rank", be.clRank,
+								"backend_a", prev,
+								"backend_b", be.Name,
+							)
+						}
+						rankSeen[be.clRank] = be.Name
 					}
 				}
 			}

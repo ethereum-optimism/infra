@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,6 +23,21 @@ func outputRootHandler(root string) http.HandlerFunc {
 			"result": map[string]interface{}{
 				"outputRoot": root,
 				"blockRef":   map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
+			},
+		})
+	}
+}
+
+// missingOutputRootHandler serves a valid JSON-RPC response that lacks an outputRoot,
+// producing a non-timeout fetch error (distinct from a backend that simply disagrees).
+func missingOutputRootHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      json.RawMessage(`67`),
+			"result": map[string]interface{}{
+				"blockRef": map[string]interface{}{"hash": "hash_0xe1", "number": float64(225)},
 			},
 		})
 	}
@@ -117,4 +133,270 @@ func TestVerifyCLOutputRoots_ConfigurableBanThreshold(t *testing.T) {
 
 	cp.verifyCLOutputRoots(context.Background(), candidatesFor(cp, be), hexutil.Uint64(225))
 	require.True(t, cp.IsBanned(be), "threshold=1: first timeout should immediately ban")
+}
+
+// newTestBackendWithRank creates a minimal Backend with a CL rank.
+func newTestBackendWithRank(t *testing.T, name string, srv *httptest.Server, timeout time.Duration, rank int) *Backend {
+	t.Helper()
+	be := NewBackend(name, srv.URL, "", nil, WithTimeout(timeout), WithCLRank(rank))
+	be.healthyProbe.Store(true)
+	return be
+}
+
+// candidatesForMulti returns a candidates map for multiple backends.
+func candidatesForMulti(cp *ConsensusPoller, backends ...*Backend) map[*Backend]*backendState {
+	m := make(map[*Backend]*backendState, len(backends))
+	for _, be := range backends {
+		bs := cp.backendState[be]
+		bs.safeBlockNumber = hexutil.Uint64(225)
+		bs.localSafeBlockNumber = hexutil.Uint64(225)
+		m[be] = bs
+	}
+	return m
+}
+
+func TestVerifyCLOutputRoots_RankedTiebreaking_LowestRankWins(t *testing.T) {
+	// Two backends return different output roots — no majority (each has 1 vote).
+	// Backend with lower rank should win and the other should be banned.
+	srvA := httptest.NewServer(outputRootHandler("root_A"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_B"))
+	defer srvB.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 1) // rank 1 = highest priority
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 2) // rank 2
+
+	cp := newTestPoller([]*Backend{beA, beB}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	// beA (rank 1) should survive, beB (rank 2) should be banned.
+	_, beAInResult := resultCandidates[beA]
+	_, beBInResult := resultCandidates[beB]
+	require.True(t, beAInResult, "beA (rank 1) should remain in candidates")
+	require.False(t, beBInResult, "beB (rank 2) should be removed from candidates")
+	require.True(t, cp.IsBanned(beB), "beB should be banned")
+	require.False(t, cp.IsBanned(beA), "beA should not be banned")
+}
+
+func TestVerifyCLOutputRoots_RankedTiebreaking_HigherRankBanned(t *testing.T) {
+	// Same as above but with reversed ranks — the one with lower rank wins.
+	srvA := httptest.NewServer(outputRootHandler("root_A"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_B"))
+	defer srvB.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 5) // rank 5
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 2) // rank 2 = higher priority
+
+	cp := newTestPoller([]*Backend{beA, beB}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	_, beAInResult := resultCandidates[beA]
+	_, beBInResult := resultCandidates[beB]
+	require.False(t, beAInResult, "beA (rank 5) should be removed")
+	require.True(t, beBInResult, "beB (rank 2) should remain")
+	require.True(t, cp.IsBanned(beA), "beA should be banned")
+	require.False(t, cp.IsBanned(beB), "beB should not be banned")
+}
+
+func TestVerifyCLOutputRoots_NoRanks_NoBans(t *testing.T) {
+	// Two backends disagree but neither has a rank — no tiebreaking, no bans.
+	srvA := httptest.NewServer(outputRootHandler("root_A"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_B"))
+	defer srvB.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 0) // unranked
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 0) // unranked
+
+	cp := newTestPoller([]*Backend{beA, beB}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	require.Len(t, resultCandidates, 2, "both should remain — no tiebreaking possible")
+	require.False(t, cp.IsBanned(beA))
+	require.False(t, cp.IsBanned(beB))
+}
+
+func TestVerifyCLOutputRoots_RankedTiebreaking_SameRootNoAction(t *testing.T) {
+	// Two backends agree on the same root — no tiebreaking needed even though
+	// they have different ranks.
+	srvA := httptest.NewServer(outputRootHandler("root_same"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_same"))
+	defer srvB.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 1)
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 2)
+
+	cp := newTestPoller([]*Backend{beA, beB}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	// Both agree, maxCount=2 so the majority path is taken, not tiebreaking.
+	require.Len(t, resultCandidates, 2)
+	require.False(t, cp.IsBanned(beA))
+	require.False(t, cp.IsBanned(beB))
+}
+
+func TestVerifyCLOutputRoots_RankedTiebreaking_OddGroupAllDisagree(t *testing.T) {
+	// Odd-sized group (3 backends) where all return different output roots — no majority
+	// is possible, so ranked tiebreaking resolves it. Confirms the feature works with odd
+	// node counts, which satisfy the odd-backend startup guard.
+	srvA := httptest.NewServer(outputRootHandler("root_A"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_B"))
+	defer srvB.Close()
+	srvC := httptest.NewServer(outputRootHandler("root_C"))
+	defer srvC.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 3) // rank 3
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 1) // rank 1 = highest priority
+	beC := newTestBackendWithRank(t, "nodeC", srvC, 2*time.Second, 2) // rank 2
+
+	cp := newTestPoller([]*Backend{beA, beB, beC}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB, beC)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	// beB (rank 1) wins; beA and beC are banned for disagreeing with the winner's root.
+	_, beBInResult := resultCandidates[beB]
+	require.True(t, beBInResult, "beB (rank 1) should remain in candidates")
+	require.Len(t, resultCandidates, 1, "only the winner should remain")
+	require.True(t, cp.IsBanned(beA), "beA (rank 3) should be banned")
+	require.True(t, cp.IsBanned(beC), "beC (rank 2) should be banned")
+	require.False(t, cp.IsBanned(beB), "beB (rank 1) should not be banned")
+}
+
+func TestVerifyCLOutputRoots_RankedTiebreaking_OddGroupWithErroredBackend(t *testing.T) {
+	// Realistic failure mode: an odd group where the highest-priority backend is down
+	// (non-timeout fetch error) and the two survivors disagree. The errored backend is
+	// skipped (cannot win), so the next-lowest rank wins and the disagreeing survivor is
+	// banned. The errored backend is neither the winner nor banned for disagreement.
+	srvA := httptest.NewServer(missingOutputRootHandler()) // rank 1, but errors
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_B"))
+	defer srvB.Close()
+	srvC := httptest.NewServer(outputRootHandler("root_C"))
+	defer srvC.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 1) // highest priority, but down
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 2) // rank 2 = highest among responders
+	beC := newTestBackendWithRank(t, "nodeC", srvC, 2*time.Second, 3) // rank 3
+
+	cp := newTestPoller([]*Backend{beA, beB, beC}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB, beC)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	// beB (rank 2) wins among the responders; beC is banned for disagreeing.
+	_, beBInResult := resultCandidates[beB]
+	require.True(t, beBInResult, "beB (rank 2) should win and remain")
+	require.False(t, cp.IsBanned(beB), "beB should not be banned")
+	require.True(t, cp.IsBanned(beC), "beC (rank 3) should be banned for disagreeing")
+
+	// beA errored: it cannot win the tiebreak and must not be banned for disagreement.
+	require.False(t, cp.IsBanned(beA), "errored beA must not be banned for disagreement")
+	_, beAInResult := resultCandidates[beA]
+	require.True(t, beAInResult, "errored beA remains in candidates (not removed by tiebreak)")
+}
+
+// --- Tests for the extracted resolveCLOutputRootTiebreak function ---
+
+func TestResolveCLOutputRootTiebreak_LowestRankWins(t *testing.T) {
+	beA := &Backend{Name: "nodeA", clRank: 1}
+	beB := &Backend{Name: "nodeB", clRank: 3}
+
+	winner, root, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "root_A"},
+		{Backend: beB, OutputRoot: "root_B"},
+	})
+
+	require.True(t, found)
+	require.Equal(t, "root_A", root)
+	require.Equal(t, "nodeA", winner.Name)
+	require.Equal(t, 1, winner.clRank)
+}
+
+func TestResolveCLOutputRootTiebreak_HigherRankLoses(t *testing.T) {
+	beA := &Backend{Name: "nodeA", clRank: 5}
+	beB := &Backend{Name: "nodeB", clRank: 2}
+
+	winner, root, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "root_A"},
+		{Backend: beB, OutputRoot: "root_B"},
+	})
+
+	require.True(t, found)
+	require.Equal(t, "root_B", root)
+	require.Equal(t, "nodeB", winner.Name)
+	require.Equal(t, 2, winner.clRank)
+}
+
+func TestResolveCLOutputRootTiebreak_NoRankedBackends(t *testing.T) {
+	beA := &Backend{Name: "nodeA", clRank: 0}
+	beB := &Backend{Name: "nodeB", clRank: 0}
+
+	_, _, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "root_A"},
+		{Backend: beB, OutputRoot: "root_B"},
+	})
+
+	require.False(t, found, "no ranked backends should return found=false")
+}
+
+func TestResolveCLOutputRootTiebreak_SingleRankedAmongUnranked(t *testing.T) {
+	beA := &Backend{Name: "nodeA", clRank: 0}
+	beB := &Backend{Name: "nodeB", clRank: 3}
+	beC := &Backend{Name: "nodeC", clRank: 0}
+
+	winner, root, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "root_A"},
+		{Backend: beB, OutputRoot: "root_B"},
+		{Backend: beC, OutputRoot: "root_C"},
+	})
+
+	require.True(t, found)
+	require.Equal(t, "root_B", root)
+	require.Equal(t, "nodeB", winner.Name)
+	require.Equal(t, 3, winner.clRank)
+}
+
+func TestResolveCLOutputRootTiebreak_ErroredBackendsSkipped(t *testing.T) {
+	beA := &Backend{Name: "nodeA", clRank: 1}
+	beB := &Backend{Name: "nodeB", clRank: 2}
+
+	winner, root, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "", Err: fmt.Errorf("fetch failed")},
+		{Backend: beB, OutputRoot: "root_B"},
+	})
+
+	require.True(t, found)
+	require.Equal(t, "root_B", root)
+	require.Equal(t, "nodeB", winner.Name)
+	require.Equal(t, 2, winner.clRank)
+}
+
+func TestResolveCLOutputRootTiebreak_DuplicateRanksPicksFirst(t *testing.T) {
+	// Duplicate ranks should not happen (validated at config), but test gracefully.
+	beA := &Backend{Name: "nodeA", clRank: 1}
+	beB := &Backend{Name: "nodeB", clRank: 1}
+
+	winner, root, found := resolveCLOutputRootTiebreak([]clOutputRootResult{
+		{Backend: beA, OutputRoot: "root_A"},
+		{Backend: beB, OutputRoot: "root_B"},
+	})
+
+	// Duplicate ranks are rejected at startup (log.Crit in proxyd.go), so this state is
+	// unreachable in production. This test only documents the function's isolated fallback:
+	// given a fixed input slice, the first encountered entry of the lowest rank is chosen.
+	require.True(t, found)
+	require.Equal(t, "root_A", root)
+	require.Equal(t, "nodeA", winner.Name)
 }

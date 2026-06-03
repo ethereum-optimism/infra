@@ -333,6 +333,10 @@ type Backend struct {
 
 	weight             int
 	allowedStatusCodes []int
+
+	// clRank is the priority ranking for CL output root tiebreaking.
+	// Lower rank = higher priority. 0 means unranked.
+	clRank int
 }
 
 type BackendOpt func(b *Backend)
@@ -446,6 +450,12 @@ func WithConsensusForcedCandidate(forcedCandidate bool) BackendOpt {
 func WithWeight(weight int) BackendOpt {
 	return func(b *Backend) {
 		b.weight = weight
+	}
+}
+
+func WithCLRank(rank int) BackendOpt {
+	return func(b *Backend) {
+		b.clRank = rank
 	}
 }
 
