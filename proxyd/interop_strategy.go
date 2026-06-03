@@ -213,25 +213,25 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 }
 
 // agreementStrategyImpl fans every check out to all configured urls
-// concurrently and decides once minResponses definitive verdicts arrive. A
-// "definitive verdict" is either a successful validation (valid) or a known
-// supervisor validation rejection (invalid); transport errors, timeouts, 5xx
-// and cancellations are non-responses and never count. Once the quorum of
-// definitive verdicts is reached the in-flight requests are cancelled rather
-// than awaited, so a slow endpoint cannot delay the decision.
+// concurrently and combines the verdicts by quorum agreement. A "definitive
+// verdict" is either a successful validation (valid) or a known supervisor
+// validation rejection (invalid); transport errors, timeouts, 5xx and
+// cancellations are non-responses and never count.
 //
 // Failsafe is a hard, short-circuit rejection: if ANY reachable endpoint
 // reports failsafe enabled, the message is rejected immediately, bypassing the
 // quorum entirely. A single endpoint asserting failsafe is enough to refuse the
 // message even if every other endpoint would have accepted it.
 //
-// Decision once the quorum is met: all-valid accepts, all-invalid rejects with
-// the real rejection error, a mix logs an error and rejects. Fewer than
-// minResponses definitive verdicts fails closed (quorum-not-reached).
-//
-// Disagreement detection is best-effort: breaking at minResponses means a slow
-// dissenter past the quorum is never observed. Guaranteed detection would need
-// an all-wait audit mode, which is out of scope.
+// Because a failsafe assertion may arrive from any endpoint, including a slow
+// one, the message can only be accepted after every endpoint has been observed.
+// The strategy therefore waits for all responses before accepting (a failsafe
+// verdict still short-circuits the wait). The decision on the full tally:
+// all-valid with at least minResponses definitive verdicts accepts, all-invalid
+// rejects with the real rejection error, a mix logs an error and rejects, and
+// fewer than minResponses definitive verdicts fails closed (quorum-not-reached).
+// Draining all responses also makes disagreement detection complete rather than
+// best-effort.
 type agreementStrategyImpl struct {
 	*commonInteropStrategy
 	minResponses int
@@ -289,14 +289,19 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		}(url)
 	}
 
+	// Every endpoint must be observed before the message can be accepted:
+	// failsafe on any endpoint is a hard rejection that bypasses the quorum, and
+	// it may arrive from an endpoint that has not yet responded. So we drain all
+	// verdicts rather than breaking once the quorum is met. A failsafe verdict
+	// short-circuits the drain (cancelling the rest); other rejection decisions
+	// are made after the full tally is in, which also makes disagreement
+	// detection complete.
 	var valid, invalid int
 	var firstInvalid error
 	for range s.urls {
 		v := <-results
 		switch {
 		case v.failsafe:
-			// Failsafe on any endpoint is a hard rejection: refuse the message
-			// immediately, bypassing the quorum entirely.
 			cancel()
 			log.Error(
 				"interop endpoint reported failsafe enabled; rejecting",
@@ -312,10 +317,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 				firstInvalid = v.err
 			}
 		default:
-			continue // non-response; keep waiting for definitive verdicts
-		}
-		if valid+invalid >= s.minResponses {
-			break
+			// non-response: transport/timeout/5xx/cancel
 		}
 	}
 
@@ -342,19 +344,23 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 }
 
 // isFailsafeError reports whether err is a supervisor failsafe rejection.
-// ErrFailsafeEnabled is the only HTTP 503 in interopRPCErrorMap, so a 503 from
-// a validating backend unambiguously identifies failsafe. Failsafe on any
-// endpoint is a hard rejection handled before the quorum logic, so it is caught
-// here rather than relying on the -32602 exclusion in the definitive set.
+// op-interop-filter emits the dedicated code -320602 for failsafe, so detection
+// keys on the code and is immune to message wording or HTTP status. Failsafe on
+// any endpoint is a hard rejection handled before the quorum logic.
 func isFailsafeError(err error) bool {
 	var e *RPCErr
-	return errors.As(err, &e) && e.HTTPErrorCode == 503
+	return errors.As(err, &e) && e.Code == failsafeInteropRejectionCode
 }
+
+// failsafeInteropRejectionCode is the dedicated supervisor failsafe code. It is
+// handled as a hard short-circuit rejection (see isFailsafeError) and is never a
+// definitive verdict.
+const failsafeInteropRejectionCode = -320602
 
 // definitiveInteropRejectionCodes is the set of supervisor verdict codes that
 // count as a definitive INVALID verdict for the agreement strategy. It is the
-// interopRPCErrorMap codes minus everything coded -32602 (the generic params
-// fallbacks and ErrFailsafeEnabled). Failsafe is handled separately as a hard
+// interopRPCErrorMap codes minus the generic params fallbacks (-32602) and the
+// failsafe code (-320602). Failsafe is handled separately as a hard
 // short-circuit rejection (see isFailsafeError), so it never reaches this set.
 // This mirrors the codes op-reth accepts as SuperchainDAError so both sides
 // agree on what counts as a rejection.
@@ -363,7 +369,7 @@ var definitiveInteropRejectionCodes = buildDefinitiveRejectionSet()
 func buildDefinitiveRejectionSet() map[int]struct{} {
 	codes := make(map[int]struct{})
 	for _, rpcErr := range interopRPCErrorMap {
-		if rpcErr.Code == -32602 {
+		if rpcErr.Code == -32602 || rpcErr.Code == failsafeInteropRejectionCode {
 			continue
 		}
 		codes[rpcErr.Code] = struct{}{}

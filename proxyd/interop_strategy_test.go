@@ -15,6 +15,8 @@ import (
 
 const (
 	validSupervisorResponse = `{"jsonrpc":"2.0","id":1,"result":null}`
+	// failsafeRPCCode is the dedicated failsafe code emitted by op-interop-filter.
+	failsafeRPCCode = -320602
 )
 
 // supervisorErrorResponse builds a JSON-RPC error body whose message matches an
@@ -90,17 +92,37 @@ func TestAgreement_Disagreement_RejectsAndLogs(t *testing.T) {
 	require.Equal(t, -320600, rpcErr.Code)
 }
 
-func TestAgreement_IgnoresSlowBackend(t *testing.T) {
+func TestAgreement_FailsafeShortCircuitsSlowBackend(t *testing.T) {
+	// Failsafe is a hard reject that short-circuits: a fast failsafe verdict ends
+	// the check immediately without awaiting a slow endpoint.
+	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newSupervisorServer(t, 503, failsafeBody, 0),
 		newSupervisorServer(t, 200, validSupervisorResponse, 1500*time.Millisecond),
 	}
 	s := newAgreementStrategy(urls, 2)
 
 	start := time.Now()
+	err := s.ValidateAccessList(context.Background(), testAccessList)
+	require.Error(t, err, "failsafe must reject")
+	require.Less(t, time.Since(start), 1*time.Second, "failsafe short-circuits without awaiting the slow endpoint")
+}
+
+func TestAgreement_AcceptWaitsForAllEndpoints(t *testing.T) {
+	// An accept can only be returned once every endpoint has been observed, so a
+	// lurking failsafe on a slow endpoint is never missed. This intentionally
+	// trades the slow-endpoint latency optimization for failsafe correctness.
+	urls := []string{
+		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newSupervisorServer(t, 200, validSupervisorResponse, 800*time.Millisecond),
+	}
+	s := newAgreementStrategy(urls, 2)
+
+	start := time.Now()
 	require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList))
-	require.Less(t, time.Since(start), 1*time.Second, "must not await the slow endpoint once quorum is met")
+	require.GreaterOrEqual(t, time.Since(start), 800*time.Millisecond,
+		"accept must await all endpoints to rule out a lurking failsafe")
 }
 
 func TestAgreement_5xxNotCounted_FailClosed(t *testing.T) {
@@ -129,7 +151,7 @@ func TestAgreement_TimeoutNotCounted_FailClosed(t *testing.T) {
 }
 
 func TestAgreement_FailsafeHardRejects(t *testing.T) {
-	failsafeBody := supervisorErrorResponse(-32602, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
 		newSupervisorServer(t, 503, failsafeBody, 0),
 		newSupervisorServer(t, 503, failsafeBody, 0),
@@ -143,7 +165,7 @@ func TestAgreement_FailsafeHardRejects(t *testing.T) {
 func TestAgreement_FailsafeOnAnyEndpoint_HardRejects(t *testing.T) {
 	// One endpoint in failsafe must reject the message even though the other two
 	// are healthy and would have met the quorum.
-	failsafeBody := supervisorErrorResponse(-32602, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
 		newSupervisorServer(t, 503, failsafeBody, 0),
 		newSupervisorServer(t, 200, validSupervisorResponse, 0),
@@ -156,8 +178,10 @@ func TestAgreement_FailsafeOnAnyEndpoint_HardRejects(t *testing.T) {
 }
 
 func TestFailsafeError_Detection(t *testing.T) {
-	require.True(t, isFailsafeError(&RPCErr{Code: -32602, HTTPErrorCode: 503}),
-		"a 503 supervisor error is failsafe")
+	require.True(t, isFailsafeError(&RPCErr{Code: failsafeRPCCode, HTTPErrorCode: 503}),
+		"the dedicated failsafe code is failsafe")
+	require.False(t, isFailsafeError(&RPCErr{Code: -32602, HTTPErrorCode: 503}),
+		"the legacy generic params code is no longer treated as failsafe")
 	require.False(t, isFailsafeError(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
 		"a definitive rejection is not failsafe")
 	require.False(t, isFailsafeError(fmt.Errorf("plain error")),
@@ -203,9 +227,11 @@ func TestAgreement_SingleUrl_MinOne(t *testing.T) {
 }
 
 func TestDefinitiveInteropRejectionSet_ExcludesGenericParams(t *testing.T) {
-	// The verdict set must contain the supervisor codes but never -32602.
+	// The verdict set must contain the supervisor codes but never the generic
+	// params fallback (-32602) nor the failsafe code (-320602).
 	require.Contains(t, definitiveInteropRejectionCodes, -320600)
 	require.Contains(t, definitiveInteropRejectionCodes, -321501)
 	require.NotContains(t, definitiveInteropRejectionCodes, -32602)
+	require.NotContains(t, definitiveInteropRejectionCodes, failsafeRPCCode)
 	require.NotEmpty(t, definitiveInteropRejectionCodes)
 }
