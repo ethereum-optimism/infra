@@ -8,25 +8,25 @@ op-conductor-ops is a CLI tool for managing op-conductor sequencer clusters.
 
 Requires [poetry](https://github.com/python-poetry/poetry).
 
-Install python dependencies with `poetry install`.
+Install the package and its dependencies with `poetry install`. This registers the
+`op-conductor-ops` console script (see `[tool.poetry.scripts]` in `pyproject.toml`).
 
-Recommended updates to your .bashrc/zshrc:
+Recommended update to your .bashrc/zshrc:
 
-1. `export PATH="export PATH="<path-to-infra-repo>/op-conductor-ops:$PATH""`
-2. `export CONDUCTOR_CONFIG="<path-to-op-conductor-ops-config.toml>"`
+1. `export CONDUCTOR_CONFIG="<path-to-op-conductor-ops-config.toml>"`
 
 ## Usage
 
-After installing dependencies with `poetry`, the tool can be invoked with `./op-conductor-ops`,
-which just calls `poetry run python main.py` and passes on any arguments.
+After installing with `poetry install`, the tool is invoked with `poetry run op-conductor-ops`
+(or just `op-conductor-ops` from within `poetry shell`), passing on any arguments.
 
 ### Example Usage
 
 * Example usage with implicit config file with lookup at ./config.toml
-```./op-conductor-ops status <network-name>```
+```poetry run op-conductor-ops status <network-name>```
 
 * Usage with explicit path to config and certificate
-```./op-conductor-ops  -c ./<path>/config.toml --cert ./<path>/cacert.pem  <command> <network-name>```
+```poetry run op-conductor-ops -c ./<path>/config.toml --cert ./<path>/cacert.pem <command> <network-name>```
 
 ## Example Configuration File: example.config.toml
 
