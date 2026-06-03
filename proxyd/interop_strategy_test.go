@@ -46,6 +46,47 @@ func newSupervisorServer(t *testing.T, httpCode int, body string, delay time.Dur
 	return srv.URL
 }
 
+// newSignalingSupervisorServer is like newSupervisorServer but closes done once
+// it has written its response, letting another endpoint sequence after it.
+func newSignalingSupervisorServer(t *testing.T, httpCode int, body string, done chan<- struct{}) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(httpCode)
+		_, _ = w.Write([]byte(body))
+		close(done)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// newGatedSupervisorServer responds only after gate is closed, then waits an
+// additional settle period. The settle gives an endpoint that signalled the
+// gate time to have its verdict fully parsed and buffered by the strategy before
+// this endpoint's verdict arrives, making ordering deterministic.
+func newGatedSupervisorServer(t *testing.T, httpCode int, body string, gate <-chan struct{}, settle time.Duration) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		if settle > 0 {
+			select {
+			case <-time.After(settle):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(httpCode)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 func newAgreementStrategy(urls []string, minResponses int) *agreementStrategyImpl {
 	return NewAgreementStrategy(urls, minResponses,
 		WithChainID(420120003),
@@ -108,21 +149,19 @@ func TestAgreement_FailsafeShortCircuitsSlowBackend(t *testing.T) {
 	require.Less(t, time.Since(start), 1*time.Second, "failsafe short-circuits without awaiting the slow endpoint")
 }
 
-func TestAgreement_AcceptWaitsForAllEndpoints(t *testing.T) {
-	// An accept can only be returned once every endpoint has been observed, so a
-	// lurking failsafe on a slow endpoint is never missed. This intentionally
-	// trades the slow-endpoint latency optimization for failsafe correctness.
+func TestAgreement_IgnoresSlowBackend(t *testing.T) {
+	// A slow non-failsafe endpoint must not delay an accept once the quorum of
+	// fast valid verdicts is in.
 	urls := []string{
 		newSupervisorServer(t, 200, validSupervisorResponse, 0),
 		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 800*time.Millisecond),
+		newSupervisorServer(t, 200, validSupervisorResponse, 1500*time.Millisecond),
 	}
 	s := newAgreementStrategy(urls, 2)
 
 	start := time.Now()
 	require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList))
-	require.GreaterOrEqual(t, time.Since(start), 800*time.Millisecond,
-		"accept must await all endpoints to rule out a lurking failsafe")
+	require.Less(t, time.Since(start), 1*time.Second, "must not await the slow endpoint once the quorum is met")
 }
 
 func TestAgreement_5xxNotCounted_FailClosed(t *testing.T) {
@@ -163,17 +202,22 @@ func TestAgreement_FailsafeHardRejects(t *testing.T) {
 }
 
 func TestAgreement_FailsafeOnAnyEndpoint_HardRejects(t *testing.T) {
-	// One endpoint in failsafe must reject the message even though the other two
-	// are healthy and would have met the quorum.
+	// One received failsafe must reject the message even though the other two are
+	// healthy and meet the quorum. The failsafe responds immediately and the two
+	// valid endpoints are gated to respond only after the failsafe has landed
+	// (plus a settle), so the failsafe verdict is observed before the accepts and
+	// the test is deterministic.
 	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeDone := make(chan struct{})
+	const settle = 100 * time.Millisecond
 	urls := []string{
-		newSupervisorServer(t, 503, failsafeBody, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newSignalingSupervisorServer(t, 503, failsafeBody, failsafeDone),
+		newGatedSupervisorServer(t, 200, validSupervisorResponse, failsafeDone, settle),
+		newGatedSupervisorServer(t, 200, validSupervisorResponse, failsafeDone, settle),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
-	require.Error(t, err, "failsafe on any endpoint must reject regardless of quorum")
+	require.Error(t, err, "a received failsafe must reject even when the quorum of accepts is met")
 	require.NotContains(t, err.Error(), "quorum not reached")
 }
 

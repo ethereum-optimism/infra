@@ -218,20 +218,25 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 // validation rejection (invalid); transport errors, timeouts, 5xx and
 // cancellations are non-responses and never count.
 //
-// Failsafe is a hard, short-circuit rejection: if ANY reachable endpoint
-// reports failsafe enabled, the message is rejected immediately, bypassing the
-// quorum entirely. A single endpoint asserting failsafe is enough to refuse the
-// message even if every other endpoint would have accepted it.
+// Failsafe is a hard, short-circuit rejection: if ANY received response reports
+// failsafe enabled, the message is rejected, even when the minimum number of
+// accepts is already in hand. A single endpoint asserting failsafe is enough to
+// refuse the message even if every other endpoint would have accepted it.
 //
-// Because a failsafe assertion may arrive from any endpoint, including a slow
-// one, the message can only be accepted after every endpoint has been observed.
-// The strategy therefore waits for all responses before accepting (a failsafe
-// verdict still short-circuits the wait). The decision on the full tally:
-// all-valid with at least minResponses definitive verdicts accepts, all-invalid
-// rejects with the real rejection error, a mix logs an error and rejects, and
-// fewer than minResponses definitive verdicts fails closed (quorum-not-reached).
-// Draining all responses also makes disagreement detection complete rather than
-// best-effort.
+// The strategy fast-accepts at the minimum: it decides as soon as minResponses
+// definitive verdicts arrive and does not await slow or unresponded endpoints. A
+// failsafe verdict, whenever received, short-circuits to a reject. Before
+// returning an accept it performs a non-blocking drain of any responses already
+// buffered, so a failsafe that has already arrived beats a met quorum; it never
+// blocks on an endpoint that has not yet responded.
+//
+// Decision once the quorum is met: all-valid accepts, all-invalid rejects with
+// the real rejection error, a mix logs an error and rejects. Fewer than
+// minResponses definitive verdicts fails closed (quorum-not-reached).
+//
+// Disagreement detection is best-effort: breaking at minResponses means a slow
+// dissenter past the quorum is never observed. Guaranteed detection would need
+// an all-wait audit mode, which is out of scope.
 type agreementStrategyImpl struct {
 	*commonInteropStrategy
 	minResponses int
@@ -289,26 +294,26 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		}(url)
 	}
 
-	// Every endpoint must be observed before the message can be accepted:
-	// failsafe on any endpoint is a hard rejection that bypasses the quorum, and
-	// it may arrive from an endpoint that has not yet responded. So we drain all
-	// verdicts rather than breaking once the quorum is met. A failsafe verdict
-	// short-circuits the drain (cancelling the rest); other rejection decisions
-	// are made after the full tally is in, which also makes disagreement
-	// detection complete.
+	rejectFailsafe := func(valid, invalid int, err error) error {
+		cancel()
+		log.Error(
+			"interop endpoint reported failsafe enabled; rejecting",
+			"req_id", GetReqID(ctx),
+		)
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true)
+		return ParseInteropError(err)
+	}
+
+	// Read verdicts as they arrive, breaking once minResponses definitive
+	// verdicts are in. A failsafe verdict short-circuits to a reject. Slow or
+	// unresponded endpoints are never awaited past the quorum.
 	var valid, invalid int
 	var firstInvalid error
 	for range s.urls {
 		v := <-results
 		switch {
 		case v.failsafe:
-			cancel()
-			log.Error(
-				"interop endpoint reported failsafe enabled; rejecting",
-				"req_id", GetReqID(ctx),
-			)
-			recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true)
-			return ParseInteropError(v.err)
+			return rejectFailsafe(valid, invalid, v.err)
 		case v.valid:
 			valid++
 		case v.err != nil:
@@ -317,20 +322,37 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 				firstInvalid = v.err
 			}
 		default:
-			// non-response: transport/timeout/5xx/cancel
+			continue // non-response; keep waiting for definitive verdicts
+		}
+		if valid+invalid >= s.minResponses {
+			break
 		}
 	}
 
-	recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
-
 	if valid+invalid < s.minResponses {
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
 		return ParseInteropError(fmt.Errorf("interop quorum not reached: %d definitive responses, %d required", valid+invalid, s.minResponses))
 	}
 
 	switch {
 	case invalid == 0:
-		return nil
+		// About to accept: non-blocking drain of any responses already buffered so
+		// a failsafe that has already arrived beats the met quorum. This consumes
+		// only what is already buffered and never blocks on an endpoint that has
+		// not yet responded.
+		for {
+			select {
+			case v := <-results:
+				if v.failsafe {
+					return rejectFailsafe(valid, invalid, v.err)
+				}
+			default:
+				recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
+				return nil
+			}
+		}
 	case valid == 0:
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
 		return firstInvalid // all reachable endpoints agree the tx is invalid
 	default:
 		log.Error(
@@ -339,6 +361,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 			"valid", valid,
 			"invalid", invalid,
 		)
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
 		return firstInvalid
 	}
 }
