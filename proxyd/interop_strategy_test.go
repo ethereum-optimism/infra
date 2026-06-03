@@ -128,7 +128,7 @@ func TestAgreement_TimeoutNotCounted_FailClosed(t *testing.T) {
 	require.Contains(t, err.Error(), "quorum not reached")
 }
 
-func TestAgreement_FailsafeNotCounted_FailClosed(t *testing.T) {
+func TestAgreement_FailsafeHardRejects(t *testing.T) {
 	failsafeBody := supervisorErrorResponse(-32602, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
 		newSupervisorServer(t, 503, failsafeBody, 0),
@@ -136,8 +136,32 @@ func TestAgreement_FailsafeNotCounted_FailClosed(t *testing.T) {
 	}
 	s := newAgreementStrategy(urls, 1)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
-	require.Error(t, err, "failsafe (-32602/503) is a non-response, quorum not met must fail closed")
-	require.Contains(t, err.Error(), "quorum not reached")
+	require.Error(t, err, "failsafe is a hard rejection")
+	require.NotContains(t, err.Error(), "quorum not reached", "failsafe short-circuits before the quorum check")
+}
+
+func TestAgreement_FailsafeOnAnyEndpoint_HardRejects(t *testing.T) {
+	// One endpoint in failsafe must reject the message even though the other two
+	// are healthy and would have met the quorum.
+	failsafeBody := supervisorErrorResponse(-32602, interopErrors.ErrFailsafeEnabled.Error())
+	urls := []string{
+		newSupervisorServer(t, 503, failsafeBody, 0),
+		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+	}
+	s := newAgreementStrategy(urls, 2)
+	err := s.ValidateAccessList(context.Background(), testAccessList)
+	require.Error(t, err, "failsafe on any endpoint must reject regardless of quorum")
+	require.NotContains(t, err.Error(), "quorum not reached")
+}
+
+func TestFailsafeError_Detection(t *testing.T) {
+	require.True(t, isFailsafeError(&RPCErr{Code: -32602, HTTPErrorCode: 503}),
+		"a 503 supervisor error is failsafe")
+	require.False(t, isFailsafeError(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
+		"a definitive rejection is not failsafe")
+	require.False(t, isFailsafeError(fmt.Errorf("plain error")),
+		"a non-RPCErr error is not failsafe")
 }
 
 func TestAgreement_CancelledRequestNotCounted(t *testing.T) {

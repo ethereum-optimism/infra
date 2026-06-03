@@ -220,6 +220,11 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 // definitive verdicts is reached the in-flight requests are cancelled rather
 // than awaited, so a slow endpoint cannot delay the decision.
 //
+// Failsafe is a hard, short-circuit rejection: if ANY reachable endpoint
+// reports failsafe enabled, the message is rejected immediately, bypassing the
+// quorum entirely. A single endpoint asserting failsafe is enough to refuse the
+// message even if every other endpoint would have accepted it.
+//
 // Decision once the quorum is met: all-valid accepts, all-invalid rejects with
 // the real rejection error, a mix logs an error and rejects. Fewer than
 // minResponses definitive verdicts fails closed (quorum-not-reached).
@@ -254,8 +259,9 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, AgreementStrategy) // nolint:staticcheck
 
 	type verdict struct {
-		valid bool
-		err   error
+		valid    bool
+		failsafe bool
+		err      error
 	}
 
 	// Buffered to len(urls) so every goroutine can always write its verdict and
@@ -263,7 +269,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	results := make(chan verdict, len(s.urls))
 
 	// Cancelled on break to abort in-flight requests to endpoints that have not
-	// yet responded once the quorum is reached.
+	// yet responded once the quorum is reached or failsafe short-circuits.
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -273,6 +279,8 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 			switch {
 			case e == nil:
 				results <- verdict{valid: true}
+			case isFailsafeError(e):
+				results <- verdict{failsafe: true, err: e}
 			case isDefinitiveInteropRejection(e):
 				results <- verdict{valid: false, err: e}
 			default:
@@ -286,6 +294,16 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	for range s.urls {
 		v := <-results
 		switch {
+		case v.failsafe:
+			// Failsafe on any endpoint is a hard rejection: refuse the message
+			// immediately, bypassing the quorum entirely.
+			cancel()
+			log.Error(
+				"interop endpoint reported failsafe enabled; rejecting",
+				"req_id", GetReqID(ctx),
+			)
+			recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true)
+			return ParseInteropError(v.err)
 		case v.valid:
 			valid++
 		case v.err != nil:
@@ -301,7 +319,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		}
 	}
 
-	recordAgreementOutcome(ctx, valid, invalid, s.minResponses)
+	recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
 
 	if valid+invalid < s.minResponses {
 		return ParseInteropError(fmt.Errorf("interop quorum not reached: %d definitive responses, %d required", valid+invalid, s.minResponses))
@@ -323,13 +341,23 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	}
 }
 
+// isFailsafeError reports whether err is a supervisor failsafe rejection.
+// ErrFailsafeEnabled is the only HTTP 503 in interopRPCErrorMap, so a 503 from
+// a validating backend unambiguously identifies failsafe. Failsafe on any
+// endpoint is a hard rejection handled before the quorum logic, so it is caught
+// here rather than relying on the -32602 exclusion in the definitive set.
+func isFailsafeError(err error) bool {
+	var e *RPCErr
+	return errors.As(err, &e) && e.HTTPErrorCode == 503
+}
+
 // definitiveInteropRejectionCodes is the set of supervisor verdict codes that
 // count as a definitive INVALID verdict for the agreement strategy. It is the
 // interopRPCErrorMap codes minus everything coded -32602 (the generic params
-// fallbacks and ErrFailsafeEnabled, which is -32602/503). A failsafe 503 is a
-// non-response, so if all reachable endpoints are in failsafe the quorum is not
-// met and we fail closed. This mirrors the codes op-reth accepts as
-// SuperchainDAError so both sides agree on what counts as a rejection.
+// fallbacks and ErrFailsafeEnabled). Failsafe is handled separately as a hard
+// short-circuit rejection (see isFailsafeError), so it never reaches this set.
+// This mirrors the codes op-reth accepts as SuperchainDAError so both sides
+// agree on what counts as a rejection.
 var definitiveInteropRejectionCodes = buildDefinitiveRejectionSet()
 
 func buildDefinitiveRejectionSet() map[int]struct{} {

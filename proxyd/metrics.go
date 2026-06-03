@@ -905,13 +905,17 @@ const (
 	agreementOutcomeRejectAgreed      = "reject_agreed"
 	agreementOutcomeRejectDisagree    = "reject_disagreement"
 	agreementOutcomeRejectQuorumUnmet = "reject_quorum_not_reached"
+	agreementOutcomeRejectFailsafe    = "reject_failsafe"
 )
 
-// recordAgreementOutcome classifies an agreement-strategy decision from the
-// definitive verdict tallies and increments the corresponding metric.
-func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int) {
+// recordAgreementOutcome classifies an agreement-strategy decision and
+// increments the corresponding metric. A failsafe short-circuit is recorded as
+// reject_failsafe regardless of the verdict tallies collected so far.
+func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int, failsafe bool) {
 	var outcome string
 	switch {
+	case failsafe:
+		outcome = agreementOutcomeRejectFailsafe
 	case valid+invalid < minResponses:
 		outcome = agreementOutcomeRejectQuorumUnmet
 	case invalid == 0:
