@@ -243,10 +243,10 @@ func TestAgreement_CancelledRequestNotCounted(t *testing.T) {
 	require.False(t, isDefinitiveInteropRejection(wrapped),
 		"a context.Canceled error must not count")
 
-	// A definitive verdict still counts.
+	// A supervisor verdict counts.
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -320600, HTTPErrorCode: 409}))
-	// A generic -32602 fallback does not count.
-	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 400}))
+	// A generic invalid-params rejection (-32602) is a real INVALID and counts.
+	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 400}))
 	// A non-RPCErr error does not count.
 	require.False(t, isDefinitiveInteropRejection(fmt.Errorf("plain error")))
 }
@@ -270,12 +270,42 @@ func TestAgreement_SingleUrl_MinOne(t *testing.T) {
 	})
 }
 
-func TestDefinitiveInteropRejectionSet_ExcludesGenericParams(t *testing.T) {
-	// The verdict set must contain the supervisor codes but never the generic
-	// params fallback (-32602) nor the failsafe code (-320602).
-	require.Contains(t, definitiveInteropRejectionCodes, -320600)
-	require.Contains(t, definitiveInteropRejectionCodes, -321501)
-	require.NotContains(t, definitiveInteropRejectionCodes, -32602)
-	require.NotContains(t, definitiveInteropRejectionCodes, failsafeRPCCode)
-	require.NotEmpty(t, definitiveInteropRejectionCodes)
+func TestAgreement_GenericParseRejection_CountsAsInvalid(t *testing.T) {
+	// The filter rejects a malformed/fabricated access list with the generic
+	// -32602 ("failed to parse access entry"). That is a real definitive INVALID:
+	// all endpoints rejecting must produce a clean reject (reject_agreed), NOT
+	// quorum-not-reached.
+	parseRejectBody := supervisorErrorResponse(-32602, "failed to parse access entry")
+	urls := []string{
+		newSupervisorServer(t, 400, parseRejectBody, 0),
+		newSupervisorServer(t, 400, parseRejectBody, 0),
+	}
+	s := newAgreementStrategy(urls, 2)
+	err := s.ValidateAccessList(context.Background(), testAccessList)
+	require.Error(t, err, "a -32602 parse rejection from all endpoints must reject")
+	require.NotContains(t, err.Error(), "quorum not reached",
+		"a -32602 rejection is a definitive invalid, not a non-response")
+	rpcErr, ok := err.(*RPCErr)
+	require.True(t, ok, "expected *RPCErr, got %T", err)
+	require.Equal(t, -32602, rpcErr.Code, "the real filter rejection code must be surfaced")
+}
+
+func TestDefinitiveInteropRejection_Classification(t *testing.T) {
+	// Any filter rejection counts as a definitive INVALID...
+	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
+		"a supervisor verdict counts")
+	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -321501, HTTPErrorCode: 422}),
+		"a supervisor verdict counts")
+	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 400}),
+		"a generic invalid-params parse rejection counts")
+
+	// ...except failsafe and non-verdict failures.
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: failsafeRPCCode, HTTPErrorCode: 503}),
+		"failsafe is handled separately and never a definitive verdict")
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: -32603, HTTPErrorCode: 500}),
+		"JSON-RPC internal error is not a verdict")
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: -32000, HTTPErrorCode: 500}),
+		"proxyd internal fallback is not a verdict")
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 502}),
+		"a 5xx transport failure is not a verdict regardless of code")
 }

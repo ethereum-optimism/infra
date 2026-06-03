@@ -377,44 +377,35 @@ func isFailsafeError(err error) bool {
 
 // failsafeInteropRejectionCode is the dedicated supervisor failsafe code. It is
 // handled as a hard short-circuit rejection (see isFailsafeError) and is never a
-// definitive verdict.
+// definitive INVALID verdict.
 const failsafeInteropRejectionCode = -320602
 
-// definitiveInteropRejectionCodes is the set of supervisor verdict codes that
-// count as a definitive INVALID verdict for the agreement strategy. It is the
-// interopRPCErrorMap codes minus the generic params fallbacks (-32602) and the
-// failsafe code (-320602). Failsafe is handled separately as a hard
-// short-circuit rejection (see isFailsafeError), so it never reaches this set.
-// This mirrors the codes op-reth accepts as SuperchainDAError so both sides
-// agree on what counts as a rejection.
-var definitiveInteropRejectionCodes = buildDefinitiveRejectionSet()
-
-func buildDefinitiveRejectionSet() map[int]struct{} {
-	codes := make(map[int]struct{})
-	for _, rpcErr := range interopRPCErrorMap {
-		if rpcErr.Code == -32602 || rpcErr.Code == failsafeInteropRejectionCode {
-			continue
-		}
-		codes[rpcErr.Code] = struct{}{}
-	}
-	return codes
-}
-
 // isDefinitiveInteropRejection reports whether err is a definitive INVALID
-// verdict from a supervisor. A cancelled request yields context.Canceled / HTTP
-// 499 and must never count (it is the agreement strategy's own cancellation, or
-// an upstream client disconnect), so it is explicitly excluded even though it
-// lives in the 4xx band.
+// verdict from the filter. A definitive INVALID is ANY filter JSON-RPC
+// rejection — the generic invalid-params code (-32602, e.g. a malformed or
+// fabricated access list) as well as the supervisor verdict codes
+// (-3204xx..-3215xx) — not just the known supervisor set. Both sides (proxyd and
+// op-reth) must treat a -32602 parse rejection as a real INVALID so it produces
+// reject_agreed rather than falling through to quorum-not-reached.
+//
+// It excludes only non-verdicts: failsafe (-320602, handled earlier by
+// isFailsafeError), the JSON-RPC internal error (-32603 and proxyd's -32000
+// fallback), cancellation (context.Canceled / HTTP 499), and transport/5xx
+// failures. The verdict is keyed on the filter's actual RPC code, which
+// ParseInteropError now preserves for JSON-RPC errors returned over HTTP 200.
 func isDefinitiveInteropRejection(err error) bool {
 	var e *RPCErr
 	if !errors.As(err, &e) {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || e.HTTPErrorCode == 499 {
+	if errors.Is(err, context.Canceled) || e.HTTPErrorCode == 499 || e.HTTPErrorCode >= 500 {
 		return false
 	}
-	_, ok := definitiveInteropRejectionCodes[e.Code]
-	return ok
+	switch e.Code {
+	case failsafeInteropRejectionCode, JSONRPCErrorInternal, -32603:
+		return false
+	}
+	return true
 }
 
 type healthAwareLoadBalancingStrategyImpl struct {
