@@ -221,7 +221,7 @@ func Start(config *Config) (*Server, func(), error) {
 		opts = append(opts, WithConsensusForcedCandidate(cfg.ConsensusForcedCandidate))
 		opts = append(opts, WithWeight(cfg.Weight))
 		if cfg.ConsensusCLRank < 0 {
-			log.Warn("negative consensus_cl_rank is invalid and will be ignored — use a positive integer for ranking or 0 for unranked",
+			log.Crit("negative consensus_cl_rank is invalid — use a positive integer for ranking or 0 for unranked",
 				"backend", name,
 				"consensus_cl_rank", cfg.ConsensusCLRank,
 			)
