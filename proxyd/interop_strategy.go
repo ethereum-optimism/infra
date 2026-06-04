@@ -28,7 +28,7 @@ type commonInteropStrategy struct {
 	accessListSizeLimit                     int
 	reqSizeLimit                            int
 	validateAndDeduplicateInteropAccessList bool
-	skipOnNoSupervisorBackend               bool
+	skipOnNoInteropFilterBackend            bool
 }
 
 func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonInteropStrategy {
@@ -37,7 +37,7 @@ func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonI
 		accessListSizeLimit:                     0,
 		reqSizeLimit:                            0,
 		validateAndDeduplicateInteropAccessList: true,
-		skipOnNoSupervisorBackend:               false,
+		skipOnNoInteropFilterBackend:            false,
 	}
 
 	for _, opt := range opts {
@@ -71,9 +71,9 @@ var WithValidateAndDeduplicateInteropAccessList = func(validateAndDeduplicateInt
 	}
 }
 
-var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonStrategyOpt {
+var WithSkipOnNoInteropFilterBackend = func(skipOnNoInteropFilterBackend bool) commonStrategyOpt {
 	return func(s *commonInteropStrategy) {
-		s.skipOnNoSupervisorBackend = skipOnNoSupervisorBackend
+		s.skipOnNoInteropFilterBackend = skipOnNoInteropFilterBackend
 	}
 }
 
@@ -85,7 +85,7 @@ var WithChainID = func(chainID uint64) commonStrategyOpt {
 
 func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, bool, error) {
 	if len(s.urls) == 0 {
-		if s.skipOnNoSupervisorBackend {
+		if s.skipOnNoInteropFilterBackend {
 			log.Info(
 				"no validating backends found for an interop transaction, skipping",
 				"req_id", GetReqID(ctx),
@@ -124,17 +124,17 @@ func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.
 	return interopAccessList, true, nil
 }
 
-type firstSupervisorStrategyImpl struct {
+type firstInteropFilterStrategyImpl struct {
 	*commonInteropStrategy
 }
 
-func NewFirstSupervisorStrategy(urls []string, opts ...commonStrategyOpt) *firstSupervisorStrategyImpl {
-	return &firstSupervisorStrategyImpl{
+func NewFirstInteropFilterStrategy(urls []string, opts ...commonStrategyOpt) *firstInteropFilterStrategyImpl {
+	return &firstInteropFilterStrategyImpl{
 		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
 	}
 }
 
-func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+func (s *firstInteropFilterStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
 	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
@@ -144,10 +144,10 @@ func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, in
 		return nil
 	}
 
-	firstSupervisorUrl := s.urls[0]
+	firstInteropFilterUrl := s.urls[0]
 
-	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
-	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl, s.chainID)
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstInteropFilterStrategy) // nolint:staticcheck
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstInteropFilterUrl, s.chainID)
 	return err
 }
 
@@ -265,7 +265,7 @@ func (s *healthAwareLoadBalancingStrategyImpl) ValidateAccessList(ctx context.Co
 	}
 
 	// retries exhausted
-	return ParseInteropError(fmt.Errorf("no healthy supervisor backends found"))
+	return ParseInteropError(fmt.Errorf("no healthy interop filter backends found"))
 }
 
 type healthAwareBackend struct {
@@ -343,14 +343,14 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 
 	log.Debug(
 		"an interop validating backend has responded",
-		"supervisor_url", url,
+		"interop_filter_url", url,
 		"strategy", strategy,
 		"req_id", GetReqID(ctx),
 		"method", "eth_sendRawTransaction",
 		"error", err,
 	)
 
-	rpcSupervisorChecksTotal.WithLabelValues(
+	rpcInteropFilterChecksTotal.WithLabelValues(
 		url,
 		strconv.Itoa(httpCode),
 		rpcErrorCode,

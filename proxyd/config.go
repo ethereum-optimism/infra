@@ -288,7 +288,7 @@ type InteropValidationStrategy string
 
 const (
 	EmptyStrategy                    InteropValidationStrategy = ""
-	FirstSupervisorStrategy          InteropValidationStrategy = "first-supervisor"
+	FirstInteropFilterStrategy       InteropValidationStrategy = "first-interop-filter"
 	MulticallStrategy                InteropValidationStrategy = "multicall"
 	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
 )

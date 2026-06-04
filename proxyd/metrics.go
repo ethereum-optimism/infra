@@ -66,12 +66,12 @@ var (
 		"batched",
 	})
 
-	rpcSupervisorChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	rpcInteropFilterChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
-		Name:      "rpc_supervisor_checks_total",
-		Help:      "Count of total supervisor checks.",
+		Name:      "rpc_interop_filter_checks_total",
+		Help:      "Count of total interop filter checks.",
 	}, []string{
-		"supervisor_url",
+		"interop_filter_url",
 		"http_code",
 		"rpc_error_code",
 		"strategy",
