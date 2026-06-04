@@ -88,6 +88,38 @@ func TestNetwork_New_PreregistersExternalPeers(t *testing.T) {
 	require.False(t, hasInternal, "internal nodes should not be pre-registered (their peer_id is discovered)")
 }
 
+func TestNetwork_resolveState_DialsExternalPeer(t *testing.T) {
+	type args struct{ node, peer string }
+	calls := []args{}
+
+	n := &Network{
+		overrideConnectPeer: func(ctx context.Context, nodeName, peerName string) {
+			calls = append(calls, args{nodeName, peerName})
+		},
+		networkConfig: &config.NetworkConfig{Members: []string{"internal", "external"}},
+		nodesConfig: map[string]*config.NodeConfig{
+			"internal": {RPCAddress: "http://internal:9545"},
+			"external": {PeerID: "ext-peer-id", PeerAddress: "/dns4/ext/tcp/9003/p2p/ext-peer-id"},
+		},
+		state: &NetworkState{
+			nodes: map[string]*NodeState{
+				"internal": {
+					self:  &p2p.PeerInfo{PeerID: "internal-peer-id"},
+					peers: &p2p.PeerDump{Peers: map[string]*p2p.PeerInfo{}},
+				},
+			},
+			nodesByPeerID: map[string]string{
+				"internal-peer-id": "internal",
+				"ext-peer-id":      "external",
+			},
+		},
+	}
+
+	n.resolveState(context.Background())
+
+	require.Equal(t, []args{{"internal", "external"}}, calls)
+}
+
 func TestNetwork_resolveState(t *testing.T) {
 	t.Run("should connect to known peers", func(t *testing.T) {
 		type connectPeerArgs struct {

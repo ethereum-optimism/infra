@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics/opp2p_client"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func (n *Network) Tick(ctx context.Context) {
@@ -271,50 +272,27 @@ func (n *Network) connectPeer(ctx context.Context, nodeName string, peerName str
 
 	nodeState := n.state.nodes[nodeName]
 	nodeConfig := n.nodesConfig[nodeName]
-	peerState := n.state.nodes[peerName]
 	peerConfig := n.nodesConfig[peerName]
 
 	if nodeState == nil {
-		log.Error("node state not found",
-			"network", n.name,
-			"node", nodeName)
+		log.Error("node state not found", "network", n.name, "node", nodeName)
 		return
 	}
-
 	if nodeConfig == nil {
-		log.Error("node config not found",
-			"network", n.name,
-			"node", nodeName)
+		log.Error("node config not found", "network", n.name, "node", nodeName)
 		return
 	}
-
-	if peerState == nil {
-		log.Error("peer state not found",
-			"network", n.name,
-			"node", nodeName,
-			"peer", peerName)
-		return
-	}
-
 	if peerConfig == nil {
-		log.Error("peer config not found",
-			"network", n.name,
-			"node", nodeName,
-			"peer", peerName)
+		log.Error("peer config not found", "network", n.name, "node", nodeName, "peer", peerName)
 		return
 	}
 
 	if nodeConfig.PreventOutbound {
-		log.Debug("node has outbound disabled",
-			"network", n.name,
-			"node", nodeName)
+		log.Debug("node has outbound disabled", "network", n.name, "node", nodeName)
 		return
 	}
-
 	if peerConfig.PreventInbound {
-		log.Debug("peer has inbound disabled",
-			"network", n.name,
-			"peer", peerName)
+		log.Debug("peer has inbound disabled", "network", n.name, "peer", peerName)
 		return
 	}
 
@@ -323,6 +301,29 @@ func (n *Network) connectPeer(ctx context.Context, nodeName string, peerName str
 		return
 	}
 
+	if peerConfig.IsExternal() {
+		n.connectExternalPeer(ctx, client, nodeName, nodeConfig, peerName, peerConfig)
+		return
+	}
+
+	peerState := n.state.nodes[peerName]
+	if peerState == nil {
+		log.Error("peer state not found", "network", n.name, "node", nodeName, "peer", peerName)
+		return
+	}
+	n.connectInternalPeer(ctx, client, nodeName, nodeConfig, nodeState, peerName, peerConfig, peerState)
+}
+
+func (n *Network) connectInternalPeer(
+	ctx context.Context,
+	client *opp2p_client.InstrumentedOpP2PClient,
+	nodeName string,
+	nodeConfig *config.NodeConfig,
+	nodeState *NodeState,
+	peerName string,
+	peerConfig *config.NodeConfig,
+	peerState *NodeState,
+) {
 	peerClient, err := opp2p_client.New(ctx, n.config, n.name, peerName, peerConfig.RPCAddress)
 	if err != nil {
 		return
@@ -344,7 +345,6 @@ func (n *Network) connectPeer(ctx context.Context, nodeName string, peerName str
 		peerID = peerState.self.PeerID.String()
 	}
 
-	// special case for automatic PeerID discovery
 	const PEER_ID_PLACEHOLDER = "{peer_id}"
 	if strings.HasPrefix(peerAddr, "/dns4/") && strings.HasSuffix(peerAddr, "/p2p/"+PEER_ID_PLACEHOLDER) {
 		peerAddr = peerAddr[0:len(peerAddr)-len(PEER_ID_PLACEHOLDER)] + peerID
@@ -362,111 +362,107 @@ func (n *Network) connectPeer(ctx context.Context, nodeName string, peerName str
 		"peer_cluster", peerConfig.Cluster,
 		"peer_addr", peerAddr)
 
-	err = client.UnprotectPeer(ctx, peerState.self.PeerID)
-	if err != nil {
-		log.Error("cant unprotect peer",
-			"network", n.name,
-			"node", nodeName,
-			"rpc_address", nodeConfig.RPCAddress,
-			"peer", peerName,
-			"peer_addr", peerAddr,
-			"peer_id", peerID,
-			"err", err)
+	if err := client.UnprotectPeer(ctx, peerState.self.PeerID); err != nil {
+		log.Error("cant unprotect peer", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = peerClient.UnprotectPeer(ctx, nodeState.self.PeerID)
-	if err != nil {
-		log.Error("cant unprotect peer (reverse)",
-			"network", n.name,
-			"node", nodeName,
-			"node_id", nodeState.self.PeerID,
-			"peer_rpc_address", peerConfig.RPCAddress,
-			"peer", peerName,
-			"err", err)
+	if err := peerClient.UnprotectPeer(ctx, nodeState.self.PeerID); err != nil {
+		log.Error("cant unprotect peer (reverse)", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = client.UnblockPeer(ctx, peerState.self.PeerID)
-	if err != nil {
-		log.Error("cant disconnect peer",
-			"network", n.name,
-			"node", nodeName,
-			"rpc_address", nodeConfig.RPCAddress,
-			"peer", peerName,
-			"peer_addr", peerAddr,
-			"peer_id", peerID,
-			"err", err)
+	if err := client.UnblockPeer(ctx, peerState.self.PeerID); err != nil {
+		log.Error("cant unblock peer", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = peerClient.UnblockPeer(ctx, nodeState.self.PeerID)
-	if err != nil {
-		log.Error("cant disconnect peer (reverse)",
-			"network", n.name,
-			"node", nodeName,
-			"node_id", nodeState.self.PeerID,
-			"peer_rpc_address", peerConfig.RPCAddress,
-			"peer", peerName,
-			"err", err)
+	if err := peerClient.UnblockPeer(ctx, nodeState.self.PeerID); err != nil {
+		log.Error("cant unblock peer (reverse)", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = client.DisconnectPeer(ctx, peerState.self.PeerID)
-	if err != nil {
-		log.Error("cant disconnect peer",
-			"network", n.name,
-			"node", nodeName,
-			"rpc_address", nodeConfig.RPCAddress,
-			"peer", peerName,
-			"peer_addr", peerAddr,
-			"peer_id", peerID,
-			"err", err)
+	if err := client.DisconnectPeer(ctx, peerState.self.PeerID); err != nil {
+		log.Error("cant disconnect peer", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = peerClient.DisconnectPeer(ctx, nodeState.self.PeerID)
-	if err != nil {
-		log.Error("cant disconnect peer (reverse)",
-			"network", n.name,
-			"node", nodeName,
-			"node_id", nodeState.self.PeerID,
-			"peer_rpc_address", peerConfig.RPCAddress,
-			"peer", peerName,
-			"err", err)
+	if err := peerClient.DisconnectPeer(ctx, nodeState.self.PeerID); err != nil {
+		log.Error("cant disconnect peer (reverse)", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
-
-	err = client.ConnectPeer(ctx, peerAddr)
-	if err != nil {
-		log.Error("cant connect to peer",
-			"network", n.name,
-			"node", nodeName,
-			"rpc_address", nodeConfig.RPCAddress,
-			"peer", peerName,
-			"peer_addr", peerAddr,
-			"err", err)
+	if err := client.ConnectPeer(ctx, peerAddr); err != nil {
+		log.Error("cant connect to peer", "network", n.name, "node", nodeName, "peer", peerName, "peer_addr", peerAddr, "err", err)
 		return
 	}
-
-	err = client.ProtectPeer(ctx, peerState.self.PeerID)
-	if err != nil {
-		log.Error("cant protect peer",
-			"network", n.name,
-			"node", nodeName,
-			"rpc_address", nodeConfig.RPCAddress,
-			"peer", peerName,
-			"peer_addr", peerAddr,
-			"peer_id", peerID,
-			"err", err)
+	if err := client.ProtectPeer(ctx, peerState.self.PeerID); err != nil {
+		log.Error("cant protect peer", "network", n.name, "node", nodeName, "peer", peerName, "err", err)
 		return
 	}
 
 	log.Info("connected to peer",
+		"network", n.name, "node", nodeName, "peer", peerName, "peer_addr", peerAddr, "peer_id", peerID)
+}
+
+func (n *Network) connectExternalPeer(
+	ctx context.Context,
+	client *opp2p_client.InstrumentedOpP2PClient,
+	nodeName string,
+	nodeConfig *config.NodeConfig,
+	peerName string,
+	peerConfig *config.NodeConfig,
+) {
+	peerIDStr := peerConfig.PeerID
+	peerID, err := peer.Decode(peerIDStr)
+	if err != nil {
+		log.Error("invalid external peer_id",
+			"network", n.name, "peer", peerName, "peer_id", peerIDStr, "err", err)
+		return
+	}
+
+	peerAddr := peerConfig.PeerAddress
+	if nodeConfig.Cluster == peerConfig.Cluster && peerConfig.PeerAddressLocal != "" {
+		peerAddr = peerConfig.PeerAddressLocal
+	}
+
+	const PEER_ID_PLACEHOLDER = "{peer_id}"
+	if strings.HasPrefix(peerAddr, "/dns4/") && strings.HasSuffix(peerAddr, "/p2p/"+PEER_ID_PLACEHOLDER) {
+		peerAddr = peerAddr[0:len(peerAddr)-len(PEER_ID_PLACEHOLDER)] + peerIDStr
+	}
+
+	metrics.RecordResolvedState(n.name, nodeName, peerName, peerIDStr, peerAddr)
+
+	log.Info("connecting to external peer",
 		"network", n.name,
 		"node", nodeName,
+		"node_cluster", nodeConfig.Cluster,
 		"rpc_address", nodeConfig.RPCAddress,
 		"peer", peerName,
-		"peer_addr", peerAddr,
-		"peer_id", peerID)
+		"peer_id", peerIDStr,
+		"peer_cluster", peerConfig.Cluster,
+		"peer_addr", peerAddr)
+
+	if err := client.UnprotectPeer(ctx, peerID); err != nil {
+		log.Error("cant unprotect external peer",
+			"network", n.name, "node", nodeName, "peer", peerName, "err", err)
+		return
+	}
+	if err := client.UnblockPeer(ctx, peerID); err != nil {
+		log.Error("cant unblock external peer",
+			"network", n.name, "node", nodeName, "peer", peerName, "err", err)
+		return
+	}
+	if err := client.DisconnectPeer(ctx, peerID); err != nil {
+		log.Error("cant disconnect external peer",
+			"network", n.name, "node", nodeName, "peer", peerName, "err", err)
+		return
+	}
+	if err := client.ConnectPeer(ctx, peerAddr); err != nil {
+		log.Error("cant connect to external peer",
+			"network", n.name, "node", nodeName, "peer", peerName, "peer_addr", peerAddr, "err", err)
+		return
+	}
+	if err := client.ProtectPeer(ctx, peerID); err != nil {
+		log.Error("cant protect external peer",
+			"network", n.name, "node", nodeName, "peer", peerName, "err", err)
+		return
+	}
+
+	log.Info("connected to external peer",
+		"network", n.name, "node", nodeName, "peer", peerName, "peer_addr", peerAddr, "peer_id", peerIDStr)
 }
