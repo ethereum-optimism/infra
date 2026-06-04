@@ -343,14 +343,14 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 
 	log.Debug(
 		"an interop validating backend has responded",
-		"supervisor_url", url,
+		"interop_filter_url", url,
 		"strategy", strategy,
 		"req_id", GetReqID(ctx),
 		"method", "eth_sendRawTransaction",
 		"error", err,
 	)
 
-	rpcSupervisorChecksTotal.WithLabelValues(
+	rpcInteropFilterChecksTotal.WithLabelValues(
 		url,
 		strconv.Itoa(httpCode),
 		rpcErrorCode,
