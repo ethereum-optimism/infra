@@ -286,10 +286,12 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 				results <- verdict{valid: true}
 			case isFailsafeError(e):
 				results <- verdict{failsafe: true, err: e}
+			case isSoftInteropFailure(e):
+				results <- verdict{} // out-of-sync node: non-response, ignored
 			case isDefinitiveInteropRejection(e):
 				results <- verdict{valid: false, err: e}
 			default:
-				results <- verdict{} // non-response: transport/timeout/5xx/cancel
+				results <- verdict{} // non-response: transport/timeout/5xx/cancel/soft
 			}
 		}(url)
 	}
@@ -380,6 +382,26 @@ func isFailsafeError(err error) bool {
 // definitive INVALID verdict.
 const failsafeInteropRejectionCode = -320602
 
+// Soft interop failure codes mean "this node does not have the data yet"
+// (out-of-sync), not "the transaction is invalid". They are treated as
+// non-responses so a single lagging node is ignored as long as quorum is met by
+// other nodes.
+const (
+	interopCodeFutureData    = -321401 // FutureData: requested data is ahead of this node
+	interopCodeUninitialized = -320400 // UNINITIALIZED_CHAIN_DATABASE: node not yet initialized
+)
+
+// isSoftInteropFailure reports whether err is a soft out-of-sync failure
+// (FutureData or Uninitialized). These never count toward quorum and never
+// cause a rejection — they behave exactly like a transport non-response.
+func isSoftInteropFailure(err error) bool {
+	var e *RPCErr
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.Code == interopCodeFutureData || e.Code == interopCodeUninitialized
+}
+
 // isDefinitiveInteropRejection reports whether err is a definitive INVALID
 // verdict from the filter. A definitive INVALID is ANY filter JSON-RPC
 // rejection — the generic invalid-params code (-32602, e.g. a malformed or
@@ -388,17 +410,22 @@ const failsafeInteropRejectionCode = -320602
 // op-reth) must treat a -32602 parse rejection as a real INVALID so it produces
 // reject_agreed rather than falling through to quorum-not-reached.
 //
-// It excludes only non-verdicts: failsafe (-320602, handled earlier by
-// isFailsafeError), the JSON-RPC internal error (-32603 and proxyd's -32000
-// fallback), cancellation (context.Canceled / HTTP 499), and transport/5xx
-// failures. The verdict is keyed on the filter's actual RPC code, which
-// ParseInteropError now preserves for JSON-RPC errors returned over HTTP 200.
+// It excludes non-verdicts: failsafe (-320602, handled earlier by
+// isFailsafeError), soft out-of-sync failures (FutureData -321401 and
+// Uninitialized -320400, see isSoftInteropFailure), the JSON-RPC internal error
+// (-32603 and proxyd's -32000 fallback), cancellation (context.Canceled / HTTP
+// 499), and transport/5xx failures. The verdict is keyed on the filter's actual
+// RPC code, which ParseInteropError preserves for JSON-RPC errors returned over
+// HTTP 200.
 func isDefinitiveInteropRejection(err error) bool {
 	var e *RPCErr
 	if !errors.As(err, &e) {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || e.HTTPErrorCode == 499 || e.HTTPErrorCode >= 500 {
+		return false
+	}
+	if isSoftInteropFailure(err) {
 		return false
 	}
 	switch e.Code {

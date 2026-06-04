@@ -290,6 +290,58 @@ func TestAgreement_GenericParseRejection_CountsAsInvalid(t *testing.T) {
 	require.Equal(t, -32602, rpcErr.Code, "the real filter rejection code must be surfaced")
 }
 
+func TestAgreement_OutOfSyncEndpointIsSoft(t *testing.T) {
+	// FutureData / Uninitialized mean "this node does not have the data yet". A
+	// single out-of-sync node must be ignored (non-response) as long as the
+	// other nodes meet the quorum, so the message is accepted.
+	cases := []struct {
+		name string
+		code int
+		msg  string
+		http int
+	}{
+		{"future data", interopCodeFutureData, interopErrors.ErrFuture.Error(), 422},
+		{"uninitialized", interopCodeUninitialized, interopErrors.ErrUninitialized.Error(), 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			softBody := supervisorErrorResponse(c.code, c.msg)
+			urls := []string{
+				newSupervisorServer(t, c.http, softBody, 0),
+				newSupervisorServer(t, 200, validSupervisorResponse, 0),
+				newSupervisorServer(t, 200, validSupervisorResponse, 0),
+			}
+			s := newAgreementStrategy(urls, 2)
+			require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList),
+				"an out-of-sync node must be ignored when quorum is met by others")
+		})
+	}
+}
+
+func TestAgreement_AllOutOfSyncFailClosed(t *testing.T) {
+	// If every node is out-of-sync, no definitive verdicts are collected and the
+	// strategy fails closed with quorum-not-reached.
+	softBody := supervisorErrorResponse(interopCodeFutureData, interopErrors.ErrFuture.Error())
+	urls := []string{
+		newSupervisorServer(t, 422, softBody, 0),
+		newSupervisorServer(t, 422, softBody, 0),
+	}
+	s := newAgreementStrategy(urls, 2)
+	err := s.ValidateAccessList(context.Background(), testAccessList)
+	require.Error(t, err, "all endpoints out-of-sync must fail closed")
+	require.Contains(t, err.Error(), "quorum not reached")
+}
+
+func TestSoftInteropFailure_Detection(t *testing.T) {
+	require.True(t, isSoftInteropFailure(&RPCErr{Code: interopCodeFutureData, HTTPErrorCode: 422}))
+	require.True(t, isSoftInteropFailure(&RPCErr{Code: interopCodeUninitialized, HTTPErrorCode: 400}))
+	require.False(t, isSoftInteropFailure(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
+		"a real supervisor verdict is not soft")
+	require.False(t, isSoftInteropFailure(&RPCErr{Code: -32602, HTTPErrorCode: 400}),
+		"a generic parse rejection is not soft")
+	require.False(t, isSoftInteropFailure(fmt.Errorf("plain error")))
+}
+
 func TestDefinitiveInteropRejection_Classification(t *testing.T) {
 	// Any filter rejection counts as a definitive INVALID...
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
@@ -308,4 +360,8 @@ func TestDefinitiveInteropRejection_Classification(t *testing.T) {
 		"proxyd internal fallback is not a verdict")
 	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 502}),
 		"a 5xx transport failure is not a verdict regardless of code")
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: interopCodeFutureData, HTTPErrorCode: 422}),
+		"a soft out-of-sync FutureData failure is not a verdict")
+	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: interopCodeUninitialized, HTTPErrorCode: 400}),
+		"a soft out-of-sync Uninitialized failure is not a verdict")
 }
