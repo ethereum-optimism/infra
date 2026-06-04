@@ -163,6 +163,34 @@ func clSyncStatusInitializing() map[string]interface{} {
 	}
 }
 
+// clSyncStatusGenesis builds a syncStatus for a chain at network genesis: every
+// L2 safety level is at block number 0 but carries a valid (non-zero) genesis
+// hash, while the node is connected to L1 with a fresh head. This must be served
+// to clients rather than rejected as block-height-0.
+func clSyncStatusGenesis() map[string]interface{} {
+	genesis := map[string]interface{}{
+		"hash":      "0x1111111111111111111111111111111111111111111111111111111111111111",
+		"number":    float64(0),
+		"timestamp": float64(0),
+	}
+	return map[string]interface{}{
+		"unsafe_l2":     genesis,
+		"safe_l2":       genesis,
+		"local_safe_l2": genesis,
+		"finalized_l2":  genesis,
+		"current_l1": map[string]interface{}{
+			"hash":      "hash_l1_100",
+			"number":    float64(100),
+			"timestamp": float64(9999999999),
+		},
+		"head_l1": map[string]interface{}{
+			"hash":      "hash_l1_100",
+			"number":    float64(100),
+			"timestamp": float64(9999999999),
+		},
+	}
+}
+
 func TestConsensusCL(t *testing.T) {
 	nodes, bg, client, shutdown := setupCL(t)
 	defer nodes["node1"].mockBackend.Close()
@@ -1020,4 +1048,38 @@ func TestConsensusCLFirstCycle(t *testing.T) {
 	require.NotNil(t, jsonMap["error"], "should return an RPC error when cache is not yet populated")
 	rpcErr := jsonMap["error"].(map[string]interface{})
 	require.Equal(t, float64(-32025), rpcErr["code"])
+}
+
+// TestConsensusCLGenesis verifies that at network genesis — every L2 safety level
+// at block number 0 but with a valid genesis hash — backends form consensus and
+// their optimism_syncStatus is served to clients, rather than being rejected as
+// block-height-0. Uses a fresh poller so the consensus tracker starts at 0, as it
+// would on a real network at genesis.
+func TestConsensusCLGenesis(t *testing.T) {
+	nodes, bg, _, shutdown := setupCL(t)
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer nodes["node3"].mockBackend.Close()
+	defer shutdown()
+
+	ctx := context.Background()
+	for _, node := range nodes {
+		node.handler.AddOverride(&ms.MethodTemplate{
+			Method:   "optimism_syncStatus",
+			Block:    "",
+			Response: buildResponse(clSyncStatusGenesis()),
+		})
+	}
+
+	for _, be := range bg.Backends {
+		bg.Consensus.UpdateBackend(ctx, be)
+	}
+	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+
+	consensusGroup := bg.Consensus.GetConsensusGroup()
+	require.Equal(t, 3, len(consensusGroup), "all genesis backends should be in consensus")
+	require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+	require.Equal(t, "0x0", bg.Consensus.GetLatestBlockNumber().String())
+	require.Equal(t, "0x0", bg.Consensus.GetSafeBlockNumber().String())
+	require.Equal(t, "0x0", bg.Consensus.GetFinalizedBlockNumber().String())
 }
