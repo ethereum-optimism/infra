@@ -512,11 +512,13 @@ func resolveCLOutputRootTiebreak(results []clOutputRootResult) (winner *Backend,
 // handleCLOutputRootTiebreak resolves an output-root disagreement that has no majority by
 // applying ranked backend priority. The lowest-ranked (highest-priority) backend's root is
 // treated as canonical, and backends whose root disagrees are banned and removed from
-// candidates. If no backend is ranked, no bans occur and the disagreement is recorded for
-// every responding backend (preserving the prior no-ban behavior).
+// candidates. If no backend is ranked, the disagreement cannot be resolved, so the group
+// fails closed: every responding backend is dropped from candidates (without a persistent
+// ban) rather than serving a potentially-divergent root. Backends may rejoin on a later
+// cycle once they agree.
 //
-// candidates is mutated in place: banned backends are deleted from the map so the caller's
-// subsequent lowestFromCandidates() scan reflects the bans.
+// candidates is mutated in place: banned and fail-closed backends are deleted from the map
+// so the caller's subsequent lowestFromCandidates() scan reflects the removals.
 //
 // results may include errored/timed-out backends (Err != nil); they are skipped — such a
 // backend can neither win the tiebreak nor be banned here.
@@ -535,14 +537,16 @@ func (cp *ConsensusPoller) handleCLOutputRootTiebreak(
 
 	winner, rankedRoot, found := resolveCLOutputRootTiebreak(results)
 	if !found {
-		// No ranked backends — cannot determine the correct root. Record the disagreement
-		// for every responding backend and leave all candidates in place.
+		// No ranked backends — cannot determine the correct root. Fail closed: drop every
+		// responding backend from candidates so the group serves no root rather than a
+		// potentially-divergent one. No persistent ban — a backend rejoins once it agrees.
 		for _, r := range results {
 			if r.Err == nil {
 				RecordCLOutputRootDisagreement(r.Backend)
+				delete(candidates, r.Backend)
 			}
 		}
-		log.Error("CL output root disagreement detected but no majority and no ranked backends — cannot determine correct root",
+		log.Error("CL output root disagreement detected but no majority and no ranked backends — failing closed, dropping all responding backends",
 			"safe_block", safeBlock,
 			"distinct_roots", distinctRoots,
 			"backends", backendNames,

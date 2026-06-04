@@ -203,24 +203,32 @@ func TestVerifyCLOutputRoots_RankedTiebreaking_HigherRankBanned(t *testing.T) {
 	require.False(t, cp.IsBanned(beB), "beB should not be banned")
 }
 
-func TestVerifyCLOutputRoots_NoRanks_NoBans(t *testing.T) {
-	// Two backends disagree but neither has a rank — no tiebreaking, no bans.
+func TestVerifyCLOutputRoots_NoRanks_FailsClosed(t *testing.T) {
+	// Odd group (passes the startup odd-count guard) that fully disagrees with no ranks:
+	// no majority and no ranked winner, so the disagreement cannot be resolved. The group
+	// must fail closed — every responding backend is dropped from candidates so no
+	// potentially-divergent root is served — but without a persistent ban (backends may
+	// rejoin once they agree).
 	srvA := httptest.NewServer(outputRootHandler("root_A"))
 	defer srvA.Close()
 	srvB := httptest.NewServer(outputRootHandler("root_B"))
 	defer srvB.Close()
+	srvC := httptest.NewServer(outputRootHandler("root_C"))
+	defer srvC.Close()
 
 	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 0) // unranked
 	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 0) // unranked
+	beC := newTestBackendWithRank(t, "nodeC", srvC, 2*time.Second, 0) // unranked
 
-	cp := newTestPoller([]*Backend{beA, beB}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+	cp := newTestPoller([]*Backend{beA, beB, beC}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
 
-	candidates := candidatesForMulti(cp, beA, beB)
+	candidates := candidatesForMulti(cp, beA, beB, beC)
 	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
 
-	require.Len(t, resultCandidates, 2, "both should remain — no tiebreaking possible")
-	require.False(t, cp.IsBanned(beA))
-	require.False(t, cp.IsBanned(beB))
+	require.Empty(t, resultCandidates, "all responding backends dropped — fail closed, serve no root")
+	require.False(t, cp.IsBanned(beA), "fail-closed drop is not a persistent ban")
+	require.False(t, cp.IsBanned(beB), "fail-closed drop is not a persistent ban")
+	require.False(t, cp.IsBanned(beC), "fail-closed drop is not a persistent ban")
 }
 
 func TestVerifyCLOutputRoots_RankedTiebreaking_SameRootNoAction(t *testing.T) {
@@ -272,6 +280,42 @@ func TestVerifyCLOutputRoots_RankedTiebreaking_OddGroupAllDisagree(t *testing.T)
 	require.True(t, cp.IsBanned(beA), "beA (rank 3) should be banned")
 	require.True(t, cp.IsBanned(beC), "beC (rank 2) should be banned")
 	require.False(t, cp.IsBanned(beB), "beB (rank 1) should not be banned")
+}
+
+func TestVerifyCLOutputRoots_MajorityWinsOverRankedTiebreak(t *testing.T) {
+	// Odd-sized group (3 backends) where 2 agree (a majority) and 1 disagrees. The
+	// disagreeing backend is the highest-priority one (rank 1). Tiebreaking must NOT be
+	// used when a majority exists: the majority root is canonical and the rank-1 minority
+	// is banned despite its priority. If ranked tiebreaking were (incorrectly) applied, the
+	// rank-1 backend would win and the two-backend majority would be banned instead.
+	srvA := httptest.NewServer(outputRootHandler("root_minority"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvB.Close()
+	srvC := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvC.Close()
+
+	beA := newTestBackendWithRank(t, "nodeA", srvA, 2*time.Second, 1) // rank 1 = highest priority, but minority
+	beB := newTestBackendWithRank(t, "nodeB", srvB, 2*time.Second, 2) // majority
+	beC := newTestBackendWithRank(t, "nodeC", srvC, 2*time.Second, 3) // majority
+
+	cp := newTestPoller([]*Backend{beA, beB, beC}, WithCLConsensusMode(), WithAsyncHandler(NewNoopAsyncHandler()))
+
+	candidates := candidatesForMulti(cp, beA, beB, beC)
+	resultCandidates, _, _ := cp.verifyCLOutputRoots(context.Background(), candidates, hexutil.Uint64(225))
+
+	// The majority (beB, beC) wins; beA is banned for disagreeing despite being rank 1.
+	require.True(t, cp.IsBanned(beA), "rank-1 minority beA should be banned by the majority")
+	require.False(t, cp.IsBanned(beB), "majority beB should not be banned")
+	require.False(t, cp.IsBanned(beC), "majority beC should not be banned")
+
+	require.Len(t, resultCandidates, 2, "both majority backends should remain")
+	_, beBInResult := resultCandidates[beB]
+	_, beCInResult := resultCandidates[beC]
+	require.True(t, beBInResult, "beB should remain in candidates")
+	require.True(t, beCInResult, "beC should remain in candidates")
+	_, beAInResult := resultCandidates[beA]
+	require.False(t, beAInResult, "banned beA should be removed from candidates")
 }
 
 func TestVerifyCLOutputRoots_RankedTiebreaking_OddGroupWithErroredBackend(t *testing.T) {
