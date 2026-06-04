@@ -226,7 +226,7 @@ var interopRPCErrorMap = map[error]*RPCErr{
 		HTTPErrorCode: 422,
 	},
 	interopErrors.ErrFailsafeEnabled: {
-		Code:          -320602, // dedicated failsafe code emitted by op-interop-filter
+		Code:          failsafeInteropRejectionCode, // dedicated failsafe code emitted by op-interop-filter
 		HTTPErrorCode: 503,
 	},
 	errors.New("stopped acces-list check early"): {
@@ -299,9 +299,9 @@ func ParseInteropError(err error) *RPCErr {
 		} else {
 			// Code-keyed fast path: the dedicated failsafe code is authoritative
 			// and routed independently of message wording.
-			if rpcErrJson.Error.Code == -320602 {
+			if rpcErrJson.Error.Code == failsafeInteropRejectionCode {
 				return &RPCErr{
-					Code:          -320602,
+					Code:          failsafeInteropRejectionCode,
 					Message:       rpcErrJson.Error.Message,
 					Data:          rpcErrJson.Error.Data,
 					HTTPErrorCode: 503,

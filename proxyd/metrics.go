@@ -86,6 +86,15 @@ var (
 		"outcome",
 	})
 
+	interopAgreementDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "interop_agreement_duration_seconds",
+		Help:      "Time taken by the agreement strategy to reach an interop validation verdict.",
+		Buckets:   prometheus.DefBuckets,
+	}, []string{
+		"outcome",
+	})
+
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_errors_total",
@@ -908,10 +917,13 @@ const (
 	agreementOutcomeRejectFailsafe    = "reject_failsafe"
 )
 
-// recordAgreementOutcome classifies an agreement-strategy decision and
-// increments the corresponding metric. A failsafe short-circuit is recorded as
-// reject_failsafe regardless of the verdict tallies collected so far.
-func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int, failsafe bool) {
+// recordAgreementOutcome classifies an agreement-strategy decision and records
+// the corresponding outcome counter and verdict duration. A failsafe
+// short-circuit is recorded as reject_failsafe regardless of the verdict tallies
+// collected so far. start marks the beginning of the supervisor fan-out, so the
+// recorded duration is the time spent fanning out to and waiting on the endpoints.
+func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int, failsafe bool, start time.Time) {
+	duration := time.Since(start)
 	var outcome string
 	switch {
 	case failsafe:
@@ -926,6 +938,7 @@ func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses in
 		outcome = agreementOutcomeRejectDisagree
 	}
 	interopAgreementOutcomesTotal.WithLabelValues(outcome).Inc()
+	interopAgreementDurationSeconds.WithLabelValues(outcome).Observe(duration.Seconds())
 	log.Debug(
 		"interop agreement outcome",
 		"req_id", GetReqID(ctx),
@@ -933,5 +946,6 @@ func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses in
 		"valid", valid,
 		"invalid", invalid,
 		"min_responses", minResponses,
+		"duration", duration,
 	)
 }

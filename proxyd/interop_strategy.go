@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -264,6 +265,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, AgreementStrategy) // nolint:staticcheck
 
 	type verdict struct {
+		url      string
 		valid    bool
 		failsafe bool
 		err      error
@@ -278,61 +280,68 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// start measures the supervisor fan-out latency: how long the strategy waits
+	// on the interop filters to reach a verdict. Recorded against the outcome.
+	start := time.Now()
+
 	for _, url := range s.urls {
 		go func(url string) {
 			_, _, e := performCheckAccessListOp(cctx, accessListToValidate, url, s.chainID)
 			switch {
 			case e == nil:
-				results <- verdict{valid: true}
+				results <- verdict{url: url, valid: true}
 			case isFailsafeError(e):
-				results <- verdict{failsafe: true, err: e}
+				results <- verdict{url: url, failsafe: true, err: e}
 			case isSoftInteropFailure(e):
-				results <- verdict{} // out-of-sync node: non-response, ignored
+				results <- verdict{url: url} // out-of-sync node: non-response, ignored
 			case isDefinitiveInteropRejection(e):
-				results <- verdict{valid: false, err: e}
+				results <- verdict{url: url, valid: false, err: e}
 			default:
-				results <- verdict{} // non-response: transport/timeout/5xx/cancel/soft
+				results <- verdict{url: url} // non-response: transport/timeout/5xx/cancel/soft
 			}
 		}(url)
 	}
 
-	rejectFailsafe := func(valid, invalid int, err error) error {
+	rejectFailsafe := func(valid, invalid int, url string, err error) error {
 		cancel()
 		log.Error(
 			"interop endpoint reported failsafe enabled; rejecting",
 			"req_id", GetReqID(ctx),
+			"supervisor_url", url,
+			"err", err,
 		)
-		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true)
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true, start)
 		return ParseInteropError(err)
 	}
 
 	// Read verdicts as they arrive, breaking once minResponses definitive
 	// verdicts are in. A failsafe verdict short-circuits to a reject. Slow or
 	// unresponded endpoints are never awaited past the quorum.
-	var valid, invalid int
-	var firstInvalid error
+	var valid int
+	var rejections []rejection
 	for range s.urls {
 		v := <-results
 		switch {
 		case v.failsafe:
-			return rejectFailsafe(valid, invalid, v.err)
+			return rejectFailsafe(valid, len(rejections), v.url, v.err)
 		case v.valid:
 			valid++
 		case v.err != nil:
-			invalid++
-			if firstInvalid == nil {
-				firstInvalid = v.err
-			}
+			rejections = append(rejections, rejection{url: v.url, err: v.err})
 		default:
-			continue // non-response; keep waiting for definitive verdicts
+			// Non-response: transport error, timeout, 5xx, cancellation, or a soft
+			// out-of-sync code. The goroutine sends a zero verdict{} for these; they
+			// never count toward quorum, so keep waiting for definitive verdicts.
+			continue
 		}
-		if valid+invalid >= s.minResponses {
+		if valid+len(rejections) >= s.minResponses {
 			break
 		}
 	}
 
+	invalid := len(rejections)
 	if valid+invalid < s.minResponses {
-		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false, start)
 		return ParseInteropError(fmt.Errorf("interop quorum not reached: %d definitive responses, %d required", valid+invalid, s.minResponses))
 	}
 
@@ -346,26 +355,49 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 			select {
 			case v := <-results:
 				if v.failsafe {
-					return rejectFailsafe(valid, invalid, v.err)
+					return rejectFailsafe(valid, invalid, v.url, v.err)
 				}
 			default:
-				recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
+				recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false, start)
 				return nil
 			}
 		}
 	case valid == 0:
-		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
-		return firstInvalid // all reachable endpoints agree the tx is invalid
+		log.Error(
+			"interop endpoints rejected the transaction",
+			"req_id", GetReqID(ctx),
+			"invalid", invalid,
+			"rejections", formatRejections(rejections),
+		)
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false, start)
+		return rejections[0].err // all reachable endpoints agree the tx is invalid
 	default:
 		log.Error(
 			"interop endpoints disagreed; rejecting",
 			"req_id", GetReqID(ctx),
 			"valid", valid,
 			"invalid", invalid,
+			"rejections", formatRejections(rejections),
 		)
-		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false)
-		return firstInvalid
+		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, false, start)
+		return rejections[0].err
 	}
+}
+
+// rejection records a single endpoint's INVALID verdict so the rejecting URLs
+// and their errors can be logged when the strategy refuses a transaction.
+type rejection struct {
+	url string
+	err error
+}
+
+// formatRejections renders rejecting endpoints as "url: err" pairs for logging.
+func formatRejections(rejections []rejection) string {
+	parts := make([]string, len(rejections))
+	for i, r := range rejections {
+		parts[i] = fmt.Sprintf("%s: %v", r.url, r.err)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // isFailsafeError reports whether err is a supervisor failsafe rejection.
@@ -377,9 +409,11 @@ func isFailsafeError(err error) bool {
 	return errors.As(err, &e) && e.Code == failsafeInteropRejectionCode
 }
 
-// failsafeInteropRejectionCode is the dedicated supervisor failsafe code. It is
-// handled as a hard short-circuit rejection (see isFailsafeError) and is never a
-// definitive INVALID verdict.
+// failsafeInteropRejectionCode is the dedicated supervisor failsafe code emitted
+// by op-interop-filter. It is the single source of truth for this code, also
+// referenced by interopRPCErrorMap and ParseInteropError in backend.go. The
+// agreement strategy handles it as a hard short-circuit rejection (see
+// isFailsafeError); it is never a definitive INVALID verdict.
 const failsafeInteropRejectionCode = -320602
 
 // Soft interop failure codes mean "this node does not have the data yet"
