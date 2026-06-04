@@ -31,9 +31,13 @@ import (
 )
 
 const (
-	JSONRPCVersion       = "2.0"
-	JSONRPCErrorInternal = -32000
-	notFoundRpcError     = -32601
+	JSONRPCVersion = "2.0"
+	// JSONRPCErrorInternal is geth's implementation-defined server error code;
+	// jsonRPCSpecInternalError is the JSON-RPC 2.0 spec "Internal error" code.
+	// Both are treated as internal (non-verdict) errors.
+	JSONRPCErrorInternal     = -32000
+	jsonRPCSpecInternalError = -32603
+	notFoundRpcError         = -32601
 )
 
 var (
@@ -226,7 +230,7 @@ var interopRPCErrorMap = map[error]*RPCErr{
 		HTTPErrorCode: 422,
 	},
 	interopErrors.ErrFailsafeEnabled: {
-		Code:          failsafeInteropRejectionCode, // dedicated failsafe code emitted by op-interop-filter
+		Code:          interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled), // dedicated failsafe code emitted by op-interop-filter
 		HTTPErrorCode: 503,
 	},
 	errors.New("stopped acces-list check early"): {
@@ -299,9 +303,9 @@ func ParseInteropError(err error) *RPCErr {
 		} else {
 			// Code-keyed fast path: the dedicated failsafe code is authoritative
 			// and routed independently of message wording.
-			if rpcErrJson.Error.Code == failsafeInteropRejectionCode {
+			if rpcErrJson.Error.Code == interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled) {
 				return &RPCErr{
-					Code:          failsafeInteropRejectionCode,
+					Code:          interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled),
 					Message:       rpcErrJson.Error.Message,
 					Data:          rpcErrJson.Error.Data,
 					HTTPErrorCode: 503,

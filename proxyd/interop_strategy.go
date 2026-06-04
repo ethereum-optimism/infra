@@ -406,34 +406,20 @@ func formatRejections(rejections []rejection) string {
 // any endpoint is a hard rejection handled before the quorum logic.
 func isFailsafeError(err error) bool {
 	var e *RPCErr
-	return errors.As(err, &e) && e.Code == failsafeInteropRejectionCode
+	return errors.As(err, &e) && e.Code == interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled)
 }
 
-// failsafeInteropRejectionCode is the dedicated supervisor failsafe code, sourced
-// from op-core/interop rather than redefined here. It is also referenced by
-// interopRPCErrorMap and ParseInteropError in backend.go. The agreement strategy
-// handles it as a hard short-circuit rejection (see isFailsafeError); it is never
-// a definitive INVALID verdict.
-var failsafeInteropRejectionCode = interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled)
-
-// Soft interop failure codes mean "this node does not have the data yet"
-// (out-of-sync), not "the transaction is invalid". They are treated as
-// non-responses so a single lagging node is ignored as long as quorum is met by
-// other nodes. Sourced from op-core/interop rather than redefined here.
-var (
-	interopCodeFutureData    = interopErrors.GetErrorCode(interopErrors.ErrFuture)        // requested data is ahead of this node
-	interopCodeUninitialized = interopErrors.GetErrorCode(interopErrors.ErrUninitialized) // node not yet initialized
-)
-
 // isSoftInteropFailure reports whether err is a soft out-of-sync failure
-// (FutureData or Uninitialized). These never count toward quorum and never
-// cause a rejection — they behave exactly like a transport non-response.
+// (FutureData or Uninitialized). These mean "this node does not have the data
+// yet", not "the transaction is invalid": they never count toward quorum and
+// never cause a rejection — they behave exactly like a transport non-response.
 func isSoftInteropFailure(err error) bool {
 	var e *RPCErr
 	if !errors.As(err, &e) {
 		return false
 	}
-	return e.Code == interopCodeFutureData || e.Code == interopCodeUninitialized
+	return e.Code == interopErrors.GetErrorCode(interopErrors.ErrFuture) ||
+		e.Code == interopErrors.GetErrorCode(interopErrors.ErrUninitialized)
 }
 
 // isDefinitiveInteropRejection reports whether err is a definitive INVALID
@@ -463,7 +449,7 @@ func isDefinitiveInteropRejection(err error) bool {
 		return false
 	}
 	switch e.Code {
-	case failsafeInteropRejectionCode, JSONRPCErrorInternal, -32603:
+	case interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled), JSONRPCErrorInternal, jsonRPCSpecInternalError:
 		return false
 	}
 	return true
