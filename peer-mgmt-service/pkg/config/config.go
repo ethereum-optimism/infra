@@ -54,6 +54,13 @@ type NetworkConfig struct {
 	Members []string `yaml:"members"`
 }
 
+// IsExternal reports whether this node is an external peer.
+// External peers have no rpc_address; PMS only dials them from internal nodes
+// using the static peer_address.
+func (n *NodeConfig) IsExternal() bool {
+	return n.RPCAddress == ""
+}
+
 func New(file string) (*Config, error) {
 	cfg := &Config{}
 	contents, err := os.ReadFile(file)
@@ -86,9 +93,14 @@ func (c *Config) Validate() error {
 		return errors.New("no networks configured")
 	}
 
-	for name, nodes := range c.Nodes {
-		if nodes.RPCAddress == "" {
-			return errors.Errorf("node [%s] rpc address is missing", name)
+	for name, node := range c.Nodes {
+		if node.IsExternal() {
+			if node.PeerID == "" {
+				return errors.Errorf("node [%s] is external (no rpc_address) but peer_id is missing", name)
+			}
+			if node.PeerAddress == "" {
+				return errors.Errorf("node [%s] is external (no rpc_address) but peer_address is missing", name)
+			}
 		}
 	}
 

@@ -49,3 +49,50 @@ func mustParseDuration(s string) time.Duration {
 	}
 	return d
 }
+
+func TestNodeConfig_IsExternal(t *testing.T) {
+	require.True(t, (&NodeConfig{}).IsExternal())
+	require.True(t, (&NodeConfig{PeerID: "p", PeerAddress: "/dns4/foo/p2p/p"}).IsExternal())
+	require.False(t, (&NodeConfig{RPCAddress: "http://x"}).IsExternal())
+}
+
+func TestConfig_Validate_ExternalPeer(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Nodes: map[string]*NodeConfig{
+				"internal": {RPCAddress: "http://internal:9545"},
+				"external": {PeerID: "16Uiu2HAm...", PeerAddress: "/dns4/ext/tcp/9003/p2p/16Uiu2HAm..."},
+			},
+			Networks: map[string]*NetworkConfig{
+				"net": {Members: []string{"internal", "external"}},
+			},
+		}
+	}
+
+	t.Run("valid: external peer with peer_id and peer_address", func(t *testing.T) {
+		require.NoError(t, base().Validate())
+	})
+
+	t.Run("invalid: external peer missing peer_id", func(t *testing.T) {
+		c := base()
+		c.Nodes["external"].PeerID = ""
+		err := c.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "peer_id")
+	})
+
+	t.Run("invalid: external peer missing peer_address", func(t *testing.T) {
+		c := base()
+		c.Nodes["external"].PeerAddress = ""
+		err := c.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "peer_address")
+	})
+
+	t.Run("invalid: node missing both rpc_address and peer info", func(t *testing.T) {
+		c := base()
+		c.Nodes["external"] = &NodeConfig{}
+		err := c.Validate()
+		require.Error(t, err)
+	})
+}
