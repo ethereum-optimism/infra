@@ -55,6 +55,15 @@ func New(
 			nodesByPeerID: make(map[string]string, len(nodesConfig)),
 		},
 	}
+
+	// Pre-register external peers so their PeerIDs resolve to a known name
+	// without ever polling them.
+	for nodeName, nodeConfig := range nodesConfig {
+		if nodeConfig.IsExternal() {
+			network.state.nodesByPeerID[nodeConfig.PeerID] = nodeName
+		}
+	}
+
 	return network
 }
 

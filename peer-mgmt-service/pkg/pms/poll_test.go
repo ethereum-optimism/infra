@@ -73,6 +73,21 @@ func TestNetwork_updateGraph(t *testing.T) {
 	})
 }
 
+func TestNetwork_New_PreregistersExternalPeers(t *testing.T) {
+	cfg := &config.Config{}
+	netCfg := &config.NetworkConfig{Members: []string{"internal", "external"}}
+	nodes := map[string]*config.NodeConfig{
+		"internal": {RPCAddress: "http://internal:9545"},
+		"external": {PeerID: "ext-peer-id", PeerAddress: "/dns4/ext/tcp/9003/p2p/ext-peer-id"},
+	}
+
+	n := New(cfg, "net", netCfg, nodes)
+
+	require.Equal(t, "external", n.state.nodesByPeerID["ext-peer-id"])
+	_, hasInternal := n.state.nodesByPeerID["internal"]
+	require.False(t, hasInternal, "internal nodes should not be pre-registered (their peer_id is discovered)")
+}
+
 func TestNetwork_resolveState(t *testing.T) {
 	t.Run("should connect to known peers", func(t *testing.T) {
 		type connectPeerArgs struct {
