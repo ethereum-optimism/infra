@@ -545,12 +545,35 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 
 	finalErr := s.interopStrategy.ValidateAccessList(ctx, interopAccessList)
 
+	rpcInteropValidationsTotal.WithLabelValues(
+		interopValidationResult(finalErr),
+		string(s.interopValidatingConfig.Strategy),
+	).Inc()
+
 	if finalErr == nil {
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
 	} else {
 		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "tx_hash", tx.Hash(), "error", finalErr)
 	}
 	return finalErr
+}
+
+// interopValidationResult classifies the outcome of an interop access list
+// validation for metrics purposes:
+//   - "passed":   the transaction was validated successfully (err == nil).
+//   - "filtered": the transaction was rejected by interop validation (a client-side
+//     4xx RPCErr, e.g. the interop filter rejected the access list or it failed a pre-check).
+//   - "errored":  validation could not be completed reliably (a 5xx RPCErr or any
+//     non-RPCErr error, e.g. no interop filter backend available or an internal error).
+func interopValidationResult(err error) string {
+	if err == nil {
+		return "passed"
+	}
+	var rpcErr *RPCErr
+	if errors.As(err, &rpcErr) && rpcErr.HTTPErrorCode >= 400 && rpcErr.HTTPErrorCode < 500 {
+		return "filtered"
+	}
+	return "errored"
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
