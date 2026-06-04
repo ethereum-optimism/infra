@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -22,11 +23,23 @@ type clSyncStatus struct {
 	LatestBlockNumber    hexutil.Uint64
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
+	SafeBlockHash        string
 	LocalSafeBlockNumber hexutil.Uint64
+	LocalSafeBlockHash   string
 	FinalizedBlockNumber hexutil.Uint64
+	FinalizedBlockHash   string
 	CurrentL1Number      uint64
 	HeadL1Number         uint64
 	HeadL1Timestamp      uint64 // Unix seconds; used to detect L1 connection staleness
+}
+
+// hasValidBlockHash reports whether hash is a well-formed, non-zero block hash.
+// At network genesis op-node reports block number 0 for every safety level but
+// with valid (non-zero) genesis hashes; an uninitialized node instead reports a
+// zero or empty hash. This lets us distinguish a legitimate genesis state from a
+// backend that simply hasn't synced yet.
+func hasValidBlockHash(hash string) bool {
+	return hash != "" && common.HexToHash(hash) != (common.Hash{})
 }
 
 // WithCLConsensusMode enables CL (op-node / consensus layer) consensus mode.
@@ -128,25 +141,28 @@ func (cp *ConsensusPoller) updateCLBackend(ctx context.Context, be *Backend) (*c
 	inSync := l1BlockLagOK && l1TimestampOK
 	RecordConsensusBackendInSync(be, inSync)
 
-	if syncStatus.LatestBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+	// Block height 0 is only an error when the corresponding hash is also missing
+	// (an uninitialized node). At network genesis op-node legitimately reports
+	// height 0 with a valid genesis hash, and those responses must pass through.
+	if syncStatus.LatestBlockNumber == 0 && !hasValidBlockHash(syncStatus.LatestBlockHash) {
+		log.Warn("error backend responded a 200 with blockheight 0 and no valid hash for latest block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return nil, nil, false, fmt.Errorf("latest block is 0 for backend %s", be.Name)
+		return nil, nil, false, fmt.Errorf("latest block is 0 with no valid hash for backend %s", be.Name)
 	}
-	if syncStatus.SafeBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+	if syncStatus.SafeBlockNumber == 0 && !hasValidBlockHash(syncStatus.SafeBlockHash) {
+		log.Warn("error backend responded a 200 with blockheight 0 and no valid hash for safe block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return nil, nil, false, fmt.Errorf("safe block is 0 for backend %s", be.Name)
+		return nil, nil, false, fmt.Errorf("safe block is 0 with no valid hash for backend %s", be.Name)
 	}
-	if syncStatus.FinalizedBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+	if syncStatus.FinalizedBlockNumber == 0 && !hasValidBlockHash(syncStatus.FinalizedBlockHash) {
+		log.Warn("error backend responded a 200 with blockheight 0 and no valid hash for finalized block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return nil, nil, false, fmt.Errorf("finalized block is 0 for backend %s", be.Name)
+		return nil, nil, false, fmt.Errorf("finalized block is 0 with no valid hash for backend %s", be.Name)
 	}
-	if syncStatus.LocalSafeBlockNumber == 0 {
-		log.Warn("error backend responded with blockheight 0 for local_safe block", "name", be.Name)
+	if syncStatus.LocalSafeBlockNumber == 0 && !hasValidBlockHash(syncStatus.LocalSafeBlockHash) {
+		log.Warn("error backend responded with blockheight 0 and no valid hash for local_safe block", "name", be.Name)
 		be.intermittentErrorsSlidingWindow.Incr()
-		return nil, nil, false, fmt.Errorf("local_safe block is 0 for backend %s", be.Name)
+		return nil, nil, false, fmt.Errorf("local_safe block is 0 with no valid hash for backend %s", be.Name)
 	}
 
 	return syncStatus, rawBody, inSync, nil
@@ -255,17 +271,17 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		return nil, nil, err
 	}
 
-	safeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
+	safeBlockNumber, safeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	localSafeBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
+	localSafeBlockNumber, localSafeBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "local_safe_l2")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	finalizedBlockNumber, _, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
+	finalizedBlockNumber, finalizedBlockHash, err := parseCLSyncStatusBlock(syncStatusResult, "finalized_l2")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -289,8 +305,11 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 		LatestBlockNumber:    hexutil.Uint64(latestBlockNumber),
 		LatestBlockHash:      latestBlockHash,
 		SafeBlockNumber:      hexutil.Uint64(safeBlockNumber),
+		SafeBlockHash:        safeBlockHash,
 		LocalSafeBlockNumber: hexutil.Uint64(localSafeBlockNumber),
+		LocalSafeBlockHash:   localSafeBlockHash,
 		FinalizedBlockNumber: hexutil.Uint64(finalizedBlockNumber),
+		FinalizedBlockHash:   finalizedBlockHash,
 		CurrentL1Number:      currentL1Number,
 		HeadL1Number:         headL1Number,
 		HeadL1Timestamp:      headL1Timestamp,
