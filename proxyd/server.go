@@ -92,14 +92,18 @@ type Server struct {
 	publicAccess            bool
 	enableTxHashLogging     bool
 
-	enableTxValidation       bool
-	txValidationFn           TxValidationFunc
-	txValidationEndpoint     string
-	txValidationMethods      TxValidationMethodSet
-	txValidationClient       *TxValidationClient
-	txValidationFailOpen     bool
-	isDraining               atomic.Bool
-	gracefulShutdownDuration time.Duration
+	enableTxValidation           bool
+	txValidationFn               TxValidationFunc
+	txValidationEndpoint         string
+	txValidationMethods          TxValidationMethodSet
+	txValidationClient           *TxValidationClient
+	txValidationFailOpen         bool
+	isDraining                   atomic.Bool
+	gracefulShutdownDuration     time.Duration
+	gracefulShutdownIdle         bool
+	gracefulShutdownIdleDuration time.Duration
+	isShuttingDown               atomic.Bool
+	lastRequestNanos             atomic.Int64
 }
 
 type limiterFunc func(method string) bool
@@ -131,6 +135,8 @@ func NewServer(
 	limExemptKeys []string,
 	txValidationConfig TxValidationMiddlewareConfig,
 	gracefulShutdownDuration time.Duration,
+	gracefulShutdownIdle bool,
+	gracefulShutdownIdleDuration time.Duration,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -221,7 +227,7 @@ func NewServer(
 		txValidationFailOpen = *txValidationConfig.FailOpen
 	}
 
-	return &Server{
+	srv := &Server{
 		BackendGroups:        backendGroups,
 		wsBackendGroup:       wsBackendGroup,
 		wsMethodWhitelist:    wsMethodWhitelist,
@@ -239,33 +245,38 @@ func NewServer(
 		upgrader: &websocket.Upgrader{
 			HandshakeTimeout: defaultWSHandshakeTimeout,
 		},
-		mainLim:                  mainLim,
-		overrideLims:             overrideLims,
-		globallyLimitedMethods:   globalMethodLims,
-		senderLim:                senderLim,
-		interopSenderLim:         interopSenderLim,
-		allowedChainIds:          senderRateLimitConfig.AllowedChainIds,
-		limExemptOrigins:         limExemptOrigins,
-		limExemptUserAgents:      limExemptUserAgents,
-		limExemptKeys:            limExemptKeys,
-		rateLimitHeader:          rateLimitHeader,
-		interopValidatingConfig:  interopValidatingConfig,
-		interopStrategy:          interopStrategy,
-		enableTxHashLogging:      enableTxHashLogging,
-		enableTxValidation:       txValidationConfig.Enabled,
-		txValidationFn:           txValidationClient.Validate,
-		txValidationEndpoint:     txValidationConfig.Endpoint,
-		txValidationMethods:      txValidationMethods,
-		txValidationClient:       txValidationClient,
-		txValidationFailOpen:     txValidationFailOpen,
-		gracefulShutdownDuration: gracefulShutdownDuration,
-	}, nil
+		mainLim:                      mainLim,
+		overrideLims:                 overrideLims,
+		globallyLimitedMethods:       globalMethodLims,
+		senderLim:                    senderLim,
+		interopSenderLim:             interopSenderLim,
+		allowedChainIds:              senderRateLimitConfig.AllowedChainIds,
+		limExemptOrigins:             limExemptOrigins,
+		limExemptUserAgents:          limExemptUserAgents,
+		limExemptKeys:                limExemptKeys,
+		rateLimitHeader:              rateLimitHeader,
+		interopValidatingConfig:      interopValidatingConfig,
+		interopStrategy:              interopStrategy,
+		enableTxHashLogging:          enableTxHashLogging,
+		enableTxValidation:           txValidationConfig.Enabled,
+		txValidationFn:               txValidationClient.Validate,
+		txValidationEndpoint:         txValidationConfig.Endpoint,
+		txValidationMethods:          txValidationMethods,
+		txValidationClient:           txValidationClient,
+		txValidationFailOpen:         txValidationFailOpen,
+		gracefulShutdownDuration:     gracefulShutdownDuration,
+		gracefulShutdownIdle:         gracefulShutdownIdle,
+		gracefulShutdownIdleDuration: gracefulShutdownIdleDuration,
+	}
+	srv.lastRequestNanos.Store(time.Now().UnixNano())
+	return srv, nil
 }
 
 func (s *Server) RPCListenAndServe(host string, port int) error {
 	s.srvMu.Lock()
 	hdlr := mux.NewRouter()
 	hdlr.HandleFunc("/healthz", s.HandleHealthz).Methods("GET")
+	hdlr.HandleFunc("/readyz", s.HandleReadyz).Methods("GET")
 	hdlr.HandleFunc("/", s.HandleRPC).Methods("POST")
 	hdlr.HandleFunc("/{authorization}", s.HandleRPC).Methods("POST")
 	c := cors.New(cors.Options{
@@ -300,6 +311,21 @@ func (s *Server) WSListenAndServe(host string, port int) error {
 }
 
 func (s *Server) Drain() {
+	if s.gracefulShutdownIdle {
+		s.isShuttingDown.Store(true)
+		log.Info("graceful shutdown: waiting for idle window",
+			"idle", s.gracefulShutdownIdleDuration)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			last := time.Unix(0, s.lastRequestNanos.Load())
+			if time.Since(last) >= s.gracefulShutdownIdleDuration {
+				log.Info("graceful shutdown: idle window elapsed, shutting down")
+				return
+			}
+		}
+		return
+	}
 	s.isDraining.Store(true)
 	time.Sleep(s.gracefulShutdownDuration)
 }
@@ -326,7 +352,26 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
 }
 
+func (s *Server) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	if s.isDraining.Load() || s.isShuttingDown.Load() {
+		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
+		return
+	}
+	for name, bg := range s.BackendGroups {
+		if bg.Consensus == nil {
+			continue
+		}
+		if len(bg.Consensus.GetConsensusGroup()) == 0 || bg.Consensus.GetLatestBlockNumber() == 0 {
+			http.Error(w, fmt.Sprintf("consensus not ready: %s", name), http.StatusServiceUnavailable)
+			return
+		}
+	}
+	_, _ = w.Write([]byte("OK"))
+}
+
 func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
+	s.lastRequestNanos.Store(time.Now().UnixNano())
+
 	ctx := s.populateContext(w, r)
 	if ctx == nil {
 		return
@@ -782,6 +827,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
+	s.lastRequestNanos.Store(time.Now().UnixNano())
+
 	ctx := s.populateContext(w, r)
 	if ctx == nil {
 		return
