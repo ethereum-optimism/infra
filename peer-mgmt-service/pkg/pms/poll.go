@@ -52,6 +52,9 @@ func (n *Network) cleanup(ctx context.Context) {
 
 func (n *Network) poll(ctx context.Context) {
 	for nodeName, nodeConfig := range n.nodesConfig {
+		if nodeConfig.IsExternal() {
+			continue
+		}
 		n.pollNode(ctx, nodeName, nodeConfig)
 	}
 }
