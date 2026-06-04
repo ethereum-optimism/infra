@@ -134,12 +134,12 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
 			return NoopFrontendRateLimiter
 		}, // limiterFactory
-		InteropValidationConfig{},              // interopValidatingConfig
-		NewFirstSupervisorStrategy([]string{}), // interopStrategy
-		false,                                  // enableTxHashLogging
-		nil,                                    // limExemptKeys
-		TxValidationMiddlewareConfig{},         // txValidationConfig
-		10*time.Second,                         // gracefulShutdownDuration
+		InteropValidationConfig{},                 // interopValidatingConfig
+		NewFirstInteropFilterStrategy([]string{}), // interopStrategy
+		false,                          // enableTxHashLogging
+		nil,                            // limExemptKeys
+		TxValidationMiddlewareConfig{}, // txValidationConfig
+		10*time.Second,                 // gracefulShutdownDuration
 	)
 	require.NoError(t, err)
 

@@ -145,7 +145,7 @@ var (
 )
 
 /*
-These adhere to the interop RPC error codes defined in the supervisor spec
+These adhere to the interop RPC error codes defined in the interop filter spec
 Ref: https://github.com/ethereum-optimism/specs/blob/41a2ea8d362ac132ad2edf7f577bd393ec8beccc/specs/interop/supervisor.md
 Summary:
 

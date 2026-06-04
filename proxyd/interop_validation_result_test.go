@@ -20,7 +20,7 @@ func TestInteropValidationResult(t *testing.T) {
 			want: "passed",
 		},
 		{
-			name: "supervisor rejection (4xx RPCErr) is filtered",
+			name: "interop filter rejection (4xx RPCErr) is filtered",
 			err:  interopRPCErrorMap[interopErrors.ErrSkipped], // 422
 			want: "filtered",
 		},
@@ -45,7 +45,7 @@ func TestInteropValidationResult(t *testing.T) {
 			want: "errored",
 		},
 		{
-			name: "no supervisor backend (non-RPCErr) is errored",
+			name: "no interop filter backend (non-RPCErr) is errored",
 			err:  interopErrors.ErrNoRPCSource,
 			want: "errored",
 		},

@@ -51,7 +51,7 @@ const (
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
-	defaultInteropValidationStrategy                = FirstSupervisorStrategy
+	defaultInteropValidationStrategy                = FirstInteropFilterStrategy
 	defaultInteropReqSizeLimit                      = 128 * opt.KiB
 	defaultInteropAccessListSizeLimit               = 1000
 	defaultInteropLoadBalancingUnhealthinessTimeout = 10 * time.Second
@@ -562,9 +562,9 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 // validation for metrics purposes:
 //   - "passed":   the transaction was validated successfully (err == nil).
 //   - "filtered": the transaction was rejected by interop validation (a client-side
-//     4xx RPCErr, e.g. the supervisor rejected the access list or it failed a pre-check).
+//     4xx RPCErr, e.g. the interop filter rejected the access list or it failed a pre-check).
 //   - "errored":  validation could not be completed reliably (a 5xx RPCErr or any
-//     non-RPCErr error, e.g. no supervisor backend available or an internal error).
+//     non-RPCErr error, e.g. no interop filter backend available or an internal error).
 func interopValidationResult(err error) string {
 	if err == nil {
 		return "passed"
