@@ -85,9 +85,9 @@ func TestInteropValidationReason(t *testing.T) {
 			want: "-32022",
 		},
 		{
-			name: "failsafe maps to its rpc error code",
+			name: "failsafe maps to its dedicated rpc error code",
 			err:  interopRPCErrorMap[interopErrors.ErrFailsafeEnabled],
-			want: "-32602",
+			want: "-320602",
 		},
 		{
 			name: "non-RPCErr is internal",

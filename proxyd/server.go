@@ -585,9 +585,10 @@ func interopValidationResult(err error) string {
 //   - the interop RPC error code as a string (e.g. "-320500"), when rejected.
 //   - "internal": a non-RPCErr error (e.g. backend unavailable, internal error).
 //
-// Note: codes that the interop filter overloads (e.g. -32602 for both failsafe
-// and invalid params) are not disambiguated here; a symbolic breakdown can be
-// layered on later.
+// Note: failsafe has a dedicated code (-320602) as of optimism#21205, so it is
+// already distinguishable from generic invalid-params (-32602); any remaining
+// overloaded codes are not further disambiguated here. A symbolic breakdown can
+// be layered on later.
 func interopValidationReason(err error) string {
 	if err == nil {
 		return "none"
