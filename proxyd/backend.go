@@ -31,9 +31,13 @@ import (
 )
 
 const (
-	JSONRPCVersion       = "2.0"
-	JSONRPCErrorInternal = -32000
-	notFoundRpcError     = -32601
+	JSONRPCVersion = "2.0"
+	// JSONRPCErrorInternal is geth's implementation-defined server error code;
+	// jsonRPCSpecInternalError is the JSON-RPC 2.0 spec "Internal error" code.
+	// Both are treated as internal (non-verdict) errors.
+	JSONRPCErrorInternal     = -32000
+	jsonRPCSpecInternalError = -32603
+	notFoundRpcError         = -32601
 )
 
 var (
@@ -226,7 +230,7 @@ var interopRPCErrorMap = map[error]*RPCErr{
 		HTTPErrorCode: 422,
 	},
 	interopErrors.ErrFailsafeEnabled: {
-		Code:          -32602, // not in interop spec — filter returns this when failsafe is on
+		Code:          interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled), // dedicated failsafe code emitted by op-interop-filter
 		HTTPErrorCode: 503,
 	},
 	errors.New("stopped acces-list check early"): {
@@ -239,10 +243,51 @@ var interopRPCErrorMap = map[error]*RPCErr{
 	},
 }
 
+// interopRPCCodeToHTTP maps a known interop RPC code to its HTTP status,
+// built once from interopRPCErrorMap. Codes shared across map entries (e.g.
+// -32602) resolve to a single status; the value is informational for clients,
+// not used for verdict classification.
+var interopRPCCodeToHTTP = func() map[int]int {
+	m := make(map[int]int, len(interopRPCErrorMap))
+	for _, rpcErr := range interopRPCErrorMap {
+		m[rpcErr.Code] = rpcErr.HTTPErrorCode
+	}
+	return m
+}()
+
+// httpCodeForInteropRPCCode returns the HTTP status for a filter JSON-RPC code.
+// Known interop codes use their mapped status; any other rejection defaults to
+// 400 (a definitive client-side rejection), not 500.
+func httpCodeForInteropRPCCode(code int) int {
+	if httpCode, ok := interopRPCCodeToHTTP[code]; ok {
+		return httpCode
+	}
+	return 400
+}
+
 func ParseInteropError(err error) *RPCErr {
 	var fallbackErr *RPCErr
 	httpErr, isHTTPError := err.(rpc.HTTPError)
 	if !isHTTPError {
+		// A JSON-RPC error returned over HTTP 200 surfaces as an rpc.Error (not an
+		// rpc.HTTPError). Read the filter's actual JSON-RPC code so failsafe
+		// (-320602), invalid-params (-32602) and the supervisor codes are all
+		// identified by code rather than collapsing to the -32000 fallback.
+		var rpcErr rpc.Error
+		if errors.As(err, &rpcErr) {
+			code := rpcErr.ErrorCode()
+			parsed := &RPCErr{
+				Code:          code,
+				Message:       err.Error(),
+				HTTPErrorCode: httpCodeForInteropRPCCode(code),
+			}
+			if dataErr, ok := rpcErr.(rpc.DataError); ok {
+				if data, marshalErr := json.Marshal(dataErr.ErrorData()); marshalErr == nil {
+					parsed.Data = data
+				}
+			}
+			return parsed
+		}
 		fallbackErr = &RPCErr{
 			Code:          JSONRPCErrorInternal,
 			Message:       err.Error(),
@@ -256,6 +301,17 @@ func ParseInteropError(err error) *RPCErr {
 			fallbackErr = ErrInvalidParams(string(httpErr.Body))
 			fallbackErr.HTTPErrorCode = httpErr.StatusCode
 		} else {
+			// Code-keyed fast path: the dedicated failsafe code is authoritative
+			// and routed independently of message wording.
+			if rpcErrJson.Error.Code == interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled) {
+				return &RPCErr{
+					Code:          interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled),
+					Message:       rpcErrJson.Error.Message,
+					Data:          rpcErrJson.Error.Data,
+					HTTPErrorCode: 503,
+				}
+			}
+
 			fallbackErr = &RPCErr{
 				Code:          rpcErrJson.Error.Code,
 				Message:       rpcErrJson.Error.Message,

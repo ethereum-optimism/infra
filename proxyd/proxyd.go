@@ -320,6 +320,20 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.AccessListSizeLimit = defaultInteropAccessListSizeLimit
 	}
 
+	if config.InteropValidationConfig.Strategy == AgreementStrategy {
+		urlCount := len(config.InteropValidationConfig.Urls)
+		if urlCount == 0 {
+			return nil, nil, errors.New("agreement interop validation strategy requires at least one url")
+		}
+		if config.InteropValidationConfig.MinResponses == 0 {
+			log.Warn("no interop validation min_responses provided for agreement strategy, defaulting to unanimity", "min_responses", urlCount)
+			config.InteropValidationConfig.MinResponses = urlCount
+		}
+		if config.InteropValidationConfig.MinResponses < 1 || config.InteropValidationConfig.MinResponses > urlCount {
+			return nil, nil, fmt.Errorf("invalid interop validation min_responses: %d (must be between 1 and %d)", config.InteropValidationConfig.MinResponses, urlCount)
+		}
+	}
+
 	log.Info("configured interop validation urls", "urls", config.InteropValidationConfig.Urls)
 	log.Info("configured interop validation strategy", "strategy", config.InteropValidationConfig.Strategy)
 
@@ -472,6 +486,12 @@ func Start(config *Config) (*Server, func(), error) {
 		interopStrategy = NewHealthAwareLoadBalancingStrategy(
 			config.InteropValidationConfig.Urls,
 			config.InteropValidationConfig.LoadBalancingUnhealthinessTimeout,
+			opts...,
+		)
+	case AgreementStrategy:
+		interopStrategy = NewAgreementStrategy(
+			config.InteropValidationConfig.Urls,
+			config.InteropValidationConfig.MinResponses,
 			opts...,
 		)
 	default:

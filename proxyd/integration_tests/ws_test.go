@@ -218,10 +218,10 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 
-	closed := false
+	var closed atomic.Bool
 	originalHandler := client.conn.CloseHandler()
 	client.conn.SetCloseHandler(func(code int, text string) error {
-		closed = true
+		closed.Store(true)
 		return originalHandler(code, text)
 	})
 
@@ -236,6 +236,7 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 		[]byte(clientReq),
 	)
 	require.Error(t, err)
-	require.True(t, closed)
+	require.Eventually(t, closed.Load, time.Second, 10*time.Millisecond,
+		"connection should be closed after exceeding the read limit")
 
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -75,6 +76,23 @@ var (
 		"http_code",
 		"rpc_error_code",
 		"strategy",
+	})
+
+	interopAgreementOutcomesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "interop_agreement_outcomes_total",
+		Help:      "Count of agreement-strategy interop validation outcomes.",
+	}, []string{
+		"outcome",
+	})
+
+	interopAgreementDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "interop_agreement_duration_seconds",
+		Help:      "Time taken by the agreement strategy to reach an interop validation verdict.",
+		Buckets:   prometheus.DefBuckets,
+	}, []string{
+		"outcome",
 	})
 
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -889,4 +907,45 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+const (
+	agreementOutcomeAccept            = "accept"
+	agreementOutcomeRejectAgreed      = "reject_agreed"
+	agreementOutcomeRejectDisagree    = "reject_disagreement"
+	agreementOutcomeRejectQuorumUnmet = "reject_quorum_not_reached"
+	agreementOutcomeRejectFailsafe    = "reject_failsafe"
+)
+
+// recordAgreementOutcome classifies an agreement-strategy decision and records
+// the corresponding outcome counter and verdict duration. A failsafe
+// short-circuit is recorded as reject_failsafe regardless of the verdict tallies
+// collected so far. start marks the beginning of the supervisor fan-out, so the
+// recorded duration is the time spent fanning out to and waiting on the endpoints.
+func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int, failsafe bool, start time.Time) {
+	duration := time.Since(start)
+	var outcome string
+	switch {
+	case failsafe:
+		outcome = agreementOutcomeRejectFailsafe
+	case valid+invalid < minResponses:
+		outcome = agreementOutcomeRejectQuorumUnmet
+	case invalid == 0:
+		outcome = agreementOutcomeAccept
+	case valid == 0:
+		outcome = agreementOutcomeRejectAgreed
+	default:
+		outcome = agreementOutcomeRejectDisagree
+	}
+	interopAgreementOutcomesTotal.WithLabelValues(outcome).Inc()
+	interopAgreementDurationSeconds.WithLabelValues(outcome).Observe(duration.Seconds())
+	log.Debug(
+		"interop agreement outcome",
+		"req_id", GetReqID(ctx),
+		"outcome", outcome,
+		"valid", valid,
+		"invalid", invalid,
+		"min_responses", minResponses,
+		"duration", duration,
+	)
 }

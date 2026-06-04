@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -1010,5 +1011,160 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends_Cu
 		expectations.unhealthyBackend1 += 0
 		expectations.unhealthyBackend2 += 0
 		expectations.unhealthyBackend3 += 0
+	})
+}
+
+func TestInteropValidation_AgreementStrategy(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	conflictResp := fmt.Sprintf(errResTmpl, -32000, interopErrors.ErrConflict.Error())
+	expectedConflict := fmt.Sprintf(errResTmpl, -320600, interopErrors.ErrConflict.Error())
+
+	type respDetails struct {
+		code         int
+		jsonResponse []byte
+	}
+	type testCase struct {
+		name         string
+		minResponses int
+		// handlers describes each validating backend's response.
+		handlers     []http.HandlerFunc
+		expectedResp respDetails
+	}
+
+	cases := []testCase{
+		{
+			name:         "all valid accepts",
+			minResponses: 2,
+			handlers: []http.HandlerFunc{
+				SingleResponseHandler(200, dummyHealthyRes),
+				SingleResponseHandler(200, dummyHealthyRes),
+				SingleResponseHandler(200, dummyHealthyRes),
+			},
+			expectedResp: respDetails{code: 200, jsonResponse: []byte(dummyHealthyRes)},
+		},
+		{
+			name:         "all invalid rejects with real error",
+			minResponses: 2,
+			handlers: []http.HandlerFunc{
+				SingleResponseHandler(409, conflictResp),
+				SingleResponseHandler(409, conflictResp),
+				SingleResponseHandler(409, conflictResp),
+			},
+			expectedResp: respDetails{code: 409, jsonResponse: []byte(expectedConflict)},
+		},
+		{
+			name:         "disagreement rejects",
+			minResponses: 2,
+			handlers: []http.HandlerFunc{
+				SingleResponseHandler(200, dummyHealthyRes),
+				SingleResponseHandler(409, conflictResp),
+				SingleResponseHandler(409, conflictResp),
+			},
+			expectedResp: respDetails{code: 409, jsonResponse: []byte(expectedConflict)},
+		},
+		{
+			name:         "below quorum fails closed",
+			minResponses: 2,
+			handlers: []http.HandlerFunc{
+				SingleResponseHandler(200, dummyHealthyRes),
+				SingleResponseHandler(500, fmt.Sprintf(errResTmpl, -32000, "boom")),
+				SingleResponseHandler(500, fmt.Sprintf(errResTmpl, -32000, "boom")),
+			},
+			expectedResp: respDetails{code: 500, jsonResponse: nil},
+		},
+	}
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt
+	config.InteropValidationConfig.Strategy = proxyd.AgreementStrategy
+
+	fakeInteropReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			urls := make([]string, 0, len(c.handlers))
+			for _, h := range c.handlers {
+				b := NewMockBackend(h)
+				defer b.Close()
+				urls = append(urls, b.URL())
+			}
+
+			config.InteropValidationConfig.Urls = urls
+			config.InteropValidationConfig.MinResponses = c.minResponses
+
+			_, shutdown, err := proxyd.Start(config)
+			require.NoError(t, err)
+			defer shutdown()
+
+			client := NewProxydClient("http://127.0.0.1:8545")
+			sendRawTransaction := makeSendRawTransaction(fakeInteropReqParams)
+			observedResp, observedCode, err := client.SendRequest(sendRawTransaction)
+			require.NoError(t, err)
+
+			require.Equal(t, c.expectedResp.code, observedCode, "response observed: %s", string(observedResp))
+			if c.expectedResp.jsonResponse != nil {
+				RequireEqualJSON(t, c.expectedResp.jsonResponse, observedResp)
+			}
+		})
+	}
+}
+
+func TestInteropValidation_AgreementMinResponsesConfig(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	v1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer v1.Close()
+	v2 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer v2.Close()
+	urls := []string{v1.URL(), v2.URL()}
+
+	t.Run("MinResponses defaults to len(urls)", func(t *testing.T) {
+		config := ReadConfig("interop_validation")
+		config.SenderRateLimit.Limit = math.MaxInt
+		config.InteropValidationConfig.Strategy = proxyd.AgreementStrategy
+		config.InteropValidationConfig.Urls = urls
+		config.InteropValidationConfig.MinResponses = 0
+
+		_, shutdown, err := proxyd.Start(config)
+		require.NoError(t, err)
+		defer shutdown()
+
+		require.Equal(t, len(urls), config.InteropValidationConfig.MinResponses)
+	})
+
+	t.Run("MinResponses above len(urls) rejected", func(t *testing.T) {
+		config := ReadConfig("interop_validation")
+		config.SenderRateLimit.Limit = math.MaxInt
+		config.InteropValidationConfig.Strategy = proxyd.AgreementStrategy
+		config.InteropValidationConfig.Urls = urls
+		config.InteropValidationConfig.MinResponses = len(urls) + 1
+
+		_, shutdown, err := proxyd.Start(config)
+		if shutdown != nil {
+			defer shutdown()
+		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid interop validation min_responses")
+	})
+
+	t.Run("MinResponses below one rejected", func(t *testing.T) {
+		config := ReadConfig("interop_validation")
+		config.SenderRateLimit.Limit = math.MaxInt
+		config.InteropValidationConfig.Strategy = proxyd.AgreementStrategy
+		config.InteropValidationConfig.Urls = urls
+		config.InteropValidationConfig.MinResponses = -1
+
+		_, shutdown, err := proxyd.Start(config)
+		if shutdown != nil {
+			defer shutdown()
+		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid interop validation min_responses")
 	})
 }
