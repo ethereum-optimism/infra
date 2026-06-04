@@ -57,3 +57,53 @@ func TestInteropValidationResult(t *testing.T) {
 		})
 	}
 }
+
+func TestInteropValidationReason(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "nil error is none",
+			err:  nil,
+			want: "none",
+		},
+		{
+			name: "skipped maps to its rpc error code",
+			err:  interopRPCErrorMap[interopErrors.ErrSkipped],
+			want: "-320500",
+		},
+		{
+			name: "conflict maps to its rpc error code",
+			err:  interopRPCErrorMap[interopErrors.ErrConflict],
+			want: "-320600",
+		},
+		{
+			name: "access list out of bounds maps to its rpc error code",
+			err:  ErrInteropAccessListOutOfBounds,
+			want: "-32022",
+		},
+		{
+			name: "failsafe maps to its rpc error code",
+			err:  interopRPCErrorMap[interopErrors.ErrFailsafeEnabled],
+			want: "-32602",
+		},
+		{
+			name: "non-RPCErr is internal",
+			err:  errors.New("interop filter backend unavailable"),
+			want: "internal",
+		},
+		{
+			name: "arbitrary RPCErr maps to its code",
+			err:  &RPCErr{Code: -39999, HTTPErrorCode: 400},
+			want: "-39999",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, interopValidationReason(tt.err))
+		})
+	}
+}

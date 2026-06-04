@@ -547,6 +547,7 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 
 	rpcInteropValidationsTotal.WithLabelValues(
 		interopValidationResult(finalErr),
+		interopValidationReason(finalErr),
 		string(s.interopValidatingConfig.Strategy),
 	).Inc()
 
@@ -574,6 +575,28 @@ func interopValidationResult(err error) string {
 		return "filtered"
 	}
 	return "errored"
+}
+
+// interopValidationReason returns a low-cardinality label for the interop
+// validation outcome, for metrics breakdown. It reuses the interop RPC error
+// code that ParseInteropError already resolved rather than introducing a
+// separate mapping:
+//   - "none":     validation passed (err == nil).
+//   - the interop RPC error code as a string (e.g. "-320500"), when rejected.
+//   - "internal": a non-RPCErr error (e.g. backend unavailable, internal error).
+//
+// Note: codes that the interop filter overloads (e.g. -32602 for both failsafe
+// and invalid params) are not disambiguated here; a symbolic breakdown can be
+// layered on later.
+func interopValidationReason(err error) string {
+	if err == nil {
+		return "none"
+	}
+	var rpcErr *RPCErr
+	if errors.As(err, &rpcErr) {
+		return strconv.Itoa(rpcErr.Code)
+	}
+	return "internal"
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
