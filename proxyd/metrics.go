@@ -532,6 +532,25 @@ var (
 		Help:      "Count of output root disagreement events per backend. Incremented for every backend whose output root does not match the rest of the group, whether or not a ban was issued.",
 	}, []string{"backend_name"})
 
+	// consensusCLHalted is a bool gauge that is set to 1 while a CL backend group is halted
+	// because its backends disagree on the output root with no majority to resolve the split.
+	// While halted, consensus does not advance — the group serves the last-agreed block.
+	// It auto-clears to 0 once a majority returns. Alert on this gauge == 1: a halt signals a
+	// potential chain split or derivation divergence requiring manual intervention.
+	consensusCLHalted = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_halted",
+		Help:      "Bool gauge: 1 while a CL backend group is halted on an unresolvable output root split (no majority), 0 otherwise.",
+	}, []string{"backend_group_name"})
+
+	// consensusCLHaltTotal counts how many consensus cycles entered the halted state, for
+	// incident frequency tracking and rate alerting.
+	consensusCLHaltTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "consensus_cl_halt_total",
+		Help:      "Count of consensus cycles halted due to an unresolvable output root split (no majority).",
+	}, []string{"backend_group_name"})
+
 	consensusUpdateDelayBackend = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "consensus_backend_update_delay",
@@ -816,6 +835,18 @@ func RecordCLGroupLocalSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64
 
 func RecordCLOutputRootDisagreement(b *Backend) {
 	consensusCLOutputRootDisagreementTotal.WithLabelValues(b.Name).Inc()
+}
+
+// RecordCLConsensusHalted updates the halted gauge for a group: 1 when halted, 0 otherwise.
+// When halted is true it also increments the halt counter; the counter therefore rises once
+// per halted consensus cycle, not once per transition into the halted state.
+func RecordCLConsensusHalted(group *BackendGroup, halted bool) {
+	if halted {
+		consensusCLHalted.WithLabelValues(group.Name).Set(1)
+		consensusCLHaltTotal.WithLabelValues(group.Name).Inc()
+	} else {
+		consensusCLHalted.WithLabelValues(group.Name).Set(0)
+	}
 }
 
 func RecordCLBanNotHealthy(b *Backend) {
