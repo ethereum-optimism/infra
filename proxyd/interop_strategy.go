@@ -409,20 +409,20 @@ func isFailsafeError(err error) bool {
 	return errors.As(err, &e) && e.Code == failsafeInteropRejectionCode
 }
 
-// failsafeInteropRejectionCode is the dedicated supervisor failsafe code emitted
-// by op-interop-filter. It is the single source of truth for this code, also
-// referenced by interopRPCErrorMap and ParseInteropError in backend.go. The
-// agreement strategy handles it as a hard short-circuit rejection (see
-// isFailsafeError); it is never a definitive INVALID verdict.
-const failsafeInteropRejectionCode = -320602
+// failsafeInteropRejectionCode is the dedicated supervisor failsafe code, sourced
+// from op-core/interop rather than redefined here. It is also referenced by
+// interopRPCErrorMap and ParseInteropError in backend.go. The agreement strategy
+// handles it as a hard short-circuit rejection (see isFailsafeError); it is never
+// a definitive INVALID verdict.
+var failsafeInteropRejectionCode = interopErrors.GetErrorCode(interopErrors.ErrFailsafeEnabled)
 
 // Soft interop failure codes mean "this node does not have the data yet"
 // (out-of-sync), not "the transaction is invalid". They are treated as
 // non-responses so a single lagging node is ignored as long as quorum is met by
-// other nodes.
-const (
-	interopCodeFutureData    = -321401 // FutureData: requested data is ahead of this node
-	interopCodeUninitialized = -320400 // UNINITIALIZED_CHAIN_DATABASE: node not yet initialized
+// other nodes. Sourced from op-core/interop rather than redefined here.
+var (
+	interopCodeFutureData    = interopErrors.GetErrorCode(interopErrors.ErrFuture)        // requested data is ahead of this node
+	interopCodeUninitialized = interopErrors.GetErrorCode(interopErrors.ErrUninitialized) // node not yet initialized
 )
 
 // isSoftInteropFailure reports whether err is a soft out-of-sync failure
