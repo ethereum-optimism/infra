@@ -255,6 +255,40 @@ func TestVerifyCLOutputRoots_MajorityResolvesNoHalt(t *testing.T) {
 	require.Len(t, resultCandidates, 2, "only the banned minority is removed")
 }
 
+func TestVerifyCLOutputRoots_MajorityOverMultipleMinoritiesResolves(t *testing.T) {
+	// Five backends split 3-1-1: the top root holds 3 of 5 votes — a strict majority
+	// (3*2 == 6 > 5). The disagreement resolves rather than halting, and every disagreeing
+	// backend is banned, not just one. This is the companion to the 2-1-1-1 plurality case,
+	// which halts because it falls one vote short of a majority.
+	srvMaj1 := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvMaj1.Close()
+	srvMaj2 := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvMaj2.Close()
+	srvMaj3 := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvMaj3.Close()
+	srvMin1 := httptest.NewServer(outputRootHandler("root_minority_1"))
+	defer srvMin1.Close()
+	srvMin2 := httptest.NewServer(outputRootHandler("root_minority_2"))
+	defer srvMin2.Close()
+
+	beMaj1 := newTestBackend(t, srvMaj1, 2*time.Second)
+	beMaj2 := newTestBackend(t, srvMaj2, 2*time.Second)
+	beMaj3 := newTestBackend(t, srvMaj3, 2*time.Second)
+	beMin1 := newTestBackend(t, srvMin1, 2*time.Second)
+	beMin2 := newTestBackend(t, srvMin2, 2*time.Second)
+	cp := newTestPoller([]*Backend{beMaj1, beMaj2, beMaj3, beMin1, beMin2}, WithCLConsensusMode())
+
+	resultCandidates, _, _, halt := cp.verifyCLOutputRoots(context.Background(), candidatesForMulti(cp, beMaj1, beMaj2, beMaj3, beMin1, beMin2), hexutil.Uint64(225))
+
+	require.False(t, halt, "3-of-5 is a strict majority — must resolve, not halt")
+	require.False(t, cp.IsBanned(beMaj1), "majority backends must not be banned")
+	require.False(t, cp.IsBanned(beMaj2), "majority backends must not be banned")
+	require.False(t, cp.IsBanned(beMaj3), "majority backends must not be banned")
+	require.True(t, cp.IsBanned(beMin1), "every minority backend must be banned")
+	require.True(t, cp.IsBanned(beMin2), "every minority backend must be banned")
+	require.Len(t, resultCandidates, 3, "both minorities are removed, majority remains")
+}
+
 func TestVerifyCLOutputRoots_UnanimousNoHalt(t *testing.T) {
 	// All agree — no disagreement, no halt, no bans.
 	srvA := httptest.NewServer(outputRootHandler("root_same"))
@@ -293,6 +327,41 @@ func TestVerifyCLOutputRoots_AllErroredNoHalt(t *testing.T) {
 	_, _, _, halt := cp.verifyCLOutputRoots(context.Background(), candidatesForMulti(cp, beA, beB), hexutil.Uint64(225))
 
 	require.False(t, halt, "all-errored is not a disagreement — must not halt")
+}
+
+func TestVerifyCLOutputRoots_TimeoutsExcludedFromResponderCount(t *testing.T) {
+	// Five backends, but two time out: only three respond, splitting 2-1. Errored backends
+	// are excluded from the responder count, so the majority is measured over the 3 responders
+	// (2*2 == 4 > 3) — a strict majority that resolves rather than halts. The lone minority
+	// responder is banned; the timed-out backends are tolerated (one timeout is below the ban
+	// threshold) and stay candidates, so four candidates survive.
+	srvMaj1 := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvMaj1.Close()
+	srvMaj2 := httptest.NewServer(outputRootHandler("root_majority"))
+	defer srvMaj2.Close()
+	srvMin := httptest.NewServer(outputRootHandler("root_minority"))
+	defer srvMin.Close()
+	srvTimeout1 := httptest.NewServer(hangingHandler())
+	defer srvTimeout1.Close()
+	srvTimeout2 := httptest.NewServer(hangingHandler())
+	defer srvTimeout2.Close()
+
+	beMaj1 := newTestBackend(t, srvMaj1, 2*time.Second)
+	beMaj2 := newTestBackend(t, srvMaj2, 2*time.Second)
+	beMin := newTestBackend(t, srvMin, 2*time.Second)
+	beTimeout1 := newTestBackend(t, srvTimeout1, 100*time.Millisecond)
+	beTimeout2 := newTestBackend(t, srvTimeout2, 100*time.Millisecond)
+	cp := newTestPoller([]*Backend{beMaj1, beMaj2, beMin, beTimeout1, beTimeout2}, WithCLConsensusMode())
+
+	resultCandidates, _, _, halt := cp.verifyCLOutputRoots(context.Background(), candidatesForMulti(cp, beMaj1, beMaj2, beMin, beTimeout1, beTimeout2), hexutil.Uint64(225))
+
+	require.False(t, halt, "majority over the 3 responders resolves — timed-out backends don't count toward the split")
+	require.True(t, cp.IsBanned(beMin), "the minority responder must be banned")
+	require.False(t, cp.IsBanned(beMaj1), "majority responders must not be banned")
+	require.False(t, cp.IsBanned(beMaj2), "majority responders must not be banned")
+	require.False(t, cp.IsBanned(beTimeout1), "a single timeout is tolerated — must not ban")
+	require.False(t, cp.IsBanned(beTimeout2), "a single timeout is tolerated — must not ban")
+	require.Len(t, resultCandidates, 4, "minority removed; majority and tolerated-timeout backends remain")
 }
 
 // --- halt-on-tie: caller freeze + auto-recover ---
