@@ -63,7 +63,10 @@ func TestConfig_Validate_ExternalPeer(t *testing.T) {
 		return &Config{
 			Nodes: map[string]*NodeConfig{
 				"internal": {RPCAddress: "http://internal:9545"},
-				"external": {PeerID: "16Uiu2HAm...", PeerAddress: "/dns4/ext/tcp/9003/p2p/16Uiu2HAm..."},
+				"external": {
+					PeerID:      "16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1",
+					PeerAddress: "/dns4/ext/tcp/9003/p2p/16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1",
+				},
 			},
 			Networks: map[string]*NetworkConfig{
 				"net": {Members: []string{"internal", "external"}},
@@ -96,5 +99,27 @@ func TestConfig_Validate_ExternalPeer(t *testing.T) {
 		c.Nodes["external"] = &NodeConfig{}
 		err := c.Validate()
 		require.Error(t, err)
+	})
+
+	t.Run("invalid: external peer with malformed peer_id", func(t *testing.T) {
+		c := base()
+		c.Nodes["external"].PeerID = "not-a-valid-peer-id"
+		err := c.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid peer_id")
+	})
+
+	t.Run("invalid: network with no internal members", func(t *testing.T) {
+		c := base()
+		// Make the internal node external too, so the network has only externals.
+		c.Nodes["internal"] = &NodeConfig{
+			PeerID:      "16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1",
+			PeerAddress: "/dns4/x/tcp/9003/p2p/16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1",
+		}
+		c.Nodes["external"].PeerID = "16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1"
+		c.Nodes["external"].PeerAddress = "/dns4/y/tcp/9003/p2p/16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1"
+		err := c.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no internal members")
 	})
 }

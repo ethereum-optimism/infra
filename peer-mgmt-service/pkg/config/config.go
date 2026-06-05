@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 
@@ -101,6 +102,9 @@ func (c *Config) Validate() error {
 			if node.PeerAddress == "" {
 				return errors.Errorf("node [%s] is external (no rpc_address) but peer_address is missing", name)
 			}
+			if _, err := peer.Decode(node.PeerID); err != nil {
+				return errors.Errorf("node [%s] has invalid peer_id [%s]: %v", name, node.PeerID, err)
+			}
 		}
 	}
 
@@ -108,10 +112,18 @@ func (c *Config) Validate() error {
 		if len(network.Members) < 2 {
 			return errors.Errorf("network [%s] has less than 2 members", name)
 		}
+		internalCount := 0
 		for _, member := range network.Members {
-			if _, ok := c.Nodes[member]; !ok {
+			nodeCfg, ok := c.Nodes[member]
+			if !ok {
 				return errors.Errorf("network [%s] member [%s] is not configured", name, member)
 			}
+			if !nodeCfg.IsExternal() {
+				internalCount++
+			}
+		}
+		if internalCount == 0 {
+			return errors.Errorf("network [%s] has no internal members (all members are external; nothing to dial from)", name)
 		}
 	}
 
