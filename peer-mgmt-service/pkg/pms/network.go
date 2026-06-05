@@ -55,6 +55,16 @@ func New(
 			nodesByPeerID: make(map[string]string, len(nodesConfig)),
 		},
 	}
+
+	// Pre-register external peers (members of this network with no rpc_address)
+	// so their PeerIDs resolve to a known name without ever polling them.
+	for _, nodeName := range networkConfig.Members {
+		nodeConfig := nodesConfig[nodeName]
+		if nodeConfig.IsExternal() {
+			network.state.nodesByPeerID[nodeConfig.PeerID] = nodeName
+		}
+	}
+
 	return network
 }
 

@@ -20,9 +20,16 @@ nodes:
     rpc_address: http://op-node-0:9545
   op-node-1:
     rpc_address: http://op-node-1:9545
+  # External peer: no rpc_address. PMS will not poll it. Internal nodes that
+  # share a network with this entry will dial peer_address and protect peer_id.
+  # peer_id and peer_address are required when rpc_address is omitted.
+  external-bootnode:
+    peer_id: 16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1
+    peer_address: /dns4/bootnode.example.com/tcp/9003/p2p/16Uiu2HAmFV3qmRmrnEByXMWFNVbBxbnLuG9PvKsgpvJgZqLF2sB1
 
 networks:
   network_name:
     members:
       - op-node-0
       - op-node-1
+      - external-bootnode
