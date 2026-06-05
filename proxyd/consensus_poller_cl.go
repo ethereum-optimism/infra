@@ -50,13 +50,18 @@ func hasValidBlockHash(hash string) bool {
 // derivation position) rather than rewriting individual fields.
 //
 // Output root verification: each poll cycle the poller calls
-// optimism_outputAtBlock at the consensus safe block on every candidate backend
-// and bans any backend whose output root disagrees with the majority. This
-// catches derivation divergences between heterogeneous CL clients (e.g. op-node
+// optimism_outputAtBlock at the consensus safe block on every candidate backend.
+// A backend whose output root disagrees with a strict majority is banned. If there
+// is no majority (a tie or N-way split), the disagreement is unresolvable and
+// consensus halts: the served block height and the cached optimism_syncStatus body
+// stay frozen at the last-agreed value, while the served group is emptied so general
+// RPCs fail closed rather than routing to a backend on an uncertain fork. Backends are
+// not persistently banned, so consensus auto-recovers as soon as a majority returns.
+// This catches derivation divergences between heterogeneous CL clients (e.g. op-node
 // vs kona-node) before incorrect data reaches consumers.
 //
-// An odd number of backends is required (enforced at initialization) so that
-// a majority is always unambiguous.
+// Any number of backends is permitted, including even/2-node cross-client groups:
+// a no-majority disagreement halts rather than being resolved by eviction.
 func WithCLConsensusMode() ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.consensusLayer = true
@@ -317,7 +322,7 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 }
 
 // verifyCLOutputRoots calls optimism_outputAtBlock(safeBlock) on every candidate
-// and bans any backend whose outputRoot disagrees with the majority.
+// and resolves output root agreement before consensus advances.
 //
 // The outputRoot is a cryptographic commitment to the full L2 state at a block:
 //
@@ -327,13 +332,20 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 // the same L1 data, their output roots will differ at the same safe block number.
 // This check catches such derivation divergences before incorrect data is served.
 //
-// Majority semantics: a backend is banned only when the agreed root has ≥2 votes.
-// With an odd number of backends (enforced at init), the majority is always unambiguous:
-//   - 2v1: the minority backend is banned.
-//   - All backends error (outputAtBlock unsupported): graceful degradation,
-//     candidates returned unchanged.
+// Resolution semantics, given the responding backends (errors/timeouts excluded):
+//   - No disagreement (0 or 1 distinct root): proceed; no bans. Covers all-errored
+//     (verification could not run) and unanimous/single-responder cases.
+//   - Strict-majority disagreement (one root has more than half the responders' votes):
+//     ban the dissenting minority and advance on the majority root.
+//   - No-majority disagreement (a tie at the top, e.g. 1v1 / 2-2, or an N-way split):
+//     the split is unresolvable. Return halt=true and ban no one — the caller freezes the
+//     served block height and cached syncStatus at the last-agreed value and empties the
+//     served group (general RPCs fail closed) until a majority returns. This is a potential
+//     chain split / derivation divergence and warrants manual intervention.
 //
-// Returns the filtered candidates map and recomputed lowestSafeBlock / lowestLocalSafeBlock.
+// Returns the filtered candidates map, the recomputed lowestSafeBlock / lowestLocalSafeBlock,
+// and halt (true when an unresolvable split was detected; the block values are then unused
+// because the caller does not advance).
 //
 // clOutputRootTimeouts mutations are protected by backendStateMux, which synchronizes
 // with concurrent Ban/Unban and UpdateBackend callers.
@@ -341,7 +353,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
 	safeBlock hexutil.Uint64,
-) (map[*Backend]*backendState, hexutil.Uint64, hexutil.Uint64) {
+) (map[*Backend]*backendState, hexutil.Uint64, hexutil.Uint64, bool) {
 	type result struct {
 		be         *Backend
 		outputRoot string
@@ -441,34 +453,48 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 		return lowestSafe, lowestLocalSafe
 	}
 
-	if maxCount < 2 {
-		// Cannot establish a clear majority:
-		//   - all backends errored (maxCount == 0), or
-		//   - every backend returned a unique root (all-disagree, no quorum).
-		// Don't ban anyone — we can't determine which backend is correct.
-		if len(counts) > 1 {
-			backendNames := make([]string, 0, len(results))
-			for _, r := range results {
-				if r.err == nil {
-					backendNames = append(backendNames, r.be.Name)
-					RecordCLOutputRootDisagreement(r.be)
-				}
-			}
-			log.Error("CL output root disagreement detected but no majority — cannot determine correct root",
-				"safe_block", safeBlock,
-				"distinct_roots", len(counts),
-				"backends", backendNames,
-			)
-		}
+	// No disagreement: at most one distinct root among responders. This covers the
+	// all-errored case (verification could not run) and the unanimous/single-responder
+	// case. Nothing to resolve - proceed without bans.
+	if len(counts) <= 1 {
 		lowestSafe, lowestLocalSafe := lowestFromCandidates()
-		return candidates, lowestSafe, lowestLocalSafe
+		return candidates, lowestSafe, lowestLocalSafe, false
+	}
+
+	// Disagreement exists. responders is the number of backends that returned a usable
+	// output root (errors and timeouts excluded), i.e. the total votes cast across all
+	// distinct roots. A backend root is canonical only with a strict majority of the
+	// responders (more than half); otherwise the top is a tie (1v1, 2-2, ...) or an N-way
+	// split, which cannot be resolved safely.
+	responders := 0
+	for _, count := range counts {
+		responders += count
+	}
+	if maxCount*2 <= responders {
+		// Unresolvable split: record the disagreement and return halt=true without banning
+		// anyone. See the function doc for how the caller handles a halt.
+		backendNames := make([]string, 0, len(results))
+		for _, r := range results {
+			if r.err == nil {
+				backendNames = append(backendNames, r.be.Name)
+				RecordCLOutputRootDisagreement(r.be)
+			}
+		}
+		log.Error("CL output root split with no majority - halting consensus advancement; serving last-agreed block; manual intervention required",
+			"safe_block", safeBlock,
+			"distinct_roots", len(counts),
+			"responders", responders,
+			"top_root_votes", maxCount,
+			"backends", backendNames,
+		)
+		return candidates, 0, 0, true
 	}
 
 	log.Info("CL output root verification",
 		"agreed_root", agreedRoot,
 		"safe_block", safeBlock,
 		"agreeing_backends", maxCount,
-		"total_responding", len(counts),
+		"total_responding", responders,
 	)
 
 	for _, r := range results {
@@ -497,7 +523,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 	}
 
 	lowestSafe, lowestLocalSafe := lowestFromCandidates()
-	return candidates, lowestSafe, lowestLocalSafe
+	return candidates, lowestSafe, lowestLocalSafe, false
 }
 
 // fetchCLOutputRoot calls optimism_outputAtBlock and returns the outputRoot hash.

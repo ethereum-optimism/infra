@@ -602,12 +602,10 @@ func Start(config *Config) (*Server, func(), error) {
 
 			if bgcfg.RoutingStrategy == ConsensusAwareCLRoutingStrategy {
 				copts = append(copts, WithCLConsensusMode())
-				if n := len(bg.Backends); n%2 == 0 {
-					log.Crit("CL consensus requires an odd number of backends: output root verification needs a majority to evict a diverging backend; an even-sized group cannot resolve a tie",
-						"backend_group", bgName,
-						"backend_count", n,
-					)
-				}
+				// Any backend count is permitted, including even/2-node cross-client groups
+				// (e.g. op-node + kona-node). An output root disagreement with no majority is
+				// not resolved by eviction — consensus halts and serves the last-agreed block
+				// until a majority returns (see verifyCLOutputRoots).
 				for _, be := range bg.Backends {
 					if be.client.Timeout == 0 {
 						log.Crit("CL consensus requires a backend timeout; set response_timeout_seconds or response_timeout_milliseconds",

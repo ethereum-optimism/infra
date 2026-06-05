@@ -531,8 +531,38 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 	}
 
-	if cp.consensusLayer && lowestSafeBlock > 0 {
-		candidates, lowestSafeBlock, lowestLocalSafeBlock = cp.verifyCLOutputRoots(ctx, candidates, lowestSafeBlock)
+	if cp.consensusLayer {
+		var halted bool
+		if lowestSafeBlock > 0 {
+			candidates, lowestSafeBlock, lowestLocalSafeBlock, halted = cp.verifyCLOutputRoots(ctx, candidates, lowestSafeBlock)
+		}
+		// Record the halted state every cycle (including zero-candidate cycles) so the gauge
+		// always reflects reality and can never get stuck at 1 after a halt.
+		RecordCLConsensusHalted(cp.backendGroup, halted)
+		if halted {
+			// Unresolvable output root split (no majority). Freeze only the client-facing
+			// response: the tracker block height and the cached optimism_syncStatus body are
+			// NOT advanced, so clients keep seeing the last-agreed response. Fail closed for
+			// everything else: empty the served consensus group so general RPCs return
+			// ErrNoBackends rather than being routed to a backend on an uncertain fork.
+			//
+			// Backends are not persistently banned — they are still polled and re-verified
+			// every cycle — so consensus auto-recovers as soon as a majority returns. A halt
+			// signals a potential chain split / derivation divergence and requires manual
+			// intervention.
+			cp.consensusGroupMux.Lock()
+			cp.consensusGroup = []*Backend{}
+			cp.consensusGroupMux.Unlock()
+			RecordGroupConsensusCount(cp.backendGroup, 0)
+
+			log.Error("CL consensus halted on output root split - serving frozen last-agreed response, general RPCs fail closed; manual intervention required",
+				"backend_group", cp.backendGroup.Name,
+				"frozen_safe_block", cp.GetSafeBlockNumber(),
+				"frozen_latest_block", cp.GetLatestBlockNumber(),
+				"frozen_finalized_block", cp.GetFinalizedBlockNumber(),
+			)
+			return
+		}
 	}
 
 	// find the proposed block among the candidates

@@ -962,9 +962,11 @@ func TestConsensusCL(t *testing.T) {
 		require.Equal(t, 2, len(bg.Consensus.GetConsensusGroup()))
 	})
 
-	t.Run("output root: all backends disagree, no majority — nobody banned", func(t *testing.T) {
-		// 3 backends each return a unique output root → no backend has ≥2 votes.
-		// Without a majority we cannot determine who is correct, so nobody should be banned.
+	t.Run("output root: all backends disagree, no majority — halts and fails closed", func(t *testing.T) {
+		// 3 backends each return a unique output root → no backend has a majority.
+		// Without a majority the split is unresolvable, so consensus halts: nobody is
+		// persistently banned (so it can auto-recover), but the served group is emptied so
+		// general RPCs fail closed rather than being routed to a backend on an uncertain fork.
 		reset()
 		override("node1", "optimism_outputAtBlock", "0xe1", buildResponse(map[string]interface{}{
 			"outputRoot": "root_A",
@@ -983,7 +985,7 @@ func TestConsensusCL(t *testing.T) {
 		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node2"].backend))
 		require.False(t, bg.Consensus.IsBanned(nodes["node3"].backend))
-		require.Equal(t, 3, len(bg.Consensus.GetConsensusGroup()))
+		require.Equal(t, 0, len(bg.Consensus.GetConsensusGroup()), "halt empties the served group (fail closed)")
 	})
 
 	t.Run("output root ban recovery", func(t *testing.T) {
