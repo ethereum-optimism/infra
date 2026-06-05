@@ -177,3 +177,15 @@ func TestNetwork_resolveState(t *testing.T) {
 		}
 	})
 }
+
+func TestNetwork_internalMemberCount(t *testing.T) {
+	n := &Network{
+		networkConfig: &config.NetworkConfig{Members: []string{"a", "b", "ext"}},
+		nodesConfig: map[string]*config.NodeConfig{
+			"a":   {RPCAddress: "http://a:9545"},
+			"b":   {RPCAddress: "http://b:9545"},
+			"ext": {PeerID: "x", PeerAddress: "/dns4/ext/tcp/9003/p2p/x"},
+		},
+	}
+	require.Equal(t, 2, n.internalMemberCount())
+}

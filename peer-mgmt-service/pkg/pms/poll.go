@@ -147,6 +147,19 @@ func (n *Network) updateGraph(ctx context.Context) {
 	}
 }
 
+// internalMemberCount returns the number of network members with an RPC address.
+// External peers are excluded because PMS can only verify connectivity from the
+// internal side, so they should not weight the health denominator.
+func (n *Network) internalMemberCount() int {
+	count := 0
+	for _, m := range n.networkConfig.Members {
+		if cfg := n.nodesConfig[m]; cfg != nil && !cfg.IsExternal() {
+			count++
+		}
+	}
+	return count
+}
+
 func (n *Network) reportMetrics(ctx context.Context) {
 	log.Debug("network state",
 		"network", n.name,
@@ -172,7 +185,11 @@ func (n *Network) reportMetrics(ctx context.Context) {
 			}
 			connectedness := strings.ToLower(peerState.Connectedness.String())
 
-			healthy := connectedness == "connected" && knownPeer
+			// External peers are excluded from the health denominator, so don't credit them
+			// to the numerator either. They are still reported in the knownnessConnectedness
+			// gauge below so visibility is preserved.
+			peerIsExternal := knownPeer && n.nodesConfig[peerName] != nil && n.nodesConfig[peerName].IsExternal()
+			healthy := connectedness == "connected" && knownPeer && !peerIsExternal
 			if healthy {
 				healthyPeers++
 
@@ -223,10 +240,14 @@ func (n *Network) reportMetrics(ctx context.Context) {
 
 	metrics.RecordNetworkMemberCount(n.name, len(n.networkConfig.Members))
 
-	// when all N members of the network are mutually connected,
+	// when all N internal members of the network are mutually connected,
 	// we'll observe (N * (N-1)) connections
-	expectedHealthy := float64(len(n.networkConfig.Members) * (len(n.networkConfig.Members) - 1))
-	percentageHealthy := float64(healthyPeers) / expectedHealthy
+	internalCount := n.internalMemberCount()
+	expectedHealthy := float64(internalCount * (internalCount - 1))
+	percentageHealthy := float64(0)
+	if expectedHealthy > 0 {
+		percentageHealthy = float64(healthyPeers) / expectedHealthy
+	}
 	metrics.RecordNetworkPeerHealthness(n.name, percentageHealthy)
 
 }
