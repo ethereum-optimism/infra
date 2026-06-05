@@ -210,6 +210,27 @@ func TestVerifyCLOutputRoots_TopTieHalts(t *testing.T) {
 	}
 }
 
+func TestVerifyCLOutputRoots_PluralityNoMajorityHalts(t *testing.T) {
+	// Five backends split 2-1-1-1: the top root leads with 2 votes (a plurality) but holds
+	// no strict majority of the 5 responders (2*2 == 4, not > 5). Without a strict majority
+	// the lead cannot be trusted as canonical, so verify must halt and ban no one.
+	roots := []string{"root_A", "root_A", "root_B", "root_C", "root_D"}
+	backends := make([]*Backend, 0, len(roots))
+	for _, root := range roots {
+		srv := httptest.NewServer(outputRootHandler(root))
+		defer srv.Close()
+		backends = append(backends, newTestBackend(t, srv, 2*time.Second))
+	}
+	cp := newTestPoller(backends, WithCLConsensusMode())
+
+	_, _, _, halt := cp.verifyCLOutputRoots(context.Background(), candidatesForMulti(cp, backends...), hexutil.Uint64(225))
+
+	require.True(t, halt, "2-1-1-1 plurality without a strict majority — must halt")
+	for _, be := range backends {
+		require.False(t, cp.IsBanned(be), "halt must not ban any backend")
+	}
+}
+
 func TestVerifyCLOutputRoots_MajorityResolvesNoHalt(t *testing.T) {
 	// 2v1 majority: a clear winner exists, so verify resolves (bans the minority) rather
 	// than halting. This is the "disagreement but majority -> don't halt" case.
