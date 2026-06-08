@@ -545,12 +545,69 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 
 	finalErr := s.interopStrategy.ValidateAccessList(ctx, interopAccessList)
 
+	rpcInteropValidationsTotal.WithLabelValues(
+		interopValidationResult(finalErr),
+		interopValidationReason(finalErr),
+		string(s.interopValidatingConfig.Strategy),
+	).Inc()
+
 	if finalErr == nil {
 		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
 	} else {
 		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "tx_hash", tx.Hash(), "error", finalErr)
 	}
 	return finalErr
+}
+
+// interopValidationResult classifies the outcome of an interop access list
+// validation for metrics purposes. It keys on the same helpers the validation
+// strategies use, rather than the raw HTTP status, so the buckets match how the
+// filter actually treats each error:
+//   - "passed":   the transaction was validated successfully (err == nil).
+//   - "failsafe": the filter rejected the tx because failsafe mode is engaged — a
+//     deliberate reject-all (see isFailsafeError), not a per-tx verdict.
+//   - "filtered": a definitive INVALID verdict from the filter (see
+//     isDefinitiveInteropRejection).
+//   - "errored":  validation could not be completed reliably — soft out-of-sync
+//     failures (ErrFuture/ErrUninitialized, see isSoftInteropFailure), 5xx/transport
+//     failures, no interop filter backend, or an internal error.
+//
+// Note: soft out-of-sync failures are 4xx but are not rejections (the node just
+// lacks the data yet), so they intentionally land in "errored", not "filtered".
+func interopValidationResult(err error) string {
+	if err == nil {
+		return "passed"
+	}
+	if isFailsafeError(err) {
+		return "failsafe"
+	}
+	if isDefinitiveInteropRejection(err) {
+		return "filtered"
+	}
+	return "errored"
+}
+
+// interopValidationReason returns a low-cardinality label for the interop
+// validation outcome, for metrics breakdown. It reuses the interop RPC error
+// code that ParseInteropError already resolved rather than introducing a
+// separate mapping:
+//   - "none":     validation passed (err == nil).
+//   - the interop RPC error code as a string (e.g. "-320500"), when rejected.
+//   - "internal": a non-RPCErr error (e.g. backend unavailable, internal error).
+//
+// Note: failsafe has a dedicated code (-320602) as of optimism#21205, so it is
+// already distinguishable from generic invalid-params (-32602); any remaining
+// overloaded codes are not further disambiguated here. A symbolic breakdown can
+// be layered on later.
+func interopValidationReason(err error) string {
+	if err == nil {
+		return "none"
+	}
+	var rpcErr *RPCErr
+	if errors.As(err, &rpcErr) {
+		return strconv.Itoa(rpcErr.Code)
+	}
+	return "internal"
 }
 
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
