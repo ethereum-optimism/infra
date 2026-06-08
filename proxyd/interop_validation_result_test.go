@@ -30,8 +30,18 @@ func TestInteropValidationResult(t *testing.T) {
 			want: "filtered",
 		},
 		{
-			name: "failsafe enabled (503 RPCErr) is errored",
-			err:  interopRPCErrorMap[interopErrors.ErrFailsafeEnabled], // 503
+			name: "failsafe enabled is its own bucket",
+			err:  interopRPCErrorMap[interopErrors.ErrFailsafeEnabled], // -320602
+			want: "failsafe",
+		},
+		{
+			name: "future data (soft out-of-sync, 422) is errored not filtered",
+			err:  interopRPCErrorMap[interopErrors.ErrFuture], // -321401, HTTP 422
+			want: "errored",
+		},
+		{
+			name: "uninitialized (soft out-of-sync, 400) is errored not filtered",
+			err:  interopRPCErrorMap[interopErrors.ErrUninitialized], // -320400, HTTP 400
 			want: "errored",
 		},
 		{

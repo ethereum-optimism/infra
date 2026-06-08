@@ -560,18 +560,28 @@ func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Tr
 }
 
 // interopValidationResult classifies the outcome of an interop access list
-// validation for metrics purposes:
+// validation for metrics purposes. It keys on the same helpers the validation
+// strategies use, rather than the raw HTTP status, so the buckets match how the
+// filter actually treats each error:
 //   - "passed":   the transaction was validated successfully (err == nil).
-//   - "filtered": the transaction was rejected by interop validation (a client-side
-//     4xx RPCErr, e.g. the interop filter rejected the access list or it failed a pre-check).
-//   - "errored":  validation could not be completed reliably (a 5xx RPCErr or any
-//     non-RPCErr error, e.g. no interop filter backend available or an internal error).
+//   - "failsafe": the filter rejected the tx because failsafe mode is engaged — a
+//     deliberate reject-all (see isFailsafeError), not a per-tx verdict.
+//   - "filtered": a definitive INVALID verdict from the filter (see
+//     isDefinitiveInteropRejection).
+//   - "errored":  validation could not be completed reliably — soft out-of-sync
+//     failures (ErrFuture/ErrUninitialized, see isSoftInteropFailure), 5xx/transport
+//     failures, no interop filter backend, or an internal error.
+//
+// Note: soft out-of-sync failures are 4xx but are not rejections (the node just
+// lacks the data yet), so they intentionally land in "errored", not "filtered".
 func interopValidationResult(err error) string {
 	if err == nil {
 		return "passed"
 	}
-	var rpcErr *RPCErr
-	if errors.As(err, &rpcErr) && rpcErr.HTTPErrorCode >= 400 && rpcErr.HTTPErrorCode < 500 {
+	if isFailsafeError(err) {
+		return "failsafe"
+	}
+	if isDefinitiveInteropRejection(err) {
 		return "filtered"
 	}
 	return "errored"

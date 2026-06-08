@@ -98,7 +98,7 @@ var (
 	rpcInteropValidationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_interop_validations_total",
-		Help:      "Count of interop transactions by validation result (passed, filtered, errored) and reason.",
+		Help:      "Count of interop transactions by validation result (passed, filtered, errored, failsafe) and reason.",
 	}, []string{
 		"result",
 		"reason",
