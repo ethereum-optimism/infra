@@ -328,14 +328,18 @@ func Start(config *Config) (*Server, func(), error) {
 	if config.InteropValidationConfig.Strategy == AgreementStrategy {
 		urlCount := len(config.InteropValidationConfig.Urls)
 		if urlCount == 0 {
-			return nil, nil, errors.New("agreement interop validation strategy requires at least one url")
-		}
-		if config.InteropValidationConfig.MinResponses == 0 {
-			log.Warn("no interop validation min_responses provided for agreement strategy, defaulting to unanimity", "min_responses", urlCount)
-			config.InteropValidationConfig.MinResponses = urlCount
-		}
-		if config.InteropValidationConfig.MinResponses < 1 || config.InteropValidationConfig.MinResponses > urlCount {
-			return nil, nil, fmt.Errorf("invalid interop validation min_responses: %d (must be between 1 and %d)", config.InteropValidationConfig.MinResponses, urlCount)
+			// proxyd starts with zero interop-filter urls so it can serve non-interop
+			// traffic; any interop executing-message tx is rejected at runtime by the
+			// fail-closed preflight check. min_responses is only meaningful with urls.
+			log.Warn("agreement interop validation strategy configured with no urls; interop transactions will be rejected (fail closed)")
+		} else {
+			if config.InteropValidationConfig.MinResponses == 0 {
+				log.Warn("no interop validation min_responses provided for agreement strategy, defaulting to unanimity", "min_responses", urlCount)
+				config.InteropValidationConfig.MinResponses = urlCount
+			}
+			if config.InteropValidationConfig.MinResponses < 1 || config.InteropValidationConfig.MinResponses > urlCount {
+				return nil, nil, fmt.Errorf("invalid interop validation min_responses: %d (must be between 1 and %d)", config.InteropValidationConfig.MinResponses, urlCount)
+			}
 		}
 	}
 
