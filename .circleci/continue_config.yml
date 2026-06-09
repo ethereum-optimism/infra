@@ -29,9 +29,6 @@ parameters:
   run-build-cci-stats:
     type: boolean
     default: false
-  run-build-op-acceptor:
-    type: boolean
-    default: false
   run-build-rhc:
     type: boolean
     default: false
@@ -104,7 +101,6 @@ jobs:
             echo "run-build-pms: << pipeline.parameters.run-build-pms >>"
             echo "run-build-op-ufm: << pipeline.parameters.run-build-op-ufm >>"
             echo "run-build-proxyd: << pipeline.parameters.run-build-proxyd >>"
-            echo "run-build-op-acceptor: << pipeline.parameters.run-build-op-acceptor >>"
             echo "run-build-rhc: << pipeline.parameters.run-build-rhc >>"
             echo "run-all: << pipeline.parameters.run-all >>"
             echo ""
@@ -158,12 +154,6 @@ jobs:
               echo "op-ufm tag regex match: false"
             fi
 
-            if [[ $CURRENT_TAG =~ ^op-acceptor/v.* ]]; then
-              echo "op-acceptor tag regex match: true"
-            else
-              echo "op-acceptor tag regex match: false"
-            fi
-
             if [[ $CURRENT_TAG =~ ^replica-healthcheck/v.* ]]; then
               echo "replica-healthcheck tag regex match: true"
             else
@@ -193,11 +183,7 @@ jobs:
       - run:
           name: run lint
           command: |
-            if [ "<<parameters.module>>" = "op-acceptor" ]; then
-              make lint
-            else
-              golangci-lint run ./...
-            fi
+            golangci-lint run ./...
           working_directory: <<parameters.module>>
 
   go-test:
@@ -288,25 +274,6 @@ jobs:
           name: Run goreleaser
           command: |
             goreleaser release --clean -f ./<<parameters.module>>/<<parameters.filename>>
-
-  # Run full op-acceptor suite, including acceptance tests via make test-all
-  op-acceptor-test-all:
-    docker:
-      - image: cimg/go:1.26
-        user: root
-    resource_class: medium.gen2
-    steps:
-      - circleci-utils/checkout-with-mise
-      - run:
-          name: go version
-          command: go version
-      - run:
-          name: run test-all
-          command: make test-all
-          working_directory: op-acceptor
-      - store_artifacts:
-          path: op-acceptor/logs
-          destination: op-acceptor-logs
 
   op-conductor-ops-lint:
     docker:
@@ -437,18 +404,6 @@ workflows:
       - go-test:
           name: cci-stats-tests
           module: cci-stats
-  op-acceptor:
-    when:
-      or: [<< pipeline.parameters.run-build-op-acceptor >>, << pipeline.parameters.run-all >>]
-    jobs:
-      - go-lint:
-          name: op-acceptor-lint
-          module: op-acceptor
-      - go-test:
-          name: op-acceptor-tests
-          module: op-acceptor
-      - op-acceptor-test-all
-
   release:
     jobs:
       - log-config-results:
@@ -475,7 +430,6 @@ workflows:
                 - op-conductor-mon
                 - peer-mgmt-service
                 - cci-stats
-                - op-acceptor
           name: <<matrix.module>>-go-release
           filters:
             tags:

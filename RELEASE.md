@@ -9,7 +9,7 @@ The release process is driven by CircleCI to build and publish components
 
    The release process is initiated by creating a new tag on the main branch
    The tag should be prefixed with the component and suffixed with release semver
-   Ex. op-acceptor/v0.1.6 / <component>/v<major>.<minor>.<patch>
+   Ex. op-signer/v0.1.6 / <component>/v<major>.<minor>.<patch>
 
    > **Note**: Generally, the branch used for releases is `main` but if needed, you can use a different branch, say, if you'd like to create test releases from your branch.
 

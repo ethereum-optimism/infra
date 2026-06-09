@@ -10,11 +10,6 @@
       "dockerfile": "cci-stats/Dockerfile",
       "paths": ["cci-stats/**"]
     },
-    "op-acceptor": {
-      "context": ".",
-      "dockerfile": "op-acceptor/Dockerfile",
-      "paths": ["op-acceptor/**"]
-    },
     "op-conductor-mon": {
       "context": ".",
       "dockerfile": "op-conductor-mon/Dockerfile",
