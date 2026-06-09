@@ -30,7 +30,7 @@ type commonInteropStrategy struct {
 	accessListSizeLimit                     int
 	reqSizeLimit                            int
 	validateAndDeduplicateInteropAccessList bool
-	skipOnNoSupervisorBackend               bool
+	skipOnNoInteropFilterBackend            bool
 }
 
 func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonInteropStrategy {
@@ -39,7 +39,7 @@ func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonI
 		accessListSizeLimit:                     0,
 		reqSizeLimit:                            0,
 		validateAndDeduplicateInteropAccessList: true,
-		skipOnNoSupervisorBackend:               false,
+		skipOnNoInteropFilterBackend:            false,
 	}
 
 	for _, opt := range opts {
@@ -73,9 +73,9 @@ var WithValidateAndDeduplicateInteropAccessList = func(validateAndDeduplicateInt
 	}
 }
 
-var WithSkipOnNoSupervisorBackend = func(skipOnNoSupervisorBackend bool) commonStrategyOpt {
+var WithSkipOnNoInteropFilterBackend = func(skipOnNoInteropFilterBackend bool) commonStrategyOpt {
 	return func(s *commonInteropStrategy) {
-		s.skipOnNoSupervisorBackend = skipOnNoSupervisorBackend
+		s.skipOnNoInteropFilterBackend = skipOnNoInteropFilterBackend
 	}
 }
 
@@ -87,7 +87,7 @@ var WithChainID = func(chainID uint64) commonStrategyOpt {
 
 func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, bool, error) {
 	if len(s.urls) == 0 {
-		if s.skipOnNoSupervisorBackend {
+		if s.skipOnNoInteropFilterBackend {
 			log.Info(
 				"no validating backends found for an interop transaction, skipping",
 				"req_id", GetReqID(ctx),
@@ -126,17 +126,17 @@ func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.
 	return interopAccessList, true, nil
 }
 
-type firstSupervisorStrategyImpl struct {
+type firstInteropFilterStrategyImpl struct {
 	*commonInteropStrategy
 }
 
-func NewFirstSupervisorStrategy(urls []string, opts ...commonStrategyOpt) *firstSupervisorStrategyImpl {
-	return &firstSupervisorStrategyImpl{
+func NewFirstInteropFilterStrategy(urls []string, opts ...commonStrategyOpt) *firstInteropFilterStrategyImpl {
+	return &firstInteropFilterStrategyImpl{
 		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
 	}
 }
 
-func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+func (s *firstInteropFilterStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
 	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
@@ -146,10 +146,10 @@ func (s *firstSupervisorStrategyImpl) ValidateAccessList(ctx context.Context, in
 		return nil
 	}
 
-	firstSupervisorUrl := s.urls[0]
+	firstInteropFilterUrl := s.urls[0]
 
-	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstSupervisorStrategy) // nolint:staticcheck
-	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstSupervisorUrl, s.chainID)
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstInteropFilterStrategy) // nolint:staticcheck
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstInteropFilterUrl, s.chainID)
 	return err
 }
 
@@ -215,7 +215,7 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 
 // agreementStrategyImpl fans every check out to all configured urls
 // concurrently and combines the verdicts by quorum agreement. A "definitive
-// verdict" is either a successful validation (valid) or a known supervisor
+// verdict" is either a successful validation (valid) or a known interop filter
 // validation rejection (invalid); transport errors, timeouts, 5xx and
 // cancellations are non-responses and never count.
 //
@@ -280,7 +280,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// start measures the supervisor fan-out latency: how long the strategy waits
+	// start measures the interop filter fan-out latency: how long the strategy waits
 	// on the interop filters to reach a verdict. Recorded against the outcome.
 	start := time.Now()
 
@@ -307,7 +307,7 @@ func (s *agreementStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		log.Error(
 			"interop endpoint reported failsafe enabled; rejecting",
 			"req_id", GetReqID(ctx),
-			"supervisor_url", url,
+			"interop_filter_url", url,
 			"err", err,
 		)
 		recordAgreementOutcome(ctx, valid, invalid, s.minResponses, true, start)
@@ -400,7 +400,7 @@ func formatRejections(rejections []rejection) string {
 	return strings.Join(parts, "; ")
 }
 
-// isFailsafeError reports whether err is a supervisor failsafe rejection.
+// isFailsafeError reports whether err is an interop filter failsafe rejection.
 // op-interop-filter emits the dedicated code -320602 for failsafe, so detection
 // keys on the code and is immune to message wording or HTTP status. Failsafe on
 // any endpoint is a hard rejection handled before the quorum logic.
@@ -425,8 +425,8 @@ func isSoftInteropFailure(err error) bool {
 // isDefinitiveInteropRejection reports whether err is a definitive INVALID
 // verdict from the filter. A definitive INVALID is ANY filter JSON-RPC
 // rejection — the generic invalid-params code (-32602, e.g. a malformed or
-// fabricated access list) as well as the supervisor verdict codes
-// (-3204xx..-3215xx) — not just the known supervisor set. Both sides (proxyd and
+// fabricated access list) as well as the interop filter verdict codes
+// (-3204xx..-3215xx) — not just the known interop filter set. Both sides (proxyd and
 // op-reth) must treat a -32602 parse rejection as a real INVALID so it produces
 // reject_agreed rather than falling through to quorum-not-reached.
 //
@@ -509,7 +509,7 @@ func (s *healthAwareLoadBalancingStrategyImpl) ValidateAccessList(ctx context.Co
 	}
 
 	// retries exhausted
-	return ParseInteropError(fmt.Errorf("no healthy supervisor backends found"))
+	return ParseInteropError(fmt.Errorf("no healthy interop filter backends found"))
 }
 
 type healthAwareBackend struct {
@@ -587,14 +587,14 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 
 	log.Debug(
 		"an interop validating backend has responded",
-		"supervisor_url", url,
+		"interop_filter_url", url,
 		"strategy", strategy,
 		"req_id", GetReqID(ctx),
 		"method", "eth_sendRawTransaction",
 		"error", err,
 	)
 
-	rpcSupervisorChecksTotal.WithLabelValues(
+	rpcInteropFilterChecksTotal.WithLabelValues(
 		url,
 		strconv.Itoa(httpCode),
 		rpcErrorCode,

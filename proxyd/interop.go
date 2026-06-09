@@ -19,7 +19,7 @@ func accessObjectToKey(accessObject messages.Access) string {
 // validateAndDeduplicateInteropAccessList
 // - validates all the interop access list entries by trying to successfully parse them on a per "Access" basis
 // - discard any successfully parsed yet duplicate "Access" objects along the way.
-// This is because op-supervisor does the same for the incoming inbox entries and validates them against its DB on a per "Access" basis.
+// This is because op-interop-filter does the same for the incoming inbox entries and validates them against its DB on a per "Access" basis.
 // So it makes sense to recognise and discard duplicate "Access" objects early.
 func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]common.Hash, error) {
 	if len(entriesToParse) == 0 {

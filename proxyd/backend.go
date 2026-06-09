@@ -271,7 +271,7 @@ func ParseInteropError(err error) *RPCErr {
 	if !isHTTPError {
 		// A JSON-RPC error returned over HTTP 200 surfaces as an rpc.Error (not an
 		// rpc.HTTPError). Read the filter's actual JSON-RPC code so failsafe
-		// (-320602), invalid-params (-32602) and the supervisor codes are all
+		// (-320602), invalid-params (-32602) and the interop filter codes are all
 		// identified by code rather than collapsing to the -32000 fallback.
 		var rpcErr rpc.Error
 		if errors.As(err, &rpcErr) {
