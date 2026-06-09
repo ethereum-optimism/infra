@@ -122,8 +122,8 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 	}
 	cases := []testCase{
 		{
-			name:     "first-interop-filter strategy with first url returning error",
-			strategy: proxyd.FirstInteropFilterStrategy,
+			name:     "first-filter strategy with first url returning error",
+			strategy: proxyd.FirstFilterStrategy,
 			urls:     []string{badInteropFilterUrl1, goodInteropFilterUrl},
 			expectedResp: respDetails{
 				code:         409,

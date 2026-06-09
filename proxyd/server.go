@@ -51,7 +51,7 @@ const (
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
-	defaultInteropValidationStrategy                = FirstInteropFilterStrategy
+	defaultInteropValidationStrategy                = FirstFilterStrategy
 	defaultInteropReqSizeLimit                      = 128 * opt.KiB
 	defaultInteropAccessListSizeLimit               = 1000
 	defaultInteropLoadBalancingUnhealthinessTimeout = 10 * time.Second

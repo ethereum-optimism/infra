@@ -472,8 +472,8 @@ func Start(config *Config) (*Server, func(), error) {
 	)
 
 	switch config.InteropValidationConfig.Strategy {
-	case FirstInteropFilterStrategy, EmptyStrategy:
-		interopStrategy = NewFirstInteropFilterStrategy(
+	case FirstFilterStrategy, EmptyStrategy:
+		interopStrategy = NewFirstFilterStrategy(
 			config.InteropValidationConfig.Urls,
 			opts...,
 		)

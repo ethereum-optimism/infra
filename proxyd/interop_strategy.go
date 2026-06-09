@@ -126,17 +126,17 @@ func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.
 	return interopAccessList, true, nil
 }
 
-type firstInteropFilterStrategyImpl struct {
+type firstFilterStrategyImpl struct {
 	*commonInteropStrategy
 }
 
-func NewFirstInteropFilterStrategy(urls []string, opts ...commonStrategyOpt) *firstInteropFilterStrategyImpl {
-	return &firstInteropFilterStrategyImpl{
+func NewFirstFilterStrategy(urls []string, opts ...commonStrategyOpt) *firstFilterStrategyImpl {
+	return &firstFilterStrategyImpl{
 		commonInteropStrategy: NewCommonInteropStrategy(urls, opts...),
 	}
 }
 
-func (s *firstInteropFilterStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
+func (s *firstFilterStrategyImpl) ValidateAccessList(ctx context.Context, interopAccessList []common.Hash) error {
 	accessListToValidate, proceedFurther, err := s.preflightChecksAndCleanupAccessList(ctx, interopAccessList)
 	if err != nil {
 		return err
@@ -146,10 +146,10 @@ func (s *firstInteropFilterStrategyImpl) ValidateAccessList(ctx context.Context,
 		return nil
 	}
 
-	firstInteropFilterUrl := s.urls[0]
+	firstFilterUrl := s.urls[0]
 
-	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstInteropFilterStrategy) // nolint:staticcheck
-	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstInteropFilterUrl, s.chainID)
+	ctx = context.WithValue(ctx, ContextKeyInteropValidationStrategy, FirstFilterStrategy) // nolint:staticcheck
+	_, _, err = performCheckAccessListOp(ctx, accessListToValidate, firstFilterUrl, s.chainID)
 	return err
 }
 
