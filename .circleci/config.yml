@@ -23,7 +23,6 @@ workflows:
             op-ufm/.* run-build-op-ufm true
             proxyd/.* run-build-proxyd true
             cci-stats/.* run-build-cci-stats true
-            op-acceptor/.* run-build-op-acceptor true
             replica-healthcheck/.* run-build-rhc true
             .circleci/.* run-all true
           filters:

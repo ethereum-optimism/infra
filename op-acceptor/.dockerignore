@@ -1,8 +1,0 @@
-.git
-.gitignore
-README.md
-Dockerfile
-*.md
-*.log
-bin/
-tmp/ 
