@@ -140,9 +140,11 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 			},
 		},
 		{
-			name:     "default strategy with first url returning success",
+			// The default (empty) strategy now resolves to agreement with unanimity,
+			// so every configured url must accept for the tx to pass.
+			name:     "default strategy with all urls returning success",
 			strategy: proxyd.EmptyStrategy,
-			urls:     []string{goodInteropFilterUrl, badInteropFilterUrl1},
+			urls:     []string{goodInteropFilterUrl, goodInteropFilterUrl},
 			expectedResp: respDetails{
 				code:         200,
 				jsonResponse: []byte(dummyHealthyRes),
@@ -1176,4 +1178,64 @@ func TestInteropValidation_AgreementMinResponsesConfig(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid interop validation min_responses")
 	})
+}
+
+// TestInteropValidation_DefaultStrategyIsAgreement asserts that leaving the
+// strategy unset resolves to the agreement strategy (the safest default).
+func TestInteropValidation_DefaultStrategyIsAgreement(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	v1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer v1.Close()
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt
+	config.InteropValidationConfig.Strategy = proxyd.EmptyStrategy
+	config.InteropValidationConfig.Urls = []string{v1.URL()}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	require.Equal(t, proxyd.AgreementStrategy, config.InteropValidationConfig.Strategy)
+}
+
+// TestInteropValidation_FailClosedWithNoUrls asserts the fail-closed posture
+// when zero interop-filter urls are configured: proxyd starts successfully and
+// serves non-interop traffic, but every interop executing-message transaction is
+// rejected at runtime rather than forwarded.
+func TestInteropValidation_FailClosedWithNoUrls(t *testing.T) {
+	goodBackend := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
+	defer goodBackend.Close()
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", goodBackend.URL()))
+
+	config := ReadConfig("interop_validation")
+	config.SenderRateLimit.Limit = math.MaxInt
+	config.InteropValidationConfig.Strategy = proxyd.AgreementStrategy
+	config.InteropValidationConfig.Urls = nil
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err, "proxyd must start with zero interop-filter urls")
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	nonInteropReqParams, err := convertTxToReqParams(fakeTxBuilder(func(tx *types.AccessListTx) {
+		tx.AccessList = nil
+	}))
+	require.NoError(t, err)
+	_, observedCode, err := client.SendRequest(makeSendRawTransaction(nonInteropReqParams))
+	require.NoError(t, err)
+	require.Equal(t, 200, observedCode, "non-interop tx must be forwarded normally")
+	require.Equal(t, 1, len(goodBackend.requests), "non-interop tx must reach the backend")
+
+	interopReqParams, err := convertTxToReqParams(fakeTxBuilder())
+	require.NoError(t, err)
+	observedResp, _, err := client.SendRequest(makeSendRawTransaction(interopReqParams))
+	require.NoError(t, err)
+	require.Contains(t, string(observedResp), interopErrors.ErrNoRPCSource.Error(),
+		"interop tx must be rejected fail-closed when no interop-filter urls are configured")
+	require.Equal(t, 1, len(goodBackend.requests), "rejected interop tx must not be forwarded to the backend")
 }

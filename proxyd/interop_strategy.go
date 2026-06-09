@@ -30,7 +30,6 @@ type commonInteropStrategy struct {
 	accessListSizeLimit                     int
 	reqSizeLimit                            int
 	validateAndDeduplicateInteropAccessList bool
-	skipOnNoInteropFilterBackend            bool
 }
 
 func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonInteropStrategy {
@@ -39,7 +38,6 @@ func NewCommonInteropStrategy(urls []string, opts ...commonStrategyOpt) *commonI
 		accessListSizeLimit:                     0,
 		reqSizeLimit:                            0,
 		validateAndDeduplicateInteropAccessList: true,
-		skipOnNoInteropFilterBackend:            false,
 	}
 
 	for _, opt := range opts {
@@ -73,12 +71,6 @@ var WithValidateAndDeduplicateInteropAccessList = func(validateAndDeduplicateInt
 	}
 }
 
-var WithSkipOnNoInteropFilterBackend = func(skipOnNoInteropFilterBackend bool) commonStrategyOpt {
-	return func(s *commonInteropStrategy) {
-		s.skipOnNoInteropFilterBackend = skipOnNoInteropFilterBackend
-	}
-}
-
 var WithChainID = func(chainID uint64) commonStrategyOpt {
 	return func(s *commonInteropStrategy) {
 		s.chainID = eth.ChainIDFromUInt64(chainID)
@@ -87,16 +79,8 @@ var WithChainID = func(chainID uint64) commonStrategyOpt {
 
 func (s *commonInteropStrategy) preflightChecksAndCleanupAccessList(ctx context.Context, interopAccessList []common.Hash) ([]common.Hash, bool, error) {
 	if len(s.urls) == 0 {
-		if s.skipOnNoInteropFilterBackend {
-			log.Info(
-				"no validating backends found for an interop transaction, skipping",
-				"req_id", GetReqID(ctx),
-				"method", "eth_sendRawTransaction",
-			)
-			return nil, false, nil
-		}
 		log.Error(
-			"no validating backends found for an interop transaction",
+			"no validating backends found for an interop transaction, rejecting (fail closed)",
 			"req_id", GetReqID(ctx),
 			"method", "eth_sendRawTransaction",
 		)
