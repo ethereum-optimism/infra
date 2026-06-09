@@ -148,9 +148,15 @@ func TestMulticall(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(rpcRes))
 		require.False(t, rpcRes.IsError())
 
-		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node1"))
-		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node2"))
-		require.Equal(t, 1, nodeBackendRequestCount(nodes, "node3"))
+		// Multicall fans out to every backend and returns as soon as it has a
+		// winning response, leaving the losing backends' requests in flight on a
+		// non-cancelable context. Poll until all three have recorded their single
+		// request rather than asserting immediately after HandleRPC returns.
+		require.Eventually(t, func() bool {
+			return nodeBackendRequestCount(nodes, "node1") == 1 &&
+				nodeBackendRequestCount(nodes, "node2") == 1 &&
+				nodeBackendRequestCount(nodes, "node3") == 1
+		}, 5*time.Second, 10*time.Millisecond)
 	})
 
 	t.Run("When all of the backends return non 200, multicall should return 503", func(t *testing.T) {
