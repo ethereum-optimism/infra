@@ -1,11 +1,50 @@
 package avg_sliding_window
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestSlidingWindow_ConcurrentAccess hammers the window with concurrent writers
+// (Add/AddWithTime/Incr) and readers (Sum/Avg/Count) from many goroutines. It is
+// a regression guard for the data race between AddWithTime's write to sw.sum and
+// Sum's read of it. Run with -race; without proper synchronization the race
+// detector flags it.
+func TestSlidingWindow_ConcurrentAccess(t *testing.T) {
+	sw := NewSlidingWindow(
+		WithWindowLength(10*time.Second),
+		WithBucketSize(time.Second))
+
+	const goroutines = 16
+	const iterations = 500
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				sw.Add(1)
+				sw.Incr()
+				sw.AddWithTime(time.Now(), 2)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_ = sw.Sum()
+				_ = sw.Avg()
+				_ = sw.Count()
+			}
+		}()
+	}
+
+	wg.Wait()
+}
 
 func TestSlidingWindow_AddWithTime_Single(t *testing.T) {
 	now := ts("2023-04-21 15:04:05")
