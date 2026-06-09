@@ -1233,7 +1233,7 @@ func TestInteropValidation_FailClosedWithNoUrls(t *testing.T) {
 
 	interopReqParams, err := convertTxToReqParams(fakeTxBuilder())
 	require.NoError(t, err)
-	observedResp, observedCode, err := client.SendRequest(makeSendRawTransaction(interopReqParams))
+	observedResp, _, err := client.SendRequest(makeSendRawTransaction(interopReqParams))
 	require.NoError(t, err)
 	require.Contains(t, string(observedResp), interopErrors.ErrNoRPCSource.Error(),
 		"interop tx must be rejected fail-closed when no interop-filter urls are configured")
