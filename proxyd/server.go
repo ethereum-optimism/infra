@@ -21,7 +21,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/log"
@@ -98,6 +97,7 @@ type Server struct {
 	txValidationMethods      TxValidationMethodSet
 	txValidationClient       *TxValidationClient
 	txValidationFailOpen     bool
+	txFilter                 *TxFilter
 	isDraining               atomic.Bool
 	gracefulShutdownDuration time.Duration
 }
@@ -221,7 +221,7 @@ func NewServer(
 		txValidationFailOpen = *txValidationConfig.FailOpen
 	}
 
-	return &Server{
+	srv := &Server{
 		BackendGroups:        backendGroups,
 		wsBackendGroup:       wsBackendGroup,
 		wsMethodWhitelist:    wsMethodWhitelist,
@@ -259,7 +259,31 @@ func NewServer(
 		txValidationClient:       txValidationClient,
 		txValidationFailOpen:     txValidationFailOpen,
 		gracefulShutdownDuration: gracefulShutdownDuration,
-	}, nil
+	}
+
+	var modules []TxFilterModule
+	if len(srv.allowedChainIds) > 0 { // B3: independent of the rate limiter
+		modules = append(modules, &chainIDModule{allowedChainIds: srv.allowedChainIds})
+	}
+	if srv.senderLim != nil {
+		modules = append(modules, &senderRateLimitModule{lim: srv.senderLim})
+	}
+	modules = append(modules, &interopModule{ // strategy always set post-#649
+		strategy:         srv.interopStrategy,
+		interopSenderLim: srv.interopSenderLim,
+		validatingCfg:    srv.interopValidatingConfig,
+	})
+	if srv.enableTxValidation {
+		modules = append(modules, &txMiddlewareModule{
+			endpoint: srv.txValidationEndpoint,
+			fn:       srv.txValidationFn,
+			failOpen: srv.txValidationFailOpen,
+			methods:  srv.txValidationMethods,
+		})
+	}
+	srv.txFilter = NewTxFilter(srv, modules...)
+
+	return srv, nil
 }
 
 func (s *Server) RPCListenAndServe(host string, port int) error {
@@ -520,45 +544,6 @@ func checkInteropAndReturnAccessList(ctx context.Context, tx *types.Transaction)
 	return interopAccessList, true, nil
 }
 
-func (s *Server) validateInteropSendRpcRequest(ctx context.Context, tx *types.Transaction) error {
-	interopAccessList, isInterop, err := checkInteropAndReturnAccessList(ctx, tx)
-	if err != nil {
-		return err
-	}
-	if !isInterop {
-		return nil
-	}
-	// at this point, we know it's an interop transaction worthy of being validated
-	log.Info(
-		"validating interop access list",
-		"source", "rpc",
-		"req_id", GetReqID(ctx),
-		"strategy", s.interopValidatingConfig.Strategy,
-		"tx_hash", tx.Hash(),
-	)
-	if err := s.rateLimitInteropSender(ctx, tx); err != nil {
-		return err
-	}
-	if err := reqSizeLimitCheck(ctx, tx, s.interopValidatingConfig.ReqSizeLimit); err != nil {
-		return err
-	}
-
-	finalErr := s.interopStrategy.ValidateAccessList(ctx, interopAccessList)
-
-	rpcInteropValidationsTotal.WithLabelValues(
-		interopValidationResult(finalErr),
-		interopValidationReason(finalErr),
-		string(s.interopValidatingConfig.Strategy),
-	).Inc()
-
-	if finalErr == nil {
-		log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
-	} else {
-		log.Info("interop access list validation failed", "req_id", GetReqID(ctx), "tx_hash", tx.Hash(), "error", finalErr)
-	}
-	return finalErr
-}
-
 // interopValidationResult classifies the outcome of an interop access list
 // validation for metrics purposes. It keys on the same helpers the validation
 // strategies use, rather than the raw HTTP status, so the buckets match how the
@@ -701,32 +686,20 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			continue
 		}
 
-		// Apply a sender-based rate limit if it is enabled. Note that sender-based rate
-		// limits apply regardless of origin or user-agent. As such, they don't use the
-		// isLimited method.
-		if parsedReq.Method == "eth_sendRawTransaction" || parsedReq.Method == "eth_sendRawTransactionConditional" {
-			tx, err := s.convertSendReqToSendTx(ctx, parsedReq)
+		// Run the unified transaction-submission filter. Sender-based rate
+		// limits apply regardless of origin or user-agent, so they don't use
+		// the isLimited method.
+		if s.txFilter.IsSubmissionMethod(parsedReq.Method) {
+			sub, err := s.txFilter.Build(ctx, parsedReq, bypassLimit)
 			if err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-			txHashes[i] = tx.Hash()
-			if err := s.rateLimitSender(ctx, tx, bypassLimit); err != nil {
-				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
-				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
-				continue
+			if len(sub.Txs) == 1 {
+				txHashes[i] = sub.Txs[0].Hash() // preserve single-tx hash tracking
 			}
-			if err := s.validateInteropSendRpcRequest(ctx, tx); err != nil {
-				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
-				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
-				continue
-			}
-		}
-
-		// Apply transaction validation middleware if enabled and method is configured.
-		if s.enableTxValidation && s.txValidationMethods.Contains(parsedReq.Method) {
-			if err := s.applyTxValidation(ctx, parsedReq); err != nil {
+			if err := s.txFilter.Apply(ctx, sub); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
@@ -1020,57 +993,11 @@ func (s *Server) convertSendReqToSendTx(ctx context.Context, req *RPCReq) (*type
 	return tx, nil
 }
 
-func (s *Server) genericRateLimitSender(ctx context.Context, tx *types.Transaction, lim FrontendRateLimiter) error {
-	// Check if the transaction is for the expected chain,
-	// otherwise reject before rate limiting to avoid replay attacks.
-	if !s.isAllowedChainId(tx.ChainId()) {
-		log.Debug("chain id is not allowed", "req_id", GetReqID(ctx))
-		return txpool.ErrInvalidSender
-	}
-
-	var signer types.Signer
-	// If you pass in a zero chain ID, types.LatestSignerForChainID panics. So we need to handle that case
-	// manually.
-	if tx.ChainId().Sign() == 0 {
-		signer = new(types.HomesteadSigner)
-	} else {
-		signer = types.LatestSignerForChainID(tx.ChainId())
-	}
-
-	from, err := types.Sender(signer, tx)
-	if err != nil {
-		log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
-		return ErrInvalidParams(err.Error())
-	}
-	ok, err := lim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
-	if err != nil {
-		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
-		return ErrInternal
-	}
-	if !ok {
-		log.Debug("sender rate limit exceeded", "sender", from.Hex(), "req_id", GetReqID(ctx))
-		return ErrOverSenderRateLimit
-	}
-
-	return nil
-}
-
-func (s *Server) rateLimitSender(ctx context.Context, tx *types.Transaction, bypassLimit bool) error {
-	if s.senderLim == nil {
-		log.Warn("sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
-		return nil
-	}
-	if bypassLimit {
-		return nil
-	}
-	return s.genericRateLimitSender(ctx, tx, s.senderLim)
-}
-
-func (s *Server) isAllowedChainId(chainId *big.Int) bool {
-	if len(s.allowedChainIds) == 0 {
+func isAllowedChainId(allowedChainIds []*big.Int, chainId *big.Int) bool {
+	if len(allowedChainIds) == 0 {
 		return true
 	}
-	for _, id := range s.allowedChainIds {
+	for _, id := range allowedChainIds {
 		if chainId.Cmp(id) == 0 {
 			return true
 		}
@@ -1200,37 +1127,6 @@ func truncate(str string, maxLen int) string {
 	} else {
 		return str
 	}
-}
-
-// applyTxValidation validates transactions using the configured validation middleware.
-// It supports both single transaction methods (eth_sendRawTransaction) and bundle methods (eth_sendBundle).
-func (s *Server) applyTxValidation(ctx context.Context, req *RPCReq) error {
-	var txs []*types.Transaction
-	var err error
-
-	switch req.Method {
-	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional":
-		tx, err := s.convertSendReqToSendTx(ctx, req)
-		if err != nil {
-			return err
-		}
-		txs = []*types.Transaction{tx}
-	case "eth_sendBundle":
-		txs, err = transactionsFromBundleReq(ctx, req)
-		if err != nil {
-			return err
-		}
-	default:
-		log.Debug("unsupported method for tx validation", "method", req.Method, "req_id", GetReqID(ctx))
-		return nil
-	}
-
-	return validateTransactions(ctx, txs, s.txValidationEndpoint, s.txValidationFn, s.txValidationFailOpen)
-}
-
-// SetTxValidationFn allows overriding the transaction validation function for testing.
-func (s *Server) SetTxValidationFn(fn TxValidationFunc) {
-	s.txValidationFn = fn
 }
 
 type batchElem struct {

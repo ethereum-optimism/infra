@@ -1,15 +1,12 @@
 package proxyd
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 func accessObjectToKey(accessObject messages.Access) string {
@@ -54,12 +51,4 @@ func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]co
 func getInteropExecutingDescriptorTimestamp() uint64 {
 	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
 	return uint64(time.Now().Unix() + 1000)
-}
-
-func (s *Server) rateLimitInteropSender(ctx context.Context, tx *types.Transaction) error {
-	if s.interopSenderLim == nil {
-		log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
-		return nil
-	}
-	return s.genericRateLimitSender(ctx, tx, s.interopSenderLim)
 }
