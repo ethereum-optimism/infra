@@ -292,10 +292,14 @@ type InteropValidationStrategy string
 
 const (
 	EmptyStrategy                    InteropValidationStrategy = ""
-	FirstSupervisorStrategy          InteropValidationStrategy = "first-supervisor"
+	FirstFilterStrategy              InteropValidationStrategy = "first-filter"
 	MulticallStrategy                InteropValidationStrategy = "multicall"
 	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
 	AgreementStrategy                InteropValidationStrategy = "agreement"
+
+	// LegacyFirstSupervisorStrategy is the pre-rename name for FirstFilterStrategy,
+	// accepted for config backwards compatibility.
+	LegacyFirstSupervisorStrategy InteropValidationStrategy = "first-supervisor"
 )
 
 func ReadFromEnvOrConfig(value string) (string, error) {

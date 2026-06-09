@@ -67,12 +67,12 @@ var (
 		"batched",
 	})
 
-	rpcSupervisorChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	rpcInteropFilterChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
-		Name:      "rpc_supervisor_checks_total",
-		Help:      "Count of total supervisor checks.",
+		Name:      "rpc_interop_filter_checks_total",
+		Help:      "Count of total interop filter checks.",
 	}, []string{
-		"supervisor_url",
+		"interop_filter_url",
 		"http_code",
 		"rpc_error_code",
 		"strategy",
@@ -961,7 +961,7 @@ const (
 // recordAgreementOutcome classifies an agreement-strategy decision and records
 // the corresponding outcome counter and verdict duration. A failsafe
 // short-circuit is recorded as reject_failsafe regardless of the verdict tallies
-// collected so far. start marks the beginning of the supervisor fan-out, so the
+// collected so far. start marks the beginning of the interop filter fan-out, so the
 // recorded duration is the time spent fanning out to and waiting on the endpoints.
 func recordAgreementOutcome(ctx context.Context, valid, invalid, minResponses int, failsafe bool, start time.Time) {
 	duration := time.Since(start)

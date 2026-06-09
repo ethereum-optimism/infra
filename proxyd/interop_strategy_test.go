@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	validSupervisorResponse = `{"jsonrpc":"2.0","id":1,"result":null}`
+	validInteropFilterResponse = `{"jsonrpc":"2.0","id":1,"result":null}`
 	// failsafeRPCCode is the dedicated failsafe code emitted by op-interop-filter.
 	failsafeRPCCode = -320602
 	// futureDataRPCCode and uninitializedRPCCode are the soft out-of-sync codes.
@@ -22,16 +22,16 @@ const (
 	uninitializedRPCCode = -320400
 )
 
-// supervisorErrorResponse builds a JSON-RPC error body whose message matches an
+// interopFilterErrorResponse builds a JSON-RPC error body whose message matches an
 // interop error so ParseInteropError maps it to the corresponding code.
-func supervisorErrorResponse(rpcCode int, message string) string {
+func interopFilterErrorResponse(rpcCode int, message string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"error":{"code":%d,"message":%q}}`, rpcCode, message)
 }
 
-// newSupervisorServer starts an httptest server that responds to every
+// newInteropFilterServer starts an httptest server that responds to every
 // interop_checkAccessList call with the given HTTP code and body after an
 // optional delay. It returns the server URL.
-func newSupervisorServer(t *testing.T, httpCode int, body string, delay time.Duration) string {
+func newInteropFilterServer(t *testing.T, httpCode int, body string, delay time.Duration) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if delay > 0 {
@@ -49,9 +49,9 @@ func newSupervisorServer(t *testing.T, httpCode int, body string, delay time.Dur
 	return srv.URL
 }
 
-// newSignalingSupervisorServer is like newSupervisorServer but closes done once
+// newSignalingInteropFilterServer is like newInteropFilterServer but closes done once
 // it has written its response, letting another endpoint sequence after it.
-func newSignalingSupervisorServer(t *testing.T, httpCode int, body string, done chan<- struct{}) string {
+func newSignalingInteropFilterServer(t *testing.T, httpCode int, body string, done chan<- struct{}) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -63,11 +63,11 @@ func newSignalingSupervisorServer(t *testing.T, httpCode int, body string, done 
 	return srv.URL
 }
 
-// newGatedSupervisorServer responds only after gate is closed, then waits an
+// newGatedInteropFilterServer responds only after gate is closed, then waits an
 // additional settle period. The settle gives an endpoint that signalled the
 // gate time to have its verdict fully parsed and buffered by the strategy before
 // this endpoint's verdict arrives, making ordering deterministic.
-func newGatedSupervisorServer(t *testing.T, httpCode int, body string, gate <-chan struct{}, settle time.Duration) string {
+func newGatedInteropFilterServer(t *testing.T, httpCode int, body string, gate <-chan struct{}, settle time.Duration) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -101,18 +101,18 @@ var testAccessList = []common.Hash{common.HexToHash("0x01")}
 
 func TestAgreement_AllValid_Accepts(t *testing.T) {
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList))
 }
 
 func TestAgreement_AllInvalid_RejectsWithRealError(t *testing.T) {
-	body := supervisorErrorResponse(-32000, interopErrors.ErrConflict.Error())
+	body := interopFilterErrorResponse(-32000, interopErrors.ErrConflict.Error())
 	urls := []string{
-		newSupervisorServer(t, 409, body, 0),
-		newSupervisorServer(t, 409, body, 0),
+		newInteropFilterServer(t, 409, body, 0),
+		newInteropFilterServer(t, 409, body, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -123,10 +123,10 @@ func TestAgreement_AllInvalid_RejectsWithRealError(t *testing.T) {
 }
 
 func TestAgreement_Disagreement_RejectsAndLogs(t *testing.T) {
-	invalidBody := supervisorErrorResponse(-32000, interopErrors.ErrConflict.Error())
+	invalidBody := interopFilterErrorResponse(-32000, interopErrors.ErrConflict.Error())
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 409, invalidBody, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 409, invalidBody, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -139,10 +139,10 @@ func TestAgreement_Disagreement_RejectsAndLogs(t *testing.T) {
 func TestAgreement_FailsafeShortCircuitsSlowBackend(t *testing.T) {
 	// Failsafe is a hard reject that short-circuits: a fast failsafe verdict ends
 	// the check immediately without awaiting a slow endpoint.
-	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeBody := interopFilterErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
-		newSupervisorServer(t, 503, failsafeBody, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 1500*time.Millisecond),
+		newInteropFilterServer(t, 503, failsafeBody, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 1500*time.Millisecond),
 	}
 	s := newAgreementStrategy(urls, 2)
 
@@ -156,9 +156,9 @@ func TestAgreement_IgnoresSlowBackend(t *testing.T) {
 	// A slow non-failsafe endpoint must not delay an accept once the quorum of
 	// fast valid verdicts is in.
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 1500*time.Millisecond),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 1500*time.Millisecond),
 	}
 	s := newAgreementStrategy(urls, 2)
 
@@ -169,8 +169,8 @@ func TestAgreement_IgnoresSlowBackend(t *testing.T) {
 
 func TestAgreement_5xxNotCounted_FailClosed(t *testing.T) {
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 500, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 500, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -180,8 +180,8 @@ func TestAgreement_5xxNotCounted_FailClosed(t *testing.T) {
 
 func TestAgreement_TimeoutNotCounted_FailClosed(t *testing.T) {
 	urls := []string{
-		newSupervisorServer(t, 200, validSupervisorResponse, 0),
-		newSupervisorServer(t, 200, validSupervisorResponse, 1500*time.Millisecond),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 1500*time.Millisecond),
 	}
 	s := newAgreementStrategy(urls, 2)
 
@@ -193,10 +193,10 @@ func TestAgreement_TimeoutNotCounted_FailClosed(t *testing.T) {
 }
 
 func TestAgreement_FailsafeHardRejects(t *testing.T) {
-	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeBody := interopFilterErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	urls := []string{
-		newSupervisorServer(t, 503, failsafeBody, 0),
-		newSupervisorServer(t, 503, failsafeBody, 0),
+		newInteropFilterServer(t, 503, failsafeBody, 0),
+		newInteropFilterServer(t, 503, failsafeBody, 0),
 	}
 	s := newAgreementStrategy(urls, 1)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -210,13 +210,13 @@ func TestAgreement_FailsafeOnAnyEndpoint_HardRejects(t *testing.T) {
 	// valid endpoints are gated to respond only after the failsafe has landed
 	// (plus a settle), so the failsafe verdict is observed before the accepts and
 	// the test is deterministic.
-	failsafeBody := supervisorErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
+	failsafeBody := interopFilterErrorResponse(failsafeRPCCode, interopErrors.ErrFailsafeEnabled.Error())
 	failsafeDone := make(chan struct{})
 	const settle = 100 * time.Millisecond
 	urls := []string{
-		newSignalingSupervisorServer(t, 503, failsafeBody, failsafeDone),
-		newGatedSupervisorServer(t, 200, validSupervisorResponse, failsafeDone, settle),
-		newGatedSupervisorServer(t, 200, validSupervisorResponse, failsafeDone, settle),
+		newSignalingInteropFilterServer(t, 503, failsafeBody, failsafeDone),
+		newGatedInteropFilterServer(t, 200, validInteropFilterResponse, failsafeDone, settle),
+		newGatedInteropFilterServer(t, 200, validInteropFilterResponse, failsafeDone, settle),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -246,7 +246,7 @@ func TestAgreement_CancelledRequestNotCounted(t *testing.T) {
 	require.False(t, isDefinitiveInteropRejection(wrapped),
 		"a context.Canceled error must not count")
 
-	// A supervisor verdict counts.
+	// An interop filter verdict counts.
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -320600, HTTPErrorCode: 409}))
 	// A generic invalid-params rejection (-32602) is a real INVALID and counts.
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 400}))
@@ -256,14 +256,14 @@ func TestAgreement_CancelledRequestNotCounted(t *testing.T) {
 
 func TestAgreement_SingleUrl_MinOne(t *testing.T) {
 	t.Run("valid accepts", func(t *testing.T) {
-		urls := []string{newSupervisorServer(t, 200, validSupervisorResponse, 0)}
+		urls := []string{newInteropFilterServer(t, 200, validInteropFilterResponse, 0)}
 		s := newAgreementStrategy(urls, 1)
 		require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList))
 	})
 
 	t.Run("invalid rejects with real error", func(t *testing.T) {
-		body := supervisorErrorResponse(-32000, interopErrors.ErrConflict.Error())
-		urls := []string{newSupervisorServer(t, 409, body, 0)}
+		body := interopFilterErrorResponse(-32000, interopErrors.ErrConflict.Error())
+		urls := []string{newInteropFilterServer(t, 409, body, 0)}
 		s := newAgreementStrategy(urls, 1)
 		err := s.ValidateAccessList(context.Background(), testAccessList)
 		require.Error(t, err)
@@ -278,10 +278,10 @@ func TestAgreement_GenericParseRejection_CountsAsInvalid(t *testing.T) {
 	// -32602 ("failed to parse access entry"). That is a real definitive INVALID:
 	// all endpoints rejecting must produce a clean reject (reject_agreed), NOT
 	// quorum-not-reached.
-	parseRejectBody := supervisorErrorResponse(-32602, "failed to parse access entry")
+	parseRejectBody := interopFilterErrorResponse(-32602, "failed to parse access entry")
 	urls := []string{
-		newSupervisorServer(t, 400, parseRejectBody, 0),
-		newSupervisorServer(t, 400, parseRejectBody, 0),
+		newInteropFilterServer(t, 400, parseRejectBody, 0),
+		newInteropFilterServer(t, 400, parseRejectBody, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -308,11 +308,11 @@ func TestAgreement_OutOfSyncEndpointIsSoft(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			softBody := supervisorErrorResponse(c.code, c.msg)
+			softBody := interopFilterErrorResponse(c.code, c.msg)
 			urls := []string{
-				newSupervisorServer(t, c.http, softBody, 0),
-				newSupervisorServer(t, 200, validSupervisorResponse, 0),
-				newSupervisorServer(t, 200, validSupervisorResponse, 0),
+				newInteropFilterServer(t, c.http, softBody, 0),
+				newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+				newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
 			}
 			s := newAgreementStrategy(urls, 2)
 			require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList),
@@ -324,10 +324,10 @@ func TestAgreement_OutOfSyncEndpointIsSoft(t *testing.T) {
 func TestAgreement_AllOutOfSyncFailClosed(t *testing.T) {
 	// If every node is out-of-sync, no definitive verdicts are collected and the
 	// strategy fails closed with quorum-not-reached.
-	softBody := supervisorErrorResponse(futureDataRPCCode, interopErrors.ErrFuture.Error())
+	softBody := interopFilterErrorResponse(futureDataRPCCode, interopErrors.ErrFuture.Error())
 	urls := []string{
-		newSupervisorServer(t, 422, softBody, 0),
-		newSupervisorServer(t, 422, softBody, 0),
+		newInteropFilterServer(t, 422, softBody, 0),
+		newInteropFilterServer(t, 422, softBody, 0),
 	}
 	s := newAgreementStrategy(urls, 2)
 	err := s.ValidateAccessList(context.Background(), testAccessList)
@@ -339,7 +339,7 @@ func TestSoftInteropFailure_Detection(t *testing.T) {
 	require.True(t, isSoftInteropFailure(&RPCErr{Code: futureDataRPCCode, HTTPErrorCode: 422}))
 	require.True(t, isSoftInteropFailure(&RPCErr{Code: uninitializedRPCCode, HTTPErrorCode: 400}))
 	require.False(t, isSoftInteropFailure(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
-		"a real supervisor verdict is not soft")
+		"a real interop filter verdict is not soft")
 	require.False(t, isSoftInteropFailure(&RPCErr{Code: -32602, HTTPErrorCode: 400}),
 		"a generic parse rejection is not soft")
 	require.False(t, isSoftInteropFailure(fmt.Errorf("plain error")))
@@ -348,9 +348,9 @@ func TestSoftInteropFailure_Detection(t *testing.T) {
 func TestDefinitiveInteropRejection_Classification(t *testing.T) {
 	// Any filter rejection counts as a definitive INVALID...
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -320600, HTTPErrorCode: 409}),
-		"a supervisor verdict counts")
+		"an interop filter verdict counts")
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -321501, HTTPErrorCode: 422}),
-		"a supervisor verdict counts")
+		"an interop filter verdict counts")
 	require.True(t, isDefinitiveInteropRejection(&RPCErr{Code: -32602, HTTPErrorCode: 400}),
 		"a generic invalid-params parse rejection counts")
 

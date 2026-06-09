@@ -23,7 +23,7 @@ urls = [
 "$VALIDATING_BACKEND_RPC_URL_1",
 "$VALIDATING_BACKEND_RPC_URL_2"
 ]
-strategy = "first-supervisor"
+strategy = "first-filter"
 req_params_size_limit = 131072 ## 128KB
 access_list_size_limit = 1000000
 

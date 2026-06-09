@@ -98,9 +98,9 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 	goodValidatingBackend1 := NewMockBackend(SingleResponseHandler(200, dummyHealthyRes))
 	defer goodValidatingBackend1.Close()
 
-	badSupervisorUrl1 := badValidatingBackend1.URL()
-	badSupervisorUrl2 := badValidatingBackend2.URL()
-	goodSupervisorUrl := goodValidatingBackend1.URL()
+	badInteropFilterUrl1 := badValidatingBackend1.URL()
+	badInteropFilterUrl2 := badValidatingBackend2.URL()
+	goodInteropFilterUrl := goodValidatingBackend1.URL()
 
 	config := ReadConfig("interop_validation")
 	config.SenderRateLimit.Limit = math.MaxInt // Don't perform rate limiting in this test since we're only testing interop validation.
@@ -122,9 +122,18 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 	}
 	cases := []testCase{
 		{
-			name:     "first-supervisor strategy with first url returning error",
-			strategy: proxyd.FirstSupervisorStrategy,
-			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
+			name:     "first-filter strategy with first url returning error",
+			strategy: proxyd.FirstFilterStrategy,
+			urls:     []string{badInteropFilterUrl1, goodInteropFilterUrl},
+			expectedResp: respDetails{
+				code:         409,
+				jsonResponse: []byte(expectedErrResp1),
+			},
+		},
+		{
+			name:     "legacy first-supervisor value routes to first-filter strategy",
+			strategy: proxyd.LegacyFirstSupervisorStrategy,
+			urls:     []string{badInteropFilterUrl1, goodInteropFilterUrl},
 			expectedResp: respDetails{
 				code:         409,
 				jsonResponse: []byte(expectedErrResp1),
@@ -133,7 +142,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		{
 			name:     "default strategy with first url returning success",
 			strategy: proxyd.EmptyStrategy,
-			urls:     []string{goodSupervisorUrl, badSupervisorUrl1},
+			urls:     []string{goodInteropFilterUrl, badInteropFilterUrl1},
 			expectedResp: respDetails{
 				code:         200,
 				jsonResponse: []byte(dummyHealthyRes),
@@ -142,7 +151,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		{
 			name:     "multicall strategy with atleast one good url",
 			strategy: proxyd.MulticallStrategy,
-			urls:     []string{badSupervisorUrl1, goodSupervisorUrl},
+			urls:     []string{badInteropFilterUrl1, goodInteropFilterUrl},
 			expectedResp: respDetails{
 				code:         200,
 				jsonResponse: []byte(dummyHealthyRes),
@@ -151,7 +160,7 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 		{
 			name:                  "multicall strategy with all bad urls",
 			strategy:              proxyd.MulticallStrategy,
-			urls:                  []string{badSupervisorUrl1, badSupervisorUrl2},
+			urls:                  []string{badInteropFilterUrl1, badInteropFilterUrl2},
 			multiplePossibilities: true,
 			possibilities: []respDetails{
 				{
@@ -488,7 +497,7 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 	require.Equal(t, 413, observedCode, "the request should have failed because of the expectation of the deduplicated entries being 5")
 	require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", -32022))
 	require.Contains(t, string(observedResp), "access list out of bounds")
-	require.Equal(t, len(validatingBackend1.requests), 0) // no request was sent to the validating backend (supervisor) because the number of entries to be passed were found to be more than the size limit of 4
+	require.Equal(t, len(validatingBackend1.requests), 0) // no request was sent to the validating backend (interop filter) because the number of entries to be passed were found to be more than the size limit of 4
 
 	shutdown()
 	firstShutdownAlreadyCalled = true
@@ -503,7 +512,7 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 	_, observedCode, err = client.SendRequest(sendRawTransaction)
 	require.NoError(t, err)
 	require.Equal(t, 200, observedCode, "the request should have succeeded because of the expectation of the deduplicated entries being 5")
-	require.Equal(t, len(validatingBackend1.requests), 1) // the success is represented by the fact that the request was sent to the validating backend (supervisor)
+	require.Equal(t, len(validatingBackend1.requests), 1) // the success is represented by the fact that the request was sent to the validating backend (interop filter)
 }
 
 func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
@@ -530,7 +539,7 @@ func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
 
 	// subroutine for checking the bad path
 	// i.e. a request with an invalid access list that is rejected by the ParseAccess check itself
-	// without needing to reach the validating backend (supervisor)
+	// without needing to reach the validating backend (interop filter)
 	{
 		wrongTx := fakeTxBuilder(func(tx *types.AccessListTx) {
 			// make the access list's storage keys invalid enough to be failed by the ParseAccess check itself
@@ -549,13 +558,13 @@ func TestInteropValidation_StaticParseAccessPrevalidationCheck(t *testing.T) {
 		require.Equal(t, 400, observedCode)
 		require.Contains(t, string(observedResp), fmt.Sprintf("\"code\":%d", -32602))
 
-		// request failed aptly without needing to reach the validating backend (supervisor)
+		// request failed aptly without needing to reach the validating backend (interop filter)
 		require.Equal(t, len(validatingBackend1.requests), 0)
 	}
 
 	// subroutine for checking the good path
 	// i.e. a request with a valid access list that is validated by the ParseAccess check itself
-	// is allowed to the validating backend (supervisor) for potentially other validation checks which can only be performed by the supervisor
+	// is allowed to the validating backend (interop filter) for potentially other validation checks which can only be performed by the interop filter
 	{
 		rightTx := fakeTxBuilder()
 		rightInteropReqParams, err := convertTxToReqParams(rightTx)
@@ -623,7 +632,7 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 	require.Contains(t, string(observedResp2), "sender is over rate limit")
 	require.Contains(t, string(observedResp2), fmt.Sprintf("\"code\":%d", -32017))
 
-	// ensuring that the second call didn't contribute to additional validating backend (supervisor) requests
+	// ensuring that the second call didn't contribute to additional validating backend (interop filter) requests
 	require.Equal(t, len(validatingBackend1.requests), 1)
 
 	// make a non-interop request to ensure that it succeeds despite the breaked rate limit depicting that the rate limit is not applied to non-interop requests
@@ -650,7 +659,7 @@ func TestInteropValidation_SenderRateLimit(t *testing.T) {
 	require.NoError(t, err3)
 	require.Equal(t, 200, observedCode3)
 
-	// ensuring that this call did contribute to additional validating backend (supervisor) requests due to being within the rate limit
+	// ensuring that this call did contribute to additional validating backend (interop filter) requests due to being within the rate limit
 	require.Equal(t, len(validatingBackend1.requests), 2)
 }
 
@@ -905,7 +914,7 @@ func TestInteropValidation_HealthAwareLoadBalancingStrategy_NoHealthyBackends_Cu
 	require.NoError(t, err)
 	defer shutdown()
 
-	expectedResp := `{"jsonrpc":"2.0","error":{"code":-32000,"message":"no healthy supervisor backends found"},"id":1}`
+	expectedResp := `{"jsonrpc":"2.0","error":{"code":-32000,"message":"no healthy interop filter backends found"},"id":1}`
 
 	client := NewProxydClient("http://127.0.0.1:8545")
 
