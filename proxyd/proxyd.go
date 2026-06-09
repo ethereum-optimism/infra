@@ -290,6 +290,11 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.Strategy = defaultInteropValidationStrategy
 	}
 
+	if config.InteropValidationConfig.Strategy == LegacyFirstSupervisorStrategy {
+		log.Warn("interop validation strategy \"first-supervisor\" is deprecated; use \"first-filter\"")
+		config.InteropValidationConfig.Strategy = FirstFilterStrategy
+	}
+
 	if config.TxValidationMiddlewareConfig.Enabled && config.TxValidationMiddlewareConfig.Endpoint == "" {
 		return nil, nil, errors.New("tx_validation_middleware is enabled but no endpoint is configured")
 	}

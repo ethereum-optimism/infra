@@ -131,6 +131,15 @@ func TestInteropValidation_NormalFlow(t *testing.T) {
 			},
 		},
 		{
+			name:     "legacy first-supervisor value routes to first-filter strategy",
+			strategy: proxyd.LegacyFirstSupervisorStrategy,
+			urls:     []string{badInteropFilterUrl1, goodInteropFilterUrl},
+			expectedResp: respDetails{
+				code:         409,
+				jsonResponse: []byte(expectedErrResp1),
+			},
+		},
+		{
 			name:     "default strategy with first url returning success",
 			strategy: proxyd.EmptyStrategy,
 			urls:     []string{goodInteropFilterUrl, badInteropFilterUrl1},

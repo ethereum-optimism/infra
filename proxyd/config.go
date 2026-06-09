@@ -296,6 +296,10 @@ const (
 	MulticallStrategy                InteropValidationStrategy = "multicall"
 	HealthAwareLoadBalancingStrategy InteropValidationStrategy = "health-aware-load-balancing"
 	AgreementStrategy                InteropValidationStrategy = "agreement"
+
+	// LegacyFirstSupervisorStrategy is the pre-rename name for FirstFilterStrategy,
+	// accepted for config backwards compatibility.
+	LegacyFirstSupervisorStrategy InteropValidationStrategy = "first-supervisor"
 )
 
 func ReadFromEnvOrConfig(value string) (string, error) {
