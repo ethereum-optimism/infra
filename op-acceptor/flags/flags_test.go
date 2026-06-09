@@ -55,7 +55,6 @@ func TestBetaFlags(t *testing.T) {
 
 func TestHasEnvVar(t *testing.T) {
 	for _, flag := range Flags {
-		flag := flag
 		flagName := flag.Names()[0]
 
 		t.Run(flagName, func(t *testing.T) {
@@ -71,7 +70,6 @@ func TestHasEnvVar(t *testing.T) {
 
 func TestEnvVarFormat(t *testing.T) {
 	for _, flag := range Flags {
-		flag := flag
 		flagName := flag.Names()[0]
 
 		t.Run(flagName, func(t *testing.T) {
