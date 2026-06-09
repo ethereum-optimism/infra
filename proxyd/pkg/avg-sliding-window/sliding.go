@@ -112,10 +112,9 @@ func (sw *AvgSlidingWindow) Incr() {
 
 // AddWithTime inserts a new data point into the window, with value `val` and time `t`
 func (sw *AvgSlidingWindow) AddWithTime(t time.Time, val float64) {
-	sw.advance()
-
-	defer sw.mux.Unlock()
 	sw.mux.Lock()
+	defer sw.mux.Unlock()
+	sw.advance()
 
 	key := t.Round(sw.bucketSize)
 	if !sw.inWindow(key) {
@@ -142,10 +141,8 @@ func (sw *AvgSlidingWindow) AddWithTime(t time.Time, val float64) {
 	sw.buckets.Put(key, b)
 }
 
-// advance evicts old data points
+// advance evicts old data points. The caller must hold sw.mux.
 func (sw *AvgSlidingWindow) advance() {
-	defer sw.mux.Unlock()
-	sw.mux.Lock()
 	now := sw.clock.Now().Round(sw.bucketSize)
 	windowStart := now.Add(-sw.windowLength)
 	keys := sw.buckets.Keys()
@@ -168,6 +165,8 @@ func (sw *AvgSlidingWindow) advance() {
 
 // Avg retrieves the current average for the sliding window
 func (sw *AvgSlidingWindow) Avg() float64 {
+	sw.mux.Lock()
+	defer sw.mux.Unlock()
 	sw.advance()
 	if sw.qty == 0 {
 		return 0
@@ -177,20 +176,24 @@ func (sw *AvgSlidingWindow) Avg() float64 {
 
 // Sum retrieves the current sum for the sliding window
 func (sw *AvgSlidingWindow) Sum() float64 {
+	sw.mux.Lock()
+	defer sw.mux.Unlock()
 	sw.advance()
 	return sw.sum
 }
 
 // Count retrieves the data point count for the sliding window
 func (sw *AvgSlidingWindow) Count() uint {
+	sw.mux.Lock()
+	defer sw.mux.Unlock()
 	sw.advance()
 	return sw.qty
 }
 
-// advance evicts old data points
+// Clear resets the sliding window to empty
 func (sw *AvgSlidingWindow) Clear() {
-	defer sw.mux.Unlock()
 	sw.mux.Lock()
+	defer sw.mux.Unlock()
 	sw.qty = 0
 	sw.sum = 0.0
 }
