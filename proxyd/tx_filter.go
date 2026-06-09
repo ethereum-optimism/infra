@@ -42,9 +42,26 @@ func (s *TxSubmission) Sender(i int) (common.Address, error) {
 	return s.senders[i], s.senderErr[i]
 }
 
-// TxFilterModule is a single check in the submission filter pipeline. Apply
-// returns nil to accept (allowing the pipeline to continue) or an error to
-// reject the whole submission. Each module owns its own failure policy.
+// txDecodeFunc decodes a single-tx submission request into a transaction. It is
+// injected into TxFilter so the filter does not hold a back-reference to the
+// Server (Server.convertSendReqToSendTx is passed in).
+type txDecodeFunc func(ctx context.Context, req *RPCReq) (*types.Transaction, error)
+
+// TxFilterModule is a single check in the submission filter pipeline.
+//
+// Apply returns nil to accept (allowing the pipeline to continue) or an error
+// to reject the whole submission. The contract:
+//
+//   - Apply runs for EVERY submission method the filter handles. Per-method
+//     scoping is the module's own responsibility — see txMiddlewareModule, which
+//     opts out of methods not in its configured set.
+//   - Modules MUST treat sub.Txs as immutable. TxSubmission.Sender memoizes
+//     ecrecover per index keyed by position in sub.Txs; mutating or reordering
+//     the slice would corrupt that memo.
+//   - The default failure policy is fail-CLOSED: returning an error rejects the
+//     submission. Fail-open (returning nil despite an internal failure) must be
+//     an explicit, operator-gated decision, as txMiddlewareModule does via its
+//     failOpen flag — never a silent default.
 type TxFilterModule interface {
 	Name() string
 	Apply(ctx context.Context, sub *TxSubmission) error
@@ -54,12 +71,12 @@ type TxFilterModule interface {
 // owns an ordered list of modules and runs them in order, short-circuiting on
 // the first rejection (logical AND).
 type TxFilter struct {
-	srv     *Server
+	decode  txDecodeFunc
 	modules []TxFilterModule
 }
 
-func NewTxFilter(srv *Server, modules ...TxFilterModule) *TxFilter {
-	return &TxFilter{srv: srv, modules: modules}
+func NewTxFilter(decode txDecodeFunc, modules ...TxFilterModule) *TxFilter {
+	return &TxFilter{decode: decode, modules: modules}
 }
 
 // IsSubmissionMethod reports the static set of submission methods the filter
@@ -85,7 +102,7 @@ func (f *TxFilter) Build(ctx context.Context, req *RPCReq, bypassRateLimit bool)
 	var txs []*types.Transaction
 	switch req.Method {
 	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional":
-		tx, err := f.srv.convertSendReqToSendTx(ctx, req)
+		tx, err := f.decode(ctx, req)
 		if err != nil {
 			return nil, err
 		}

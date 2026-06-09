@@ -261,29 +261,36 @@ func NewServer(
 		gracefulShutdownDuration: gracefulShutdownDuration,
 	}
 
-	var modules []TxFilterModule
-	if len(srv.allowedChainIds) > 0 { // B3: independent of the rate limiter
-		modules = append(modules, &chainIDModule{allowedChainIds: srv.allowedChainIds})
-	}
-	if srv.senderLim != nil {
-		modules = append(modules, &senderRateLimitModule{lim: srv.senderLim})
-	}
-	modules = append(modules, &interopModule{ // strategy always set post-#649
-		strategy:         srv.interopStrategy,
-		interopSenderLim: srv.interopSenderLim,
-		validatingCfg:    srv.interopValidatingConfig,
-	})
-	if srv.enableTxValidation {
-		modules = append(modules, &txMiddlewareModule{
-			endpoint: srv.txValidationEndpoint,
-			fn:       srv.txValidationFn,
-			failOpen: srv.txValidationFailOpen,
-			methods:  srv.txValidationMethods,
-		})
-	}
-	srv.txFilter = NewTxFilter(srv, modules...)
+	srv.txFilter = NewTxFilter(srv.convertSendReqToSendTx, srv.txFilterModules()...)
 
 	return srv, nil
+}
+
+// txFilterModules assembles the ordered submission-filter pipeline:
+// ChainID → SenderRateLimit → Interop → TxMiddleware. The order is fixed here
+// and is the single source of truth for module sequencing.
+func (s *Server) txFilterModules() []TxFilterModule {
+	var modules []TxFilterModule
+	if len(s.allowedChainIds) > 0 { // B3: independent of the rate limiter
+		modules = append(modules, &chainIDModule{allowedChainIds: s.allowedChainIds})
+	}
+	if s.senderLim != nil {
+		modules = append(modules, &senderRateLimitModule{lim: s.senderLim})
+	}
+	modules = append(modules, &interopModule{ // strategy always set post-#649
+		strategy:         s.interopStrategy,
+		interopSenderLim: s.interopSenderLim,
+		validatingCfg:    s.interopValidatingConfig,
+	})
+	if s.enableTxValidation {
+		modules = append(modules, &txMiddlewareModule{
+			endpoint: s.txValidationEndpoint,
+			fn:       s.txValidationFn,
+			failOpen: s.txValidationFailOpen,
+			methods:  s.txValidationMethods,
+		})
+	}
+	return modules
 }
 
 func (s *Server) RPCListenAndServe(host string, port int) error {
@@ -696,8 +703,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				responses[i] = NewRPCErrorRes(parsedReq.ID, err)
 				continue
 			}
-			if len(sub.Txs) == 1 {
-				txHashes[i] = sub.Txs[0].Hash() // preserve single-tx hash tracking
+			if sub.Method == "eth_sendRawTransaction" || sub.Method == "eth_sendRawTransactionConditional" {
+				txHashes[i] = sub.Txs[0].Hash() // preserve single-tx forwarding log; bundles aren't sendRawTransaction
 			}
 			if err := s.txFilter.Apply(ctx, sub); err != nil {
 				RecordRPCError(ctx, BackendProxyd, parsedReq.Method, err)

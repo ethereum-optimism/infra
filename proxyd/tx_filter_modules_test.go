@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -109,6 +110,16 @@ func TestSenderRateLimitModule(t *testing.T) {
 		sub := &TxSubmission{Txs: []*types.Transaction{signedTxWithChainID(t, big.NewInt(1), 0)}}
 		require.ErrorIs(t, m.Apply(context.Background(), sub), ErrOverSenderRateLimit)
 	})
+}
+
+// TestSenderRateLimitModule_FailsClosedOnLimiterError documents the fail-closed
+// contract: a backing-limiter error rejects the submission (ErrInternal), it
+// does not silently allow the tx through.
+func TestSenderRateLimitModule_FailsClosedOnLimiterError(t *testing.T) {
+	lim := &fakeRateLimiter{allowFunc: func(string) (bool, error) { return false, errors.New("limiter unavailable") }}
+	m := &senderRateLimitModule{lim: lim}
+	sub := &TxSubmission{Txs: []*types.Transaction{signedTxWithChainID(t, big.NewInt(1), 0)}}
+	require.ErrorIs(t, m.Apply(context.Background(), sub), ErrInternal)
 }
 
 func TestInteropModule_SkipsNonInteropTxs(t *testing.T) {

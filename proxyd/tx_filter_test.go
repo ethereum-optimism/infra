@@ -93,7 +93,7 @@ func TestTxFilter_Apply_FirstRejectShortCircuits(t *testing.T) {
 
 func TestTxFilter_Build_SingleTx(t *testing.T) {
 	srv := &Server{}
-	f := NewTxFilter(srv)
+	f := NewTxFilter(srv.convertSendReqToSendTx)
 	tx := signedTxWithChainID(t, big.NewInt(1), 0)
 	sub, err := f.Build(context.Background(), rawTxReq(t, tx), false)
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestTxFilter_Build_SingleTx(t *testing.T) {
 
 func TestTxFilter_Build_Bundle(t *testing.T) {
 	srv := &Server{}
-	f := NewTxFilter(srv)
+	f := NewTxFilter(srv.convertSendReqToSendTx)
 	tx1 := signedTxWithChainID(t, big.NewInt(1), 0)
 	tx2 := signedTxWithChainID(t, big.NewInt(1), 1)
 	sub, err := f.Build(context.Background(), bundleReq(t, tx1, tx2), false)
@@ -113,7 +113,7 @@ func TestTxFilter_Build_Bundle(t *testing.T) {
 
 func TestTxFilter_Build_DecodeErrors(t *testing.T) {
 	srv := &Server{}
-	f := NewTxFilter(srv)
+	f := NewTxFilter(srv.convertSendReqToSendTx)
 
 	t.Run("bad json", func(t *testing.T) {
 		req := &RPCReq{Method: "eth_sendRawTransaction", Params: json.RawMessage(`not-json`), ID: json.RawMessage("1")}
@@ -149,7 +149,7 @@ func TestTxFilter_Build_DecodeErrors(t *testing.T) {
 
 func TestTxFilter_Build_BundleSizeCap(t *testing.T) {
 	srv := &Server{}
-	f := NewTxFilter(srv)
+	f := NewTxFilter(srv.convertSendReqToSendTx)
 	txs := make([]*types.Transaction, maxBundleTransactions+1)
 	for i := range txs {
 		txs[i] = signedTxWithChainID(t, big.NewInt(1), uint64(i))
@@ -193,4 +193,41 @@ func TestTxSubmission_Sender_RecoveryError(t *testing.T) {
 	sub := &TxSubmission{Txs: []*types.Transaction{tx}}
 	_, err := sub.Sender(0)
 	require.Error(t, err)
+}
+
+func TestTxFilter_ModuleOrder(t *testing.T) {
+	moduleNames := func(modules []TxFilterModule) []string {
+		names := make([]string, len(modules))
+		for i, m := range modules {
+			names[i] = m.Name()
+		}
+		return names
+	}
+
+	t.Run("all modules enabled", func(t *testing.T) {
+		srv := &Server{
+			allowedChainIds:    []*big.Int{big.NewInt(1)},
+			senderLim:          &fakeRateLimiter{},
+			interopStrategy:    &fakeInteropStrategy{},
+			interopSenderLim:   &fakeRateLimiter{},
+			enableTxValidation: true,
+		}
+		require.Equal(t,
+			[]string{"chain_id", "sender_rate_limit", "interop", "tx_middleware"},
+			moduleNames(srv.txFilterModules()),
+		)
+	})
+
+	t.Run("rate limiter and middleware disabled", func(t *testing.T) {
+		srv := &Server{
+			allowedChainIds:    []*big.Int{big.NewInt(1)},
+			senderLim:          nil,
+			interopStrategy:    &fakeInteropStrategy{},
+			enableTxValidation: false,
+		}
+		require.Equal(t,
+			[]string{"chain_id", "interop"},
+			moduleNames(srv.txFilterModules()),
+		)
+	})
 }
