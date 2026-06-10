@@ -5,9 +5,26 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/log"
 )
+
+// takeSenderLimit applies a per-sender:nonce rate limit, mapping a limiter
+// error to ErrInternal and an exhausted limit to ErrOverSenderRateLimit. Shared
+// by every sender limiter so their semantics stay in lockstep.
+func takeSenderLimit(ctx context.Context, lim FrontendRateLimiter, from common.Address, nonce uint64) error {
+	ok, err := lim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), nonce))
+	if err != nil {
+		log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
+		return ErrInternal
+	}
+	if !ok {
+		log.Debug("sender rate limit exceeded", "sender", from.Hex(), "req_id", GetReqID(ctx))
+		return ErrOverSenderRateLimit
+	}
+	return nil
+}
 
 // chainIDModule rejects any transaction whose chain ID is not in the allowed
 // set. It is wired whenever allowedChainIds is non-empty, independent of either
@@ -47,14 +64,8 @@ func (m *senderRateLimitModule) Apply(ctx context.Context, sub *TxSubmission) er
 			log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 			return ErrInvalidParams(err.Error())
 		}
-		ok, err := m.lim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
-		if err != nil {
-			log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
-			return ErrInternal
-		}
-		if !ok {
-			log.Debug("sender rate limit exceeded", "sender", from.Hex(), "req_id", GetReqID(ctx))
-			return ErrOverSenderRateLimit
+		if err := takeSenderLimit(ctx, m.lim, from, tx.Nonce()); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -91,20 +102,16 @@ func (m *interopModule) Apply(ctx context.Context, sub *TxSubmission) error {
 			"tx_hash", tx.Hash(),
 		)
 
+		// The interop sender limit is not bypassed by API key (matches prior
+		// rateLimitInteropSender behavior), unlike senderRateLimitModule.
 		if m.interopSenderLim != nil {
 			from, err := sub.Sender(i)
 			if err != nil {
 				log.Debug("could not get sender from transaction", "err", err, "req_id", GetReqID(ctx))
 				return ErrInvalidParams(err.Error())
 			}
-			ok, err := m.interopSenderLim.Take(ctx, fmt.Sprintf("%s:%d", from.Hex(), tx.Nonce()))
-			if err != nil {
-				log.Error("error taking from sender limiter", "err", err, "req_id", GetReqID(ctx))
-				return ErrInternal
-			}
-			if !ok {
-				log.Debug("sender rate limit exceeded", "sender", from.Hex(), "req_id", GetReqID(ctx))
-				return ErrOverSenderRateLimit
+			if err := takeSenderLimit(ctx, m.interopSenderLim, from, tx.Nonce()); err != nil {
+				return err
 			}
 		} else {
 			log.Warn("interop sender rate limiter is not enabled, skipping", "req_id", GetReqID(ctx))
