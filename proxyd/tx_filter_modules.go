@@ -46,8 +46,7 @@ func (m *chainIDModule) Apply(ctx context.Context, sub *TxSubmission) error {
 }
 
 // senderRateLimitModule applies the per-sender:nonce rate limit. It is skipped
-// for API-key-bypassed submissions, matching the previous rateLimitSender
-// behavior.
+// for API-key-bypassed submissions.
 type senderRateLimitModule struct {
 	lim FrontendRateLimiter
 }
@@ -73,9 +72,9 @@ func (m *senderRateLimitModule) Apply(ctx context.Context, sub *TxSubmission) er
 
 // interopModule validates every transaction in a submission against the
 // op-interop-filter. Each tx carrying an interop access list is rate-limited
-// (via the interop sender limiter, without a chain-ID re-check — chain-ID
-// already ran as its own module), size-checked, and validated by the strategy.
-// Fail-closed behavior lives in the strategy and the no-URL preflight check.
+// (via the interop sender limiter; chain-ID enforcement is the chainIDModule's
+// responsibility), size-checked, and validated by the strategy. Fail-closed
+// behavior lives in the strategy and the no-URL preflight check.
 type interopModule struct {
 	strategy         InteropStrategy
 	interopSenderLim FrontendRateLimiter
@@ -102,8 +101,8 @@ func (m *interopModule) Apply(ctx context.Context, sub *TxSubmission) error {
 			"tx_hash", tx.Hash(),
 		)
 
-		// The interop sender limit is not bypassed by API key (matches prior
-		// rateLimitInteropSender behavior), unlike senderRateLimitModule.
+		// The interop sender limit is not bypassed by API key, unlike
+		// senderRateLimitModule.
 		if m.interopSenderLim != nil {
 			from, err := sub.Sender(i)
 			if err != nil {

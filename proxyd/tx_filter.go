@@ -92,12 +92,11 @@ func (f *TxFilter) IsSubmissionMethod(method string) bool {
 }
 
 // Build decodes a submission request into a TxSubmission, method-aware:
-//   - single-tx methods reuse convertSendReqToSendTx
-//   - eth_sendBundle reuses transactionsFromBundleReq
+//   - single-tx methods use convertSendReqToSendTx
+//   - eth_sendBundle uses transactionsFromBundleReq
 //
-// It returns the same decode errors those return today and enforces
-// maxBundleTransactions here so the cap applies to every bundle regardless of
-// middleware enablement.
+// It propagates those decoders' errors and enforces maxBundleTransactions here
+// so the cap applies to every bundle regardless of middleware enablement.
 func (f *TxFilter) Build(ctx context.Context, req *RPCReq, bypassRateLimit bool) (*TxSubmission, error) {
 	var txs []*types.Transaction
 	switch req.Method {
