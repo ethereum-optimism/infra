@@ -75,7 +75,7 @@ func (m *senderRateLimitModule) Apply(ctx context.Context, sub *TxSubmission) er
 // op-interop-filter. Each tx carrying an interop access list is rate-limited
 // (via the interop sender limiter, without a chain-ID re-check — chain-ID
 // already ran as its own module), size-checked, and validated by the strategy.
-// Fail-closed behavior lives in the strategy and the #649 no-URL preflight.
+// Fail-closed behavior lives in the strategy and the no-URL preflight check.
 type interopModule struct {
 	strategy         InteropStrategy
 	interopSenderLim FrontendRateLimiter

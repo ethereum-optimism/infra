@@ -271,13 +271,13 @@ func NewServer(
 // and is the single source of truth for module sequencing.
 func (s *Server) txFilterModules() []TxFilterModule {
 	var modules []TxFilterModule
-	if len(s.allowedChainIds) > 0 { // B3: independent of the rate limiter
+	if len(s.allowedChainIds) > 0 { // chain-ID enforcement is independent of either rate limiter
 		modules = append(modules, &chainIDModule{allowedChainIds: s.allowedChainIds})
 	}
 	if s.senderLim != nil {
 		modules = append(modules, &senderRateLimitModule{lim: s.senderLim})
 	}
-	modules = append(modules, &interopModule{ // strategy always set post-#649
+	modules = append(modules, &interopModule{ // interopStrategy is always non-nil
 		strategy:         s.interopStrategy,
 		interopSenderLim: s.interopSenderLim,
 		validatingCfg:    s.interopValidatingConfig,
