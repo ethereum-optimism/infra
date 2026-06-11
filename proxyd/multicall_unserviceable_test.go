@@ -88,7 +88,7 @@ func TestForwardUnserviceableMetric(t *testing.T) {
 
 	req := []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber", JSONRPC: "2.0"}}
 
-	t.Run("all backends fail increments exactly once", func(t *testing.T) {
+	t.Run("all backends fail increments unserviceable counter exactly once", func(t *testing.T) {
 		s1 := newServer(http.StatusServiceUnavailable, `{"error":"down"}`)
 		s2 := newServer(http.StatusServiceUnavailable, `{"error":"down"}`)
 		defer s1.Close()
@@ -113,7 +113,7 @@ func TestForwardUnserviceableMetric(t *testing.T) {
 			"a fully-unserviceable forward must increment the counter exactly once regardless of backend count")
 	})
 
-	t.Run("a successful backend does not increment", func(t *testing.T) {
+	t.Run("at least one successful backend does not increment unserviceable counter", func(t *testing.T) {
 		s1 := newServer(http.StatusServiceUnavailable, `{"error":"down"}`)
 		s2 := newServer(http.StatusOK, `{"jsonrpc":"2.0","result":"0x123","id":1}`)
 		defer s1.Close()
