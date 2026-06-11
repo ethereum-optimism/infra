@@ -145,6 +145,37 @@ func TestInteropModule_RejectsOnStrategyError(t *testing.T) {
 	require.ErrorIs(t, m.Apply(context.Background(), sub), ErrInternal)
 }
 
+// failOnNthStrategy rejects the failCall-th interop tx it validates (1-based)
+// and accepts the rest, counting calls.
+type failOnNthStrategy struct {
+	failCall int
+	calls    int
+}
+
+func (s *failOnNthStrategy) ValidateAccessList(ctx context.Context, _ []common.Hash) error {
+	s.calls++
+	if s.calls == s.failCall {
+		return ErrInternal
+	}
+	return nil
+}
+
+// TestInteropModule_BundleShortCircuit proves the first failing interop tx in a
+// bundle rejects the whole submission and no later tx is validated (so its
+// metric increment never happens).
+func TestInteropModule_BundleShortCircuit(t *testing.T) {
+	strategy := &failOnNthStrategy{failCall: 2}
+	m := &interopModule{strategy: strategy, validatingCfg: InteropValidationConfig{}}
+	sub := &TxSubmission{Txs: []*types.Transaction{
+		interopTx(t, big.NewInt(1), 0), // call 1: passes
+		interopTx(t, big.NewInt(1), 1), // call 2: fails -> reject
+		interopTx(t, big.NewInt(1), 2), // never validated
+	}}
+
+	require.ErrorIs(t, m.Apply(context.Background(), sub), ErrInternal)
+	require.Equal(t, 2, strategy.calls, "validation must stop at the first failing tx")
+}
+
 func TestInteropModule_SenderRateLimit(t *testing.T) {
 	lim := &fakeRateLimiter{allowFunc: func(string) (bool, error) { return false, nil }}
 	m := &interopModule{strategy: &fakeInteropStrategy{}, interopSenderLim: lim, validatingCfg: InteropValidationConfig{}}

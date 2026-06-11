@@ -14,6 +14,8 @@ import (
 // The submission is decoded once and the recovered sender for each tx is
 // memoized so that the chain-ID, sender-rate-limit, and interop modules can all
 // share a single ecrecover per transaction.
+//
+// Not safe for concurrent use.
 type TxSubmission struct {
 	Method          string
 	Req             *RPCReq
@@ -79,41 +81,51 @@ func NewTxFilter(decode txDecodeFunc, modules ...TxFilterModule) *TxFilter {
 	return &TxFilter{decode: decode, modules: modules}
 }
 
+// submissionDecoder decodes a submission request into its transactions.
+type submissionDecoder func(ctx context.Context, f *TxFilter, req *RPCReq) ([]*types.Transaction, error)
+
+// submissionMethods is the single source of truth for the submission-method
+// set: both membership (IsSubmissionMethod) and decoding (Build) read it, so
+// they cannot drift. This set gates chain-ID, rate-limit, and interop, so
+// adding a method here enrolls it in all three.
+var submissionMethods = map[string]submissionDecoder{
+	"eth_sendRawTransaction":            decodeSingleTx,
+	"eth_sendRawTransactionConditional": decodeSingleTx,
+	"eth_sendBundle":                    decodeBundle,
+}
+
+func decodeSingleTx(ctx context.Context, f *TxFilter, req *RPCReq) ([]*types.Transaction, error) {
+	tx, err := f.decode(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return []*types.Transaction{tx}, nil
+}
+
+func decodeBundle(ctx context.Context, _ *TxFilter, req *RPCReq) ([]*types.Transaction, error) {
+	return transactionsFromBundleReq(ctx, req)
+}
+
 // IsSubmissionMethod reports the static set of submission methods the filter
 // handles. Per-method middleware opt-out is enforced inside the middleware
 // module, not here — chain-ID/rate-limit/interop always apply.
 func (f *TxFilter) IsSubmissionMethod(method string) bool {
-	switch method {
-	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle":
-		return true
-	default:
-		return false
-	}
+	_, ok := submissionMethods[method]
+	return ok
 }
 
-// Build decodes a submission request into a TxSubmission, method-aware:
-//   - single-tx methods use convertSendReqToSendTx
-//   - eth_sendBundle uses transactionsFromBundleReq
-//
-// It propagates those decoders' errors and enforces maxBundleTransactions here
-// so the cap applies to every bundle regardless of middleware enablement.
+// Build decodes a submission request into a TxSubmission using the decoder
+// registered for its method, propagating that decoder's errors and enforcing
+// maxBundleTransactions here so the cap applies to every bundle regardless of
+// middleware enablement.
 func (f *TxFilter) Build(ctx context.Context, req *RPCReq, bypassRateLimit bool) (*TxSubmission, error) {
-	var txs []*types.Transaction
-	switch req.Method {
-	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional":
-		tx, err := f.decode(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		txs = []*types.Transaction{tx}
-	case "eth_sendBundle":
-		bundleTxs, err := transactionsFromBundleReq(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		txs = bundleTxs
-	default:
+	decode, ok := submissionMethods[req.Method]
+	if !ok {
 		return nil, fmt.Errorf("not a submission method: %s", req.Method)
+	}
+	txs, err := decode(ctx, f, req)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(txs) > maxBundleTransactions {
