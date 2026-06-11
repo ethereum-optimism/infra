@@ -87,6 +87,17 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 	})
 }
 
+func TestWSProxierRequestSlotLimit(t *testing.T) {
+	w := &WSProxier{requestSem: semaphore.NewWeighted(1)}
+
+	require.True(t, w.acquireRequestSlot())
+	require.False(t, w.acquireRequestSlot())
+
+	w.releaseRequestSlot()
+	require.True(t, w.acquireRequestSlot())
+	w.releaseRequestSlot()
+}
+
 func TestClientDisconnectionFlow499(t *testing.T) {
 	initialCount := getHttpResponseCodeCount("499")
 

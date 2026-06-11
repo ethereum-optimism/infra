@@ -1444,7 +1444,9 @@ type WSProxier struct {
 	writeTimeout     time.Duration
 	onClose          func()
 	closeOnce        sync.Once
-	requestProcessor func(context.Context, *RPCReq) (*RPCRes, bool)
+	requestHandler   func(*RPCReq) bool
+	requestProcessor func(context.Context, *RPCReq) *RPCRes
+	requestSem       *semaphore.Weighted
 }
 
 func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet, onClose func()) *WSProxier {
@@ -1456,6 +1458,7 @@ func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, met
 		readTimeout:     defaultWSReadTimeout,
 		writeTimeout:    defaultWSWriteTimeout,
 		onClose:         onClose,
+		requestSem:      semaphore.NewWeighted(defaultMaxConcurrentWSRPCs),
 	}
 }
 
@@ -1535,10 +1538,10 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			continue
 		}
 
-		if w.requestProcessor != nil {
-			res, handled := w.requestProcessor(ctx, req)
-			if handled {
-				msg = mustMarshalJSON(res)
+		if w.requestHandler != nil && w.requestHandler(req) {
+			if !w.acquireRequestSlot() {
+				msg = mustMarshalJSON(NewRPCErrorRes(req.ID, ErrTooManyRequests))
+				RecordRPCError(ctx, BackendProxyd, req.Method, ErrTooManyRequests)
 				err = w.writeClientConn(msgType, msg)
 				if err != nil {
 					errC <- err
@@ -1546,6 +1549,8 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				}
 				continue
 			}
+			go w.processClientRPC(ctx, msgType, req, errC)
+			continue
 		}
 
 		RecordRPCForward(ctx, w.backend.Name, req.Method, RPCRequestSourceWS)
@@ -1560,6 +1565,46 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		if err != nil {
 			errC <- err
 			return
+		}
+	}
+}
+
+func (w *WSProxier) acquireRequestSlot() bool {
+	if w.requestSem == nil {
+		return true
+	}
+	return w.requestSem.TryAcquire(1)
+}
+
+func (w *WSProxier) releaseRequestSlot() {
+	if w.requestSem != nil {
+		w.requestSem.Release(1)
+	}
+}
+
+func (w *WSProxier) processClientRPC(ctx context.Context, msgType int, req *RPCReq, errC chan error) {
+	defer w.releaseRequestSlot()
+
+	var res *RPCRes
+	if w.requestProcessor == nil {
+		res = NewRPCErrorRes(req.ID, ErrInternal)
+	} else {
+		res = w.requestProcessor(ctx, req)
+	}
+	if res == nil {
+		res = NewRPCErrorRes(req.ID, ErrInternal)
+	}
+	if err := w.writeClientConn(msgType, mustMarshalJSON(res)); err != nil {
+		log.Error(
+			"error writing async WS RPC response",
+			"method", req.Method,
+			"auth", GetAuthCtx(ctx),
+			"req_id", GetReqID(ctx),
+			"err", err,
+		)
+		select {
+		case errC <- err:
+		default:
 		}
 	}
 }

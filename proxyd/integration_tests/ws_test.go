@@ -1,8 +1,10 @@
 package integration_tests
 
 import (
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -256,6 +258,69 @@ func TestWSWhitelistedUnmappedSubscriptionUsesWSBackend(t *testing.T) {
 	require.NoError(t, err)
 	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"subscription-ok"}`), res)
 	require.Equal(t, int64(1), wsBackendMessages.Load())
+}
+
+func TestWSMappedRequestDoesNotBlockSubscriptionTraffic(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() {
+		close(release)
+	})
+	httpBackend := NewMockBackend(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() {
+			close(started)
+		})
+		<-release
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`))
+	}))
+	defer httpBackend.Close()
+
+	var wsBackendMessages atomic.Int64
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		wsBackendMessages.Add(1)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":2,"result":"subscription-ok"}`)))
+	}, nil)
+	defer wsBackend.Close()
+
+	config := ReadConfig("ws")
+	config.Server.RPCPort = 0
+	config.Backends["good"].RPCURL = httpBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+	config.WSMethodWhitelist = []string{"eth_chainId", "eth_subscribe"}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`)))
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":2,"method":"eth_subscribe","params":["newHeads"]}`)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":2,"result":"subscription-ok"}`), res)
+	require.Equal(t, int64(1), wsBackendMessages.Load())
+
+	releaseOnce.Do(func() {
+		close(release)
+	})
+	_, res, err = conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`), res)
 }
 
 func TestWSClientClosure(t *testing.T) {

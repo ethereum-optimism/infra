@@ -46,6 +46,7 @@ const (
 	defaultWSHandshakeTimeout                       = 10 * time.Second
 	defaultWSReadTimeout                            = 2 * time.Minute
 	defaultWSWriteTimeout                           = 10 * time.Second
+	defaultMaxConcurrentWSRPCs                      = 100
 	defaultCacheTtl                                 = 1 * time.Hour
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
@@ -839,7 +840,8 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	activeClientWsConnsGauge.WithLabelValues(GetAuthCtx(ctx)).Inc()
-	proxier.requestProcessor = func(ctx context.Context, req *RPCReq) (*RPCRes, bool) {
+	proxier.requestHandler = s.shouldHandleWSRPC
+	proxier.requestProcessor = func(ctx context.Context, req *RPCReq) *RPCRes {
 		return s.handleWSRPC(ctx, req, isLimited, bypassLimit)
 	}
 	go func() {
@@ -853,18 +855,25 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	log.Info("accepted WS connection", "auth", GetAuthCtx(ctx), "req_id", GetReqID(ctx))
 }
 
-func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) (*RPCRes, bool) {
+func (s *Server) shouldHandleWSRPC(req *RPCReq) bool {
+	if s.rpcMethodMappings[req.Method] != "" {
+		return true
+	}
+	if s.txFilter != nil && s.txFilter.IsSubmissionMethod(req.Method) {
+		return true
+	}
+	return s.enableTxValidation && s.txValidationMethods.Contains(req.Method)
+}
+
+func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) *RPCRes {
 	if s.rpcMethodMappings[req.Method] == "" {
-		if isTransactionForwardingMethod(req.Method) || (s.enableTxValidation && s.txValidationMethods.Contains(req.Method)) {
-			RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
-			return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted), true
-		}
-		return nil, false
+		RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
+		return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted)
 	}
 
 	localRes, group, txHash := s.prepareRPCForForward(ctx, req, isLimited, bypassLimit, RPCRequestSourceWS)
 	if localRes != nil {
-		return localRes, true
+		return localRes
 	}
 
 	forwardStart := time.Now()
@@ -877,7 +886,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"req_id", GetReqID(ctx),
 			"err", err,
 		)
-		return NewRPCErrorRes(req.ID, err), true
+		return NewRPCErrorRes(req.ID, err)
 	}
 	if len(res) == 0 {
 		log.Error(
@@ -885,7 +894,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"backend_group", group,
 			"req_id", GetReqID(ctx),
 		)
-		return NewRPCErrorRes(req.ID, ErrInternal), true
+		return NewRPCErrorRes(req.ID, ErrInternal)
 	}
 
 	if txHash != nil && s.enableTxHashLogging {
@@ -899,16 +908,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 		)
 	}
 
-	return res[0], true
-}
-
-func isTransactionForwardingMethod(method string) bool {
-	switch method {
-	case "eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle":
-		return true
-	default:
-		return false
-	}
+	return res[0]
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
