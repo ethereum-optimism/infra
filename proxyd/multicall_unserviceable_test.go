@@ -41,7 +41,7 @@ func TestExecuteMulticallUnserviceableMetric(t *testing.T) {
 		}
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		resp := bg.ExecuteMulticall(context.Background(), req)
+		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP)
 		require.Error(t, resp.error)
 		require.True(t, errors.Is(resp.error, ErrNoBackends))
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
@@ -65,7 +65,7 @@ func TestExecuteMulticallUnserviceableMetric(t *testing.T) {
 		}
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		resp := bg.ExecuteMulticall(context.Background(), req)
+		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP)
 		require.NoError(t, resp.error)
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
 
