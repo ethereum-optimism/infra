@@ -21,6 +21,18 @@ To configure `proxyd` for use, you'll need to create a configuration file to def
 Once you have a config file, start the daemon via `proxyd <path-to-config>.toml`.
 
 
+## WebSockets
+
+WebSocket support is enabled with `ws_port`, `ws_backend_group`, and `ws_method_whitelist`. The whitelist controls which
+methods are accepted on the WS endpoint. By default, accepted WS methods are proxied directly to the selected upstream
+WS backend connection, which is the expected behavior for stateful methods such as `eth_subscribe`.
+
+To enable a WS method to run through the intelligent filtering/load-balancing described below, also add it to
+`rpc_method_mappings`. Mapped WS methods use backend-group forwarding, so they can receive transaction filtering, rate
+limiting, retries, and consensus-aware routing. Transaction submission or validation methods that are whitelisted but
+unmapped are rejected instead of being forwarded directly over WS.
+
+
 ## Consensus awareness
 
 Starting on v4.0.0, `proxyd` is aware of the consensus state of its backends. This helps minimize chain reorgs experienced by clients.
