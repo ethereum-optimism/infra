@@ -1120,6 +1120,9 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	go func() {
 		defer close(ch)
 		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+		if backendResp.error != nil && errors.Is(backendResp.error, ErrNoBackends) {
+			RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+		}
 		ch <- *backendResp
 	}()
 	backendResp := <-ch
@@ -1183,7 +1186,12 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 		close(ch)
 	}()
 
-	return bg.ProcessMulticallResponses(ch, bgCtx)
+	resp, unserviceable := bg.ProcessMulticallResponses(ch, bgCtx)
+	// resp.error != nil is kinda redundant (but still kept it as a fail safe) as unserviceable can only be true for a negative response
+	if resp.error != nil && unserviceable {
+		RecordUnserviceableRequest(bgCtx, RPCRequestSourceHTTP)
+	}
+	return resp
 }
 
 func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple) {
@@ -1229,25 +1237,27 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 	}
 }
 
-func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx context.Context) *BackendGroupRPCResponse {
+func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx context.Context) (resp *BackendGroupRPCResponse, unserviceable bool) {
+	allBackendsUnserviceable := true
 	var finalResp *BackendGroupRPCResponse
 	i := 0
 	for {
 		multicallResp, ok := <-ch
 		if !ok {
+			// we didn't reach a successful response until the end of channel, so return the final (negative) response
 			log.Trace("multicall response channel closed",
 				"req_id", GetReqID(ctx),
 				"auth", GetAuthCtx(ctx),
 				"response_count", i,
 			)
 			if i > 0 {
-				return finalResp
+				return finalResp, allBackendsUnserviceable
 			}
 			return &BackendGroupRPCResponse{
 				RPCRes:   nil,
 				ServedBy: "",
 				error:    errors.New("no multicall response received"),
-			}
+			}, allBackendsUnserviceable // in case of no response/backends, it's fair to assume the request was unserviceable
 		}
 
 		i++
@@ -1262,12 +1272,16 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 				"backend", backendName,
 			)
 			finalResp = resp
+			if !errors.Is(resp.error, ErrNoBackends) {
+				allBackendsUnserviceable = false
+			}
 			continue
 		}
 
 		// Assuming multicall doesn't support batch
 		if bg.multicallRPCErrorCheck && resp.RPCRes[0].IsError() {
 			finalResp = resp
+			allBackendsUnserviceable = false // coz the backend served a response (just an RPC-level error)
 			continue
 		}
 
@@ -1277,7 +1291,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 			"served_by", resp.ServedBy,
 			"backend", backendName,
 		)
-		return resp
+		return resp, false // unserviceable is false because we received a successful response
 	}
 }
 
@@ -1814,7 +1828,6 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 		}
 	}
 
-	RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
 	return &BackendGroupRPCResponse{
 		RPCRes:   nil,
 		ServedBy: "",
