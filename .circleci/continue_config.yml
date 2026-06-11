@@ -183,7 +183,11 @@ jobs:
       - run:
           name: run lint
           command: |
-            golangci-lint run ./...
+            if [ "<<parameters.module>>" = "proxyd" ]; then
+              make lint
+            else
+              golangci-lint run ./...
+            fi
           working_directory: <<parameters.module>>
 
   go-test:

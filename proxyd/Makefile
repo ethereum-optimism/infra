@@ -26,9 +26,8 @@ test:
 .PHONY: test
 
 lint:
-	go vet ./...
-	goimports -w .
-.PHONY: test
+	golangci-lint run ./...
+.PHONY: lint
 
 test-%:
 	go test -v ./... -test.run ^Test$*$$
