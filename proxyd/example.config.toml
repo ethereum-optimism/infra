@@ -21,6 +21,8 @@ ws_port = 8085
 # Maximum client body size, in bytes, that the server will accept.
 max_body_size_bytes = 10485760
 max_concurrent_rpcs = 1000
+# Maximum mapped RPC requests handled concurrently per WS connection.
+max_concurrent_ws_rpcs = 100
 # Server log level
 log_level = "info"
 # Allow both authenticated and unauthenticated requests when authentication is configured

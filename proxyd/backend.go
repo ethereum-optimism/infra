@@ -749,6 +749,7 @@ func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet
 		if acquiredWSConn {
 			b.wsSem.Release(1)
 		}
+		log.Warn("error dialing websocket backend", "backend", b.Name, "err", err)
 		return nil, wrapErr(err, "error dialing backend")
 	}
 	if b.maxResponseSize != 0 {
@@ -1434,35 +1435,42 @@ func calcBackoff(i int) time.Duration {
 }
 
 type WSProxier struct {
-	backend          *Backend
-	clientConn       *websocket.Conn
-	clientConnMu     sync.Mutex
-	backendConn      *websocket.Conn
-	backendConnMu    sync.Mutex
-	methodWhitelist  *StringSet
-	readTimeout      time.Duration
-	writeTimeout     time.Duration
-	onClose          func()
-	closeOnce        sync.Once
-	requestHandler   func(*RPCReq) bool
-	requestProcessor func(context.Context, *RPCReq) *RPCRes
-	requestSem       *semaphore.Weighted
+	backend               *Backend
+	clientConn            *websocket.Conn
+	clientConnMu          sync.Mutex
+	backendConn           *websocket.Conn
+	backendConnMu         sync.Mutex
+	methodWhitelist       *StringSet
+	readTimeout           time.Duration
+	writeTimeout          time.Duration
+	onClose               func()
+	closeOnce             sync.Once
+	requestHandler        func(*RPCReq) bool
+	requestProcessor      func(context.Context, *RPCReq) *RPCRes
+	requestSem            *semaphore.Weighted
+	cancel                context.CancelFunc
+	maxConcurrentRequests int64
 }
 
 func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet, onClose func()) *WSProxier {
 	return &WSProxier{
-		backend:         backend,
-		clientConn:      clientConn,
-		backendConn:     backendConn,
-		methodWhitelist: methodWhitelist,
-		readTimeout:     defaultWSReadTimeout,
-		writeTimeout:    defaultWSWriteTimeout,
-		onClose:         onClose,
-		requestSem:      semaphore.NewWeighted(defaultMaxConcurrentWSRPCs),
+		backend:               backend,
+		clientConn:            clientConn,
+		backendConn:           backendConn,
+		methodWhitelist:       methodWhitelist,
+		readTimeout:           defaultWSReadTimeout,
+		writeTimeout:          defaultWSWriteTimeout,
+		onClose:               onClose,
+		maxConcurrentRequests: defaultMaxConcurrentWSRPCs,
 	}
 }
 
 func (w *WSProxier) Proxy(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
+	if w.maxConcurrentRequests > 0 {
+		w.requestSem = semaphore.NewWeighted(w.maxConcurrentRequests)
+	}
 	errC := make(chan error, 2)
 	go w.clientPump(ctx, errC)
 	go w.backendPump(ctx, errC)
@@ -1481,6 +1489,8 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				errC <- err
 				return
 			}
+			errC <- err
+			return
 		}
 
 		RecordWSMessage(ctx, w.backend.Name, SourceClient)
@@ -1619,6 +1629,8 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 				errC <- err
 				return
 			}
+			errC <- err
+			return
 		}
 
 		RecordWSMessage(ctx, w.backend.Name, SourceBackend)
@@ -1671,6 +1683,9 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 
 func (w *WSProxier) close() {
 	w.closeOnce.Do(func() {
+		if w.cancel != nil {
+			w.cancel()
+		}
 		w.clientConn.Close()
 		w.backendConn.Close()
 		activeBackendWsConnsGauge.WithLabelValues(w.backend.Name).Dec()

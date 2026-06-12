@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,6 +99,29 @@ func TestWSProxierRequestSlotLimit(t *testing.T) {
 	w.releaseRequestSlot()
 }
 
+func TestBackendProxyWSReleasesSlotOnDialFailure(t *testing.T) {
+	b := &Backend{
+		Name:   "bad-ws",
+		wsURL:  "://invalid",
+		dialer: websocket.DefaultDialer,
+		wsSem:  semaphore.NewWeighted(1),
+	}
+
+	_, err := b.ProxyWS(nil, NewStringSetFromStrings([]string{"eth_subscribe"}), 0)
+	require.Error(t, err)
+	require.True(t, b.wsSem.TryAcquire(1))
+	b.wsSem.Release(1)
+}
+
+func TestShouldHandleWSRPCTxValidationOnlyMethod(t *testing.T) {
+	srv := &Server{
+		enableTxValidation:  true,
+		txValidationMethods: NewTxValidationMethodSet([]string{"eth_call"}),
+	}
+
+	require.True(t, srv.shouldHandleWSRPC(&RPCReq{Method: "eth_call"}))
+}
+
 func TestClientDisconnectionFlow499(t *testing.T) {
 	initialCount := getHttpResponseCodeCount("499")
 
@@ -151,6 +175,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		nil,                                // limExemptKeys
 		TxValidationMiddlewareConfig{},     // txValidationConfig
 		10*time.Second,                     // gracefulShutdownDuration
+		defaultMaxConcurrentWSRPCs,         // maxConcurrentWSRPCs
 	)
 	require.NoError(t, err)
 

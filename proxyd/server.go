@@ -91,6 +91,7 @@ type Server struct {
 	interopStrategy         InteropStrategy
 	publicAccess            bool
 	enableTxHashLogging     bool
+	maxConcurrentWSRPCs     int64
 
 	enableTxValidation       bool
 	txValidationFn           TxValidationFunc
@@ -132,6 +133,7 @@ func NewServer(
 	limExemptKeys []string,
 	txValidationConfig TxValidationMiddlewareConfig,
 	gracefulShutdownDuration time.Duration,
+	maxConcurrentWSRPCs int64,
 ) (*Server, error) {
 	if cache == nil {
 		cache = &NoopRPCCache{}
@@ -155,6 +157,9 @@ func NewServer(
 
 	if maxBatchSize > MaxBatchRPCCallsHardLimit {
 		maxBatchSize = MaxBatchRPCCallsHardLimit
+	}
+	if maxConcurrentWSRPCs == 0 {
+		maxConcurrentWSRPCs = defaultMaxConcurrentWSRPCs
 	}
 
 	var mainLim FrontendRateLimiter
@@ -253,6 +258,7 @@ func NewServer(
 		interopValidatingConfig:  interopValidatingConfig,
 		interopStrategy:          interopStrategy,
 		enableTxHashLogging:      enableTxHashLogging,
+		maxConcurrentWSRPCs:      maxConcurrentWSRPCs,
 		enableTxValidation:       txValidationConfig.Enabled,
 		txValidationFn:           txValidationClient.Validate,
 		txValidationEndpoint:     txValidationConfig.Endpoint,
@@ -378,7 +384,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	apiKey := r.Header.Get("X-Api-Key")
 	bypassLimit := s.isValidAPIKey(apiKey)
 
-	isLimited, origin, userAgent, xff, err := s.limiterForRequest(ctx, r, bypassLimit)
+	isLimited, err := s.limiterForRequest(ctx, r, bypassLimit)
 	if err != nil {
 		writeRPCError(ctx, w, nil, err)
 		return
@@ -388,9 +394,9 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		"received RPC request",
 		"req_id", GetReqID(ctx),
 		"auth", GetAuthCtx(ctx),
-		"user_agent", userAgent,
-		"origin", origin,
-		"remote_ip", xff,
+		"user_agent", r.Header.Get("User-Agent"),
+		"origin", r.Header.Get("Origin"),
+		"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 	)
 
 	body, err := io.ReadAll(LimitReader(r.Body, s.maxBodySize))
@@ -816,7 +822,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	// User can provide an API key via the "X-Api-Key" header
 	apiKey := r.Header.Get("X-Api-Key")
 	bypassLimit := s.isValidAPIKey(apiKey)
-	isLimited, _, _, _, err := s.limiterForRequest(ctx, r, bypassLimit)
+	isLimited, err := s.limiterForRequest(ctx, r, bypassLimit)
 	if err != nil {
 		http.Error(w, "request does not include a remote IP", http.StatusBadRequest)
 		return
@@ -844,6 +850,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	proxier.requestProcessor = func(ctx context.Context, req *RPCReq) *RPCRes {
 		return s.handleWSRPC(ctx, req, isLimited, bypassLimit)
 	}
+	proxier.maxConcurrentRequests = s.maxConcurrentWSRPCs
 	go func() {
 		// Below call blocks so run it in a goroutine.
 		if err := proxier.Proxy(ctx); err != nil {
@@ -1002,7 +1009,7 @@ func (s *Server) isValidAPIKey(key string) bool {
 	return false
 }
 
-func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassLimit bool) (limiterFunc, string, string, string, error) {
+func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassLimit bool) (limiterFunc, error) {
 	origin := r.Header.Get("Origin")
 	userAgent := r.Header.Get("User-Agent")
 	// Use XFF in context since it will automatically be replaced by the remote IP
@@ -1011,7 +1018,7 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 	isUnlimitedUserAgent := s.isUnlimitedUserAgent(userAgent)
 
 	if xff == "" {
-		return nil, origin, userAgent, xff, ErrInvalidRequest("request does not include a remote IP")
+		return nil, ErrInvalidRequest("request does not include a remote IP")
 	}
 
 	isLimited := func(method string) bool {
@@ -1043,7 +1050,7 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 		return !ok
 	}
 
-	return isLimited, origin, userAgent, xff, nil
+	return isLimited, nil
 }
 
 func (s *Server) isGlobalLimit(method string) bool {

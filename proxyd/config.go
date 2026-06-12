@@ -17,6 +17,8 @@ type ServerConfig struct {
 	WSPort            int    `toml:"ws_port"`
 	MaxBodySizeBytes  int64  `toml:"max_body_size_bytes"`
 	MaxConcurrentRPCs int64  `toml:"max_concurrent_rpcs"`
+	// MaxConcurrentWSRPCs limits concurrent mapped RPCs handled over a single WS connection.
+	MaxConcurrentWSRPCs int64 `toml:"max_concurrent_ws_rpcs"`
 	// DisableConcurrentRequestSemaphore=true allows unlimited concurrent RPC requests. This takes precedence over MaxConcurrentRPCs.
 	DisableConcurrentRequestSemaphore bool   `toml:"disable_concurrent_request_semaphore"`
 	LogLevel                          string `toml:"log_level"`
