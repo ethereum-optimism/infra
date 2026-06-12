@@ -19,11 +19,7 @@ The release process is driven by CircleCI to build and publish components
 
    The workflow compares differences between the newly released tag and the `main` branch (the base revision). Based on these differences, it selectively toggles parameters to `true` only for services that have been updated. This prevents unnecessary builds or deployments when minor changes are made to unrelated services. [Refer to config here](https://github.com/ethereum-optimism/infra/blob/main/.circleci/config.yml#L18-L25).
 
-3. **Approval Process for Certain Tags**
-
-   For specific tags ([listed here](https://github.com/ethereum-optimism/infra/blob/main/.circleci/continue_config.yml#L590)), the workflow pauses with a hold step that requires approval from a member of the `@release-managers` team on `ethereum-optimism` GitHub Organisation. Once approved, the workflow continues.
-
-4. **Selective Component Release**
+3. **Selective Component Release**
 
    Depending on the type of released tag i.e. the component/service updated in the release, the following steps are selectively triggered to handle only that updated services:
 
@@ -39,4 +35,3 @@ Typically a reviewer will publish a new release after reviewing the contribution
 Feel free to request a new release as part of the creating the PR in the PR description.
 
 If no release has been created feel free to create an issue or reach out in the OP Stack Protocol R&D Discord
-
