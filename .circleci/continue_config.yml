@@ -416,13 +416,6 @@ workflows:
               only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
             branches:
               ignore: /.*/
-      - hold:
-          type: approval
-          filters:
-            tags:
-              only: /^(replica-healthcheck|cci-stats|peer-mgmt-service|proxyd|ufm-[a-z0-9\-]*|op-[a-z0-9\-]*)\/v.*/
-            branches:
-              ignore: /.*/
       - go-release:
           matrix:
             parameters:
