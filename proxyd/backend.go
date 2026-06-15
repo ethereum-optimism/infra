@@ -364,6 +364,7 @@ type Backend struct {
 	maxResponseSize      int64
 	maxRPS               int
 	maxWSConns           int
+	wsSem                *semaphore.Weighted
 	outOfServiceInterval time.Duration
 	stripTrailingXFF     bool
 	proxydIP             string
@@ -445,6 +446,7 @@ func WithMaxRPS(maxRPS int) BackendOpt {
 func WithMaxWSConns(maxConns int) BackendOpt {
 	return func(b *Backend) {
 		b.maxWSConns = maxConns
+		b.wsSem = semaphore.NewWeighted(int64(maxConns))
 	}
 }
 
@@ -634,11 +636,15 @@ func (b *Backend) Override(opts ...BackendOpt) {
 }
 
 func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]*RPCRes, error) {
+	return b.ForwardWithSource(ctx, reqs, isBatch, RPCRequestSourceHTTP)
+}
+
+func (b *Backend) ForwardWithSource(ctx context.Context, reqs []*RPCReq, isBatch bool, source string) ([]*RPCRes, error) {
 	var lastError error
 	// <= to account for the first attempt not technically being
 	// a retry
 	for i := 0; i <= b.maxRetries; i++ {
-		RecordBatchRPCForward(ctx, b.Name, reqs, RPCRequestSourceHTTP)
+		RecordBatchRPCForward(ctx, b.Name, reqs, source)
 		metricLabelMethod := reqs[0].Method
 		if isBatch {
 			metricLabelMethod = "<batch>"
@@ -733,8 +739,17 @@ func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]
 }
 
 func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
+	if b.wsSem != nil && !b.wsSem.TryAcquire(1) {
+		return nil, ErrBackendOverCapacity
+	}
+	acquiredWSConn := b.wsSem != nil
+
 	backendConn, _, err := b.dialer.Dial(b.wsURL, nil) // nolint:bodyclose
 	if err != nil {
+		if acquiredWSConn {
+			b.wsSem.Release(1)
+		}
+		log.Warn("error dialing websocket backend", "backend", b.Name, "err", err)
 		return nil, wrapErr(err, "error dialing backend")
 	}
 	if b.maxResponseSize != 0 {
@@ -744,7 +759,11 @@ func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet
 	}
 
 	activeBackendWsConnsGauge.WithLabelValues(b.Name).Inc()
-	return NewWSProxier(b, clientConn, backendConn, methodWhitelist), nil
+	return NewWSProxier(b, clientConn, backendConn, methodWhitelist, func() {
+		if acquiredWSConn {
+			b.wsSem.Release(1)
+		}
+	}), nil
 }
 
 // ForwardRPC makes a call directly to a backend and populate the response into `res`
@@ -1084,6 +1103,10 @@ func (bg *BackendGroup) Primaries() []*Backend {
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
 func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
+	return bg.ForwardWithSource(ctx, rpcReqs, isBatch, RPCRequestSourceHTTP)
+}
+
+func (bg *BackendGroup) ForwardWithSource(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, source string) ([]*RPCRes, string, error) {
 	if len(rpcReqs) == 0 {
 		return nil, "", nil
 	}
@@ -1112,16 +1135,16 @@ func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch 
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
-		backendResp := bg.ExecuteMulticall(ctx, rpcReqs)
+		backendResp := bg.ExecuteMulticall(ctx, rpcReqs, source)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	ch := make(chan BackendGroupRPCResponse)
 	go func() {
 		defer close(ch)
-		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch)
+		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch, source)
 		if backendResp.error != nil && errors.Is(backendResp.error, ErrNoBackends) {
-			RecordUnserviceableRequest(ctx, RPCRequestSourceHTTP)
+			RecordUnserviceableRequest(ctx, source)
 		}
 		ch <- *backendResp
 	}()
@@ -1161,7 +1184,7 @@ type multicallTuple struct {
 }
 
 // Note: rpcReqs should only contain 1 request of 'sendRawTransactions'
-func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq) *BackendGroupRPCResponse {
+func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq, source string) *BackendGroupRPCResponse {
 	// Create ctx without cancel so background tasks process
 	// after original request returns
 	bgCtx := context.WithoutCancel(ctx)
@@ -1174,7 +1197,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 	ch := make(chan *multicallTuple, len(bg.Backends))
 	for _, backend := range bg.Backends {
 		wg.Add(1)
-		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch)
+		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch, source)
 	}
 
 	go func() {
@@ -1189,12 +1212,12 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq)
 	resp, unserviceable := bg.ProcessMulticallResponses(ch, bgCtx)
 	// resp.error != nil is kinda redundant (but still kept it as a fail safe) as unserviceable can only be true for a negative response
 	if resp.error != nil && unserviceable {
-		RecordUnserviceableRequest(bgCtx, RPCRequestSourceHTTP)
+		RecordUnserviceableRequest(bgCtx, source)
 	}
 	return resp
 }
 
-func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple) {
+func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple, source string) {
 	defer wg.Done()
 	log.Debug("forwarding multicall request to backend",
 		"req_id", GetReqID(ctx),
@@ -1203,7 +1226,7 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 	)
 
 	RecordBackendGroupMulticallRequest(bg, backend.Name)
-	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false)
+	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false, source)
 
 	multicallResp := &multicallTuple{
 		response:    backendResp,
@@ -1296,7 +1319,7 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 }
 
 func (bg *BackendGroup) ProxyWS(ctx context.Context, clientConn *websocket.Conn, methodWhitelist *StringSet, serverReadLimit int64) (*WSProxier, error) {
-	for _, back := range bg.Backends {
+	for _, back := range bg.orderedBackendsForRequest() {
 		proxier, err := back.ProxyWS(clientConn, methodWhitelist, serverReadLimit)
 		if errors.Is(err, ErrBackendOffline) {
 			log.Warn(
@@ -1412,28 +1435,42 @@ func calcBackoff(i int) time.Duration {
 }
 
 type WSProxier struct {
-	backend         *Backend
-	clientConn      *websocket.Conn
-	clientConnMu    sync.Mutex
-	backendConn     *websocket.Conn
-	backendConnMu   sync.Mutex
-	methodWhitelist *StringSet
-	readTimeout     time.Duration
-	writeTimeout    time.Duration
+	backend               *Backend
+	clientConn            *websocket.Conn
+	clientConnMu          sync.Mutex
+	backendConn           *websocket.Conn
+	backendConnMu         sync.Mutex
+	methodWhitelist       *StringSet
+	readTimeout           time.Duration
+	writeTimeout          time.Duration
+	onClose               func()
+	closeOnce             sync.Once
+	requestHandler        func(*RPCReq) bool
+	requestProcessor      func(context.Context, *RPCReq) *RPCRes
+	requestSem            *semaphore.Weighted
+	cancel                context.CancelFunc
+	maxConcurrentRequests int64
 }
 
-func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet) *WSProxier {
+func NewWSProxier(backend *Backend, clientConn, backendConn *websocket.Conn, methodWhitelist *StringSet, onClose func()) *WSProxier {
 	return &WSProxier{
-		backend:         backend,
-		clientConn:      clientConn,
-		backendConn:     backendConn,
-		methodWhitelist: methodWhitelist,
-		readTimeout:     defaultWSReadTimeout,
-		writeTimeout:    defaultWSWriteTimeout,
+		backend:               backend,
+		clientConn:            clientConn,
+		backendConn:           backendConn,
+		methodWhitelist:       methodWhitelist,
+		readTimeout:           defaultWSReadTimeout,
+		writeTimeout:          defaultWSWriteTimeout,
+		onClose:               onClose,
+		maxConcurrentRequests: defaultMaxConcurrentWSRPCs,
 	}
 }
 
 func (w *WSProxier) Proxy(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
+	if w.maxConcurrentRequests > 0 {
+		w.requestSem = semaphore.NewWeighted(w.maxConcurrentRequests)
+	}
 	errC := make(chan error, 2)
 	go w.clientPump(ctx, errC)
 	go w.backendPump(ctx, errC)
@@ -1452,6 +1489,8 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				errC <- err
 				return
 			}
+			errC <- err
+			return
 		}
 
 		RecordWSMessage(ctx, w.backend.Name, SourceClient)
@@ -1509,6 +1548,21 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			continue
 		}
 
+		if w.requestHandler != nil && w.requestHandler(req) {
+			if !w.acquireRequestSlot() {
+				msg = mustMarshalJSON(NewRPCErrorRes(req.ID, ErrTooManyRequests))
+				RecordRPCError(ctx, BackendProxyd, req.Method, ErrTooManyRequests)
+				err = w.writeClientConn(msgType, msg)
+				if err != nil {
+					errC <- err
+					return
+				}
+				continue
+			}
+			go w.processClientRPC(ctx, msgType, req, errC)
+			continue
+		}
+
 		RecordRPCForward(ctx, w.backend.Name, req.Method, RPCRequestSourceWS)
 		log.Info(
 			"forwarded WS message to backend",
@@ -1525,6 +1579,46 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 	}
 }
 
+func (w *WSProxier) acquireRequestSlot() bool {
+	if w.requestSem == nil {
+		return true
+	}
+	return w.requestSem.TryAcquire(1)
+}
+
+func (w *WSProxier) releaseRequestSlot() {
+	if w.requestSem != nil {
+		w.requestSem.Release(1)
+	}
+}
+
+func (w *WSProxier) processClientRPC(ctx context.Context, msgType int, req *RPCReq, errC chan error) {
+	defer w.releaseRequestSlot()
+
+	var res *RPCRes
+	if w.requestProcessor == nil {
+		res = NewRPCErrorRes(req.ID, ErrInternal)
+	} else {
+		res = w.requestProcessor(ctx, req)
+	}
+	if res == nil {
+		res = NewRPCErrorRes(req.ID, ErrInternal)
+	}
+	if err := w.writeClientConn(msgType, mustMarshalJSON(res)); err != nil {
+		log.Error(
+			"error writing async WS RPC response",
+			"method", req.Method,
+			"auth", GetAuthCtx(ctx),
+			"req_id", GetReqID(ctx),
+			"err", err,
+		)
+		select {
+		case errC <- err:
+		default:
+		}
+	}
+}
+
 func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 	for {
 		// Block until we get a message.
@@ -1535,6 +1629,8 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 				errC <- err
 				return
 			}
+			errC <- err
+			return
 		}
 
 		RecordWSMessage(ctx, w.backend.Name, SourceBackend)
@@ -1586,9 +1682,17 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 }
 
 func (w *WSProxier) close() {
-	w.clientConn.Close()
-	w.backendConn.Close()
-	activeBackendWsConnsGauge.WithLabelValues(w.backend.Name).Dec()
+	w.closeOnce.Do(func() {
+		if w.cancel != nil {
+			w.cancel()
+		}
+		w.clientConn.Close()
+		w.backendConn.Close()
+		activeBackendWsConnsGauge.WithLabelValues(w.backend.Name).Dec()
+		if w.onClose != nil {
+			w.onClose()
+		}
+	})
 }
 
 func (w *WSProxier) prepareClientMsg(msg []byte) (*RPCReq, error) {
@@ -1744,6 +1848,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	backends []*Backend,
 	ctx context.Context,
 	isBatch bool,
+	source string,
 ) *BackendGroupRPCResponse {
 	for _, back := range backends {
 		res := make([]*RPCRes, 0)
@@ -1753,7 +1858,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 		if len(rpcReqs) > 0 {
 
-			res, err = back.Forward(ctx, rpcReqs, isBatch)
+			res, err = back.ForwardWithSource(ctx, rpcReqs, isBatch, source)
 
 			// below are errors that we explicitly handle so that we don't
 			// mark this request as unserviceable (unserviceable requests

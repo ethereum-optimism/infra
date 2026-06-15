@@ -1,9 +1,10 @@
-# List of WS methods to whitelist.
-ws_method_whitelist = [
-  "eth_subscribe",
-  "eth_call",
-  "eth_chainId"
-]
+# List of WS methods to whitelist. Whitelisted WS methods are accepted by the
+# WS endpoint, but by default they are passed straight through to the pinned
+# upstream WS backend connection. To apply proxyd's intelligent request handling
+# to a WS method, such as transaction filtering, rate limiting, retries, or
+# consensus-aware backend-group routing, also add the method to
+# [rpc_method_mappings].
+ws_method_whitelist = ["eth_subscribe", "eth_call", "eth_chainId"]
 # Enable WS on this backend group. There can only be one WS-enabled backend group.
 ws_backend_group = "main"
 
@@ -20,6 +21,8 @@ ws_port = 8085
 # Maximum client body size, in bytes, that the server will accept.
 max_body_size_bytes = 10485760
 max_concurrent_rpcs = 1000
+# Maximum mapped RPC requests handled concurrently per WS connection.
+max_concurrent_ws_rpcs = 100
 # Server log level
 log_level = "info"
 # Allow both authenticated and unauthenticated requests when authentication is configured
@@ -141,7 +144,11 @@ enabled = true
 endpoint = "https://your-validation-service.example.com/validate"
 # List of RPC methods to apply validation to.
 # Defaults to ["eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"]
-methods = ["eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"]
+methods = [
+  "eth_sendRawTransaction",
+  "eth_sendRawTransactionConditional",
+  "eth_sendBundle",
+]
 # Timeout in seconds for validation HTTP requests, default 5
 timeout_seconds = 5
 # Whether to allow transactions through if the validation service returns an error.

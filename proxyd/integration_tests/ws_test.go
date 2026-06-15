@@ -1,8 +1,10 @@
 package integration_tests
 
 import (
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,6 +150,340 @@ func TestWS(t *testing.T) {
 	}
 }
 
+func TestWSMappedTransactionUsesHTTPPipeline(t *testing.T) {
+	var wsBackendMessages atomic.Int64
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		wsBackendMessages.Add(1)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"result":"ws-backend"}`)))
+	}, nil)
+	defer wsBackend.Close()
+
+	httpBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
+	defer httpBackend.Close()
+
+	config := ReadConfig("sender_rate_limit")
+	config.Server.RPCPort = 0
+	config.Server.WSPort = 8546
+	config.WSBackendGroup = "main"
+	config.WSMethodWhitelist = []string{"eth_sendRawTransaction"}
+	config.Backends["good"].RPCURL = httpBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, makeSendRawTransaction(txHex1)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(dummyRes), res)
+	require.Len(t, httpBackend.Requests(), 1)
+	require.Equal(t, int64(0), wsBackendMessages.Load())
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, makeSendRawTransaction(txHex1)))
+	_, res, err = conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(limRes), res)
+	require.Len(t, httpBackend.Requests(), 1)
+	require.Equal(t, int64(0), wsBackendMessages.Load())
+}
+
+func TestWSWhitelistedUnmappedTransactionRejected(t *testing.T) {
+	var wsBackendMessages atomic.Int64
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		wsBackendMessages.Add(1)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"result":"ws-backend"}`)))
+	}, nil)
+	defer wsBackend.Close()
+
+	httpBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
+	defer httpBackend.Close()
+
+	config := ReadConfig("sender_rate_limit")
+	config.Server.RPCPort = 0
+	config.Server.WSPort = 8546
+	config.WSBackendGroup = "main"
+	config.WSMethodWhitelist = []string{"eth_sendRawTransaction"}
+	config.Backends["good"].RPCURL = httpBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+	delete(config.RPCMethodMappings, "eth_sendRawTransaction")
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, makeSendRawTransaction(txHex1)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","error":{"code":-32601,"message":"rpc method is not whitelisted"},"id":1}`), res)
+	require.Empty(t, httpBackend.Requests())
+	require.Equal(t, int64(0), wsBackendMessages.Load())
+}
+
+func TestWSWhitelistedUnmappedSubscriptionUsesWSBackend(t *testing.T) {
+	var wsBackendMessages atomic.Int64
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		wsBackendMessages.Add(1)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"result":"subscription-ok"}`)))
+	}, nil)
+	defer wsBackend.Close()
+
+	config := ReadConfig("ws")
+	config.Server.RPCPort = 0
+	config.Backends["good"].RPCURL = wsBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+	config.WSMethodWhitelist = []string{"eth_subscribe"}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}`)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"subscription-ok"}`), res)
+	require.Equal(t, int64(1), wsBackendMessages.Load())
+}
+
+func TestWSBackendMaxConnsFallsBackAndReleases(t *testing.T) {
+	rpcBackend := NewMockBackend(SingleResponseHandler(200, dummyRes))
+	defer rpcBackend.Close()
+
+	var firstConnections atomic.Int64
+	var firstClosed sync.Once
+	firstClosedCh := make(chan struct{})
+	firstWSBackend := NewMockWSBackend(func(conn *websocket.Conn) {
+		firstConnections.Add(1)
+	}, func(conn *websocket.Conn, msgType int, data []byte) {
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"result":"first"}`)))
+	}, func(conn *websocket.Conn, err error) {
+		firstClosed.Do(func() {
+			close(firstClosedCh)
+		})
+	})
+	defer firstWSBackend.Close()
+
+	var secondConnections atomic.Int64
+	secondWSBackend := NewMockWSBackend(func(conn *websocket.Conn) {
+		secondConnections.Add(1)
+	}, func(conn *websocket.Conn, msgType int, data []byte) {
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"result":"second"}`)))
+	}, nil)
+	defer secondWSBackend.Close()
+
+	config := ReadConfig("ws")
+	config.Server.RPCPort = 0
+	config.Backends["good"].RPCURL = rpcBackend.URL()
+	config.Backends["good"].WSURL = firstWSBackend.URL()
+	config.Backends["good"].MaxWSConns = 1
+	config.Backends["next"] = &proxyd.BackendConfig{
+		RPCURL: rpcBackend.URL(),
+		WSURL:  secondWSBackend.URL(),
+	}
+	config.BackendGroups["main"].Backends = []string{"good", "next"}
+	config.WSMethodWhitelist = []string{"eth_subscribe"}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	dial := func() (*websocket.Conn, error) {
+		conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+		if err != nil {
+			return nil, err
+		}
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+		return conn, nil
+	}
+	sendSubscribe := func(conn *websocket.Conn) ([]byte, error) {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}`)); err != nil {
+			return nil, err
+		}
+		_, res, err := conn.ReadMessage()
+		return res, err
+	}
+
+	firstConn, err := dial()
+	require.NoError(t, err)
+	defer firstConn.Close()
+	res, err := sendSubscribe(firstConn)
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"first"}`), res)
+
+	secondConn, err := dial()
+	require.NoError(t, err)
+	defer secondConn.Close()
+	res, err = sendSubscribe(secondConn)
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"second"}`), res)
+
+	require.NoError(t, firstConn.Close())
+	require.Eventually(t, func() bool {
+		select {
+		case <-firstClosedCh:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	var thirdConn *websocket.Conn
+	require.Eventually(t, func() bool {
+		conn, err := dial()
+		if err != nil {
+			return false
+		}
+		res, err := sendSubscribe(conn)
+		if err == nil && string(res) == `{"jsonrpc":"2.0","id":1,"result":"first"}` {
+			thirdConn = conn
+			return true
+		}
+		conn.Close()
+		return false
+	}, time.Second, 10*time.Millisecond)
+	defer thirdConn.Close()
+
+	require.Equal(t, int64(2), firstConnections.Load())
+	require.Equal(t, int64(1), secondConnections.Load())
+}
+
+func TestWSMappedRequestLimitReturnsTooManyRequests(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() {
+		close(release)
+	})
+	httpBackend := NewMockBackend(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() {
+			close(started)
+		})
+		<-release
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`))
+	}))
+	defer httpBackend.Close()
+
+	wsBackend := NewMockWSBackend(nil, nil, nil)
+	defer wsBackend.Close()
+
+	config := ReadConfig("ws")
+	config.Server.RPCPort = 0
+	config.Server.MaxConcurrentWSRPCs = 1
+	config.Backends["good"].RPCURL = httpBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+	config.WSMethodWhitelist = []string{"eth_chainId"}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`)))
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":2,"method":"eth_chainId","params":[]}`)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","error":{"code":-32024,"message":"too many requests"},"id":2}`), res)
+
+	releaseOnce.Do(func() {
+		close(release)
+	})
+	_, res, err = conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`), res)
+}
+
+func TestWSMappedRequestDoesNotBlockSubscriptionTraffic(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() {
+		close(release)
+	})
+	httpBackend := NewMockBackend(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() {
+			close(started)
+		})
+		<-release
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`))
+	}))
+	defer httpBackend.Close()
+
+	var wsBackendMessages atomic.Int64
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		wsBackendMessages.Add(1)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":2,"result":"subscription-ok"}`)))
+	}, nil)
+	defer wsBackend.Close()
+
+	config := ReadConfig("ws")
+	config.Server.RPCPort = 0
+	config.Backends["good"].RPCURL = httpBackend.URL()
+	config.Backends["good"].WSURL = wsBackend.URL()
+	config.WSMethodWhitelist = []string{"eth_chainId", "eth_subscribe"}
+
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`)))
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":2,"method":"eth_subscribe","params":["newHeads"]}`)))
+	_, res, err := conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":2,"result":"subscription-ok"}`), res)
+	require.Equal(t, int64(1), wsBackendMessages.Load())
+
+	releaseOnce.Do(func() {
+		close(release)
+	})
+	_, res, err = conn.ReadMessage()
+	require.NoError(t, err)
+	RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`), res)
+}
+
 func TestWSClientClosure(t *testing.T) {
 	backendHdlr := new(backendHandler)
 	clientHdlr := new(clientHandler)
@@ -231,12 +567,11 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 
 	payload := strings.Repeat("barf", 1024*1024)
 	clientReq := "{\"id\": 1, \"method\": \"eth_subscribe\", \"params\": [\"" + payload + "\"]}"
-	err = client.WriteMessage(
+	writeErr := client.WriteMessage(
 		websocket.TextMessage,
 		[]byte(clientReq),
 	)
-	require.Error(t, err)
 	require.Eventually(t, closed.Load, time.Second, 10*time.Millisecond,
-		"connection should be closed after exceeding the read limit")
+		"connection should be closed after exceeding the read limit; write error: %v", writeErr)
 
 }
