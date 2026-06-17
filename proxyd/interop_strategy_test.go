@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
+	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
@@ -367,4 +370,34 @@ func TestDefinitiveInteropRejection_Classification(t *testing.T) {
 		"a soft out-of-sync FutureData failure is not a verdict")
 	require.False(t, isDefinitiveInteropRejection(&RPCErr{Code: uninitializedRPCCode, HTTPErrorCode: 400}),
 		"a soft out-of-sync Uninitialized failure is not a verdict")
+}
+
+// Descriptor must carry a near-future timestamp (clock skew only) and op-reth's expiry timeout.
+func TestExecutingDescriptor_NearFutureTimestampAndExpiryTimeout(t *testing.T) {
+	var got messages.ExecutingDescriptor
+	captured := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Params []json.RawMessage `json:"params"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Len(t, req.Params, 3)
+		require.NoError(t, json.Unmarshal(req.Params[2], &got))
+		captured <- struct{}{}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(validInteropFilterResponse))
+	}))
+	t.Cleanup(srv.Close)
+
+	before := uint64(time.Now().Unix())
+	_, _, err := performCheckAccessListOp(context.Background(), testAccessList, srv.URL, eth.ChainIDFromUInt64(420120003))
+	require.NoError(t, err)
+	<-captured
+	after := uint64(time.Now().Unix())
+
+	require.Equal(t, interopExecutingDescriptorTimeoutSeconds, got.Timeout, "timeout should match op-reth's expiry margin")
+	require.GreaterOrEqual(t, got.Timestamp, before+interopExecutingDescriptorClockToleranceSeconds)
+	require.LessOrEqual(t, got.Timestamp, after+interopExecutingDescriptorClockToleranceSeconds,
+		"timestamp must be near-future (clock skew only), not a large forward window")
 }

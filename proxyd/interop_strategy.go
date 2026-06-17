@@ -549,6 +549,7 @@ func performCheckAccessListOp(ctx context.Context, accessList []common.Hash, url
 	err = validatingBackend.CheckAccessList(ctx, accessList, safety.CrossUnsafe, messages.ExecutingDescriptor{
 		ChainID:   chainID,
 		Timestamp: getInteropExecutingDescriptorTimestamp(),
+		Timeout:   interopExecutingDescriptorTimeoutSeconds,
 	})
 
 	var httpCode int

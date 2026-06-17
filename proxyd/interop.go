@@ -48,7 +48,14 @@ func validateAndDeduplicateInteropAccessList(entriesToParse []common.Hash) ([]co
 	return deduplicatedAccessListEntries, nil
 }
 
+const (
+	// Clock-skew tolerance only; the executing message's later block is the real lower bound.
+	interopExecutingDescriptorClockToleranceSeconds uint64 = 30
+
+	// Expiry-window margin; matches op-reth's CHECK_ACCESS_LIST_TIMEOUT_SECS.
+	interopExecutingDescriptorTimeoutSeconds uint64 = 7200
+)
+
 func getInteropExecutingDescriptorTimestamp() uint64 {
-	// intentionally kept to be slightly in the future (but within the expiryAt of the associated message) to proceed through the access-list time-checks
-	return uint64(time.Now().Unix() + 1000)
+	return uint64(time.Now().Unix()) + interopExecutingDescriptorClockToleranceSeconds
 }
