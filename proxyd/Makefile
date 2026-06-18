@@ -25,6 +25,10 @@ test:
 	go test -v ./...
 .PHONY: test
 
+test-race:
+	go test -race ./...
+.PHONY: test-race
+
 lint:
 	golangci-lint run ./...
 .PHONY: lint

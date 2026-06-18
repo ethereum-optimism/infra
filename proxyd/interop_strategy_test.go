@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -400,4 +402,41 @@ func TestExecutingDescriptor_NearFutureTimestampAndExpiryTimeout(t *testing.T) {
 	require.GreaterOrEqual(t, got.Timestamp, before+interopExecutingDescriptorClockToleranceSeconds)
 	require.LessOrEqual(t, got.Timestamp, after+interopExecutingDescriptorClockToleranceSeconds,
 		"timestamp must be near-future (clock skew only), not a large forward window")
+}
+
+func newMulticallStrategy(urls []string) *multicallStrategyImpl {
+	return NewMulticallStrategy(urls,
+		WithChainID(420120003),
+		WithValidateAndDeduplicateInteropAccessList(false),
+	)
+}
+
+// multicallValidateGoroutineRunning reports whether any goroutine is still
+// parked inside multicallStrategyImpl.ValidateAccessList. After the call
+// returns, the broadcast sender goroutines exit on their own; anything left
+// behind is a leak.
+func multicallValidateGoroutineRunning() bool {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	return strings.Contains(string(buf[:n]), "multicallStrategyImpl).ValidateAccessList")
+}
+
+// TestMulticall_DoesNotLeakGoroutine guards against the dual-receiver pattern:
+// a drainer goroutine that out-lives the call by blocking forever on the
+// result channel (and can steal verdicts from the main collector). The result
+// channel is buffered to the number of backends, so no sender ever blocks even
+// when we return early on the first success, and no drainer is needed.
+func TestMulticall_DoesNotLeakGoroutine(t *testing.T) {
+	urls := []string{
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+		newInteropFilterServer(t, 200, validInteropFilterResponse, 0),
+	}
+	s := newMulticallStrategy(urls)
+	require.NoError(t, s.ValidateAccessList(context.Background(), testAccessList))
+
+	require.Eventually(t, func() bool {
+		return !multicallValidateGoroutineRunning()
+	}, 2*time.Second, 20*time.Millisecond,
+		"multicall strategy leaked a goroutine blocked on its result channel")
 }
