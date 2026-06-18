@@ -157,31 +157,17 @@ func (s *multicallStrategyImpl) ValidateAccessList(ctx context.Context, interopA
 		return nil
 	}
 
+	// Buffer one slot per backend so every sender can deliver its result without
+	// blocking, even after we return early on the first success and stop
+	// receiving. Senders complete and exit on their own.
 	resultChan := make(chan error, len(s.urls))
 	// concurrently broadcast the checkAccessList operation to all the validating backends
-	var wg sync.WaitGroup
 	for _, url := range s.urls {
-		wg.Add(1)
 		go func(ctx context.Context, url string) {
-			defer wg.Done()
 			_, _, err := performCheckAccessListOp(ctx, accessListToValidate, url, s.chainID)
 			resultChan <- err
 		}(ctx, url)
 	}
-
-	// goroutine which waits for all the sender goroutines created above to be done, and drain and close the resultChan
-	go func() {
-		wg.Wait()
-		log.Debug(
-			"all interop validating backends have responded",
-			"source", "rpc",
-			"req_id", GetReqID(ctx),
-			"method", "eth_sendRawTransaction",
-		)
-		for range resultChan {
-		} // drain the channel
-		close(resultChan)
-	}()
 
 	// Success: if at least one backend responds successfully
 	// Failure: the first error response if all the backends respond with an error
