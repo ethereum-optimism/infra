@@ -1,0 +1,31 @@
+package:
+  name: cci-stats
+  version: "0.0.0"
+  epoch: 0
+  description: cci-stats — CI statistics runner
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - go-1.26
+  environment:
+    CGO_ENABLED: "0"
+
+pipeline:
+  - uses: go/build
+    with:
+      modroot: cci-stats
+      packages: ./cmd/runner
+      output: cci-stats
+      go-package: go-1.26
+      ldflags: -s -w
+
+  - uses: strip

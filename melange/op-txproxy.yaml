@@ -1,0 +1,31 @@
+package:
+  name: op-txproxy
+  version: "0.0.0"
+  epoch: 0
+  description: op-txproxy — OP Stack transaction proxy
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - go-1.26
+  environment:
+    CGO_ENABLED: "0"
+
+pipeline:
+  - uses: go/build
+    with:
+      modroot: op-txproxy
+      packages: ./cmd
+      output: op-txproxy
+      go-package: go-1.26
+      ldflags: -s -w
+
+  - uses: strip

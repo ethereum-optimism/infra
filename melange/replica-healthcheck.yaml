@@ -1,0 +1,26 @@
+package:
+  name: replica-healthcheck
+  version: "0.0.0"
+  epoch: 0
+  description: replica-healthcheck — OP Stack replica health checker
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - nodejs-22
+      - yarn
+      - build-base
+
+pipeline:
+  - uses: yarn/build
+    with:
+      output: replica-healthcheck
+      subdir: replica-healthcheck

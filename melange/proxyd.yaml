@@ -1,0 +1,31 @@
+package:
+  name: proxyd
+  version: "0.0.0"
+  epoch: 0
+  description: proxyd — OP Stack RPC request router and proxy
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - go-1.26
+  environment:
+    CGO_ENABLED: "1"
+
+pipeline:
+  - uses: go/build
+    with:
+      modroot: proxyd
+      packages: ./cmd/proxyd
+      output: proxyd
+      go-package: go-1.26
+      ldflags: -s -w
+
+  - uses: strip

@@ -1,0 +1,15 @@
+name: Install binary symlink under /app for Helm chart compatibility.
+
+# Helm charts for OP Stack infra services expect binaries at /app/<name>.
+# Melange's go/build installs to /usr/bin/<name>. This pipeline creates a
+# /app/<name> → /usr/bin/<name> symlink so both paths work.
+
+inputs:
+  binary-name:
+    description: Binary filename (e.g. "pms"), installed at /usr/bin/<binary-name>
+    required: true
+
+pipeline:
+  - runs: |
+      mkdir -p "${{targets.destdir}}/app"
+      ln -sf "/usr/bin/${{inputs.binary-name}}" "${{targets.destdir}}/app/${{inputs.binary-name}}"
