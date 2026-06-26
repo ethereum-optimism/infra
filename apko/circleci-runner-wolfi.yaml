@@ -1,0 +1,87 @@
+# Wolfi/apko CircleCI base image. Ships the clang/libclang toolchain,
+# protobuf toolchain, sccache, and Go/Rust tools used by CI jobs.
+# Unlike a service image this is a base: no single entrypoint, and it provides
+# a non-root `circleci` user (uid 1001) and the shell/coreutils/git exec
+# environment CircleCI jobs assume in place of cimg/base.
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+  packages:
+    # CircleCI runtime / exec environment (parity with cimg/base)
+    - wolfi-baselayout
+    - ca-certificates-bundle
+    - glibc
+    - libgcc
+    - libstdc++
+    - busybox
+    - bash
+    - coreutils
+    - git
+    - openssh-client
+    - curl
+    # Toolchain (mirrors the Dockerfile apt package set)
+    - build-base            # build-essential / gcc toolchain
+    - clang-19              # clang + /usr/lib/libclang.so for bindgen (reth-mdbx-sys)
+    - libclang-cpp-19       # libclang-cpp runtime
+    - mold                  # faster linker used by Rust jobs
+    - protoc                # protobuf-compiler
+    - protobuf-dev          # libprotobuf-dev, including google/protobuf/*.proto
+    - sqlite-dev            # libsqlite3-dev
+    - tpm2-tss-dev          # libtss2-dev
+    - pkgconf               # pkg-config
+    - sccache               # Wolfi-maintained sccache (replaces pinned 0.9.1)
+    # CircleCI / mise-managed toolchain baseline
+    - circleci-runner
+    - go-1.26
+    - rust-1.94
+
+environment:
+  PATH: /home/circleci/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+  HOME: /home/circleci
+
+# CircleCI jobs expect a non-root `circleci` user (uid 1001, as in cimg/base)
+# with a writable home for rustup/cargo.
+accounts:
+  groups:
+    - groupname: circleci
+      gid: 1001
+  users:
+    - username: circleci
+      uid: 1001
+      gid: 1001
+      homedir: /home/circleci
+      shell: /bin/bash
+  run-as: 1001
+
+paths:
+  - path: /home/circleci
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local/bin
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local/bin/mise
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+
+entrypoint:
+  command: /bin/bash
+
+annotations:
+  org.opencontainers.image.source: https://github.com/ethereum-optimism/infra
+  org.opencontainers.image.title: circleci-runner-wolfi
+  org.opencontainers.image.description: CircleCI base image with clang, protobuf, sccache, mise, Go, and Rust for Optimism CI jobs

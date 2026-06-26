@@ -1,0 +1,23 @@
+package:
+  name: circleci-runner
+  version: "2026.2.2"
+  epoch: 0
+  description: CircleCI runner tooling for Optimism CI jobs
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+
+pipeline:
+  - uses: circleci-runner/install
+
+  - uses: strip

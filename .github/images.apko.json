@@ -1,0 +1,168 @@
+{
+  "shared_paths": [
+    ".github/images.apko.json",
+    ".github/workflows/build-images.apko.yaml",
+    "melange/pipelines/**",
+    "go.mod"
+  ],
+  "melange_archs": [
+    "x86_64",
+    "aarch64"
+  ],
+  "apko_archs": "amd64,arm64",
+  "release": {
+    "tag_regex": "^([^/]+)/(v.+)$",
+    "service_match": 1,
+    "version_match": 2,
+    "publish_tag": "${version}",
+    "source_ref": "${ref_name}"
+  },
+  "default_runners": {
+    "x86_64": "ubuntu-24.04",
+    "aarch64": "ubuntu-24.04-arm"
+  },
+  "melange": {
+    "cci-stats": {},
+    "op-conductor-mon": {},
+    "op-signer": {},
+    "op-txproxy": {},
+    "op-ufm": {},
+    "peer-mgmt-service": {},
+    "proxyd": {},
+    "op-conductor-ops": {},
+    "replica-healthcheck": {},
+    "circleci-runner": {}
+  },
+  "images": {
+    "cci-stats": {
+      "needs_melange": [
+        "cci-stats"
+      ],
+      "paths": [
+        "cci-stats/**"
+      ],
+      "nexus_paths": [
+        "melange/cci-stats.yaml",
+        "apko/cci-stats.yaml"
+      ],
+      "smoke_test": "cci-stats --help"
+    },
+    "op-conductor-mon": {
+      "needs_melange": [
+        "op-conductor-mon"
+      ],
+      "paths": [
+        "op-conductor-mon/**"
+      ],
+      "nexus_paths": [
+        "melange/op-conductor-mon.yaml",
+        "apko/op-conductor-mon.yaml"
+      ],
+      "smoke_test": "op-conductor-mon --help"
+    },
+    "op-signer": {
+      "needs_melange": [
+        "op-signer"
+      ],
+      "paths": [
+        "op-signer/**"
+      ],
+      "nexus_paths": [
+        "melange/op-signer.yaml",
+        "apko/op-signer.yaml"
+      ],
+      "smoke_test": "op-signer --help"
+    },
+    "op-txproxy": {
+      "needs_melange": [
+        "op-txproxy"
+      ],
+      "paths": [
+        "op-txproxy/**"
+      ],
+      "nexus_paths": [
+        "melange/op-txproxy.yaml",
+        "apko/op-txproxy.yaml"
+      ],
+      "smoke_test": "op-txproxy --help"
+    },
+    "op-ufm": {
+      "needs_melange": [
+        "op-ufm"
+      ],
+      "paths": [
+        "op-ufm/**"
+      ],
+      "nexus_paths": [
+        "melange/op-ufm.yaml",
+        "apko/op-ufm.yaml"
+      ],
+      "smoke_test": "ufm --help"
+    },
+    "peer-mgmt-service": {
+      "needs_melange": [
+        "peer-mgmt-service"
+      ],
+      "paths": [
+        "peer-mgmt-service/**"
+      ],
+      "nexus_paths": [
+        "melange/peer-mgmt-service.yaml",
+        "apko/peer-mgmt-service.yaml"
+      ],
+      "smoke_test": "pms --help"
+    },
+    "proxyd": {
+      "needs_melange": [
+        "proxyd"
+      ],
+      "paths": [
+        "proxyd/**"
+      ],
+      "nexus_paths": [
+        "melange/proxyd.yaml",
+        "apko/proxyd.yaml"
+      ],
+      "smoke_test": "proxyd --help"
+    },
+    "op-conductor-ops": {
+      "needs_melange": [
+        "op-conductor-ops"
+      ],
+      "paths": [
+        "op-conductor-ops/**"
+      ],
+      "nexus_paths": [
+        "melange/op-conductor-ops.yaml",
+        "apko/op-conductor-ops.yaml"
+      ],
+      "smoke_test": "op-conductor-ops --help"
+    },
+    "replica-healthcheck": {
+      "needs_melange": [
+        "replica-healthcheck"
+      ],
+      "paths": [
+        "replica-healthcheck/**"
+      ],
+      "nexus_paths": [
+        "melange/replica-healthcheck.yaml",
+        "apko/replica-healthcheck.yaml"
+      ],
+      "smoke_test": "node --version"
+    },
+    "circleci-runner-wolfi": {
+      "type": "base",
+      "needs_melange": [
+        "circleci-runner"
+      ],
+      "paths": [],
+      "nexus_paths": [
+        "melange/circleci-runner.yaml",
+        "melange/pipelines/circleci-runner/**",
+        "apko/circleci-runner-wolfi.yaml"
+      ],
+      "smoke_test": "mise --version,go version,rustc --version,cargo --version,sccache --version,clang --version,mold --version,protoc --version,cc --version,pkg-config --version,git --version,bash --version"
+    }
+  }
+}

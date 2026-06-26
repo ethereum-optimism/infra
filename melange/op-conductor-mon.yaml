@@ -1,0 +1,38 @@
+package:
+  name: op-conductor-mon
+  version: "0.0.0"
+  epoch: 0
+  description: op-conductor-mon — OP Stack conductor monitor
+  copyright:
+    - license: MIT
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - go-1.26
+  environment:
+    CGO_ENABLED: "0"
+
+pipeline:
+  - uses: go/build
+    with:
+      modroot: op-conductor-mon
+      packages: ./cmd/monitor
+      output: op-conductor-mon
+      go-package: go-1.26
+      ldflags: -s -w -checklinkname=0
+
+  # The k8s chart invokes command: ["/app/op-conductor-mon", ...] (legacy WORKDIR
+  # convention). go/build installs to /usr/bin; add a /app compat symlink so the
+  # image is drop-in for the existing chart.
+  - runs: |
+      install -d "${{targets.destdir}}/app"
+      ln -sf /usr/bin/op-conductor-mon "${{targets.destdir}}/app/op-conductor-mon"
+
+  - uses: strip
