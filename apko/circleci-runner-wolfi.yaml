@@ -52,7 +52,31 @@ accounts:
     - username: circleci
       uid: 1001
       gid: 1001
+      homedir: /home/circleci
+      shell: /bin/bash
   run-as: 1001
+
+paths:
+  - path: /home/circleci
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local/bin
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
+  - path: /home/circleci/.local/bin/mise
+    type: permissions
+    uid: 1001
+    gid: 1001
+    permissions: 0o755
 
 entrypoint:
   command: /bin/bash
