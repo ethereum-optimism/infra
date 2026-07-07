@@ -236,6 +236,23 @@ func TestConsensus(t *testing.T) {
 		require.Equal(t, 1, len(consensusGroup))
 	})
 
+	t.Run("prevent using a backend when eth_syncing errors", func(t *testing.T) {
+		reset()
+		// A transport/RPC-level failure (unlike overrideNotInSync, which returns a
+		// successful-but-not-synced response) exercises the concurrent isELInSync
+		// error path in UpdateBackend.
+		nodes["node1"].handler.AddOverride(&ms.MethodTemplate{
+			Method:       "eth_syncing",
+			ResponseCode: 500,
+		})
+		update()
+
+		consensusGroup := bg.Consensus.GetConsensusGroup()
+		require.NotContains(t, consensusGroup, nodes["node1"].backend)
+		require.False(t, bg.Consensus.IsBanned(nodes["node1"].backend))
+		require.Equal(t, 1, len(consensusGroup))
+	})
+
 	t.Run("advance consensus", func(t *testing.T) {
 		reset()
 
