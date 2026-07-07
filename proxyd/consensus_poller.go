@@ -3,7 +3,6 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,12 +15,6 @@ import (
 
 const (
 	DefaultPollerInterval = 1 * time.Second
-)
-
-var (
-	errZeroLatestBlock    = errors.New("backend responded with blockheight 0 for latest block")
-	errZeroSafeBlock      = errors.New("backend responded with blockheight 0 for safe block")
-	errZeroFinalizedBlock = errors.New("backend responded with blockheight 0 for finalized block")
 )
 
 type OnConsensusBroken func()
@@ -395,20 +388,68 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			return
 		}
 	} else {
-		var err error
-		inSync, err = cp.isELInSync(ctx, be)
-		RecordConsensusBackendInSync(be, err == nil && inSync)
-		if err != nil {
-			log.Warn("error updating backend sync state", "name", be.Name, "err", err)
+		// eth_syncing and the three eth_getBlockByNumber calls are independent RPCs against
+		// the same backend — fire them concurrently instead of one after another so a single
+		// poll cycle costs one round trip, not four. Errors/results are collected and then
+		// checked in the same precedence order the old sequential code used, so behavior on
+		// failure (which error wins, what gets banned/logged) is unchanged.
+		var inSyncErr, latestErr, safeErr, finalizedErr error
+
+		var wg sync.WaitGroup
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			inSync, inSyncErr = cp.isELInSync(ctx, be)
+		}()
+		go func() {
+			defer wg.Done()
+			latestBlockNumber, latestBlockHash, latestErr = cp.fetchELBlock(ctx, be, "latest")
+		}()
+		go func() {
+			defer wg.Done()
+			safeBlockNumber, _, safeErr = cp.fetchELBlock(ctx, be, "safe")
+		}()
+		go func() {
+			defer wg.Done()
+			finalizedBlockNumber, _, finalizedErr = cp.fetchELBlock(ctx, be, "finalized")
+		}()
+		wg.Wait()
+
+		RecordConsensusBackendInSync(be, inSyncErr == nil && inSync)
+		if inSyncErr != nil {
+			log.Warn("error updating backend sync state", "name", be.Name, "err", inSyncErr)
 			return
 		}
-		els, err := cp.fetchELState(ctx, be)
-		if err != nil {
+
+		if latestErr != nil {
+			log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", latestErr)
 			return
 		}
-		latestBlockNumber, latestBlockHash = els.LatestBlockNumber, els.LatestBlockHash
-		safeBlockNumber = els.SafeBlockNumber
-		finalizedBlockNumber = els.FinalizedBlockNumber
+		if latestBlockNumber == 0 {
+			log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
+			be.intermittentErrorsSlidingWindow.Incr()
+			return
+		}
+
+		if safeErr != nil {
+			log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", safeErr)
+			return
+		}
+		if safeBlockNumber == 0 {
+			log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
+			be.intermittentErrorsSlidingWindow.Incr()
+			return
+		}
+
+		if finalizedErr != nil {
+			log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", finalizedErr)
+			return
+		}
+		if finalizedBlockNumber == 0 {
+			log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
+			be.intermittentErrorsSlidingWindow.Incr()
+			return
+		}
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
@@ -766,48 +807,6 @@ func (cp *ConsensusPoller) findConsensusBlock(
 	}
 }
 
-// fetchELState fetches the block numbers and hashes for the latest, safe, and finalized
-// tags from a single EL backend, performing zero-value validation inline.
-func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlockState, error) {
-	var s ELBlockState
-	var err error
-
-	s.LatestBlockNumber, s.LatestBlockHash, err = cp.fetchELBlock(ctx, be, "latest")
-	if err != nil {
-		log.Warn("error updating backend - latest block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
-	}
-	if s.LatestBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for latest block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroLatestBlock
-	}
-
-	s.SafeBlockNumber, _, err = cp.fetchELBlock(ctx, be, "safe")
-	if err != nil {
-		log.Warn("error updating backend - safe block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
-	}
-	if s.SafeBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for safe block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroSafeBlock
-	}
-
-	s.FinalizedBlockNumber, _, err = cp.fetchELBlock(ctx, be, "finalized")
-	if err != nil {
-		log.Warn("error updating backend - finalized block will not be updated", "name", be.Name, "err", err)
-		return ELBlockState{}, err
-	}
-	if s.FinalizedBlockNumber == 0 {
-		log.Warn("error backend responded a 200 with blockheight 0 for finalized block", "name", be.Name)
-		be.intermittentErrorsSlidingWindow.Incr()
-		return ELBlockState{}, errZeroFinalizedBlock
-	}
-
-	return s, nil
-}
-
 // fetchELBlock calls eth_getBlockByNumber and returns the block number and hash.
 func (cp *ConsensusPoller) fetchELBlock(ctx context.Context, be *Backend, block string) (blockNumber hexutil.Uint64, blockHash string, err error) {
 	var rpcRes RPCRes
@@ -915,14 +914,6 @@ func (cp *ConsensusPoller) GetLastUpdate(be *Backend) time.Time {
 	defer bs.backendStateMux.Unlock()
 	bs.backendStateMux.Lock()
 	return bs.lastUpdate
-}
-
-// ELBlockState holds the block numbers and hashes fetched from an EL backend in a single polling cycle.
-type ELBlockState struct {
-	LatestBlockNumber    hexutil.Uint64
-	LatestBlockHash      string
-	SafeBlockNumber      hexutil.Uint64
-	FinalizedBlockNumber hexutil.Uint64
 }
 
 // backendStateUpdate is a value object passed to setBackendState to avoid

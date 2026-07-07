@@ -241,20 +241,26 @@ func (m *MockBackend) Requests() []*RecordedRequest {
 }
 
 func (m *MockBackend) wrappedHandler(w http.ResponseWriter, r *http.Request) {
-	m.mtx.Lock()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		panic(err)
 	}
 	clone := r.Clone(context.Background())
 	clone.Body = io.NopCloser(bytes.NewReader(body))
+
+	// Only the shared request log and handler reference need the lock. Holding it across
+	// ServeHTTP would force concurrent requests to this backend to execute one at a time,
+	// unlike a real backend, which breaks tests that rely on genuinely concurrent RPCs.
+	m.mtx.Lock()
 	m.requests = append(m.requests, &RecordedRequest{
 		Method:  r.Method,
 		Headers: r.Header.Clone(),
 		Body:    body,
 	})
-	m.handler.ServeHTTP(w, clone)
+	handler := m.handler
 	m.mtx.Unlock()
+
+	handler.ServeHTTP(w, clone)
 }
 
 type MockWSBackend struct {
