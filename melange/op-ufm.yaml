@@ -18,6 +18,8 @@ environment:
       - go-1.26
   environment:
     CGO_ENABLED: "1"
+    GITCOMMIT: "melange"
+    GITDATE: "0"
 
 pipeline:
   - uses: go/build
@@ -26,6 +28,6 @@ pipeline:
       packages: ./cmd/ufm
       output: ufm
       go-package: go-1.26
-      ldflags: -s -w
+      ldflags: -s -w -X main.GitVersion=${{package.version}} -X main.GitCommit=$GITCOMMIT -X main.GitDate=$GITDATE
 
   - uses: strip

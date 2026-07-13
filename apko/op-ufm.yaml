@@ -26,6 +26,7 @@ accounts:
 
 entrypoint:
   command: /usr/bin/ufm
+cmd: /etc/ufm/config.toml
 
 annotations:
   org.opencontainers.image.source: https://github.com/ethereum-optimism/infra

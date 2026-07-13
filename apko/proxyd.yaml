@@ -26,6 +26,7 @@ accounts:
 
 entrypoint:
   command: /usr/bin/proxyd
+cmd: /etc/proxyd/proxyd.toml
 
 annotations:
   org.opencontainers.image.source: https://github.com/ethereum-optimism/infra
