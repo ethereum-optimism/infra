@@ -87,27 +87,28 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(payload))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create validation request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute validation request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read validation response body: %w", err)
 	}
 
 	var validationRes txValidationResponse
 	if err := json.Unmarshal(body, &validationRes); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal validation response: %w", err)
 	}
 
 	if msg := validationRes.ErrorCode + validationRes.ErrorMessage; msg != "" {
+		log.Error("tx validation service error", "req_id", GetReqID(ctx), "error", msg)
 		return nil, ErrInternal
 	}
 	return validationRes.Unauthorized, nil
@@ -199,7 +200,7 @@ func validateTransactions(
 			"error", validationErr,
 			"tx_count", len(txs),
 		)
-		return ErrInternal
+		return ErrTransactionRejected // the fail_closed behaviour is about rejecting the transaction
 	}
 
 	for txHash, isUnauthorized := range validationResults {

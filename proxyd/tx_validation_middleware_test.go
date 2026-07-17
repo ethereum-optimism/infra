@@ -243,7 +243,7 @@ func TestValidateTransactions_ServiceError_FailClosed(t *testing.T) {
 	// With failOpen=false, service errors should reject transaction
 	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, false)
 	require.Error(t, err)
-	require.Equal(t, ErrInternal, err)
+	require.Equal(t, ErrTransactionRejected, err)
 }
 
 func TestTxValidationClient_HTTPServer(t *testing.T) {
