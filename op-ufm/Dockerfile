@@ -1,10 +1,10 @@
-FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
+FROM chainguard/wolfi-base:latest AS builder
 
 ARG GITCOMMIT=docker
 ARG GITDATE=docker
 ARG GITVERSION=docker
 
-RUN apk add make jq git gcc musl-dev linux-headers
+RUN apk add --no-cache go-1.26 make jq git build-base
 
 COPY ./op-ufm /app
 
@@ -12,7 +12,7 @@ WORKDIR /app
 
 RUN make ufm
 
-FROM dhi.io/alpine-base:3.23
+FROM chainguard/wolfi-base:latest
 
 VOLUME /etc/ufm
 

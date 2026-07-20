@@ -1,5 +1,5 @@
-ARG BUILDER_IMAGE=golang:1.26.1-alpine3.23
-ARG RUNTIME_IMAGE=dhi.io/alpine-base:3.23
+ARG BUILDER_IMAGE=chainguard/wolfi-base:latest
+ARG RUNTIME_IMAGE=chainguard/wolfi-base:latest
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -7,7 +7,7 @@ ARG GITCOMMIT=docker
 ARG GITDATE=docker
 ARG GITVERSION=docker
 
-RUN apk add make jq git gcc musl-dev linux-headers
+RUN apk add --no-cache go-1.26 make jq git build-base
 
 COPY ./proxyd /app
 
