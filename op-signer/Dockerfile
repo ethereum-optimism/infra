@@ -1,12 +1,12 @@
-FROM dhi.io/golang:1.26-alpine3.23-dev AS builder
+FROM chainguard/wolfi-base:latest AS builder
 
 COPY ./op-signer /app
 
 WORKDIR /app
-RUN apk --no-cache add make jq bash git alpine-sdk
+RUN apk --no-cache add go-1.26 make jq bash git build-base
 RUN make build
 
-FROM dhi.io/alpine-base:3.23
+FROM chainguard/wolfi-base:latest
 
 WORKDIR /app
 

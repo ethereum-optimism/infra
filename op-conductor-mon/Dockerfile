@@ -1,11 +1,12 @@
-FROM dhi.io/golang:1.24-dev AS builder
+FROM chainguard/wolfi-base:latest AS builder
 
 COPY ./op-conductor-mon /app
 
 WORKDIR /app
+RUN apk add --no-cache go-1.26 make jq bash git build-base
 RUN CGO_ENABLED=0 make build
 
-FROM dhi.io/alpine-base:3.22
+FROM chainguard/wolfi-base:latest
 
 COPY --from=builder /app/bin/op-conductor-mon /app/op-conductor-mon
 
