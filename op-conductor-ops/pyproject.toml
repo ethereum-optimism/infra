@@ -18,7 +18,7 @@ rich = "^13.0.0"
 op-conductor-ops = "op_conductor_ops.cli:app"
 
 [tool.poetry.group.dev.dependencies]
-black = "^25.1.0"
+black = ">=25.1.0"
 
 [build-system]
 requires = ["poetry-core"]
