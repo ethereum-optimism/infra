@@ -12,7 +12,6 @@ from typing_extensions import Annotated
 from .config import read_config
 from .utils import make_rpc_payload, print_boolean, print_warn, print_error
 
-
 app = typer.Typer(
     help="CLI for managing OP Conductor sequencers. WARNING: This tool can cause a network outage if used improperly."
 )
