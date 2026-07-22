@@ -1,0 +1,15 @@
+# Address for the webhook to listen on
+listen_addr: 0.0.0.0:8080
+
+# List of GitHub teams who can trigger the bot.
+admin_teams:
+  - engineering
+
+# Repo org
+org: ethereum-optimism
+# Repo name
+repo: optimism
+# Go-compatible regex pattern to trigger the bot. Your regex must contain a group named <sha> that matches a commit SHA.
+trigger_pattern: "(?m)^/ci authorize (?P<sha>[a-f0-9]+)$"
+# Name of the commit status to post to GitHub.
+status_name: "bailiff"
