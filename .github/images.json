@@ -5,6 +5,11 @@
     "go.mod"
   ],
   "images": {
+    "bailiff": {
+      "context": "bailiff",
+      "dockerfile": "Dockerfile",
+      "paths": ["bailiff/**"]
+    },
     "cci-stats": {
       "context": ".",
       "dockerfile": "cci-stats/Dockerfile",
