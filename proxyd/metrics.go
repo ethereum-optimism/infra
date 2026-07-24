@@ -22,10 +22,22 @@ const (
 	RPCRequestSourceWS   = "ws"
 
 	BackendProxyd    = "proxyd"
+	BackendCache     = "cache"
 	SourceClient     = "client"
 	SourceBackend    = "backend"
 	MethodUnknown    = "unknown"
 	MethodNotAllowed = "method_not_allowed"
+
+	statusCodeOK             = "200"
+	statusCodeBadRequest     = "400"
+	statusCodeInternal       = "500"
+	statusCodeGatewayTimeout = "504"
+
+	// StatusCodeRelayed marks a WS call relayed to the backend whose response
+	// cannot be correlated back to the request (eth_subscribe / eth_unsubscribe).
+	// Deliberately non-numeric so status_code=~"2.." and status_code=~"5.." can
+	// never match it: such a call is neither a success nor a failure.
+	StatusCodeRelayed = "relayed"
 )
 
 var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000}
@@ -948,6 +960,41 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// statusCodeForRPCRes derives the HTTP-equivalent status code for a single
+// JSON-RPC response, for per-call metrics.
+//
+// An error with HTTPErrorCode == 0 means the backend answered HTTP 200 while
+// carrying a JSON-RPC error — doForward only stamps HTTPErrorCode when the
+// upstream status was non-200. Those are request-level faults ("already known",
+// "nonce too low", "execution reverted") and MUST map to 400, not 500: reporting
+// them as 5xx would burn the error-rate SLO on routine client errors.
+func statusCodeForRPCRes(res *RPCRes) string {
+	if res == nil {
+		// Should not happen; a nil response slot is an internal failure.
+		return statusCodeInternal
+	}
+	if !res.IsError() {
+		return statusCodeOK
+	}
+	if res.Error.HTTPErrorCode != 0 {
+		return strconv.Itoa(res.Error.HTTPErrorCode)
+	}
+	return statusCodeBadRequest
+}
+
+// backendNameFromServedBy extracts the backend name from a servedBy string,
+// which ForwardRequestToBackendGroup formats as "<group>/<backend>". Falls back
+// to BackendProxyd so the label is never empty.
+func backendNameFromServedBy(servedBy string) string {
+	if i := strings.LastIndex(servedBy, "/"); i >= 0 {
+		servedBy = servedBy[i+1:]
+	}
+	if servedBy == "" {
+		return BackendProxyd
+	}
+	return servedBy
 }
 
 const (
