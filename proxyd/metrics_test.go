@@ -3,6 +3,7 @@ package proxyd
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,4 +82,83 @@ func TestBackendNameFromServedBy(t *testing.T) {
 			require.Equal(t, tt.want, backendNameFromServedBy(tt.servedBy))
 		})
 	}
+}
+
+func TestRecordRPCCallDefaultsEmptyLabels(t *testing.T) {
+	before := gatherCounter(t, "proxyd_rpc_calls_total", map[string]string{
+		"backend_name": "proxyd",
+		"method_name":  "unknown",
+		"status_code":  "500",
+		"transport":    "http",
+	})
+
+	// Empty backend and method must not produce empty label values.
+	RecordRPCCall("", "", statusCodeInternal, RPCRequestSourceHTTP)
+
+	after := gatherCounter(t, "proxyd_rpc_calls_total", map[string]string{
+		"backend_name": "proxyd",
+		"method_name":  "unknown",
+		"status_code":  "500",
+		"transport":    "http",
+	})
+	require.Equal(t, before+1, after)
+}
+
+func TestRecordRPCCallsFillsNilSlotsWithFallback(t *testing.T) {
+	labels := func(status string) map[string]string {
+		return map[string]string{
+			"backend_name": "reth-0",
+			"method_name":  "eth_chainId",
+			"status_code":  status,
+			"transport":    "http",
+		}
+	}
+	before200 := gatherCounter(t, "proxyd_rpc_calls_total", labels("200"))
+	before504 := gatherCounter(t, "proxyd_rpc_calls_total", labels("504"))
+
+	responses := []*RPCRes{{Result: "0x1"}, nil}
+	methods := []string{"eth_chainId", "eth_chainId"}
+	backends := []string{"reth-0", "reth-0"}
+
+	recordRPCCalls(responses, methods, backends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
+
+	require.Equal(t, before200+1, gatherCounter(t, "proxyd_rpc_calls_total", labels("200")))
+	require.Equal(t, before504+1, gatherCounter(t, "proxyd_rpc_calls_total", labels("504")))
+}
+
+func TestRecordRPCNotification(t *testing.T) {
+	labels := map[string]string{"backend_name": "reth-0"}
+	before := gatherCounter(t, "proxyd_rpc_notifications_total", labels)
+	RecordRPCNotification("reth-0")
+	require.Equal(t, before+1, gatherCounter(t, "proxyd_rpc_notifications_total", labels))
+}
+
+// gatherCounter returns the current value of the counter named `name` whose
+// labels are a superset of `labels`, or 0 if no such series exists yet.
+func gatherCounter(t *testing.T, name string, labels map[string]string) float64 {
+	t.Helper()
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, mf := range mfs {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			got := make(map[string]string, len(m.GetLabel()))
+			for _, l := range m.GetLabel() {
+				got[l.GetName()] = l.GetValue()
+			}
+			match := true
+			for k, v := range labels {
+				if got[k] != v {
+					match = false
+					break
+				}
+			}
+			if match {
+				return m.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
 }

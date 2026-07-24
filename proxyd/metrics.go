@@ -183,6 +183,28 @@ var (
 		"status_code",
 	})
 
+	rpcCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_calls_total",
+		Help: "Count of client-initiated JSON-RPC calls by the outcome the client received. " +
+			"One increment per call: batch elements are counted individually, as is each WS frame. " +
+			"Recorded after retries and failover, so it reflects what the client saw. " +
+			"Excludes consensus-poller traffic.",
+	}, []string{
+		"backend_name",
+		"method_name",
+		"status_code",
+		"transport",
+	})
+
+	rpcNotificationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_notifications_total",
+		Help:      "Count of client-bound WS subscription notifications delivered.",
+	}, []string{
+		"backend_name",
+	})
+
 	httpRequestDurationSumm = promauto.NewSummary(prometheus.SummaryOpts{
 		Namespace:  MetricsNamespace,
 		Name:       "http_request_duration_seconds",
@@ -982,6 +1004,42 @@ func statusCodeForRPCRes(res *RPCRes) string {
 		return strconv.Itoa(res.Error.HTTPErrorCode)
 	}
 	return statusCodeBadRequest
+}
+
+// RecordRPCCall records one client-initiated JSON-RPC call and the outcome the
+// client received. Callers must pass a method name already bounded by
+// Server.metricMethodName or WSProxier.metricMethodName — never a raw
+// client-supplied method string, which is unbounded label cardinality.
+func RecordRPCCall(backendName, method, statusCode, transport string) {
+	if backendName == "" {
+		backendName = BackendProxyd
+	}
+	if method == "" {
+		method = MethodUnknown
+	}
+	rpcCallsTotal.WithLabelValues(backendName, method, statusCode, transport).Inc()
+}
+
+// RecordRPCNotification records one client-bound WS subscription notification.
+func RecordRPCNotification(backendName string) {
+	if backendName == "" {
+		backendName = BackendProxyd
+	}
+	rpcNotificationsTotal.WithLabelValues(backendName).Inc()
+}
+
+// recordRPCCalls records one call per element of a handled request set. Slots
+// whose response was never filled — an early return aborted the request set —
+// are recorded with fallbackStatus, which must match the status the HTTP handler
+// goes on to write to the client.
+func recordRPCCalls(responses []*RPCRes, methods, backends []string, transport, fallbackStatus string) {
+	for i := range responses {
+		status := fallbackStatus
+		if responses[i] != nil {
+			status = statusCodeForRPCRes(responses[i])
+		}
+		RecordRPCCall(backends[i], methods[i], status, transport)
+	}
 }
 
 // backendNameFromServedBy extracts the backend name from a servedBy string,
