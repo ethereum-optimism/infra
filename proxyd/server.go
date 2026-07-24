@@ -908,14 +908,27 @@ func (s *Server) shouldHandleWSRPC(req *RPCReq) bool {
 }
 
 func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) *RPCRes {
+	res, servedBy := s.handleWSRPCInner(ctx, req, isLimited, bypassLimit)
+	RecordRPCCall(
+		backendNameFromServedBy(servedBy),
+		s.metricMethodName(req.Method),
+		statusCodeForRPCRes(res),
+		RPCRequestSourceWS,
+	)
+	return res
+}
+
+// handleWSRPCInner resolves a single WS RPC and reports which backend served it.
+// The empty string means no backend was reached — proxyd answered locally.
+func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) (*RPCRes, string) {
 	if s.rpcMethodMappings[req.Method] == "" {
 		RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
-		return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted)
+		return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted), ""
 	}
 
 	localRes, group, txHash := s.prepareRPCForForward(ctx, req, isLimited, bypassLimit, RPCRequestSourceWS)
 	if localRes != nil {
-		return localRes
+		return localRes, ""
 	}
 
 	forwardStart := time.Now()
@@ -928,7 +941,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"req_id", GetReqID(ctx),
 			"err", err,
 		)
-		return NewRPCErrorRes(req.ID, err)
+		return NewRPCErrorRes(req.ID, err), servedBy
 	}
 	if len(res) == 0 {
 		log.Error(
@@ -936,7 +949,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"backend_group", group,
 			"req_id", GetReqID(ctx),
 		)
-		return NewRPCErrorRes(req.ID, ErrInternal)
+		return NewRPCErrorRes(req.ID, ErrInternal), servedBy
 	}
 
 	if txHash != nil && s.enableTxHashLogging {
@@ -950,7 +963,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 		)
 	}
 
-	return res[0]
+	return res[0], servedBy
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
