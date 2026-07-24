@@ -815,7 +815,7 @@ func (cp *ConsensusPoller) fetchELBlock(ctx context.Context, be *Backend, block 
 		"backend", be.Name,
 		"block", block,
 	)
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "eth_getBlockByNumber", block, false)
+	err = be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "eth_getBlockByNumber", block, false)
 	if err != nil {
 		return 0, "", err
 	}
@@ -849,7 +849,7 @@ func (cp *ConsensusPoller) getPeerCount(ctx context.Context, be *Backend) (count
 // fetchELPeerCount calls net_peerCount and returns the peer count.
 func (cp *ConsensusPoller) fetchELPeerCount(ctx context.Context, be *Backend) (count uint64, err error) {
 	var rpcRes RPCRes
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "net_peerCount")
+	err = be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "net_peerCount")
 	if err != nil {
 		return 0, err
 	}
@@ -867,7 +867,7 @@ func (cp *ConsensusPoller) fetchELPeerCount(ctx context.Context, be *Backend) (c
 // isELInSync checks if an EL backend is in sync by calling eth_syncing.
 func (cp *ConsensusPoller) isELInSync(ctx context.Context, be *Backend) (result bool, err error) {
 	var rpcRes RPCRes
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "eth_syncing")
+	err = be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "eth_syncing")
 	if err != nil {
 		return false, err
 	}

@@ -635,11 +635,11 @@ func (b *Backend) Override(opts ...BackendOpt) {
 	}
 }
 
-func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool) ([]*RPCRes, error) {
-	return b.ForwardWithSource(ctx, reqs, isBatch, RPCRequestSourceHTTP)
+func (b *Backend) Forward(ctx context.Context, reqs []*RPCReq, isBatch bool, origin string) ([]*RPCRes, error) {
+	return b.ForwardWithSource(ctx, reqs, isBatch, RPCRequestSourceHTTP, origin)
 }
 
-func (b *Backend) ForwardWithSource(ctx context.Context, reqs []*RPCReq, isBatch bool, source string) ([]*RPCRes, error) {
+func (b *Backend) ForwardWithSource(ctx context.Context, reqs []*RPCReq, isBatch bool, source string, origin string) ([]*RPCRes, error) {
 	var lastError error
 	// <= to account for the first attempt not technically being
 	// a retry
@@ -665,7 +665,7 @@ func (b *Backend) ForwardWithSource(ctx context.Context, reqs []*RPCReq, isBatch
 			"max_attempts", b.maxRetries+1,
 			"method", metricLabelMethod,
 		)
-		res, err := b.doForward(ctx, reqs, isBatch)
+		res, err := b.doForward(ctx, reqs, isBatch, origin)
 		switch err {
 		case nil: // do nothing
 		case ErrBackendResponseTooLarge:
@@ -767,7 +767,7 @@ func (b *Backend) ProxyWS(clientConn *websocket.Conn, methodWhitelist *StringSet
 }
 
 // ForwardRPC makes a call directly to a backend and populate the response into `res`
-func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method string, params ...any) error {
+func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, origin string, id string, method string, params ...any) error {
 	jsonParams, err := json.Marshal(params)
 	if err != nil {
 		return err
@@ -780,7 +780,7 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 		ID:      []byte(id),
 	}
 
-	slicedRes, err := b.doForward(ctx, []*RPCReq{&rpcReq}, false)
+	slicedRes, err := b.doForward(ctx, []*RPCReq{&rpcReq}, false, origin)
 	if err != nil {
 		return err
 	}
@@ -796,7 +796,7 @@ func (b *Backend) ForwardRPC(ctx context.Context, res *RPCRes, id string, method
 	return nil
 }
 
-func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, error) {
+func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, origin string) ([]*RPCRes, error) {
 	// we are concerned about network error rates, so we record 1 request independently of how many are in the batch
 	b.networkRequestsSlidingWindow.Incr()
 
@@ -920,6 +920,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		metricLabelMethod,
 		strconv.Itoa(httpRes.StatusCode),
 		strconv.FormatBool(isBatch),
+		origin,
 	).Inc()
 
 	// if the response in unsuccessful and its status code is unexpected, consider that as an unhealthy backend
@@ -1102,11 +1103,11 @@ func (bg *BackendGroup) Primaries() []*Backend {
 }
 
 // NOTE: BackendGroup Forward contains the log for balancing with consensus aware
-func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool) ([]*RPCRes, string, error) {
-	return bg.ForwardWithSource(ctx, rpcReqs, isBatch, RPCRequestSourceHTTP)
+func (bg *BackendGroup) Forward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, origin string) ([]*RPCRes, string, error) {
+	return bg.ForwardWithSource(ctx, rpcReqs, isBatch, RPCRequestSourceHTTP, origin)
 }
 
-func (bg *BackendGroup) ForwardWithSource(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, source string) ([]*RPCRes, string, error) {
+func (bg *BackendGroup) ForwardWithSource(ctx context.Context, rpcReqs []*RPCReq, isBatch bool, source string, origin string) ([]*RPCRes, string, error) {
 	if len(rpcReqs) == 0 {
 		return nil, "", nil
 	}
@@ -1135,14 +1136,14 @@ func (bg *BackendGroup) ForwardWithSource(ctx context.Context, rpcReqs []*RPCReq
 	// When routing_strategy is set to 'multicall' the request will be forward to all backends
 	// and return the first successful response
 	if bg.GetRoutingStrategy() == MulticallRoutingStrategy && isValidMulticallTx(rpcReqs) && !isBatch {
-		backendResp := bg.ExecuteMulticall(ctx, rpcReqs, source)
+		backendResp := bg.ExecuteMulticall(ctx, rpcReqs, source, origin)
 		return backendResp.RPCRes, backendResp.ServedBy, backendResp.error
 	}
 
 	ch := make(chan BackendGroupRPCResponse)
 	go func() {
 		defer close(ch)
-		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch, source)
+		backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, backends, ctx, isBatch, source, origin)
 		if backendResp.error != nil && errors.Is(backendResp.error, ErrNoBackends) {
 			RecordUnserviceableRequest(ctx, source)
 		}
@@ -1184,7 +1185,7 @@ type multicallTuple struct {
 }
 
 // Note: rpcReqs should only contain 1 request of 'sendRawTransactions'
-func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq, source string) *BackendGroupRPCResponse {
+func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq, source string, origin string) *BackendGroupRPCResponse {
 	// Create ctx without cancel so background tasks process
 	// after original request returns
 	bgCtx := context.WithoutCancel(ctx)
@@ -1197,7 +1198,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq,
 	ch := make(chan *multicallTuple, len(bg.Backends))
 	for _, backend := range bg.Backends {
 		wg.Add(1)
-		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch, source)
+		go bg.MulticallRequest(backend, rpcReqs, &wg, bgCtx, ch, source, origin)
 	}
 
 	go func() {
@@ -1217,7 +1218,7 @@ func (bg *BackendGroup) ExecuteMulticall(ctx context.Context, rpcReqs []*RPCReq,
 	return resp
 }
 
-func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple, source string) {
+func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg *sync.WaitGroup, ctx context.Context, ch chan *multicallTuple, source string, origin string) {
 	defer wg.Done()
 	log.Debug("forwarding multicall request to backend",
 		"req_id", GetReqID(ctx),
@@ -1226,7 +1227,7 @@ func (bg *BackendGroup) MulticallRequest(backend *Backend, rpcReqs []*RPCReq, wg
 	)
 
 	RecordBackendGroupMulticallRequest(bg, backend.Name)
-	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false, source)
+	backendResp := bg.ForwardRequestToBackendGroup(rpcReqs, []*Backend{backend}, ctx, false, source, origin)
 
 	multicallResp := &multicallTuple{
 		response:    backendResp,
@@ -1849,6 +1850,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 	ctx context.Context,
 	isBatch bool,
 	source string,
+	origin string,
 ) *BackendGroupRPCResponse {
 	for _, back := range backends {
 		res := make([]*RPCRes, 0)
@@ -1858,7 +1860,7 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 		if len(rpcReqs) > 0 {
 
-			res, err = back.ForwardWithSource(ctx, rpcReqs, isBatch, source)
+			res, err = back.ForwardWithSource(ctx, rpcReqs, isBatch, source, origin)
 
 			// below are errors that we explicitly handle so that we don't
 			// mark this request as unserviceable (unserviceable requests

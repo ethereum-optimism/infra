@@ -226,18 +226,18 @@ func TestAllowedStatusCodes(t *testing.T) {
 	require.Equal(t, []int{400, 413}, healthyBackend.allowedStatusCodes) // default allowed status codes
 
 	healthyBackend.allowedStatusCodes = []int{} // no need to explicitly allow 200
-	res, err := healthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	res, err := healthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false, RPCRequestOriginClient)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.Nil(t, res[0].Error) // denoting a successful RPC response
 
-	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false, RPCRequestOriginClient)
 	require.Error(t, err)
 	require.Nil(t, res)
 	require.ErrorContains(t, err, "response code 503")
 
 	unhealthyBackend.allowedStatusCodes = []int{503}
-	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false)
+	res, err = unhealthyBackend.doForward(context.Background(), []*RPCReq{{ID: []byte("1"), Method: "eth_blockNumber"}}, false, RPCRequestOriginClient)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	// denotes the RPC response holding the error

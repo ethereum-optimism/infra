@@ -41,7 +41,7 @@ func TestExecuteMulticallUnserviceableMetric(t *testing.T) {
 		}
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP)
+		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP, RPCRequestOriginClient)
 		require.Error(t, resp.error)
 		require.True(t, errors.Is(resp.error, ErrNoBackends))
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
@@ -65,7 +65,7 @@ func TestExecuteMulticallUnserviceableMetric(t *testing.T) {
 		}
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP)
+		resp := bg.ExecuteMulticall(context.Background(), req, RPCRequestSourceHTTP, RPCRequestOriginClient)
 		require.NoError(t, resp.error)
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
 
@@ -104,7 +104,7 @@ func TestForwardUnserviceableMetric(t *testing.T) {
 		require.NotEqual(t, MulticallRoutingStrategy, bg.GetRoutingStrategy())
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		_, _, err := bg.Forward(context.Background(), req, false)
+		_, _, err := bg.Forward(context.Background(), req, false, RPCRequestOriginClient)
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrNoBackends))
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
@@ -128,7 +128,7 @@ func TestForwardUnserviceableMetric(t *testing.T) {
 		}
 
 		before := getUnserviceableRequestCount(RPCRequestSourceHTTP)
-		_, _, err := bg.Forward(context.Background(), req, false)
+		_, _, err := bg.Forward(context.Background(), req, false, RPCRequestOriginClient)
 		require.NoError(t, err)
 		after := getUnserviceableRequestCount(RPCRequestSourceHTTP)
 

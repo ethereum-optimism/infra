@@ -739,7 +739,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			end := int(math.Min(float64(start+s.maxUpstreamBatchSize), float64(len(cacheMisses))))
 			elems := cacheMisses[start:end]
 			forwardStart := time.Now()
-			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch)
+			res, sb, err := s.BackendGroups[group.backendGroup].Forward(ctx, createBatchRequest(elems), isBatch, RPCRequestOriginClient)
 			forwardDuration := time.Since(forwardStart)
 			servedBy[sb] = true
 
@@ -884,7 +884,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 	}
 
 	forwardStart := time.Now()
-	res, servedBy, err := s.BackendGroups[group].ForwardWithSource(ctx, []*RPCReq{req}, false, RPCRequestSourceWS)
+	res, servedBy, err := s.BackendGroups[group].ForwardWithSource(ctx, []*RPCReq{req}, false, RPCRequestSourceWS, RPCRequestOriginClient)
 	forwardDuration := time.Since(forwardStart)
 	if err != nil {
 		log.Error(

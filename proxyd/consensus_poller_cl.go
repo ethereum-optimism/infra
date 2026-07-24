@@ -253,7 +253,7 @@ func (cp *ConsensusPoller) fetchCLSyncStatus(ctx context.Context, be *Backend) (
 	log.Trace("executing fetchCLSyncStatus for backend",
 		"backend", be.Name,
 	)
-	if err := be.ForwardRPC(ctx, &rpcRes, "67", "optimism_syncStatus"); err != nil {
+	if err := be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "optimism_syncStatus"); err != nil {
 		return nil, nil, err
 	}
 
@@ -529,7 +529,7 @@ func (cp *ConsensusPoller) verifyCLOutputRoots(
 // fetchCLOutputRoot calls optimism_outputAtBlock and returns the outputRoot hash.
 func (cp *ConsensusPoller) fetchCLOutputRoot(ctx context.Context, be *Backend, block hexutil.Uint64) (string, error) {
 	var rpcRes RPCRes
-	if err := be.ForwardRPC(ctx, &rpcRes, "67", "optimism_outputAtBlock", block.String()); err != nil {
+	if err := be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "optimism_outputAtBlock", block.String()); err != nil {
 		return "", err
 	}
 	jsonMap, ok := rpcRes.Result.(map[string]interface{})
@@ -550,7 +550,7 @@ func (cp *ConsensusPoller) fetchCLPeerCount(ctx context.Context, be *Backend) (c
 	log.Trace("executing fetchCLPeerCount",
 		"backend", be.Name,
 	)
-	err = be.ForwardRPC(ctx, &rpcRes, "67", "opp2p_peerStats")
+	err = be.ForwardRPC(ctx, &rpcRes, RPCRequestOriginConsensus, "67", "opp2p_peerStats")
 	if err != nil {
 		return 0, err
 	}

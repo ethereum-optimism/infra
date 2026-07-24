@@ -21,6 +21,9 @@ const (
 	RPCRequestSourceHTTP = "http"
 	RPCRequestSourceWS   = "ws"
 
+	RPCRequestOriginClient    = "client"
+	RPCRequestOriginConsensus = "consensus"
+
 	BackendProxyd    = "proxyd"
 	SourceClient     = "client"
 	SourceBackend    = "backend"
@@ -65,6 +68,7 @@ var (
 		"method_name",
 		"status_code",
 		"batched",
+		"origin",
 	})
 
 	rpcInteropFilterChecksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
