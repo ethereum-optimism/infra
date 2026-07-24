@@ -126,6 +126,16 @@ func TestRecordRPCCallsFillsNilSlotsWithFallback(t *testing.T) {
 	require.Equal(t, before504+1, gatherCounter(t, "proxyd_rpc_calls_total", labels("504")))
 }
 
+func TestServerMetricMethodNameBoundsCardinality(t *testing.T) {
+	s := &Server{rpcMethodMappings: map[string]string{"eth_chainId": "replicas"}}
+
+	require.Equal(t, "eth_chainId", s.metricMethodName("eth_chainId"))
+	require.Equal(t, MethodUnknown, s.metricMethodName(""))
+	// An arbitrary client-supplied method must never become a label value.
+	require.Equal(t, MethodNotAllowed, s.metricMethodName("evil_"+string(make([]byte, 128))))
+	require.Equal(t, MethodNotAllowed, s.metricMethodName("not_whitelisted"))
+}
+
 func TestRecordRPCNotification(t *testing.T) {
 	labels := map[string]string{"backend_name": "reth-0"}
 	before := gatherCounter(t, "proxyd_rpc_notifications_total", labels)

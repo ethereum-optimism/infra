@@ -655,6 +655,20 @@ func (s *Server) prepareRPCForForward(
 	return nil, group, txHash
 }
 
+// metricMethodName bounds the method_name label cardinality. Method names are
+// client-supplied and reachable by unauthenticated clients, so anything outside
+// the configured whitelist collapses to MethodNotAllowed rather than becoming an
+// unbounded Prometheus label value.
+func (s *Server) metricMethodName(method string) string {
+	if method == "" {
+		return MethodUnknown
+	}
+	if s.rpcMethodMappings[method] == "" {
+		return MethodNotAllowed
+	}
+	return method
+}
+
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
 	// A request set is transformed into groups of batches.
 	// Each batch group maps to a forwarded JSON-RPC batch request (subject to maxUpstreamBatchSize constraints)
@@ -668,6 +682,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 	}
 
 	responses := make([]*RPCRes, len(reqs))
+	// Per-element attribution for proxyd_rpc_calls_total, parallel to responses.
+	callMethods := make([]string, len(reqs))
+	callBackends := make([]string, len(reqs))
 	batches := make(map[batchGroup][]batchElem)
 	ids := make(map[string]int, len(reqs))
 	txHashes := make(map[int]common.Hash) // tracks tx hashes by request index for forwarding logs
@@ -677,11 +694,15 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		if err != nil {
 			log.Info("error parsing RPC call", "source", "rpc", "err", err)
 			responses[i] = NewRPCErrorRes(nil, err)
+			callMethods[i] = MethodUnknown
+			callBackends[i] = BackendProxyd
 			continue
 		}
 
 		// Simple health check
 		if len(reqs) == 1 && parsedReq.Method == proxydHealthzMethod {
+			// Deliberately not recorded in proxyd_rpc_calls_total: this is a probe,
+			// not client RPC traffic, and would dilute the SLO denominator.
 			res := &RPCRes{
 				ID:      parsedReq.ID,
 				JSONRPC: JSONRPCVersion,
@@ -690,9 +711,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			return []*RPCRes{res}, false, "", nil
 		}
 
+		callMethods[i] = s.metricMethodName(parsedReq.Method)
+
 		localRes, group, txHash := s.prepareRPCForForward(ctx, parsedReq, isLimited, bypassLimit, RPCRequestSourceHTTP)
 		if localRes != nil {
 			responses[i] = localRes
+			callBackends[i] = BackendProxyd
 			continue
 		}
 		if txHash != nil {
@@ -716,6 +740,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			backendRes, _ := s.cache.GetRPC(ctx, req.Req)
 			if backendRes != nil {
 				responses[req.Index] = backendRes
+				callBackends[req.Index] = BackendCache
 				cached = true
 			} else {
 				cacheMisses = append(cacheMisses, req)
@@ -732,6 +757,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 					"batch_index", i,
 				)
 				batchRPCShortCircuitsTotal.Inc()
+				// HandleRPC writes ErrGatewayTimeout (504) for this error.
+				recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
 				return nil, false, "", context.DeadlineExceeded
 			}
 
@@ -746,6 +773,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
+					// HandleRPC writes ErrInvalidRequest (400) for these errors.
+					recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeBadRequest)
 					return nil, false, "", err
 				}
 				log.Error(
@@ -776,8 +805,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				}
 			}
 
+			// sb is "" when the forward failed outright, which backendNameFromServedBy
+			// resolves to BackendProxyd — such a batch was never served by a backend.
+			forwardedBy := backendNameFromServedBy(sb)
 			for i := range elems {
 				responses[elems[i].Index] = res[i]
+				callBackends[elems[i].Index] = forwardedBy
 
 				// TODO(inphi): batch put these
 				if res[i].Error == nil && res[i].Result != nil {
@@ -800,6 +833,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		}
 		servedByString += sb
 	}
+
+	recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeInternal)
 
 	return responses, cached, servedByString, nil
 }
