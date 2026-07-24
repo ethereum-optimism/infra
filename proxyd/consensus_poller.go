@@ -508,7 +508,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	currentConsensusBlockNumber := cp.GetLatestBlockNumber()
 
 	// get the candidates for the consensus group
-	candidates := cp.getConsensusCandidates()
+	candidates, exclusionReasons := cp.getConsensusCandidates()
 
 	var lowestLatestBlock hexutil.Uint64
 	var lowestLatestBlockHash string
@@ -613,7 +613,11 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			group = append(group, be)
 			consensusBackendsNames = append(consensusBackendsNames, be.Name)
 		} else {
-			filteredBackendsNames = append(filteredBackendsNames, be.Name)
+			reason, ok := exclusionReasons[be]
+			if !ok {
+				reason = "unknown"
+			}
+			filteredBackendsNames = append(filteredBackendsNames, fmt.Sprintf("%s(%s)", be.Name, reason))
 		}
 	}
 
@@ -953,16 +957,22 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) 
 
 // getConsensusCandidates will search for candidates in the primary group,
 // if there are none it will search for candidates in he fallback group
-func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
+// It also returns the exclusion reason for each backend that was filtered out, so callers
+// can log why the consensus group is empty or degraded.
+func (cp *ConsensusPoller) getConsensusCandidates() (map[*Backend]*backendState, map[*Backend]string) {
 
-	healthyPrimaries := cp.FilterCandidates(cp.backendGroup.Primaries())
+	healthyPrimaries, primaryReasons := cp.filterCandidates(cp.backendGroup.Primaries())
 
 	RecordHealthyCandidates(cp.backendGroup, len(healthyPrimaries))
 	if len(healthyPrimaries) > 0 {
-		return healthyPrimaries
+		return healthyPrimaries, primaryReasons
 	}
 
-	return cp.FilterCandidates(cp.backendGroup.Fallbacks())
+	fallbacks, fallbackReasons := cp.filterCandidates(cp.backendGroup.Fallbacks())
+	for be, reason := range fallbackReasons {
+		primaryReasons[be] = reason
+	}
+	return fallbacks, primaryReasons
 }
 
 // filterCandidates find out what backends are the candidates to be in the consensus group
@@ -983,8 +993,18 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 //   - (CL mode) finalized and local_safe blocks are at or above the current group consensus,
 //     preventing a restarting backend from dragging consensus backward
 func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*backendState {
+	candidates, _ := cp.filterCandidates(backends)
+	return candidates
+}
+
+// filterCandidates is FilterCandidates plus the per-backend exclusion reason for every
+// backend it filtered out. Reasons are short, stable tokens suitable for log fields:
+// banned, unhealthy, low_peer_count, not_in_sync, finalized_below_consensus,
+// local_safe_below_consensus, stale_state, lagging_latest_block.
+func (cp *ConsensusPoller) filterCandidates(backends []*Backend) (map[*Backend]*backendState, map[*Backend]string) {
 
 	candidates := make(map[*Backend]*backendState, len(cp.backendGroup.Backends))
+	reasons := make(map[*Backend]string, len(cp.backendGroup.Backends))
 
 	var consensusFinalized, consensusLocalSafe hexutil.Uint64
 	if cp.consensusLayer {
@@ -1000,9 +1020,11 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 			continue
 		}
 		if bs.IsBanned() {
+			reasons[be] = "banned"
 			continue
 		}
 		if !be.IsHealthy() {
+			reasons[be] = "unhealthy"
 			continue
 		}
 		if !be.skipPeerCountCheck && bs.peerCount < cp.minPeerCount {
@@ -1011,9 +1033,11 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 				"peer_count", bs.peerCount,
 				"min_peer_count", cp.minPeerCount,
 			)
+			reasons[be] = "low_peer_count"
 			continue
 		}
 		if !be.skipIsSyncingCheck && !bs.inSync {
+			reasons[be] = "not_in_sync"
 			continue
 		}
 		if cp.consensusLayer {
@@ -1023,6 +1047,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 					"backend_finalized", bs.finalizedBlockNumber,
 					"consensus_finalized", consensusFinalized,
 				)
+				reasons[be] = "finalized_below_consensus"
 				continue
 			}
 			if consensusLocalSafe > 0 && bs.localSafeBlockNumber < consensusLocalSafe {
@@ -1031,10 +1056,12 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 					"backend_local_safe", bs.localSafeBlockNumber,
 					"consensus_local_safe", consensusLocalSafe,
 				)
+				reasons[be] = "local_safe_below_consensus"
 				continue
 			}
 		}
 		if bs.lastUpdate.Add(cp.maxUpdateThreshold).Before(time.Now()) {
+			reasons[be] = "stale_state"
 			continue
 		}
 
@@ -1061,7 +1088,8 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 	// remove lagging backends from the candidates
 	for _, be := range lagging {
 		delete(candidates, be)
+		reasons[be] = "lagging_latest_block"
 	}
 
-	return candidates
+	return candidates, reasons
 }
