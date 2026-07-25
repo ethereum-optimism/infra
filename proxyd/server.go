@@ -664,6 +664,15 @@ func (s *Server) metricMethodName(method string) string {
 	if method == "" {
 		return MethodUnknown
 	}
+	if method == "eth_accounts" {
+		// eth_accounts is answered locally by prepareRPCForForward, before the
+		// rpcMethodMappings lookup (proxyd never forwards it to a backend), so it
+		// is deliberately absent from rpc_method_mappings. Without this
+		// passthrough it would collapse to MethodNotAllowed and pollute that
+		// bucket — the one operators grep to find clients calling unsupported
+		// methods — with 200s.
+		return method
+	}
 	if s.rpcMethodMappings[method] == "" {
 		return MethodNotAllowed
 	}
@@ -758,8 +767,16 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 					"batch_index", i,
 				)
 				batchRPCShortCircuitsTotal.Inc()
-				// HandleRPC writes ErrGatewayTimeout (504) for this error.
-				recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
+				// The whole request set failed wholesale: this function returns a bare
+				// error, so HandleRPC writes a single error envelope for the entire
+				// batch (ErrGatewayTimeout/504 on the batch path; the single-request
+				// path has no DeadlineExceeded case and writes ErrInternal/500 instead).
+				// The client receives none of the per-element results computed so far
+				// (cache hits, locally-answered elements, or minibatches already
+				// forwarded in a prior iteration) — every element must be recorded with
+				// the fallback status, not the per-element status that never reached
+				// the client.
+				recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
 				return nil, false, "", context.DeadlineExceeded
 			}
 
@@ -774,8 +791,11 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
-					// HandleRPC writes ErrInvalidRequest (400) for these errors.
-					recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeBadRequest)
+					// HandleRPC writes ErrInvalidRequest (400) for these errors, as a
+					// single envelope for the whole request set — see the short-circuit
+					// case above for why every element must use the fallback status
+					// rather than any per-element result computed so far.
+					recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, statusCodeBadRequest)
 					return nil, false, "", err
 				}
 				log.Error(
@@ -848,6 +868,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Reject new WebSocket connections during drain
 	if s.isDraining.Load() {
+		// httpResponseCodesTotal is deliberately NOT incremented here (unlike the
+		// HTTP drain rejection above): WS responses never flow through
+		// writeRPCRes/writeBatchRPCRes, so no successful WS response is in this
+		// metric's population. Counting only the WS drain rejection would add a
+		// numerator entry with no denominator baseline.
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}

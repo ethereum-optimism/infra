@@ -91,6 +91,66 @@ func TestRPCCallsCountsEveryBatchElement(t *testing.T) {
 	require.Equal(t, before+3, sumRPCCalls(t, okLabels))
 }
 
+// TestRPCCallsMixedBatchAcrossMinibatches covers spec §5's "an N-element batch
+// with mixed outcomes produces exactly N increments with the expected status
+// distribution" — the claim the SLO rests on. The batch has 12 elements against
+// max_upstream_batch_size = 10 (testdata/rpc_calls.toml): 10 net_version calls
+// plus 1 eth_chainId call share a backend group and are forwarded across two
+// minibatches (10 then 1) — the exact multi-minibatch shape the original
+// short-circuit undercount defect (IMP-1) lived in — while 1 non-whitelisted
+// method is rejected locally without ever reaching the forward loop at all.
+func TestRPCCallsMixedBatchAcrossMinibatches(t *testing.T) {
+	InitLogger()
+
+	router := NewBatchRPCResponseRouter()
+	for i := 1; i <= 10; i++ {
+		router.SetRoute("net_version", fmt.Sprintf("%d", i), "0x1")
+	}
+	router.SetRoute("eth_chainId", "11", "0x1")
+
+	good := NewMockBackend(router)
+	defer good.Close()
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", good.URL()))
+
+	config := ReadConfig("rpc_calls")
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+
+	client := NewProxydClient("http://127.0.0.1:8545")
+
+	// Mixed status, and mixed backend attribution, within one envelope.
+	okLabels := map[string]string{
+		"backend_name": "good",
+		"method_name":  "eth_chainId",
+		"status_code":  "200",
+		"transport":    "http",
+	}
+	notAllowedLabels := map[string]string{
+		"backend_name": "proxyd",
+		"method_name":  "method_not_allowed",
+		"status_code":  "403",
+		"transport":    "http",
+	}
+	beforeOK := sumRPCCalls(t, okLabels)
+	beforeNotAllowed := sumRPCCalls(t, notAllowedLabels)
+
+	reqs := make([]*proxyd.RPCReq, 0, 12)
+	for i := 1; i <= 10; i++ {
+		reqs = append(reqs, NewRPCReq(fmt.Sprintf("%d", i), "net_version", nil))
+	}
+	reqs = append(reqs, NewRPCReq("11", "eth_chainId", nil))
+	// ErrMethodNotWhitelisted.HTTPErrorCode == 403 (backend.go) — asserted below.
+	reqs = append(reqs, NewRPCReq("12", "definitely_not_whitelisted", nil))
+
+	_, statusCode, err := client.SendBatchRPC(reqs...)
+	require.NoError(t, err)
+	require.Equal(t, 200, statusCode)
+
+	require.Equal(t, beforeOK+1, sumRPCCalls(t, okLabels))
+	require.Equal(t, beforeNotAllowed+1, sumRPCCalls(t, notAllowedLabels))
+}
+
 func TestRPCCallsBoundsNonWhitelistedMethodName(t *testing.T) {
 	InitLogger()
 

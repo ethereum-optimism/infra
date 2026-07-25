@@ -1485,6 +1485,16 @@ func (w *WSProxier) metricMethodName(method string) string {
 	if method == "" {
 		return MethodUnknown
 	}
+	// MethodUnknown and MethodNotAllowed are already-bounded sentinels — e.g.
+	// clientPump passes MethodUnknown through here when a frame fails
+	// ParseRPCReq. Pass them through unchanged rather than re-running them
+	// through the whitelist, where the literal strings "unknown" and
+	// "method_not_allowed" would themselves fail the Has check and get
+	// relabeled MethodNotAllowed, mislabeling a parse failure as a
+	// not-allowed method.
+	if method == MethodUnknown || method == MethodNotAllowed {
+		return method
+	}
 	if !w.methodWhitelist.Has(method) {
 		return MethodNotAllowed
 	}
@@ -1563,7 +1573,6 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		}
 
 		if w.requestHandler != nil && w.requestHandler(req) {
-			// handleWSRPC records this call; do not record it here too.
 			if !w.acquireRequestSlot() {
 				msg = mustMarshalJSON(NewRPCErrorRes(req.ID, ErrTooManyRequests))
 				RecordRPCError(ctx, BackendProxyd, req.Method, ErrTooManyRequests)
@@ -1575,6 +1584,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				}
 				continue
 			}
+			// handleWSRPC records this call; do not record it here too.
 			go w.processClientRPC(ctx, msgType, req, errC)
 			continue
 		}

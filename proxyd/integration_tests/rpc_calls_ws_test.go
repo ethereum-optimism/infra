@@ -28,12 +28,22 @@ func TestRPCCallsWSRelayedSubscribeAndNotifications(t *testing.T) {
 	InitLogger()
 
 	// The WS backend answers the subscribe, then pushes two notifications.
+	// NB: this callback runs on the mock backend's read-loop goroutine, not the
+	// test goroutine, so require.NoError (which calls t.FailNow -> Goexit) would
+	// be undefined behavior here. Use t.Errorf instead so a write failure is
+	// reported rather than hanging the test to its timeout.
 	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
-		require.NoError(t, conn.WriteMessage(websocket.TextMessage,
-			[]byte(`{"jsonrpc":"2.0","id":1,"result":"0xcafe"}`)))
+		if err := conn.WriteMessage(websocket.TextMessage,
+			[]byte(`{"jsonrpc":"2.0","id":1,"result":"0xcafe"}`)); err != nil {
+			t.Errorf("writing subscribe response: %v", err)
+			return
+		}
 		for i := 0; i < 2; i++ {
-			require.NoError(t, conn.WriteMessage(websocket.TextMessage,
-				[]byte(`{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0xcafe","result":{}}}`)))
+			if err := conn.WriteMessage(websocket.TextMessage,
+				[]byte(`{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0xcafe","result":{}}}`)); err != nil {
+				t.Errorf("writing notification %d: %v", i, err)
+				return
+			}
 		}
 	}, nil)
 	defer wsBackend.Close()

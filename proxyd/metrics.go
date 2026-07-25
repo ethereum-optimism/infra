@@ -1042,6 +1042,19 @@ func recordRPCCalls(responses []*RPCRes, methods, backends []string, transport, 
 	}
 }
 
+// recordRPCCallsAll records every call in a request set with the same status,
+// ignoring any per-element responses computed so far. Use it on exits where the
+// whole set failed wholesale and the client received a single error envelope
+// rather than any per-element results — e.g. cache hits or forwarded minibatches
+// from earlier loop iterations that succeeded before a later iteration aborted
+// the whole request. Those per-element outcomes never reached the client and
+// must not be reported as successes just because their slot was filled.
+func recordRPCCallsAll(methods, backends []string, transport, statusCode string) {
+	for i := range methods {
+		RecordRPCCall(backends[i], methods[i], statusCode, transport)
+	}
+}
+
 // backendNameFromServedBy extracts the backend name from a servedBy string,
 // which ForwardRequestToBackendGroup formats as "<group>/<backend>". Falls back
 // to BackendProxyd so the label is never empty.

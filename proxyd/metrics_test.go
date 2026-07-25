@@ -129,6 +129,36 @@ func TestRecordRPCCallsFillsNilSlotsWithFallback(t *testing.T) {
 	require.Equal(t, before504+1, gatherCounter(t, "proxyd_rpc_calls_total", labels("504")))
 }
 
+// TestRecordRPCCallsAllIgnoresPerElementResponses locks in the IMP-1 fix: on a
+// wholesale-failure exit, a slot that was already filled with a real success
+// (a cache hit, a locally-answered element, or a minibatch forwarded in a
+// prior loop iteration) must NOT be reported as a 200 just because a response
+// was computed for it — the client never saw it, only the single error
+// envelope. Every element must land on the fallback status.
+func TestRecordRPCCallsAllIgnoresPerElementResponses(t *testing.T) {
+	labels := func(status string) map[string]string {
+		return map[string]string{
+			"backend_name": "reth-0",
+			"method_name":  "eth_chainId",
+			"status_code":  status,
+			"transport":    "http",
+		}
+	}
+	before200 := gatherCounter(t, "proxyd_rpc_calls_total", labels("200"))
+	before504 := gatherCounter(t, "proxyd_rpc_calls_total", labels("504"))
+
+	// Three elements: two already have a filled, successful response (as they
+	// would after earlier minibatches/cache hits succeeded), one was never
+	// reached. recordRPCCallsAll must record all three as 504, none as 200.
+	methods := []string{"eth_chainId", "eth_chainId", "eth_chainId"}
+	backends := []string{"reth-0", "reth-0", "reth-0"}
+
+	recordRPCCallsAll(methods, backends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
+
+	require.Equal(t, before200, gatherCounter(t, "proxyd_rpc_calls_total", labels("200")))
+	require.Equal(t, before504+3, gatherCounter(t, "proxyd_rpc_calls_total", labels("504")))
+}
+
 func TestServerMetricMethodNameBoundsCardinality(t *testing.T) {
 	s := &Server{rpcMethodMappings: map[string]string{"eth_chainId": "replicas"}}
 
@@ -137,6 +167,10 @@ func TestServerMetricMethodNameBoundsCardinality(t *testing.T) {
 	// An arbitrary client-supplied method must never become a label value.
 	require.Equal(t, MethodNotAllowed, s.metricMethodName("evil_"+string(make([]byte, 128))))
 	require.Equal(t, MethodNotAllowed, s.metricMethodName("not_whitelisted"))
+	// eth_accounts is answered locally before the rpcMethodMappings lookup and
+	// is deliberately never mapped; it must pass through as itself rather than
+	// collapsing to MethodNotAllowed and polluting that bucket with 200s.
+	require.Equal(t, "eth_accounts", s.metricMethodName("eth_accounts"))
 }
 
 func TestRecordRPCNotification(t *testing.T) {
@@ -182,6 +216,12 @@ func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
 	require.Equal(t, "eth_subscribe", w.metricMethodName("eth_subscribe"))
 	require.Equal(t, MethodUnknown, w.metricMethodName(""))
 	require.Equal(t, MethodNotAllowed, w.metricMethodName("not_whitelisted"))
+	// Already-bounded sentinels (as clientPump passes through on a parse
+	// failure) must pass through unchanged, not get re-mapped by the whitelist
+	// check — the literal strings "unknown"/"method_not_allowed" are not
+	// themselves whitelisted methods.
+	require.Equal(t, MethodUnknown, w.metricMethodName(MethodUnknown))
+	require.Equal(t, MethodNotAllowed, w.metricMethodName(MethodNotAllowed))
 }
 
 func TestWriteBatchRPCResRecordsEnvelopeStatus(t *testing.T) {
