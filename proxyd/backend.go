@@ -1479,6 +1479,18 @@ func (w *WSProxier) Proxy(ctx context.Context) error {
 	return err
 }
 
+// metricMethodName bounds the method_name label cardinality for WS traffic. See
+// Server.metricMethodName — WS uses its own whitelist.
+func (w *WSProxier) metricMethodName(method string) string {
+	if method == "" {
+		return MethodUnknown
+	}
+	if !w.methodWhitelist.Has(method) {
+		return MethodNotAllowed
+	}
+	return method
+}
+
 func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 	for {
 		// Block until we get a message.
@@ -1526,6 +1538,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			)
 			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
 			RecordRPCError(ctx, BackendProxyd, method, err)
+			RecordRPCCall(BackendProxyd, w.metricMethodName(method), statusCodeForRPCRes(NewRPCErrorRes(id, err)), RPCRequestSourceWS)
 
 			// Send error response to client
 			err = w.writeClientConn(msgType, msg)
@@ -1540,6 +1553,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		if req.Method == "eth_accounts" {
 			msg = mustMarshalJSON(NewRPCRes(req.ID, emptyArrayResponse))
 			RecordRPCForward(ctx, BackendProxyd, "eth_accounts", RPCRequestSourceWS)
+			RecordRPCCall(BackendProxyd, "eth_accounts", statusCodeOK, RPCRequestSourceWS)
 			err = w.writeClientConn(msgType, msg)
 			if err != nil {
 				errC <- err
@@ -1549,9 +1563,11 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		}
 
 		if w.requestHandler != nil && w.requestHandler(req) {
+			// handleWSRPC records this call; do not record it here too.
 			if !w.acquireRequestSlot() {
 				msg = mustMarshalJSON(NewRPCErrorRes(req.ID, ErrTooManyRequests))
 				RecordRPCError(ctx, BackendProxyd, req.Method, ErrTooManyRequests)
+				RecordRPCCall(BackendProxyd, w.metricMethodName(req.Method), statusCodeForRPCRes(NewRPCErrorRes(req.ID, ErrTooManyRequests)), RPCRequestSourceWS)
 				err = w.writeClientConn(msgType, msg)
 				if err != nil {
 					errC <- err
@@ -1564,6 +1580,11 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		}
 
 		RecordRPCForward(ctx, w.backend.Name, req.Method, RPCRequestSourceWS)
+		// Counted at send time: this call's response returns asynchronously in
+		// backendPump with no id correlation back to this request, so its outcome
+		// is unknowable here. Counting at send time guarantees usage completeness
+		// at the cost of an unknown status.
+		RecordRPCCall(w.backend.Name, w.metricMethodName(req.Method), StatusCodeRelayed, RPCRequestSourceWS)
 		log.Info(
 			"forwarded WS message to backend",
 			"method", req.Method,
@@ -1654,6 +1675,13 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
 			log.Info("backend responded with error", "err", err)
 		} else {
+			// A backend message with no id is a subscription notification pushed by
+			// the backend, not a response to a client call. A message WITH an id is
+			// a response to a relayed call, already counted at send time in
+			// clientPump — counting it here would double-count.
+			if len(res.ID) == 0 {
+				RecordRPCNotification(w.backend.Name)
+			}
 			if res.IsError() {
 				log.Info(
 					"backend responded with RPC error",

@@ -172,3 +172,11 @@ func gatherCounter(t *testing.T, name string, labels map[string]string) float64 
 	}
 	return 0
 }
+
+func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
+	w := &WSProxier{methodWhitelist: NewStringSetFromStrings([]string{"eth_subscribe"})}
+
+	require.Equal(t, "eth_subscribe", w.metricMethodName("eth_subscribe"))
+	require.Equal(t, MethodUnknown, w.metricMethodName(""))
+	require.Equal(t, MethodNotAllowed, w.metricMethodName("not_whitelisted"))
+}
