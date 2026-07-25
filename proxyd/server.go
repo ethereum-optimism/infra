@@ -372,6 +372,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 
 	// Reject new requests during drain
 	if s.isDraining.Load() {
+		httpResponseCodesTotal.WithLabelValues(strconv.Itoa(http.StatusServiceUnavailable)).Inc()
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
@@ -1216,6 +1217,7 @@ func writeBatchRPCRes(ctx context.Context, w http.ResponseWriter, res []*RPCRes)
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
 		return
 	}
+	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(200)).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 

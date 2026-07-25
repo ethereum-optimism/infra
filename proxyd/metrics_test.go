@@ -1,6 +1,9 @@
 package proxyd
 
 import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -179,4 +182,19 @@ func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
 	require.Equal(t, "eth_subscribe", w.metricMethodName("eth_subscribe"))
 	require.Equal(t, MethodUnknown, w.metricMethodName(""))
 	require.Equal(t, MethodNotAllowed, w.metricMethodName("not_whitelisted"))
+}
+
+func TestWriteBatchRPCResRecordsEnvelopeStatus(t *testing.T) {
+	labels := map[string]string{"status_code": "200"}
+	before := gatherCounter(t, "proxyd_http_response_codes_total", labels)
+
+	rec := httptest.NewRecorder()
+	writeBatchRPCRes(context.Background(), rec, []*RPCRes{
+		{JSONRPC: JSONRPCVersion, Result: "0x1", ID: json.RawMessage("1")},
+		{JSONRPC: JSONRPCVersion, Result: "0x2", ID: json.RawMessage("2")},
+	})
+
+	require.Equal(t, 200, rec.Code)
+	// One increment per HTTP response, not per batch element.
+	require.Equal(t, before+1, gatherCounter(t, "proxyd_http_response_codes_total", labels))
 }
