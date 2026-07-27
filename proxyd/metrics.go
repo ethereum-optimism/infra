@@ -22,10 +22,22 @@ const (
 	RPCRequestSourceWS   = "ws"
 
 	BackendProxyd    = "proxyd"
+	BackendCache     = "cache"
 	SourceClient     = "client"
 	SourceBackend    = "backend"
 	MethodUnknown    = "unknown"
 	MethodNotAllowed = "method_not_allowed"
+
+	statusCodeOK             = "200"
+	statusCodeBadRequest     = "400"
+	statusCodeInternal       = "500"
+	statusCodeGatewayTimeout = "504"
+
+	// StatusCodeRelayed marks a WS call relayed to the backend whose response
+	// cannot be correlated back to the request (eth_subscribe / eth_unsubscribe).
+	// Deliberately non-numeric so status_code=~"2.." and status_code=~"5.." can
+	// never match it: such a call is neither a success nor a failure.
+	StatusCodeRelayed = "relayed"
 )
 
 var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000}
@@ -169,6 +181,28 @@ var (
 		Help:      "Count of total HTTP response codes.",
 	}, []string{
 		"status_code",
+	})
+
+	rpcCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_calls_total",
+		Help: "Count of client-initiated JSON-RPC calls by the outcome the client received. " +
+			"One increment per call: batch elements are counted individually, as is each WS frame. " +
+			"Recorded after retries and failover, so it reflects what the client saw. " +
+			"Excludes consensus-poller traffic.",
+	}, []string{
+		"backend_name",
+		"method_name",
+		"status_code",
+		"transport",
+	})
+
+	rpcNotificationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "rpc_notifications_total",
+		Help:      "Count of client-bound WS subscription notifications delivered.",
+	}, []string{
+		"backend_name",
 	})
 
 	httpRequestDurationSumm = promauto.NewSummary(prometheus.SummaryOpts{
@@ -948,6 +982,118 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// statusCodeForRPCRes derives the HTTP-equivalent status code for a single
+// JSON-RPC response, for per-call metrics.
+//
+// An error with HTTPErrorCode == 0 is, in the common case, a backend that
+// answered HTTP 200 while carrying a JSON-RPC error: doForward stamps
+// HTTPErrorCode only when the upstream status was non-200. Those are
+// request-level faults ("already known", "nonce too low", "execution reverted")
+// and MUST map to 400, not 500 — reporting them as 5xx would burn the error-rate
+// SLO on routine client errors.
+//
+// doForward is not the only writer. HTTPErrorCode is also set on proxyd's own
+// error table (backend.go) and, notably, on interop-filter failures:
+// ParseInteropError and interop_strategy.go copy the interop filter backend's
+// raw upstream HTTP status through verbatim. So the status_code label domain is
+// not proxyd's fixed table alone — it is that table plus whatever status the
+// filter emits (bounded by HTTP's 100-599, so label cardinality stays bounded,
+// but the values are partly sourced from a remote service). Those calls are
+// recorded with backend_name="proxyd", because the filter round-trip happens in
+// prepareRPCForForward before any backend is selected; an operator paging on
+// backend_name="proxyd" with a 5xx should treat the interop filter as a
+// candidate cause alongside proxyd itself.
+func statusCodeForRPCRes(res *RPCRes) string {
+	if res == nil {
+		// Should not happen; a nil response slot is an internal failure.
+		return statusCodeInternal
+	}
+	if !res.IsError() {
+		return statusCodeOK
+	}
+	if res.Error.HTTPErrorCode != 0 {
+		return strconv.Itoa(res.Error.HTTPErrorCode)
+	}
+	return statusCodeBadRequest
+}
+
+// RecordRPCCall records one client-initiated JSON-RPC call and the outcome the
+// client received. Callers must pass a method name already bounded by
+// Server.metricMethodName or WSProxier.metricMethodName — never a raw
+// client-supplied method string, which is unbounded label cardinality.
+func RecordRPCCall(backendName, method, statusCode, transport string) {
+	if backendName == "" {
+		backendName = BackendProxyd
+	}
+	if method == "" {
+		method = MethodUnknown
+	}
+	rpcCallsTotal.WithLabelValues(backendName, method, statusCode, transport).Inc()
+}
+
+// RecordRPCNotification records one client-bound WS subscription notification.
+func RecordRPCNotification(backendName string) {
+	if backendName == "" {
+		backendName = BackendProxyd
+	}
+	rpcNotificationsTotal.WithLabelValues(backendName).Inc()
+}
+
+// recordRPCCalls records one call per element of a handled request set. Slots
+// whose response was never filled — an early return aborted the request set —
+// are recorded with fallbackStatus, which must match the status the HTTP handler
+// goes on to write to the client.
+func recordRPCCalls(responses []*RPCRes, methods, backends []string, transport, fallbackStatus string) {
+	for i := range responses {
+		status := fallbackStatus
+		if responses[i] != nil {
+			status = statusCodeForRPCRes(responses[i])
+		}
+		RecordRPCCall(backends[i], methods[i], status, transport)
+	}
+}
+
+// recordRPCCallsAll records every call in a request set with the same status,
+// ignoring any per-element responses computed so far. Use it on exits where the
+// whole set failed wholesale and the client received a single error envelope
+// rather than any per-element results — e.g. cache hits or forwarded minibatches
+// from earlier loop iterations that succeeded before a later iteration aborted
+// the whole request. Those per-element outcomes never reached the client and
+// must not be reported as successes just because their slot was filled.
+func recordRPCCallsAll(methods, backends []string, transport, statusCode string) {
+	for i := range methods {
+		RecordRPCCall(backends[i], methods[i], statusCode, transport)
+	}
+}
+
+// deadlineShortCircuitStatus returns the status the HTTP handler goes on to write
+// to the client when handleBatchRPC short-circuits on an expired context.
+//
+// HandleRPC maps context.DeadlineExceeded to ErrGatewayTimeout (504) on the batch
+// path only. The single-request path has no DeadlineExceeded case and falls
+// through to ErrInternal (500). Recording 504 on both would report a timeout the
+// client never saw for single requests — the divergence lives here so it has one
+// definition and a test.
+func deadlineShortCircuitStatus(isBatch bool) string {
+	if isBatch {
+		return statusCodeGatewayTimeout
+	}
+	return statusCodeInternal
+}
+
+// backendNameFromServedBy extracts the backend name from a servedBy string,
+// which ForwardRequestToBackendGroup formats as "<group>/<backend>". Falls back
+// to BackendProxyd so the label is never empty.
+func backendNameFromServedBy(servedBy string) string {
+	if i := strings.LastIndex(servedBy, "/"); i >= 0 {
+		servedBy = servedBy[i+1:]
+	}
+	if servedBy == "" {
+		return BackendProxyd
+	}
+	return servedBy
 }
 
 const (

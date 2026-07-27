@@ -79,6 +79,13 @@ var (
 	ErrTooManyBatchRequests = &RPCErr{
 		Code:    JSONRPCErrorInternal - 14,
 		Message: "too many RPC calls in batch request",
+		// 413 matches ErrRequestBodyTooLarge, the sibling "request is too big"
+		// rejection, and is a client-visible change: this was previously HTTP 200.
+		// Without an HTTPErrorCode this rejection was written as HTTP 200, so a
+		// client whose every batch exceeds max_batch_size failed 100% of the time
+		// while both proxyd_http_response_codes_total and (because the rejection
+		// returns before handleBatchRPC) proxyd_rpc_calls_total reported health.
+		HTTPErrorCode: 413,
 	}
 	ErrGatewayTimeout = &RPCErr{
 		Code:          JSONRPCErrorInternal - 15,
@@ -1479,6 +1486,36 @@ func (w *WSProxier) Proxy(ctx context.Context) error {
 	return err
 }
 
+// metricMethodName bounds the method_name label cardinality for WS traffic by
+// collapsing anything outside ws_method_whitelist to a sentinel.
+//
+// Both current call sites in clientPump are downstream of a successful
+// prepareClientMsg, which already applies the same whitelist, so the collapsing
+// branches are unreachable today and only the tests exercise them. This is kept
+// deliberately: the bound is self-contained (it consults w.methodWhitelist
+// directly, not the caller's gate), method names are client-supplied and
+// reachable by unauthenticated clients, and unbounded Prometheus label
+// cardinality is the failure mode. Any future WS metric site can call this
+// without having to prove where it sits relative to the whitelist gate.
+//
+// Note this whitelist is not the one Server.metricMethodName uses: that one keys
+// on rpc_method_mappings. shouldHandleWSRPC admits a request via
+// txFilter.IsSubmissionMethod or txValidationMethods without consulting
+// rpc_method_mappings, so a method in ws_method_whitelist but absent from
+// rpc_method_mappings records under its real name when rejected by the semaphore
+// here and as method_not_allowed when handleWSRPCInner rejects it. Both are
+// rejections, so no call is miscounted, but sum by (method_name) is not
+// comparable across the two paths in that (unusual) configuration.
+func (w *WSProxier) metricMethodName(method string) string {
+	if method == "" {
+		return MethodUnknown
+	}
+	if !w.methodWhitelist.Has(method) {
+		return MethodNotAllowed
+	}
+	return method
+}
+
 func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 	for {
 		// Block until we get a message.
@@ -1513,10 +1550,22 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		req, err := w.prepareClientMsg(msg)
 		if err != nil {
 			var id json.RawMessage
+			// method is the raw client-supplied string, used only for
+			// RecordRPCError below, which deliberately accepts unbounded
+			// cardinality. It must NOT be passed to metricMethodName: an
+			// arbitrary client-supplied method (e.g. "unknown") must not be
+			// able to masquerade as the MethodUnknown sentinel and evade the
+			// method_not_allowed bucket. metricLabel below is derived from
+			// req instead, since prepareClientMsg has exactly two failure
+			// modes: req == nil means ParseRPCReq failed (no method to speak
+			// of); req != nil means the method parsed but failed the
+			// whitelist check.
 			method := MethodUnknown
+			metricLabel := MethodUnknown
 			if req != nil {
 				id = req.ID
 				method = req.Method
+				metricLabel = MethodNotAllowed
 			}
 			log.Info(
 				"error preparing client message",
@@ -1524,8 +1573,12 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				"req_id", GetReqID(ctx),
 				"err", err,
 			)
-			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
+			// Build the response once and derive the metric from that same value, so
+			// the recorded status cannot drift from what the client receives.
+			errRes := NewRPCErrorRes(id, err)
+			msg = mustMarshalJSON(errRes)
 			RecordRPCError(ctx, BackendProxyd, method, err)
+			RecordRPCCall(BackendProxyd, metricLabel, statusCodeForRPCRes(errRes), RPCRequestSourceWS)
 
 			// Send error response to client
 			err = w.writeClientConn(msgType, msg)
@@ -1540,6 +1593,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		if req.Method == "eth_accounts" {
 			msg = mustMarshalJSON(NewRPCRes(req.ID, emptyArrayResponse))
 			RecordRPCForward(ctx, BackendProxyd, "eth_accounts", RPCRequestSourceWS)
+			RecordRPCCall(BackendProxyd, "eth_accounts", statusCodeOK, RPCRequestSourceWS)
 			err = w.writeClientConn(msgType, msg)
 			if err != nil {
 				errC <- err
@@ -1550,8 +1604,10 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 
 		if w.requestHandler != nil && w.requestHandler(req) {
 			if !w.acquireRequestSlot() {
-				msg = mustMarshalJSON(NewRPCErrorRes(req.ID, ErrTooManyRequests))
+				errRes := NewRPCErrorRes(req.ID, ErrTooManyRequests)
+				msg = mustMarshalJSON(errRes)
 				RecordRPCError(ctx, BackendProxyd, req.Method, ErrTooManyRequests)
+				RecordRPCCall(BackendProxyd, w.metricMethodName(req.Method), statusCodeForRPCRes(errRes), RPCRequestSourceWS)
 				err = w.writeClientConn(msgType, msg)
 				if err != nil {
 					errC <- err
@@ -1559,6 +1615,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				}
 				continue
 			}
+			// handleWSRPC records this call; do not record it here too.
 			go w.processClientRPC(ctx, msgType, req, errC)
 			continue
 		}
@@ -1576,6 +1633,14 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			errC <- err
 			return
 		}
+
+		// Recorded after the write succeeds, so "relayed" means actually relayed —
+		// a call lost to a failed backend write is not counted as one proxyd
+		// delivered. Counted here rather than on the response because this call's
+		// response returns asynchronously in backendPump with no id correlation back
+		// to this request, so its outcome is unknowable on this side: counting at
+		// send time guarantees usage completeness at the cost of an unknown status.
+		RecordRPCCall(w.backend.Name, w.metricMethodName(req.Method), StatusCodeRelayed, RPCRequestSourceWS)
 	}
 }
 
@@ -1646,6 +1711,7 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 		}
 
 		res, err := w.parseBackendMsg(msg)
+		isNotification := false
 		if err != nil {
 			var id json.RawMessage
 			if res != nil {
@@ -1654,6 +1720,13 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
 			log.Info("backend responded with error", "err", err)
 		} else {
+			// A backend message with no id and no error is a subscription notification
+			// pushed by the backend, not a response to a client call. A message WITH an
+			// id is a response to a relayed call, already counted at send time in
+			// clientPump — counting it here would double-count. parseBackendMsg does no
+			// shape validation beyond JSON parsing, so an id-less *error* frame is also
+			// possible and is not a notification either.
+			isNotification = len(res.ID) == 0 && !res.IsError()
 			if res.IsError() {
 				log.Info(
 					"backend responded with RPC error",
@@ -1677,6 +1750,13 @@ func (w *WSProxier) backendPump(ctx context.Context, errC chan error) {
 		if err != nil {
 			errC <- err
 			return
+		}
+
+		// Recorded only after the client write succeeds: the metric claims delivery,
+		// so a notification dropped on a slow or disconnected client must not read as
+		// one the subscriber received.
+		if isNotification {
+			RecordRPCNotification(w.backend.Name)
 		}
 	}
 }
@@ -1943,6 +2023,10 @@ func (bg *BackendGroup) ForwardRequestToBackendGroup(
 
 func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*RPCRes {
 	for _, ov := range overriddenResponses {
+		// proxyd produced this response itself; no backend saw the request. Mark it
+		// so per-call metrics do not attribute it to whichever backend served the
+		// elements that were forwarded alongside it.
+		ov.res.servedLocally = true
 		if len(res) > 0 {
 			// insert ov.res at position ov.index
 			res = append(res[:ov.index], append([]*RPCRes{ov.res}, res[ov.index:]...)...)

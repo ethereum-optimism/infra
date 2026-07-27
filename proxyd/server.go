@@ -372,6 +372,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 
 	// Reject new requests during drain
 	if s.isDraining.Load() {
+		httpResponseCodesTotal.WithLabelValues(strconv.Itoa(http.StatusServiceUnavailable)).Inc()
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
@@ -655,6 +656,29 @@ func (s *Server) prepareRPCForForward(
 	return nil, group, txHash
 }
 
+// metricMethodName bounds the method_name label cardinality. Method names are
+// client-supplied and reachable by unauthenticated clients, so anything outside
+// the configured whitelist collapses to MethodNotAllowed rather than becoming an
+// unbounded Prometheus label value.
+func (s *Server) metricMethodName(method string) string {
+	if method == "" {
+		return MethodUnknown
+	}
+	if method == "eth_accounts" {
+		// eth_accounts is answered locally by prepareRPCForForward, before the
+		// rpcMethodMappings lookup (proxyd never forwards it to a backend), so it
+		// is deliberately absent from rpc_method_mappings. Without this
+		// passthrough it would collapse to MethodNotAllowed and pollute that
+		// bucket — the one operators grep to find clients calling unsupported
+		// methods — with 200s.
+		return method
+	}
+	if s.rpcMethodMappings[method] == "" {
+		return MethodNotAllowed
+	}
+	return method
+}
+
 func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
 	// A request set is transformed into groups of batches.
 	// Each batch group maps to a forwarded JSON-RPC batch request (subject to maxUpstreamBatchSize constraints)
@@ -668,6 +692,9 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 	}
 
 	responses := make([]*RPCRes, len(reqs))
+	// Per-element attribution for proxyd_rpc_calls_total, parallel to responses.
+	callMethods := make([]string, len(reqs))
+	callBackends := make([]string, len(reqs))
 	batches := make(map[batchGroup][]batchElem)
 	ids := make(map[string]int, len(reqs))
 	txHashes := make(map[int]common.Hash) // tracks tx hashes by request index for forwarding logs
@@ -677,11 +704,15 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		if err != nil {
 			log.Info("error parsing RPC call", "source", "rpc", "err", err)
 			responses[i] = NewRPCErrorRes(nil, err)
+			callMethods[i] = MethodUnknown
+			callBackends[i] = BackendProxyd
 			continue
 		}
 
 		// Simple health check
 		if len(reqs) == 1 && parsedReq.Method == proxydHealthzMethod {
+			// Deliberately not recorded in proxyd_rpc_calls_total: this is a probe,
+			// not client RPC traffic, and would dilute the SLO denominator.
 			res := &RPCRes{
 				ID:      parsedReq.ID,
 				JSONRPC: JSONRPCVersion,
@@ -690,9 +721,12 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			return []*RPCRes{res}, false, "", nil
 		}
 
+		callMethods[i] = s.metricMethodName(parsedReq.Method)
+
 		localRes, group, txHash := s.prepareRPCForForward(ctx, parsedReq, isLimited, bypassLimit, RPCRequestSourceHTTP)
 		if localRes != nil {
 			responses[i] = localRes
+			callBackends[i] = BackendProxyd
 			continue
 		}
 		if txHash != nil {
@@ -716,6 +750,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			backendRes, _ := s.cache.GetRPC(ctx, req.Req)
 			if backendRes != nil {
 				responses[req.Index] = backendRes
+				callBackends[req.Index] = BackendCache
 				cached = true
 			} else {
 				cacheMisses = append(cacheMisses, req)
@@ -732,6 +767,17 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 					"batch_index", i,
 				)
 				batchRPCShortCircuitsTotal.Inc()
+				// The whole request set failed wholesale: this function returns a bare
+				// error, so HandleRPC writes a single error envelope for the entire
+				// request set. The client receives none of the per-element results
+				// computed so far (cache hits, locally-answered elements, or minibatches
+				// already forwarded in a prior iteration) — every element must be
+				// recorded with the status the client actually received, not the
+				// per-element status that never reached it.
+				//
+				// That status differs between the batch and single-request paths — see
+				// deadlineShortCircuitStatus.
+				recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, deadlineShortCircuitStatus(isBatch))
 				return nil, false, "", context.DeadlineExceeded
 			}
 
@@ -746,6 +792,11 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			if err != nil {
 				if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 					errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
+					// HandleRPC writes ErrInvalidRequest (400) for these errors, as a
+					// single envelope for the whole request set — see the short-circuit
+					// case above for why every element must use the fallback status
+					// rather than any per-element result computed so far.
+					recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, statusCodeBadRequest)
 					return nil, false, "", err
 				}
 				log.Error(
@@ -776,8 +827,22 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				}
 			}
 
+			// sb is "" when the forward failed outright, and also when consensus or
+			// block-tag rewriting overrode every element so no backend was contacted at
+			// all (BackendGroup.ForwardWithSource). backendNameFromServedBy resolves
+			// both to BackendProxyd, which is the correct attribution: neither case was
+			// served by a backend.
+			forwardedBy := backendNameFromServedBy(sb)
 			for i := range elems {
 				responses[elems[i].Index] = res[i]
+				// With a *partial* override, sb names the backend that served the
+				// remaining elements, so the overridden ones must not inherit it — they
+				// were answered by proxyd from consensus state or rejected by a rewrite.
+				if res[i].servedLocally {
+					callBackends[elems[i].Index] = BackendProxyd
+				} else {
+					callBackends[elems[i].Index] = forwardedBy
+				}
 
 				// TODO(inphi): batch put these
 				if res[i].Error == nil && res[i].Result != nil {
@@ -801,6 +866,8 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 		servedByString += sb
 	}
 
+	recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeInternal)
+
 	return responses, cached, servedByString, nil
 }
 
@@ -812,6 +879,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Reject new WebSocket connections during drain
 	if s.isDraining.Load() {
+		// httpResponseCodesTotal is deliberately NOT incremented here (unlike the
+		// HTTP drain rejection above): WS responses never flow through
+		// writeRPCRes/writeBatchRPCRes, so no successful WS response is in this
+		// metric's population. Counting only the WS drain rejection would add a
+		// numerator entry with no denominator baseline.
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
@@ -873,14 +945,27 @@ func (s *Server) shouldHandleWSRPC(req *RPCReq) bool {
 }
 
 func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) *RPCRes {
+	res, servedBy := s.handleWSRPCInner(ctx, req, isLimited, bypassLimit)
+	RecordRPCCall(
+		backendNameFromServedBy(servedBy),
+		s.metricMethodName(req.Method),
+		statusCodeForRPCRes(res),
+		RPCRequestSourceWS,
+	)
+	return res
+}
+
+// handleWSRPCInner resolves a single WS RPC and reports which backend served it.
+// The empty string means no backend was reached — proxyd answered locally.
+func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited limiterFunc, bypassLimit bool) (*RPCRes, string) {
 	if s.rpcMethodMappings[req.Method] == "" {
 		RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
-		return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted)
+		return NewRPCErrorRes(req.ID, ErrMethodNotWhitelisted), ""
 	}
 
 	localRes, group, txHash := s.prepareRPCForForward(ctx, req, isLimited, bypassLimit, RPCRequestSourceWS)
 	if localRes != nil {
-		return localRes
+		return localRes, ""
 	}
 
 	forwardStart := time.Now()
@@ -893,7 +978,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"req_id", GetReqID(ctx),
 			"err", err,
 		)
-		return NewRPCErrorRes(req.ID, err)
+		return NewRPCErrorRes(req.ID, err), servedBy
 	}
 	if len(res) == 0 {
 		log.Error(
@@ -901,7 +986,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 			"backend_group", group,
 			"req_id", GetReqID(ctx),
 		)
-		return NewRPCErrorRes(req.ID, ErrInternal)
+		return NewRPCErrorRes(req.ID, ErrInternal), servedBy
 	}
 
 	if txHash != nil && s.enableTxHashLogging {
@@ -915,7 +1000,7 @@ func (s *Server) handleWSRPC(ctx context.Context, req *RPCReq, isLimited limiter
 		)
 	}
 
-	return res[0]
+	return res[0], servedBy
 }
 
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
@@ -1168,6 +1253,10 @@ func writeBatchRPCRes(ctx context.Context, w http.ResponseWriter, res []*RPCRes)
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
 		return
 	}
+	// A batch envelope is always HTTP 200 — per-element outcomes are invisible to
+	// this metric by construction, so a batch in which every element failed still
+	// counts here as a 200. proxyd_rpc_calls_total is the per-element view.
+	httpResponseCodesTotal.WithLabelValues(statusCodeOK).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 

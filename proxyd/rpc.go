@@ -18,6 +18,15 @@ type RPCRes struct {
 	Result  interface{}
 	Error   *RPCErr
 	ID      json.RawMessage
+
+	// servedLocally marks a response proxyd produced itself instead of obtaining
+	// it from a backend — a consensus-state answer or a block-tag rewrite
+	// rejection. Set by OverrideResponses, the single point where overridden
+	// responses are merged back into a batch result, and read by handleBatchRPC
+	// so per-call metrics attribute the element to proxyd rather than to the
+	// backend that served its siblings. Unexported and absent from rpcResJSON, so
+	// it never reaches the wire.
+	servedLocally bool
 }
 
 type rpcResJSON struct {
