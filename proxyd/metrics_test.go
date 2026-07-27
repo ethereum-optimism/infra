@@ -216,11 +216,14 @@ func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
 	require.Equal(t, "eth_subscribe", w.metricMethodName("eth_subscribe"))
 	require.Equal(t, MethodUnknown, w.metricMethodName(""))
 	require.Equal(t, MethodNotAllowed, w.metricMethodName("not_whitelisted"))
-	// Already-bounded sentinels (as clientPump passes through on a parse
-	// failure) must pass through unchanged, not get re-mapped by the whitelist
-	// check — the literal strings "unknown"/"method_not_allowed" are not
-	// themselves whitelisted methods.
-	require.Equal(t, MethodUnknown, w.metricMethodName(MethodUnknown))
+	// A client naming its method with one of the sentinel literals must NOT be
+	// able to masquerade as that sentinel — it is just another non-whitelisted
+	// method and must collapse to MethodNotAllowed like any other. Callers
+	// that need to report a genuine parse failure (no method to speak of) do
+	// so by recording MethodUnknown directly, without going through
+	// metricMethodName at all — see clientPump's prepareClientMsg-error
+	// branch.
+	require.Equal(t, MethodNotAllowed, w.metricMethodName(MethodUnknown))
 	require.Equal(t, MethodNotAllowed, w.metricMethodName(MethodNotAllowed))
 }
 

@@ -1485,16 +1485,6 @@ func (w *WSProxier) metricMethodName(method string) string {
 	if method == "" {
 		return MethodUnknown
 	}
-	// MethodUnknown and MethodNotAllowed are already-bounded sentinels — e.g.
-	// clientPump passes MethodUnknown through here when a frame fails
-	// ParseRPCReq. Pass them through unchanged rather than re-running them
-	// through the whitelist, where the literal strings "unknown" and
-	// "method_not_allowed" would themselves fail the Has check and get
-	// relabeled MethodNotAllowed, mislabeling a parse failure as a
-	// not-allowed method.
-	if method == MethodUnknown || method == MethodNotAllowed {
-		return method
-	}
 	if !w.methodWhitelist.Has(method) {
 		return MethodNotAllowed
 	}
@@ -1535,10 +1525,22 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 		req, err := w.prepareClientMsg(msg)
 		if err != nil {
 			var id json.RawMessage
+			// method is the raw client-supplied string, used only for
+			// RecordRPCError below, which deliberately accepts unbounded
+			// cardinality. It must NOT be passed to metricMethodName: an
+			// arbitrary client-supplied method (e.g. "unknown") must not be
+			// able to masquerade as the MethodUnknown sentinel and evade the
+			// method_not_allowed bucket. metricLabel below is derived from
+			// req instead, since prepareClientMsg has exactly two failure
+			// modes: req == nil means ParseRPCReq failed (no method to speak
+			// of); req != nil means the method parsed but failed the
+			// whitelist check.
 			method := MethodUnknown
+			metricLabel := MethodUnknown
 			if req != nil {
 				id = req.ID
 				method = req.Method
+				metricLabel = MethodNotAllowed
 			}
 			log.Info(
 				"error preparing client message",
@@ -1548,7 +1550,7 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			)
 			msg = mustMarshalJSON(NewRPCErrorRes(id, err))
 			RecordRPCError(ctx, BackendProxyd, method, err)
-			RecordRPCCall(BackendProxyd, w.metricMethodName(method), statusCodeForRPCRes(NewRPCErrorRes(id, err)), RPCRequestSourceWS)
+			RecordRPCCall(BackendProxyd, metricLabel, statusCodeForRPCRes(NewRPCErrorRes(id, err)), RPCRequestSourceWS)
 
 			// Send error response to client
 			err = w.writeClientConn(msgType, msg)

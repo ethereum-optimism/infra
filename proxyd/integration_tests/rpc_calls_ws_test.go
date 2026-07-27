@@ -143,3 +143,96 @@ func TestRPCCallsWSMappedMethodRecordsRealStatusAndBackend(t *testing.T) {
 		"status_code": "relayed",
 	}))
 }
+
+// TestRPCCallsWSUnwhitelistedMethodNamedUnknownIsNotAllowed pins the regression
+// where a client naming its method the literal string "unknown" could collide
+// with the MethodUnknown sentinel and evade the method_not_allowed bucket. A
+// frame with method "unknown" fails the ws whitelist (prepareClientMsg returns
+// req != nil, err == ErrMethodNotWhitelisted), so it must be recorded as
+// method_not_allowed / 403, never as "unknown".
+func TestRPCCallsWSUnwhitelistedMethodNamedUnknownIsNotAllowed(t *testing.T) {
+	InitLogger()
+
+	// The frame is rejected locally by prepareClientMsg's whitelist check and
+	// never forwarded, so the WS backend must see nothing.
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {}, nil)
+	defer wsBackend.Close()
+
+	httpBackend := NewMockBackend(SingleResponseHandler(200, buildResponse("0x1")))
+	defer httpBackend.Close()
+
+	_, shutdown, err := proxyd.Start(wsTestConfig(httpBackend.URL(), wsBackend.URL()))
+	require.NoError(t, err)
+	defer shutdown()
+
+	received := make(chan struct{}, 4)
+	client, err := NewProxydWSClient("ws://127.0.0.1:8546", func(msgType int, data []byte) {
+		received <- struct{}{}
+	}, nil)
+	require.NoError(t, err)
+	defer client.HardClose()
+
+	notAllowedLabels := map[string]string{
+		"method_name": "method_not_allowed",
+		"status_code": "403",
+		"transport":   "ws",
+	}
+	unknownLabels := map[string]string{
+		"method_name": "unknown",
+		"transport":   "ws",
+	}
+	beforeNotAllowed := sumRPCCalls(t, notAllowedLabels)
+	beforeUnknown := sumRPCCalls(t, unknownLabels)
+
+	require.NoError(t, client.WriteMessage(websocket.TextMessage,
+		[]byte(`{"jsonrpc":"2.0","method":"unknown","id":1}`)))
+
+	select {
+	case <-received:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for error response")
+	}
+
+	require.Equal(t, beforeNotAllowed+1, sumRPCCalls(t, notAllowedLabels))
+	require.Equal(t, beforeUnknown, sumRPCCalls(t, unknownLabels))
+}
+
+// TestRPCCallsWSMalformedFrameRecordsUnknown covers the other side of the
+// disambiguation: a frame that genuinely fails to parse (req == nil) must
+// still record method_name="unknown", not method_not_allowed.
+func TestRPCCallsWSMalformedFrameRecordsUnknown(t *testing.T) {
+	InitLogger()
+
+	wsBackend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {}, nil)
+	defer wsBackend.Close()
+
+	httpBackend := NewMockBackend(SingleResponseHandler(200, buildResponse("0x1")))
+	defer httpBackend.Close()
+
+	_, shutdown, err := proxyd.Start(wsTestConfig(httpBackend.URL(), wsBackend.URL()))
+	require.NoError(t, err)
+	defer shutdown()
+
+	received := make(chan struct{}, 4)
+	client, err := NewProxydWSClient("ws://127.0.0.1:8546", func(msgType int, data []byte) {
+		received <- struct{}{}
+	}, nil)
+	require.NoError(t, err)
+	defer client.HardClose()
+
+	unknownLabels := map[string]string{
+		"method_name": "unknown",
+		"transport":   "ws",
+	}
+	beforeUnknown := sumRPCCalls(t, unknownLabels)
+
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(`{not valid json`)))
+
+	select {
+	case <-received:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for error response")
+	}
+
+	require.Equal(t, beforeUnknown+1, sumRPCCalls(t, unknownLabels))
+}
