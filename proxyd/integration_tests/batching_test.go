@@ -44,6 +44,8 @@ func TestBatching(t *testing.T) {
 		maxUpstreamBatchSize int
 		numExpectedForwards  int
 		maxResponseSizeBytes int64
+		// expectedStatusCode defaults to 200 when zero.
+		expectedStatusCode int
 	}{
 		{
 			name:  "backend returns batches out of order",
@@ -118,6 +120,11 @@ func TestBatching(t *testing.T) {
 			expectedRes:          "{\"error\":{\"code\":-32014,\"message\":\"over batch size custom message\"},\"id\":null,\"jsonrpc\":\"2.0\"}",
 			maxUpstreamBatchSize: 2,
 			numExpectedForwards:  0,
+			// A rejected batch must not report HTTP 200. This rejection returns before
+			// handleBatchRPC, so it contributes nothing to proxyd_rpc_calls_total
+			// either — as HTTP 200 it was invisible to every error-rate metric while
+			// failing 100% of the client's requests.
+			expectedStatusCode: http.StatusRequestEntityTooLarge,
 		},
 		{
 			name: "eth_accounts does not get forwarded",
@@ -169,9 +176,14 @@ func TestBatching(t *testing.T) {
 			require.NoError(t, err)
 			defer shutdown()
 
+			expectedStatusCode := tt.expectedStatusCode
+			if expectedStatusCode == 0 {
+				expectedStatusCode = http.StatusOK
+			}
+
 			res, statusCode, err := client.SendBatchRPC(tt.reqs...)
 			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, statusCode)
+			require.Equal(t, expectedStatusCode, statusCode)
 			RequireEqualJSON(t, []byte(tt.expectedRes), res)
 
 			if tt.numExpectedForwards != 0 {

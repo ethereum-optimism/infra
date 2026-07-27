@@ -769,14 +769,15 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				batchRPCShortCircuitsTotal.Inc()
 				// The whole request set failed wholesale: this function returns a bare
 				// error, so HandleRPC writes a single error envelope for the entire
-				// batch (ErrGatewayTimeout/504 on the batch path; the single-request
-				// path has no DeadlineExceeded case and writes ErrInternal/500 instead).
-				// The client receives none of the per-element results computed so far
-				// (cache hits, locally-answered elements, or minibatches already
-				// forwarded in a prior iteration) — every element must be recorded with
-				// the fallback status, not the per-element status that never reached
-				// the client.
-				recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, statusCodeGatewayTimeout)
+				// request set. The client receives none of the per-element results
+				// computed so far (cache hits, locally-answered elements, or minibatches
+				// already forwarded in a prior iteration) — every element must be
+				// recorded with the status the client actually received, not the
+				// per-element status that never reached it.
+				//
+				// That status differs between the batch and single-request paths — see
+				// deadlineShortCircuitStatus.
+				recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, deadlineShortCircuitStatus(isBatch))
 				return nil, false, "", context.DeadlineExceeded
 			}
 
@@ -826,12 +827,22 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				}
 			}
 
-			// sb is "" when the forward failed outright, which backendNameFromServedBy
-			// resolves to BackendProxyd — such a batch was never served by a backend.
+			// sb is "" when the forward failed outright, and also when consensus or
+			// block-tag rewriting overrode every element so no backend was contacted at
+			// all (BackendGroup.ForwardWithSource). backendNameFromServedBy resolves
+			// both to BackendProxyd, which is the correct attribution: neither case was
+			// served by a backend.
 			forwardedBy := backendNameFromServedBy(sb)
 			for i := range elems {
 				responses[elems[i].Index] = res[i]
-				callBackends[elems[i].Index] = forwardedBy
+				// With a *partial* override, sb names the backend that served the
+				// remaining elements, so the overridden ones must not inherit it — they
+				// were answered by proxyd from consensus state or rejected by a rewrite.
+				if res[i].servedLocally {
+					callBackends[elems[i].Index] = BackendProxyd
+				} else {
+					callBackends[elems[i].Index] = forwardedBy
+				}
 
 				// TODO(inphi): batch put these
 				if res[i].Error == nil && res[i].Result != nil {
@@ -1242,7 +1253,10 @@ func writeBatchRPCRes(ctx context.Context, w http.ResponseWriter, res []*RPCRes)
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
 		return
 	}
-	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(200)).Inc()
+	// A batch envelope is always HTTP 200 — per-element outcomes are invisible to
+	// this metric by construction, so a batch in which every element failed still
+	// counts here as a 200. proxyd_rpc_calls_total is the per-element view.
+	httpResponseCodesTotal.WithLabelValues(statusCodeOK).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 

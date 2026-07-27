@@ -24,6 +24,9 @@ func TestStatusCodeForRPCRes(t *testing.T) {
 		{"method not whitelisted", &RPCRes{Error: ErrMethodNotWhitelisted}, "403"},
 		{"gateway timeout", &RPCRes{Error: ErrGatewayTimeout}, "504"},
 		{"body too large", &RPCRes{Error: ErrRequestBodyTooLarge}, "413"},
+		// ErrTooManyBatchRequests carried no HTTPErrorCode, so this rejection reported
+		// 200 on both the HTTP and per-call metrics during a 100%-failure condition.
+		{"too many batch requests", &RPCRes{Error: ErrTooManyBatchRequests}, "413"},
 		{"proxyd internal", &RPCRes{Error: ErrInternal}, "500"},
 		{
 			"upstream non-200 stamped per element",
@@ -50,11 +53,6 @@ func TestStatusCodeForRPCRes(t *testing.T) {
 		{
 			"upstream method not found",
 			&RPCRes{Error: &RPCErr{Code: -32601, Message: "the method does not exist"}},
-			"400",
-		},
-		{
-			"too many batch requests has no http code",
-			&RPCRes{Error: ErrTooManyBatchRequests},
 			"400",
 		},
 		{"nil response treated as internal error", nil, "500"},
@@ -157,6 +155,33 @@ func TestRecordRPCCallsAllIgnoresPerElementResponses(t *testing.T) {
 
 	require.Equal(t, before200, gatherCounter(t, "proxyd_rpc_calls_total", labels("200")))
 	require.Equal(t, before504+3, gatherCounter(t, "proxyd_rpc_calls_total", labels("504")))
+}
+
+// The deadline short-circuit must record the status the client actually receives,
+// which differs by path: HandleRPC maps context.DeadlineExceeded to
+// ErrGatewayTimeout only for batches, and writes ErrInternal for single requests.
+// Recording 504 for both would fire a timeout alert for what the client saw as an
+// internal error — and hide it from a 500-only alert.
+func TestDeadlineShortCircuitStatusMatchesHandlerPath(t *testing.T) {
+	require.Equal(t, statusCodeGatewayTimeout, deadlineShortCircuitStatus(true))
+	require.Equal(t, statusCodeInternal, deadlineShortCircuitStatus(false))
+}
+
+// A partially-overridden batch returns a real servedBy for the elements a backend
+// answered, so the overridden elements must be distinguishable or they inherit a
+// backend that never saw them. OverrideResponses is the single merge point, so
+// marking there covers every override site.
+func TestOverrideResponsesMarksServedLocally(t *testing.T) {
+	forwarded := &RPCRes{ID: json.RawMessage(`2`), Result: "from-backend"}
+	overridden := &RPCRes{ID: json.RawMessage(`1`), Result: "from-consensus"}
+
+	res := OverrideResponses([]*RPCRes{forwarded}, []*indexedReqRes{
+		{index: 0, res: overridden},
+	})
+
+	require.Equal(t, []*RPCRes{overridden, forwarded}, res)
+	require.True(t, overridden.servedLocally, "proxyd answered this element itself")
+	require.False(t, forwarded.servedLocally, "a backend answered this element")
 }
 
 func TestServerMetricMethodNameBoundsCardinality(t *testing.T) {

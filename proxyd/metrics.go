@@ -987,11 +987,24 @@ func boolToFloat64(b bool) float64 {
 // statusCodeForRPCRes derives the HTTP-equivalent status code for a single
 // JSON-RPC response, for per-call metrics.
 //
-// An error with HTTPErrorCode == 0 means the backend answered HTTP 200 while
-// carrying a JSON-RPC error — doForward only stamps HTTPErrorCode when the
-// upstream status was non-200. Those are request-level faults ("already known",
-// "nonce too low", "execution reverted") and MUST map to 400, not 500: reporting
-// them as 5xx would burn the error-rate SLO on routine client errors.
+// An error with HTTPErrorCode == 0 is, in the common case, a backend that
+// answered HTTP 200 while carrying a JSON-RPC error: doForward stamps
+// HTTPErrorCode only when the upstream status was non-200. Those are
+// request-level faults ("already known", "nonce too low", "execution reverted")
+// and MUST map to 400, not 500 — reporting them as 5xx would burn the error-rate
+// SLO on routine client errors.
+//
+// doForward is not the only writer. HTTPErrorCode is also set on proxyd's own
+// error table (backend.go) and, notably, on interop-filter failures:
+// ParseInteropError and interop_strategy.go copy the interop filter backend's
+// raw upstream HTTP status through verbatim. So the status_code label domain is
+// not proxyd's fixed table alone — it is that table plus whatever status the
+// filter emits (bounded by HTTP's 100-599, so label cardinality stays bounded,
+// but the values are partly sourced from a remote service). Those calls are
+// recorded with backend_name="proxyd", because the filter round-trip happens in
+// prepareRPCForForward before any backend is selected; an operator paging on
+// backend_name="proxyd" with a 5xx should treat the interop filter as a
+// candidate cause alongside proxyd itself.
 func statusCodeForRPCRes(res *RPCRes) string {
 	if res == nil {
 		// Should not happen; a nil response slot is an internal failure.
@@ -1053,6 +1066,21 @@ func recordRPCCallsAll(methods, backends []string, transport, statusCode string)
 	for i := range methods {
 		RecordRPCCall(backends[i], methods[i], statusCode, transport)
 	}
+}
+
+// deadlineShortCircuitStatus returns the status the HTTP handler goes on to write
+// to the client when handleBatchRPC short-circuits on an expired context.
+//
+// HandleRPC maps context.DeadlineExceeded to ErrGatewayTimeout (504) on the batch
+// path only. The single-request path has no DeadlineExceeded case and falls
+// through to ErrInternal (500). Recording 504 on both would report a timeout the
+// client never saw for single requests — the divergence lives here so it has one
+// definition and a test.
+func deadlineShortCircuitStatus(isBatch bool) string {
+	if isBatch {
+		return statusCodeGatewayTimeout
+	}
+	return statusCodeInternal
 }
 
 // backendNameFromServedBy extracts the backend name from a servedBy string,

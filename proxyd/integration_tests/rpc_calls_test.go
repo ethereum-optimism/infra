@@ -126,6 +126,16 @@ func TestRPCCallsMixedBatchAcrossMinibatches(t *testing.T) {
 		"status_code":  "200",
 		"transport":    "http",
 	}
+	// The 10 net_version elements are the entire first minibatch — the exact shape
+	// the IMP-1 undercount defect lived in — so they must be asserted explicitly.
+	// sumRPCCalls only sums series matching the supplied label subset, so neither
+	// of the other two label sets covers them.
+	netVersionLabels := map[string]string{
+		"backend_name": "good",
+		"method_name":  "net_version",
+		"status_code":  "200",
+		"transport":    "http",
+	}
 	notAllowedLabels := map[string]string{
 		"backend_name": "proxyd",
 		"method_name":  "method_not_allowed",
@@ -133,7 +143,9 @@ func TestRPCCallsMixedBatchAcrossMinibatches(t *testing.T) {
 		"transport":    "http",
 	}
 	beforeOK := sumRPCCalls(t, okLabels)
+	beforeNetVersion := sumRPCCalls(t, netVersionLabels)
 	beforeNotAllowed := sumRPCCalls(t, notAllowedLabels)
+	beforeTotal := sumRPCCalls(t, map[string]string{"transport": "http"})
 
 	reqs := make([]*proxyd.RPCReq, 0, 12)
 	for i := 1; i <= 10; i++ {
@@ -148,7 +160,10 @@ func TestRPCCallsMixedBatchAcrossMinibatches(t *testing.T) {
 	require.Equal(t, 200, statusCode)
 
 	require.Equal(t, beforeOK+1, sumRPCCalls(t, okLabels))
+	require.Equal(t, beforeNetVersion+10, sumRPCCalls(t, netVersionLabels))
 	require.Equal(t, beforeNotAllowed+1, sumRPCCalls(t, notAllowedLabels))
+	// The headline claim, pinned directly: 12 elements in, 12 increments out.
+	require.Equal(t, beforeTotal+12, sumRPCCalls(t, map[string]string{"transport": "http"}))
 }
 
 func TestRPCCallsBoundsNonWhitelistedMethodName(t *testing.T) {
