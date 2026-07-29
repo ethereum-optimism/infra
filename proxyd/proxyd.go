@@ -751,18 +751,18 @@ func millisecondsToDuration(ms int) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
-	if cfg.CAFile == "" {
+func configureTLS(caFile, clientCertFile, clientKeyFile string) (*tls.Config, error) {
+	if caFile == "" {
 		return nil, nil
 	}
 
-	tlsConfig, err := CreateTLSClient(cfg.CAFile)
+	tlsConfig, err := CreateTLSClient(caFile)
 	if err != nil {
 		return nil, err
 	}
 
-	if cfg.ClientCertFile != "" && cfg.ClientKeyFile != "" {
-		cert, err := ParseKeyPair(cfg.ClientCertFile, cfg.ClientKeyFile)
+	if clientCertFile != "" && clientKeyFile != "" {
+		cert, err := ParseKeyPair(clientCertFile, clientKeyFile)
 		if err != nil {
 			return nil, err
 		}
@@ -770,4 +770,8 @@ func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+func configureBackendTLS(cfg *BackendConfig) (*tls.Config, error) {
+	return configureTLS(cfg.CAFile, cfg.ClientCertFile, cfg.ClientKeyFile)
 }
