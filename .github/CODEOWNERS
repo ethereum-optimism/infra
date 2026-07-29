@@ -1,4 +1,10 @@
 * @ethereum-optimism/infra-reviewers
 
 /op-txproxy @ethereum-optimism/ecosystem
-.github/workflows/ @ethereum-optimism/platform-security
+
+/.github/workflows/     @ethereum-optimism/cloud-security
+/.github/actions/       @ethereum-optimism/cloud-security
+/renovate.json          @ethereum-optimism/cloud-security
+/.github/renovate.json  @ethereum-optimism/cloud-security
+/renovate.json5         @ethereum-optimism/cloud-security
+/.github/CODEOWNERS      @ethereum-optimism/cloud-security
