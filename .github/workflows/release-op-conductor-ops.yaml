@@ -1,0 +1,139 @@
+name: release op-conductor-ops
+
+on:
+  push:
+    tags:
+      - 'op-conductor-ops/v*'
+  pull_request:
+    paths:
+      - 'op-conductor-ops/**'
+      - '.github/workflows/release-op-conductor-ops.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-14
+          - platform: darwin-amd64
+            runner: macos-15-intel
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#op-conductor-ops/v}"
+          else
+            version="0.0.0-dev"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Building version ${version}"
+
+      - name: Install dependencies
+        working-directory: op-conductor-ops
+        run: |
+          set -euo pipefail
+          pip install poetry
+          poetry check --lock
+          poetry install --no-interaction --with dev
+
+      - name: Build executable
+        working-directory: op-conductor-ops
+        env:
+          ASSET: op-conductor-ops-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          poetry run pyinstaller --onefile --clean --noconfirm \
+            --name "${ASSET}" entrypoint.py
+
+      - name: Smoke test executable
+        working-directory: op-conductor-ops
+        env:
+          ASSET: op-conductor-ops-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          file "dist/${ASSET}"
+          "./dist/${ASSET}" --help
+
+      - name: Compute checksum
+        working-directory: op-conductor-ops/dist
+        env:
+          ASSET: op-conductor-ops-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 "${ASSET}" > "${ASSET}.sha256"
+          cat "${ASSET}.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: op-conductor-ops-${{ matrix.platform }}
+          path: |
+            op-conductor-ops/dist/op-conductor-ops-*-${{ matrix.platform }}
+            op-conductor-ops/dist/op-conductor-ops-*-${{ matrix.platform }}.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#op-conductor-ops/v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Assemble checksums file
+        working-directory: dist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat ./*.sha256 | sort -k2 > "op-conductor-ops_${VERSION}_checksums.txt"
+          rm -f ./*.sha256
+          cat "op-conductor-ops_${VERSION}_checksums.txt"
+          test "$(grep -c . "op-conductor-ops_${VERSION}_checksums.txt")" -eq 4
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "op-conductor-ops ${VERSION}" \
+            --generate-notes \
+            dist/*
