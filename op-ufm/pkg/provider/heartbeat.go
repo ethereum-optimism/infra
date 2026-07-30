@@ -71,9 +71,7 @@ func (p *Provider) Heartbeat(ctx context.Context) {
 				"hash", hash,
 				"url", p.config.URL,
 				"err", err)
-			if !errors.Is(err, ethereum.NotFound) {
-				continue
-			}
+			continue
 		}
 
 		log.Debug("got transaction",
