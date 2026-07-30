@@ -5,7 +5,7 @@ go 1.23.1
 require (
 	github.com/ethereum-optimism/optimism v1.9.3
 	github.com/ethereum/go-ethereum v1.14.11
-	github.com/go-yaml/yaml v2.1.0+incompatible
+	github.com/go-yaml/yaml v2.1.1+incompatible
 	github.com/google/go-github/v66 v66.0.0
 	github.com/gorilla/mux v1.8.0
 	github.com/migueleliasweb/go-github-mock v1.0.1
