@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics"
-	"github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics/clients"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/log"
@@ -17,6 +16,25 @@ func (p *Provider) Heartbeat(ctx context.Context) {
 	log.Debug("heartbeat",
 		"provider", p.name,
 		"count", len(p.txPool.Transactions))
+
+	// GC stale entries. When a provider never observes a tx (e.g. it never
+	// propagates there, or the receipt lookup errored out on the source
+	// provider), the "seen by all" removal path below never fires and the
+	// entry would live forever. Anything older than 2x the receipt timeout is
+	// definitely not going to be usefully tracked anymore.
+	staleThreshold := 2 * time.Duration(p.config.ReceiptRetrievalTimeout)
+	p.txPool.M.Lock()
+	for hash, st := range p.txPool.Transactions {
+		if time.Since(st.SentAt) > staleThreshold {
+			log.Warn("evicting stale transaction from pool",
+				"provider", p.name,
+				"hash", hash,
+				"sourceProvider", st.ProviderSource,
+				"age", time.Since(st.SentAt))
+			delete(p.txPool.Transactions, hash)
+		}
+	}
+	p.txPool.M.Unlock()
 
 	metrics.RecordTransactionsInFlight(p.config.Network, len(p.txPool.Transactions))
 
@@ -42,12 +60,13 @@ func (p *Provider) Heartbeat(ctx context.Context) {
 		return
 	}
 
-	client, err := clients.Dial(p.name, p.config.URL)
+	client, err := p.ethClientOrDial()
 	if err != nil {
 		log.Error("cant dial to provider",
 			"provider", p.name,
 			"url", p.config.URL,
 			"err", err)
+		return
 	}
 
 	log.Debug("checking in-flight tx",

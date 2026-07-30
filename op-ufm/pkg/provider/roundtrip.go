@@ -9,7 +9,6 @@ import (
 	iclients "github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics/clients"
 	"github.com/ethereum/go-ethereum/core"
 
-	"github.com/ethereum-optimism/optimism/op-service/tls"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -25,7 +24,7 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 	log.Debug("RoundTrip",
 		"provider", p.name)
 
-	client, err := iclients.Dial(p.name, p.config.URL)
+	client, err := p.ethClientOrDial()
 	if err != nil {
 		log.Error("cant dial to provider",
 			"provider", p.name,
@@ -145,6 +144,20 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 	p.txPool.LastSend = sentAt
 	p.txPool.M.Unlock()
 
+	// If we bail out before the tx succeeds end-to-end, drop it from the pool.
+	// The Heartbeat "seen by all providers" removal path only fires on success,
+	// so without this every timeout/error would strand the entry forever and
+	// leak memory in proportion to failure rate * uptime.
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		p.txPool.M.Lock()
+		delete(p.txPool.Transactions, txHash.Hex())
+		p.txPool.M.Unlock()
+	}()
+
 	var receipt *types.Receipt
 	attempt = 0
 	for receipt == nil {
@@ -187,6 +200,7 @@ func (p *Provider) RoundTrip(ctx context.Context) {
 	}
 
 	roundTripLatency := time.Since(roundTripStartedAt)
+	success = true
 
 	metrics.RecordRoundTripLatency(p.name, roundTripLatency)
 	metrics.RecordGasUsed(p.name, receipt.GasUsed)
@@ -295,12 +309,7 @@ func (p *Provider) sign(ctx context.Context, from *common.Address, tx *types.Tra
 		}
 		return types.SignTx(tx, types.LatestSignerForChainID(&p.walletConfig.ChainID), privateKey)
 	case "signer":
-		tlsConfig := tls.CLIConfig{
-			TLSCaCert: p.signerConfig.TLSCaCert,
-			TLSCert:   p.signerConfig.TLSCert,
-			TLSKey:    p.signerConfig.TLSKey,
-		}
-		client, err := iclients.NewSignerClient(p.name, log.Root(), p.signerConfig.URL, tlsConfig)
+		client, err := p.signerClientOrDial()
 		if err != nil || client == nil {
 			log.Error("failed to create signer client", "err", err)
 		}

@@ -30,6 +30,10 @@ func Dial(providerName string, url string) (*InstrumentedEthClient, error) {
 	return &InstrumentedEthClient{c: c, providerName: providerName}, nil
 }
 
+func (i *InstrumentedEthClient) Close() {
+	i.c.Close()
+}
+
 func (i *InstrumentedEthClient) TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error) {
 	start := time.Now()
 	tx, isPending, err := i.c.TransactionByHash(ctx, hash)
