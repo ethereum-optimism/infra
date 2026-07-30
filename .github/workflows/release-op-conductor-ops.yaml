@@ -35,6 +35,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e # v6
@@ -84,6 +86,13 @@ jobs:
           file "dist/${ASSET}"
           "./dist/${ASSET}" --help
 
+      # Only released binaries get an attestation; PR and dispatch builds are throwaway.
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        with:
+          subject-path: op-conductor-ops/dist/op-conductor-ops-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+
       - name: Compute checksum
         working-directory: op-conductor-ops/dist
         env:
@@ -108,6 +117,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      attestations: read
     steps:
       - name: Resolve version
         id: version
@@ -133,14 +143,40 @@ jobs:
           cat "op-conductor-ops_${VERSION}_checksums.txt"
           test "$(grep -c . "op-conductor-ops_${VERSION}_checksums.txt")" -eq 4
 
-      - name: Create release
+      # The checksums file is generated here and is deliberately not attested.
+      - name: Verify build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for f in dist/op-conductor-ops-*-*; do
+            gh attestation verify "$f" --repo "${GITHUB_REPOSITORY}"
+          done
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "op-conductor-ops ${VERSION}" \
-            --generate-notes \
-            dist/*
+          # Reuse an existing draft so a rerun repairs a partial upload instead of
+          # failing on create, then publish only after all uploads succeed. Refuse to
+          # touch an already-published release: PyInstaller output is not reproducible,
+          # so clobbering assets would invalidate the SHA-256 digests op-toolbox pins.
+          draft="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          case "${draft}" in
+            false)
+              echo "::error::${GITHUB_REF_NAME} is already published; delete the release or cut a new version" >&2
+              exit 1
+              ;;
+            missing)
+              gh release create "${GITHUB_REF_NAME}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --draft \
+                --title "op-conductor-ops ${VERSION}" \
+                --generate-notes
+              ;;
+          esac
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" dist/* --clobber
+          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
