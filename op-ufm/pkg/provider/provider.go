@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/tls"
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/config"
 	iclients "github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics/clients"
-	"github.com/ethereum-optimism/optimism/op-service/tls"
 	"github.com/ethereum/go-ethereum/log"
 )
 
