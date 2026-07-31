@@ -2,6 +2,8 @@ module github.com/ethereum-optimism/optimism/op-ufm
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	cloud.google.com/go/kms v1.26.0
 	github.com/BurntSushi/toml v1.3.2

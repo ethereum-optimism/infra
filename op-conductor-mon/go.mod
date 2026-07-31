@@ -1,6 +1,8 @@
 module github.com/ethereum-optimism/optimism/op-conductor-mon
 
-go 1.25.0
+go 1.26.0
+
+toolchain go1.26.5
 
 require (
 	github.com/ethereum-optimism/optimism v1.7.8-0.20240620182338-0bb839cfd664

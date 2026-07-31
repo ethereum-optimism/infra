@@ -2,6 +2,8 @@ module github.com/ethereum-optimism/infra/op-signer
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	cloud.google.com/go/kms v1.23.0
 	github.com/aws/aws-sdk-go-v2/config v1.28.11

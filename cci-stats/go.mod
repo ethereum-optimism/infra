@@ -2,6 +2,8 @@ module github.com/ethereum-optimism/infra/cci-stats
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	github.com/axelKingsley/go-circleci v0.9.1
 	github.com/jackc/pgx/v5 v5.9.2

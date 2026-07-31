@@ -2,6 +2,8 @@ module github.com/ethereum-optimism/infra/peer-mgmt-service
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	github.com/ethereum-optimism/optimism v1.5.0-rc.3.0.20240131131533-152d1e0a458d
 	github.com/ethereum/go-ethereum v1.13.8
