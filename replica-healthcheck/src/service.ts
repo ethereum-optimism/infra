@@ -43,11 +43,11 @@ export class HealthcheckService extends BaseServiceV2<
       },
       optionsSpec: {
         referenceRpcProvider: {
-          validator: validators.provider,
+          validator: validators.staticJsonRpcProvider,
           desc: 'Provider for interacting with L1',
         },
         targetRpcProvider: {
-          validator: validators.provider,
+          validator: validators.staticJsonRpcProvider,
           desc: 'Provider for interacting with L2',
         },
         onDivergenceWaitMs: {
@@ -141,7 +141,7 @@ export class HealthcheckService extends BaseServiceV2<
     if (!reference) {
       // This is ok, but we should log it and restart the loop.
       this.logger.info(`reference block was not found`, {
-        blockNumber: reference.number,
+        blockNumber: minBlock,
       })
       return
     }
@@ -150,7 +150,7 @@ export class HealthcheckService extends BaseServiceV2<
     if (!target) {
       // This is ok, but we should log it and restart the loop.
       this.logger.info(`target block was not found`, {
-        blockNumber: target.number,
+        blockNumber: minBlock,
       })
       return
     }
