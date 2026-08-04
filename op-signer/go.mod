@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/kms v1.23.0
 	github.com/aws/aws-sdk-go-v2/config v1.28.11
 	github.com/ethereum-optimism/optimism v1.13.6
-	github.com/ethereum/go-ethereum v1.16.2
+	github.com/ethereum/go-ethereum v1.17.0
 	github.com/golang/mock v1.6.0
 	github.com/googleapis/gax-go v1.0.3
 	github.com/googleapis/gax-go/v2 v2.15.0
