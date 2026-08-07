@@ -4,29 +4,62 @@ op-conductor-ops is a CLI tool for managing op-conductor sequencer clusters.
 
 **WARNING!!! This tool can cause a network outage if used improperly. Please consult #pod-devinfra before using.**
 
-## Setup
+## Install
+
+### Via op-toolbox (recommended for operators)
+
+```sh
+op-toolbox install op-conductor-ops
+op-toolbox op-conductor-ops status <network-name>
+```
+
+### Direct binary download
+
+Releases attach a self-contained executable per platform; no Python is required.
+
+```sh
+version=0.2.0
+platform=darwin-arm64  # or darwin-amd64, linux-amd64, linux-arm64
+gh release download "op-conductor-ops/v${version}" \
+  --repo ethereum-optimism/infra \
+  --pattern "op-conductor-ops-${version}-${platform}"
+chmod +x "op-conductor-ops-${version}-${platform}"
+./op-conductor-ops-${version}-${platform} --help
+```
+
+Verify the download against `op-conductor-ops_${version}_checksums.txt` from the
+same release.
+
+### From source (development)
 
 Requires [poetry](https://github.com/python-poetry/poetry).
 
-Install the package and its dependencies with `poetry install`. This registers the
-`op-conductor-ops` console script (see `[tool.poetry.scripts]` in `pyproject.toml`).
+```sh
+poetry install
+poetry run op-conductor-ops --help
+```
 
-Recommended update to your .bashrc/zshrc:
+Build the executable locally with `just build-binary 0.2.0 darwin-arm64`.
 
-1. `export CONDUCTOR_CONFIG="<path-to-op-conductor-ops-config.toml>"`
+## Configuration
+
+Recommended addition to your `.bashrc`/`.zshrc`:
+
+```sh
+export CONDUCTOR_CONFIG="<path-to-op-conductor-ops-config.toml>"
+```
 
 ## Usage
 
-After installing with `poetry install`, the tool is invoked with `poetry run op-conductor-ops`
-(or just `op-conductor-ops` from within `poetry shell`), passing on any arguments.
+```sh
+# Implicit config lookup at ./config.toml or $CONDUCTOR_CONFIG
+op-conductor-ops status <network-name>
 
-### Example Usage
+# Explicit config and certificate paths
+op-conductor-ops -c ./<path>/config.toml --cert ./<path>/cacert.pem <command> <network-name>
+```
 
-* Example usage with implicit config file with lookup at ./config.toml
-```poetry run op-conductor-ops status <network-name>```
-
-* Usage with explicit path to config and certificate
-```poetry run op-conductor-ops -c ./<path>/config.toml --cert ./<path>/cacert.pem <command> <network-name>```
+From a source checkout, prefix the above with `poetry run`.
 
 ## Example Configuration File: example.config.toml
 
