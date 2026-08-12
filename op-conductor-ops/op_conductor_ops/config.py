@@ -1,5 +1,6 @@
 from .network import Network
 from .sequencer import Sequencer
+import os
 import toml
 
 
@@ -7,9 +8,11 @@ def read_config(config_path: str) -> tuple[dict[str, Sequencer], str]:
     config = toml.load(config_path)
 
     cert_path = config.get("cert_path", "")
-    # if cert path is relative, pre-pend the config path
-    if not cert_path.startswith("/"):
-        cert_path = f"{config_path.rsplit('/', 1)[0]}/{cert_path}"
+    # Resolve relative cert paths against the config file's directory
+    # (not the config filename itself — bare names like "toss.toml" have no '/').
+    if cert_path and not os.path.isabs(cert_path):
+        config_dir = os.path.dirname(os.path.abspath(config_path))
+        cert_path = os.path.normpath(os.path.join(config_dir, cert_path))
 
     # load sequencers into a map
     sequencers = {}
