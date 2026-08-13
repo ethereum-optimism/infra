@@ -2,14 +2,17 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pressly/goose/v3"
 )
 
 // legacyV1Schema is the schema as it was applied by hand, before these
@@ -24,8 +27,15 @@ var legacyV1Schema string
 const defaultTestDatabaseURI = "postgres://opc@localhost:5432/postgres?sslmode=disable"
 
 // gooseTable is the bookkeeping table goose adds. It is the only object the
-// first migration of an existing database is allowed to create.
+// baseline migration of an existing database is allowed to create.
 const gooseTable = "goose_db_version"
+
+// currentSchemaVersion is the highest migration in pkg/db/migrations. Bump it
+// when adding one.
+const currentSchemaVersion = 2
+
+// baselineVersion is the migration that reproduces the hand-applied schema.
+const baselineVersion = 1
 
 // TestMigrateFromEmpty covers a database built from nothing.
 func TestMigrateFromEmpty(t *testing.T) {
@@ -35,7 +45,7 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if err := Migrate(ctx, uri); err != nil {
 		t.Fatalf("migrating an empty database: %v", err)
 	}
-	assertVersion(ctx, t, uri, 1)
+	assertVersion(ctx, t, uri, currentSchemaVersion)
 	for _, table := range []string{"pipelines", "jobs", "test_results"} {
 		assertTableExists(ctx, t, uri, schema, table)
 	}
@@ -53,7 +63,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := Migrate(ctx, uri); err != nil {
 		t.Fatalf("second migrate against an already current database: %v", err)
 	}
-	assertVersion(ctx, t, uri, 1)
+	assertVersion(ctx, t, uri, currentSchemaVersion)
 }
 
 // TestMigrateOverLegacySchema is the one that matters for the first deploy: the
@@ -67,7 +77,7 @@ func TestMigrateOverLegacySchema(t *testing.T) {
 	if err := Migrate(ctx, uri); err != nil {
 		t.Fatalf("migrating a database that was set up by hand: %v", err)
 	}
-	assertVersion(ctx, t, uri, 1)
+	assertVersion(ctx, t, uri, currentSchemaVersion)
 
 	// The point of a migration chain: a database built from scratch and one
 	// carried over from the hand-applied schema must end up identical.
@@ -82,11 +92,11 @@ func TestMigrateOverLegacySchema(t *testing.T) {
 	}
 }
 
-// TestMigrateLeavesExistingDatabaseAlone covers the first deploy of this
-// change. Against the database already in service, the baseline must add
-// goose's bookkeeping table and nothing else — no existing object altered and
-// no row touched.
-func TestMigrateLeavesExistingDatabaseAlone(t *testing.T) {
+// TestBaselineLeavesExistingDatabaseAlone covers adopting the database already
+// in service. Stopping at the baseline, it must add goose's bookkeeping table
+// and nothing else — no existing object altered and no row touched. Later
+// migrations are expected to change the schema, so they are not run here.
+func TestBaselineLeavesExistingDatabaseAlone(t *testing.T) {
 	ctx := context.Background()
 	uri, schema := newTestSchema(ctx, t, "untouched")
 	exec(ctx, t, uri, legacyV1Schema)
@@ -95,16 +105,14 @@ INSERT INTO pipelines (id, number, commit, branch, created_at)
 VALUES ('p1', 1, 'abc123', 'develop', '2026-01-01 00:00:00')`)
 
 	before := fingerprint(ctx, t, uri, schema, gooseTable)
-	if err := Migrate(ctx, uri); err != nil {
-		t.Fatalf("migrating the existing database: %v", err)
-	}
+	migrateUpTo(ctx, t, uri, baselineVersion)
 	after := fingerprint(ctx, t, uri, schema, gooseTable)
 
 	if before != after {
 		t.Errorf("the existing schema was modified:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
 	assertTableExists(ctx, t, uri, schema, gooseTable)
-	assertVersion(ctx, t, uri, 1)
+	assertVersion(ctx, t, uri, baselineVersion)
 
 	var count int
 	conn, err := pgx.Connect(ctx, uri)
@@ -117,6 +125,37 @@ VALUES ('p1', 1, 'abc123', 'develop', '2026-01-01 00:00:00')`)
 	}
 	if count != 1 {
 		t.Errorf("existing row did not survive the migration")
+	}
+}
+
+// TestPipelineCompleteAdoptsExistingRows covers the meaning of the complete
+// column for rows that predate it. Those pipelines were only ever written once
+// all of their workflows had finished, so they must read as complete rather
+// than land back on the retry list.
+func TestPipelineCompleteAdoptsExistingRows(t *testing.T) {
+	ctx := context.Background()
+	uri, _ := newTestSchema(ctx, t, "adopt_rows")
+	exec(ctx, t, uri, legacyV1Schema)
+	exec(ctx, t, uri, `
+INSERT INTO pipelines (id, number, commit, branch, created_at)
+VALUES ('old', 1, 'abc123', 'develop', '2026-01-01 00:00:00')`)
+
+	if err := Migrate(ctx, uri); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	conn, err := pgx.Connect(ctx, uri)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	var complete bool
+	if err := conn.QueryRow(ctx, "SELECT complete FROM pipelines WHERE id = 'old'").Scan(&complete); err != nil {
+		t.Fatalf("reading complete: %v", err)
+	}
+	if !complete {
+		t.Error("a pipeline recorded before the column existed was left incomplete, so it will be retried forever")
 	}
 }
 
@@ -138,6 +177,32 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "expects") {
 		t.Errorf("error does not explain the version mismatch: %v", err)
+	}
+}
+
+// migrateUpTo applies migrations only as far as version, which Migrate has no
+// reason to expose. It uses the same embedded files, so a test can pin the
+// behaviour of one migration rather than the whole chain.
+func migrateUpTo(ctx context.Context, t *testing.T, uri string, version int64) {
+	t.Helper()
+
+	sqlDB, err := sql.Open("pgx", uri)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer sqlDB.Close()
+
+	fsys, err := fs.Sub(migrations, migrationsDir)
+	if err != nil {
+		t.Fatalf("reading embedded migrations: %v", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys,
+		goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatalf("creating provider: %v", err)
+	}
+	if _, err := provider.UpTo(ctx, version); err != nil {
+		t.Fatalf("migrating to version %d: %v", version, err)
 	}
 }
 
