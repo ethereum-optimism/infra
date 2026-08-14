@@ -6,7 +6,8 @@ internally at OP Labs to keep track of CI pass rate, merge throughput, and other
 To run the program, specify the following env vars:
 
 - `CCI_KEY`: CircleCI API Key
-- `DATABASE_URI`: Postgres database URI
+- `DATABASE_URI`: Postgres database URI. The role needs DDL rights, because the runner migrates the
+  schema at startup
 - `PROJECT_SLUG`: Slug of the CCI project you want to grab stats for
 - `BRANCH_PATTERN`: Regex pattern to filter branches by
 - `WORKFLOW_PATTERN`: Regex pattern to filter workflows by
@@ -16,3 +17,14 @@ To run the program, specify the following env vars:
   further debugging
 
 Then run `go run cmd/runner/main.go`.
+
+## Schema
+
+The schema is the migration chain in `pkg/db/migrations`, applied at startup. Nothing is applied by
+hand. To change it, add a numbered file with `-- +goose Up` and `-- +goose Down` sections.
+
+`pkg/db` tests need a real Postgres. CI provides one; locally, point `TEST_DATABASE_URI` at one:
+
+```
+TEST_DATABASE_URI=postgres://user@localhost:5432/postgres?sslmode=disable go test ./pkg/db
+```

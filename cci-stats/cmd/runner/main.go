@@ -34,6 +34,12 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Before connecting, so that a schema this binary cannot work against stops
+	// the run rather than failing part way through it.
+	if err := db.Migrate(ctx, dbURI); err != nil {
+		return fmt.Errorf("failed to migrate db: %w", err)
+	}
+
 	dbConn, err := db.New(ctx, dbURI)
 	if err != nil {
 		return fmt.Errorf("failed to connect to db: %w", err)
