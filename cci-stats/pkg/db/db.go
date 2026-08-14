@@ -19,6 +19,12 @@ type Pipeline struct {
 	Commit    string
 	Branch    string
 	CreatedAt time.Time
+	// Complete is false while the pipeline may still create workflows, or while
+	// a matched workflow is unfinished. The ingest high water mark is
+	// MAX(created_at) over the table, so a pipeline left unrecorded can never be
+	// revisited; recording it as incomplete lets the mark advance while the
+	// pipeline stays on the retry list.
+	Complete bool
 }
 
 type Job struct {
@@ -34,8 +40,6 @@ type Job struct {
 }
 
 type TestResult struct {
-	ID      int
-	JobID   string
 	Name    string
 	Runtime float64
 	Status  string
@@ -44,6 +48,8 @@ type TestResult struct {
 
 type Connection interface {
 	LastPipeline(ctx context.Context) (*Pipeline, error)
+	IncompletePipelines(ctx context.Context, since time.Time) ([]Pipeline, error)
+	RecordPending(ctx context.Context, pipelines []Pipeline) error
 
 	Begin() (Transactor, error)
 	Close() error
@@ -52,7 +58,7 @@ type Connection interface {
 type Transactor interface {
 	InsertPipeline(ctx context.Context, p Pipeline) error
 	InsertJob(ctx context.Context, j Job) error
-	InsertTestResult(ctx context.Context, tr TestResult) (int, error)
+	ReplaceTestResults(ctx context.Context, jobID string, results []TestResult) error
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context)
 }
@@ -72,13 +78,13 @@ func New(ctx context.Context, uri string) (*PGXDB, error) {
 
 func (p *PGXDB) LastPipeline(ctx context.Context) (*Pipeline, error) {
 	sql := `
-SELECT id, number, commit, branch, created_at
+SELECT id, number, commit, branch, created_at, complete
 FROM pipelines ORDER BY created_at DESC LIMIT 1
 `
 
 	row := p.conn.QueryRow(ctx, sql)
 	var pl Pipeline
-	if err := row.Scan(&pl.ID, &pl.Number, &pl.Commit, &pl.Branch, &pl.CreatedAt); err != nil {
+	if err := row.Scan(&pl.ID, &pl.Number, &pl.Commit, &pl.Branch, &pl.CreatedAt, &pl.Complete); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -86,6 +92,59 @@ FROM pipelines ORDER BY created_at DESC LIMIT 1
 		return nil, fmt.Errorf("failed to get last pipeline: %w", err)
 	}
 	return &pl, nil
+}
+
+// IncompletePipelines returns pipelines recorded before they finished, so they
+// can be indexed again. The since bound stops a pipeline that never finishes,
+// such as one left awaiting approval, from being retried forever.
+func (p *PGXDB) IncompletePipelines(ctx context.Context, since time.Time) ([]Pipeline, error) {
+	sql := `
+SELECT id, number, commit, branch, created_at, complete
+FROM pipelines WHERE NOT complete AND created_at >= $1 ORDER BY created_at
+`
+
+	rows, err := p.conn.Query(ctx, sql, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query incomplete pipelines: %w", err)
+	}
+	defer rows.Close()
+
+	var res []Pipeline
+	for rows.Next() {
+		var pl Pipeline
+		if err := rows.Scan(&pl.ID, &pl.Number, &pl.Commit, &pl.Branch, &pl.CreatedAt, &pl.Complete); err != nil {
+			return nil, fmt.Errorf("failed to scan incomplete pipeline: %w", err)
+		}
+		res = append(res, pl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read incomplete pipelines: %w", err)
+	}
+	return res, nil
+}
+
+// RecordPending records pipelines as incomplete before they are indexed, so a
+// run that stops part way leaves them on the retry list rather than behind the
+// high water mark. Pipelines already recorded are left alone, so this never
+// reopens a completed one.
+func (p *PGXDB) RecordPending(ctx context.Context, pipelines []Pipeline) error {
+	if len(pipelines) == 0 {
+		return nil
+	}
+
+	sql := `
+INSERT INTO pipelines (id, number, commit, branch, created_at, complete)
+VALUES ($1, $2, $3, $4, $5, FALSE) ON CONFLICT (id) DO NOTHING
+`
+
+	batch := &pgx.Batch{}
+	for _, pl := range pipelines {
+		batch.Queue(sql, pl.ID, pl.Number, pl.Commit, pl.Branch, pl.CreatedAt)
+	}
+	if err := p.conn.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("failed to record pending pipelines: %w", err)
+	}
+	return nil
 }
 
 func (p *PGXDB) Begin() (Transactor, error) {
@@ -111,9 +170,12 @@ func (p *PGXTransactor) InsertPipeline(ctx context.Context, pl Pipeline) error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
+	// The complete flag has to be updated on conflict: a pipeline is recorded
+	// while it is still running and indexed again once it finishes.
 	sql := `
-INSERT INTO pipelines (id, number, commit, branch, created_at)
-VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING
+INSERT INTO pipelines (id, number, commit, branch, created_at, complete)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (id) DO UPDATE SET complete = EXCLUDED.complete
 `
 
 	if _, err := p.tx.Exec(ctx,
@@ -123,6 +185,7 @@ VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING
 		pl.Commit,
 		pl.Branch,
 		pl.CreatedAt,
+		pl.Complete,
 	); err != nil {
 		return fmt.Errorf("failed to insert pipeline: %w", err)
 	}
@@ -133,67 +196,56 @@ func (p *PGXTransactor) InsertJob(ctx context.Context, j Job) error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	type queryPkg struct {
-		query string
-		args  []any
-	}
+	sql := `
+INSERT INTO jobs (id, pipeline_id, workflow_id, workflow_name, number, name, status, started_at, stopped_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, started_at = EXCLUDED.started_at, stopped_at = EXCLUDED.stopped_at
+`
 
-	queries := []queryPkg{
-		{
-			"DELETE FROM test_results WHERE job_id = $1",
-			[]any{j.ID},
-		},
-		{
-			`INSERT INTO jobs (id, pipeline_id, workflow_id, workflow_name, number, name, status, started_at, stopped_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
-			[]any{
-				j.ID,
-				j.PipelineID,
-				j.WorkflowID,
-				j.WorkflowName,
-				j.Number,
-				j.Name,
-				j.Status,
-				j.StartedAt,
-				j.StoppedAt,
-			},
-		},
-	}
-
-	for i, q := range queries {
-		if _, err := p.tx.Exec(ctx,
-			q.query,
-			q.args...,
-		); err != nil {
-			return fmt.Errorf("failed to insert job: query %d: %w", i, err)
-		}
+	if _, err := p.tx.Exec(ctx,
+		sql,
+		j.ID,
+		j.PipelineID,
+		j.WorkflowID,
+		j.WorkflowName,
+		j.Number,
+		j.Name,
+		j.Status,
+		j.StartedAt,
+		j.StoppedAt,
+	); err != nil {
+		return fmt.Errorf("failed to insert job: %w", err)
 	}
 
 	return nil
 }
 
-func (p *PGXTransactor) InsertTestResult(ctx context.Context, tr TestResult) (int, error) {
+// ReplaceTestResults swaps a job's stored results for the ones supplied. The
+// caller must not pass an empty slice: clearing the old rows is only safe when
+// there are new ones to put in their place, since a job whose metadata fetch
+// returns not found is indistinguishable from one that genuinely has none.
+func (p *PGXTransactor) ReplaceTestResults(ctx context.Context, jobID string, results []TestResult) error {
+	if len(results) == 0 {
+		return fmt.Errorf("refusing to replace test results for job %s with none", jobID)
+	}
+
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
+	if _, err := p.tx.Exec(ctx, "DELETE FROM test_results WHERE job_id = $1", jobID); err != nil {
+		return fmt.Errorf("failed to clear test results: %w", err)
+	}
+
 	sql := `
 INSERT INTO test_results (job_id, name, runtime, status, message)
-VALUES ($1, $2, $3, $4, $5) RETURNING id
+VALUES ($1, $2, $3, $4, $5)
 `
-
-	row := p.tx.QueryRow(ctx,
-		sql,
-		tr.JobID,
-		tr.Name,
-		tr.Runtime,
-		tr.Status,
-		tr.Message,
-	)
-	var id int
-	if err := row.Scan(&id); err != nil {
-		return 0, fmt.Errorf("failed to insert test result: %w", err)
+	for _, tr := range results {
+		if _, err := p.tx.Exec(ctx, sql, jobID, tr.Name, tr.Runtime, tr.Status, tr.Message); err != nil {
+			return fmt.Errorf("failed to insert test result: %w", err)
+		}
 	}
-	return id, nil
+	return nil
 }
 
 func (p *PGXTransactor) Commit(ctx context.Context) error {
@@ -202,10 +254,12 @@ func (p *PGXTransactor) Commit(ctx context.Context) error {
 	return p.tx.Commit(ctx)
 }
 
+// Rollback is safe to defer unconditionally: rolling back an already committed
+// transaction is a no-op rather than an error worth reporting.
 func (p *PGXTransactor) Rollback(ctx context.Context) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
-	if err := p.tx.Rollback(context.Background()); err != nil {
+	if err := p.tx.Rollback(context.Background()); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		slog.Error("error rolling back transaction", "err", err)
 	}
 }
