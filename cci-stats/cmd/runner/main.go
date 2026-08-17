@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/axelKingsley/go-circleci"
+	"github.com/ethereum-optimism/infra/cci-stats/pkg/cci"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/config"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/db"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/service"
@@ -55,11 +55,9 @@ func run() error {
 		SlowTestThresholdSeconds: float64(slowTestThresholdSeconds),
 	}
 
-	clientCfg := circleci.DefaultConfig()
-	clientCfg.Token = cciKey
-	client, err := circleci.NewClient(clientCfg)
+	client, err := cci.NewClient(cciKey)
 	if err != nil {
-		return fmt.Errorf("failed to create circleci client: %w", err)
+		return err
 	}
 
 	errC := make(chan error)
