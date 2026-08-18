@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/kms v1.26.0
 	github.com/BurntSushi/toml v1.3.2
 	github.com/ethereum-optimism/optimism v1.7.7-0.20240529212843-af0999ccc31d
-	github.com/ethereum/go-ethereum v1.13.15
+	github.com/ethereum/go-ethereum v1.17.0
 	github.com/gorilla/mux v1.8.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.0
