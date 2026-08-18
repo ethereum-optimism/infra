@@ -2,7 +2,7 @@ FROM cimg/base:2026.03
 
 LABEL org.opencontainers.image.title="optimism ci-base clang"
 LABEL org.opencontainers.image.description="CircleCI base image with clang, llvm-dev, libclang-dev, and sccache preinstalled for Rust bindgen and prost/tonic build jobs"
-LABEL org.opencontainers.image.source="https://github.com/ethereum-optimism/optimism"
+LABEL org.opencontainers.image.source="https://github.com/ethereum-optimism/infra"
 
 # Pinned sccache release, preinstalled so Rust CI jobs don't install it per-job.
 # Checksums are the upstream .tar.gz.sha256 sidecars for v0.9.1; the build fails
