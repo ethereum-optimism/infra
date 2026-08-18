@@ -10,6 +10,11 @@
       "dockerfile": "Dockerfile",
       "paths": ["bailiff/**"]
     },
+    "ci-base-clang": {
+      "context": "ci-base-clang",
+      "dockerfile": "Dockerfile",
+      "paths": ["ci-base-clang/**"]
+    },
     "cci-stats": {
       "context": ".",
       "dockerfile": "cci-stats/Dockerfile",
