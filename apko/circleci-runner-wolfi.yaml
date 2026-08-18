@@ -26,6 +26,7 @@ contents:
     - jq                    # cargo metadata | jq in several just recipes
     # Toolchain (mirrors the Dockerfile apt package set)
     - build-base            # build-essential / gcc toolchain
+    - m4                    # gmp-mpfr-sys builds GMP from source via ./configure, needs m4
     - clang-19              # clang + /usr/lib/libclang.so for bindgen (reth-mdbx-sys)
     - libclang-cpp-19       # libclang-cpp runtime
     - mold                  # faster linker used by Rust jobs
