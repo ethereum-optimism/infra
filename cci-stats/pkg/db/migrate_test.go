@@ -32,7 +32,7 @@ const gooseTable = "goose_db_version"
 
 // currentSchemaVersion is the highest migration in pkg/db/migrations. Bump it
 // when adding one.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // baselineVersion is the migration that reproduces the hand-applied schema.
 const baselineVersion = 1
