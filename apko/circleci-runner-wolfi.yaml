@@ -22,6 +22,8 @@ contents:
     - openssh-client
     - curl
     - sudo                  # checkout-with-mise orb runs `sudo` to set up /data/mise-data
+    - openssl               # cargo-hack `just hack` shuffle: shuf --random-source=<(openssl ...)
+    - jq                    # cargo metadata | jq in several just recipes
     # Toolchain (mirrors the Dockerfile apt package set)
     - build-base            # build-essential / gcc toolchain
     - clang-19              # clang + /usr/lib/libclang.so for bindgen (reth-mdbx-sys)
