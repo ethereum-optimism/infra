@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"golang.org/x/exp/slog"
 
 	"github.com/ethereum/go-ethereum/log"
 

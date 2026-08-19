@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/optimism/op-node/p2p"
+	"github.com/ethereum-optimism/optimism/op-service/apis"
 )
 
 type Network struct {
@@ -33,8 +33,8 @@ type NetworkState struct {
 }
 
 type NodeState struct {
-	self       *p2p.PeerInfo
-	peers      *p2p.PeerDump
+	self       *apis.PeerInfo
+	peers      *apis.PeerDump
 	knownPeers []string
 	updatedAt  time.Time
 }

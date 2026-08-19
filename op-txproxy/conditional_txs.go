@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -43,13 +43,12 @@ type ConditionalTxService struct {
 }
 
 func NewConditionalTxService(ctx context.Context, log log.Logger, m metrics.Factory, cfg *CLIConfig) (*ConditionalTxService, error) {
-	rpc, err := client.NewRPC(ctx, log, cfg.SendRawTransactionConditionalBackend)
+	rpcMetrics := metrics.MakeRPCMetrics(MetricsNameSpace, m)
+	backend, err := client.NewRPC(ctx, log, cfg.SendRawTransactionConditionalBackend,
+		client.WithRPCRecorder(rpcMetrics.NewRecorder("backend")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial backend %s: %w", cfg.SendRawTransactionConditionalBackend, err)
 	}
-
-	rpcMetrics := metrics.MakeRPCClientMetrics("backend", m)
-	backend := client.NewInstrumentedRPC(rpc, &rpcMetrics)
 
 	limiter := rate.NewLimiter(rate.Limit(cfg.SendRawTransactionConditionalRateLimit), params.TransactionConditionalMaxCost)
 	entrypointAddresses := map[common.Address]bool{predeploys.EntryPoint_v060Addr: true, predeploys.EntryPoint_v070Addr: true}
