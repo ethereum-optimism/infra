@@ -3,6 +3,7 @@ package clients
 import (
 	"context"
 	"math/big"
+	"net/http"
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics"
@@ -21,7 +22,7 @@ type InstrumentedSignerClient struct {
 
 func NewSignerClient(providerName string, logger log.Logger, endpoint string, tlsConfig optls.CLIConfig) (*InstrumentedSignerClient, error) {
 	start := time.Now()
-	c, err := signer.NewSignerClient(logger, endpoint, tlsConfig)
+	c, err := signer.NewSignerClient(logger, endpoint, make(http.Header), tlsConfig)
 	if err != nil {
 		metrics.RecordErrorDetails(providerName, "signer.NewSignerClient", err)
 		return nil, err

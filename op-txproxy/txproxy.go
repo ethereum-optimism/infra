@@ -93,10 +93,11 @@ func (txp *TxProxy) initRPC(cfg *CLIConfig) error {
 	apis := []rpc.API{{Namespace: "eth", Service: txp.conditionalTxService}}
 
 	rpcCfg := cfg.rpcConfig
-	rpcOpts := []oprpc.ServerOption{oprpc.WithAPIs(apis), oprpc.WithLogger(txp.log)}
-
 	txp.log.Info("starting rpc server", "addr", rpcCfg.ListenAddr, "port", rpcCfg.ListenPort)
-	txp.rpcSrv = oprpc.NewServer(rpcCfg.ListenAddr, rpcCfg.ListenPort, txp.version, rpcOpts...)
+	txp.rpcSrv = oprpc.NewServer(rpcCfg.ListenAddr, rpcCfg.ListenPort, txp.version, oprpc.WithLogger(txp.log))
+	for _, api := range apis {
+		txp.rpcSrv.AddAPI(api)
+	}
 	if err := txp.rpcSrv.Start(); err != nil {
 		return fmt.Errorf("failed to start rpc server: %w", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
 	opp2p "github.com/ethereum-optimism/optimism/op-node/p2p"
+	"github.com/ethereum-optimism/optimism/op-service/client"
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -15,7 +17,7 @@ import (
 )
 
 type InstrumentedOpP2PClient struct {
-	c       *opp2p.Client
+	c       *sources.P2PClient
 	network string
 	node    string
 	rpcUrl  string
@@ -31,7 +33,7 @@ func New(ctx context.Context, config *config.Config, network string, nodeName st
 			"err", err)
 		return nil, errors.Errorf("failed to create p2p rpc client with network [%s], nodeName [%s], rpcUrl [%s]: %v", network, nodeName, rpcUrl, err)
 	}
-	p2pClient := opp2p.NewClient(pc)
+	p2pClient := sources.NewP2PClient(client.NewBaseRPCClient(pc))
 
 	return &InstrumentedOpP2PClient{
 		c:       p2pClient,

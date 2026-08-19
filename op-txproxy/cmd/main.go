@@ -7,14 +7,15 @@ import (
 
 	optxproxy "github.com/ethereum-optimism/infra/op-txproxy"
 
+	opservice "github.com/ethereum-optimism/optimism/op-service"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
-	"github.com/ethereum-optimism/optimism/op-service/opio"
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
 
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
+	gethversion "github.com/ethereum/go-ethereum/version"
 
 	"github.com/urfave/cli/v2"
 )
@@ -29,7 +30,8 @@ func main() {
 	oplog.SetupDefaults()
 
 	app := cli.NewApp()
-	app.Version = params.VersionWithCommit(GitCommit, GitDate)
+	version := fmt.Sprintf("%d.%d.%d", gethversion.Major, gethversion.Minor, gethversion.Patch)
+	app.Version = opservice.FormatVersion(version, GitCommit, GitDate, gethversion.Meta)
 	app.Name = "op-txproxy"
 	app.Usage = "Optimism TxProxy Service"
 	app.Description = "Auxiliary service to supplement op-stack transaction pool management"
@@ -41,7 +43,7 @@ func main() {
 	backendFlags := optxproxy.CLIFlags(EnvVarPrefix)
 	app.Flags = append(append(append(backendFlags, rpcFlags...), metricsFlags...), logFlags...)
 
-	ctx := opio.WithInterruptBlocker(context.Background())
+	ctx := ctxinterrupt.WithSignalWaiterMain(context.Background())
 	if err := app.RunContext(ctx, os.Args); err != nil {
 		log.Crit("Application Failed", "err", err)
 	}
