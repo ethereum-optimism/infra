@@ -7,7 +7,7 @@ import (
 
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
-	opp2p "github.com/ethereum-optimism/optimism/op-node/p2p"
+	"github.com/ethereum-optimism/optimism/op-service/apis"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum/log"
@@ -43,7 +43,7 @@ func New(ctx context.Context, config *config.Config, network string, nodeName st
 	}, nil
 }
 
-func (i *InstrumentedOpP2PClient) Self(ctx context.Context) (*opp2p.PeerInfo, error) {
+func (i *InstrumentedOpP2PClient) Self(ctx context.Context) (*apis.PeerInfo, error) {
 	start := time.Now()
 	log.Debug("opp2p.Self", "rpc_address", i.rpcUrl)
 	peerInfo, err := i.c.Self(ctx)
@@ -55,7 +55,7 @@ func (i *InstrumentedOpP2PClient) Self(ctx context.Context) (*opp2p.PeerInfo, er
 	return peerInfo, err
 }
 
-func (i *InstrumentedOpP2PClient) Peers(ctx context.Context, connected bool) (*opp2p.PeerDump, error) {
+func (i *InstrumentedOpP2PClient) Peers(ctx context.Context, connected bool) (*apis.PeerDump, error) {
 	start := time.Now()
 	log.Debug("opp2p.Peers", "rpc_address", i.rpcUrl, "connected", connected)
 	peerDump, err := i.c.Peers(ctx, connected)
@@ -67,7 +67,7 @@ func (i *InstrumentedOpP2PClient) Peers(ctx context.Context, connected bool) (*o
 	return peerDump, err
 }
 
-func (i *InstrumentedOpP2PClient) PeerStats(ctx context.Context) (*opp2p.PeerStats, error) {
+func (i *InstrumentedOpP2PClient) PeerStats(ctx context.Context) (*apis.PeerStats, error) {
 	start := time.Now()
 	log.Debug("opp2p.PeerStats", "rpc_address", i.rpcUrl)
 	peerStats, err := i.c.PeerStats(ctx)

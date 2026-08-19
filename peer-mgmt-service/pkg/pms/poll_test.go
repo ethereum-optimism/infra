@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
-	"github.com/ethereum-optimism/optimism/op-node/p2p"
+	"github.com/ethereum-optimism/optimism/op-service/apis"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,8 +15,8 @@ func TestNetwork_cleanupState(t *testing.T) {
 		n := &Network{
 			config: &config.Config{NodeStateExpiration: 10 * time.Hour},
 			state: &NetworkState{nodes: map[string]*NodeState{
-				"clean_me": {updatedAt: time.Now().Add(-11 * time.Hour), self: &p2p.PeerInfo{PeerID: "clean_me"}},
-				"keep_me":  {updatedAt: time.Now(), self: &p2p.PeerInfo{PeerID: "keep_me"}},
+				"clean_me": {updatedAt: time.Now().Add(-11 * time.Hour), self: &apis.PeerInfo{PeerID: "clean_me"}},
+				"keep_me":  {updatedAt: time.Now(), self: &apis.PeerInfo{PeerID: "keep_me"}},
 			}},
 		}
 		ctx := context.Background()
@@ -34,24 +34,24 @@ func TestNetwork_updateGraph(t *testing.T) {
 			state: &NetworkState{
 				nodes: map[string]*NodeState{
 					"p1": {
-						self: &p2p.PeerInfo{PeerID: "peer_id_1"},
-						peers: &p2p.PeerDump{
-							Peers: map[string]*p2p.PeerInfo{
+						self: &apis.PeerInfo{PeerID: "peer_id_1"},
+						peers: &apis.PeerDump{
+							Peers: map[string]*apis.PeerInfo{
 								"peer_id_2": {PeerID: "peer_id_2"},
 							},
 						},
 					},
 					"p2": {
-						self: &p2p.PeerInfo{PeerID: "peer_id_2"},
-						peers: &p2p.PeerDump{
-							Peers: map[string]*p2p.PeerInfo{
+						self: &apis.PeerInfo{PeerID: "peer_id_2"},
+						peers: &apis.PeerDump{
+							Peers: map[string]*apis.PeerInfo{
 								"peer_id_1": {PeerID: "peer_id_1"},
 							},
 						},
 					},
 					"p3": {
-						self:  &p2p.PeerInfo{PeerID: "peer_id_3"},
-						peers: &p2p.PeerDump{},
+						self:  &apis.PeerInfo{PeerID: "peer_id_3"},
+						peers: &apis.PeerDump{},
 					},
 				},
 				nodesByPeerID: map[string]string{
@@ -104,8 +104,8 @@ func TestNetwork_resolveState_DialsExternalPeer(t *testing.T) {
 		state: &NetworkState{
 			nodes: map[string]*NodeState{
 				"internal": {
-					self:  &p2p.PeerInfo{PeerID: "internal-peer-id"},
-					peers: &p2p.PeerDump{Peers: map[string]*p2p.PeerInfo{}},
+					self:  &apis.PeerInfo{PeerID: "internal-peer-id"},
+					peers: &apis.PeerDump{Peers: map[string]*apis.PeerInfo{}},
 				},
 			},
 			nodesByPeerID: map[string]string{
@@ -142,24 +142,24 @@ func TestNetwork_resolveState(t *testing.T) {
 			state: &NetworkState{
 				nodes: map[string]*NodeState{
 					"p1": {
-						self: &p2p.PeerInfo{PeerID: "peer_id_1"},
-						peers: &p2p.PeerDump{
-							Peers: map[string]*p2p.PeerInfo{
+						self: &apis.PeerInfo{PeerID: "peer_id_1"},
+						peers: &apis.PeerDump{
+							Peers: map[string]*apis.PeerInfo{
 								"peer_id_2": {PeerID: "peer_id_2"},
 							},
 						},
 					},
 					"p2": {
-						self: &p2p.PeerInfo{PeerID: "peer_id_2"},
-						peers: &p2p.PeerDump{
-							Peers: map[string]*p2p.PeerInfo{
+						self: &apis.PeerInfo{PeerID: "peer_id_2"},
+						peers: &apis.PeerDump{
+							Peers: map[string]*apis.PeerInfo{
 								"peer_id_1": {PeerID: "peer_id_1"},
 							},
 						},
 					},
 					"p3": {
-						self:  &p2p.PeerInfo{PeerID: "peer_id_3"},
-						peers: &p2p.PeerDump{},
+						self:  &apis.PeerInfo{PeerID: "peer_id_3"},
+						peers: &apis.PeerDump{},
 					},
 				},
 				nodesByPeerID: map[string]string{
