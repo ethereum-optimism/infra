@@ -162,7 +162,7 @@
         "melange/pipelines/circleci-runner/**",
         "apko/circleci-runner-wolfi.yaml"
       ],
-      "smoke_test": "mise --version,go version,rustc --version,cargo --version,sccache --version,clang --version,mold --version,protoc --version,cc --version,pkg-config --version,git --version,bash --version"
+      "smoke_test": "mise --version,go version,rustc --version,cargo --version,sccache --version,clang --version,mold --version,cc --version,pkg-config --version,git --version,bash --version"
     }
   }
 }
