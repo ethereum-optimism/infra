@@ -147,19 +147,16 @@ func (sw *AvgSlidingWindow) advance() {
 	windowStart := now.Add(-sw.windowLength)
 	keys := sw.buckets.Keys()
 	for _, k := range keys {
+		// buckets is insertion-ordered, not key-ordered, so a newer key can
+		// precede an older one. Skip rather than stop, or stale buckets survive.
 		if k.(time.Time).After(windowStart) {
-			break
+			continue
 		}
 		val, _ := sw.buckets.Get(k)
 		b := val.(*bucket)
 		sw.buckets.Remove(k)
-		if sw.buckets.Size() > 0 {
-			sw.qty -= b.qty
-			sw.sum = sw.sum - b.sum
-		} else {
-			sw.qty = 0
-			sw.sum = 0.0
-		}
+		sw.qty -= b.qty
+		sw.sum -= b.sum
 	}
 }
 
