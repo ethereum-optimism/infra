@@ -49,7 +49,8 @@ func ReadConfig(path string) (ProviderConfig, error) {
 	}
 
 	if !config.ProviderType.IsValid() {
-		return config, fmt.Errorf("invalid provider '%s' in config. Must be 'AWS', 'GCP', or 'LOCAL'", config.ProviderType)
+		providerTypesStr := GetAllProviderTypesString()
+		return config, fmt.Errorf("invalid provider '%s' in config. Must be %s", config.ProviderType, providerTypesStr)
 	}
 
 	for _, authConfig := range config.Auth {
