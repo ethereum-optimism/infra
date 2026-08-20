@@ -1,3 +1,9 @@
 lint:
   poetry run black .
 
+# Build a single-file executable. VERSION has no leading "v" (e.g. 0.2.0).
+# PLATFORM is one of darwin-arm64, darwin-amd64, linux-amd64, linux-arm64.
+build-binary VERSION PLATFORM:
+  poetry run pyinstaller --onefile --clean --noconfirm \
+    --name "op-conductor-ops-{{VERSION}}-{{PLATFORM}}" \
+    entrypoint.py
