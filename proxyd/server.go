@@ -51,6 +51,7 @@ const (
 	maxRequestBodyLogLen                            = 2000
 	defaultMaxUpstreamBatchSize                     = 10
 	defaultRateLimitHeader                          = "X-Forwarded-For"
+	maxRateLimitTrackerKeys                         = 50_000
 	defaultInteropValidationStrategy                = AgreementStrategy
 	defaultInteropReqSizeLimit                      = 128 * opt.KiB
 	defaultInteropAccessListSizeLimit               = 1000
@@ -75,6 +76,7 @@ type Server struct {
 	upgrader                *websocket.Upgrader
 	mainLim                 FrontendRateLimiter
 	overrideLims            map[string]FrontendRateLimiter
+	rateLimitTracker        *rateLimitTracker
 	senderLim               FrontendRateLimiter
 	interopSenderLim        FrontendRateLimiter
 	allowedChainIds         []*big.Int
@@ -209,6 +211,16 @@ func NewServer(
 		rateLimitHeader = rateLimitConfig.IPHeaderOverride
 	}
 
+	var tracker *rateLimitTracker
+	if rateLimitConfig.BaseRate > 0 || len(overrideLims) > 0 {
+		window := time.Duration(rateLimitConfig.BaseInterval)
+		if window <= 0 {
+			window = time.Minute
+		}
+		tracker = newRateLimitTracker(maxRateLimitTrackerKeys)
+		tracker.Start(window)
+	}
+
 	var txValidationMethods TxValidationMethodSet
 	if len(txValidationConfig.Methods) == 0 {
 		txValidationMethods = defaultTxValidationMethods()
@@ -247,6 +259,7 @@ func NewServer(
 		},
 		mainLim:                  mainLim,
 		overrideLims:             overrideLims,
+		rateLimitTracker:         tracker,
 		globallyLimitedMethods:   globalMethodLims,
 		senderLim:                senderLim,
 		interopSenderLim:         interopSenderLim,
@@ -353,6 +366,9 @@ func (s *Server) Shutdown() {
 	}
 	for _, bg := range s.BackendGroups {
 		bg.Shutdown()
+	}
+	if s.rateLimitTracker != nil {
+		s.rateLimitTracker.Stop()
 	}
 }
 
@@ -1130,12 +1146,22 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 		ok, err := lim.Take(ctx, xff)
 		if err != nil {
 			log.Warn("error taking rate limit", "err", err)
+			s.trackRateLimited(xff)
 			return true
+		}
+		if !ok {
+			s.trackRateLimited(xff)
 		}
 		return !ok
 	}
 
 	return isLimited, nil
+}
+
+func (s *Server) trackRateLimited(key string) {
+	if s.rateLimitTracker != nil {
+		s.rateLimitTracker.recordLimited(key)
+	}
 }
 
 func (s *Server) isGlobalLimit(method string) bool {

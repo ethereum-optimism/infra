@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -96,6 +97,42 @@ func TestIsValidAPIKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRateLimitedRequestIsTracked(t *testing.T) {
+	s := &Server{
+		rateLimitHeader:  defaultRateLimitHeader,
+		mainLim:          NewMemoryFrontendRateLimit(time.Minute, 1),
+		rateLimitTracker: newRateLimitTracker(10),
+	}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Header.Set(defaultRateLimitHeader, "203.0.113.9")
+	ctx := s.populateContext(httptest.NewRecorder(), req)
+	require.NotNil(t, ctx)
+
+	isLimited, err := s.limiterForRequest(ctx, req, false)
+	require.NoError(t, err)
+
+	require.False(t, isLimited(""), "first request is under the limit")
+	require.Empty(t, s.rateLimitTracker.limited, "allowed requests must not be tracked")
+
+	require.True(t, isLimited(""), "second request is over the limit")
+	require.Equal(t, map[string]int{"203.0.113.9": 1}, s.rateLimitTracker.limited)
+}
+
+func TestRateLimitedRequestWithoutTracker(t *testing.T) {
+	s := &Server{
+		rateLimitHeader: defaultRateLimitHeader,
+		mainLim:         NewMemoryFrontendRateLimit(time.Minute, 0),
+	}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Header.Set(defaultRateLimitHeader, "203.0.113.9")
+	ctx := s.populateContext(httptest.NewRecorder(), req)
+	require.NotNil(t, ctx)
+
+	isLimited, err := s.limiterForRequest(ctx, req, false)
+	require.NoError(t, err)
+	require.True(t, isLimited(""), "a nil tracker must not panic")
 }
 
 func TestPopulateContextRemoteAddrFallback(t *testing.T) {
