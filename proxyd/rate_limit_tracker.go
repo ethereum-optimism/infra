@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"hash/fnv"
 	"sync"
 	"time"
 )
@@ -10,7 +11,7 @@ import (
 // histogram of rejected-request counts per key, with no per-IP labels.
 type rateLimitTracker struct {
 	mtx     sync.Mutex
-	limited map[string]int
+	limited map[uint64]int
 	maxKeys int
 
 	done chan struct{}
@@ -19,26 +20,35 @@ type rateLimitTracker struct {
 
 func newRateLimitTracker(maxKeys int) *rateLimitTracker {
 	return &rateLimitTracker{
-		limited: make(map[string]int),
+		limited: make(map[uint64]int),
 		maxKeys: maxKeys,
 		done:    make(chan struct{}),
 	}
 }
 
+// recordLimited counts a rejected request for key. The key is hashed to a
+// fixed-width value before storage so retained memory is bounded by maxKeys
+// alone, independent of the (client-controllable) key length. Keys are only
+// counted, never exported as labels, so hash collisions merely risk a slight
+// undercount of distinct keys.
 func (t *rateLimitTracker) recordLimited(key string) {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key))
+	k := h.Sum64()
+
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
-	if _, ok := t.limited[key]; !ok && len(t.limited) >= t.maxKeys {
+	if _, ok := t.limited[k]; !ok && len(t.limited) >= t.maxKeys {
 		frontendRateLimitTrackerOverflowTotal.Inc()
 		return
 	}
-	t.limited[key]++
+	t.limited[k]++
 }
 
 func (t *rateLimitTracker) flush() {
 	t.mtx.Lock()
 	limited := t.limited
-	t.limited = make(map[string]int, len(limited))
+	t.limited = make(map[uint64]int, len(limited))
 	t.mtx.Unlock()
 
 	frontendRateLimitedUniqueKeys.Set(float64(len(limited)))

@@ -117,7 +117,10 @@ func TestRateLimitedRequestIsTracked(t *testing.T) {
 	require.Empty(t, s.rateLimitTracker.limited, "allowed requests must not be tracked")
 
 	require.True(t, isLimited(""), "second request is over the limit")
-	require.Equal(t, map[string]int{"203.0.113.9": 1}, s.rateLimitTracker.limited)
+	require.Len(t, s.rateLimitTracker.limited, 1, "one distinct key tracked")
+	for _, n := range s.rateLimitTracker.limited {
+		require.Equal(t, 1, n, "one rejected request recorded for the key")
+	}
 }
 
 func TestRateLimitedRequestWithoutTracker(t *testing.T) {
