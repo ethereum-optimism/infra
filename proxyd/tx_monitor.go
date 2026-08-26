@@ -19,6 +19,9 @@ const (
 	txmonReapInterval = 5 * time.Second
 	txmonFetchTimeout = 10 * time.Second
 	txmonMaxBackoff   = 30 * time.Second
+	// txmonMaxFrameBytes caps websocket frame size on the subblocks stream;
+	// gorilla defaults to unlimited, and the stream is untrusted input.
+	txmonMaxFrameBytes = 10 << 20
 )
 
 type txmonEvent struct {
@@ -232,6 +235,7 @@ func (m *TxMonitor) streamSubblocks() error {
 		return err
 	}
 	defer conn.Close()
+	conn.SetReadLimit(txmonMaxFrameBytes)
 
 	// Unblock the blocking ReadMessage on shutdown without leaking a
 	// goroutine per reconnect.
