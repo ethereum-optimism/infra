@@ -1029,7 +1029,7 @@ func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited li
 		)
 	}
 
-	if txHash != nil && s.txMonitor != nil && !res[0].IsError() {
+	if txHash != nil && s.txMonitor != nil && res[0] != nil && !res[0].IsError() {
 		s.txMonitor.Observe(*txHash, group, RPCRequestSourceWS)
 	}
 
