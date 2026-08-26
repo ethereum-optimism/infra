@@ -91,7 +91,9 @@ func (f *backendGroupBlockFetcher) fetch(ctx context.Context, tag string) (uint6
 	var lastErr error
 	for _, be := range f.bg.Backends {
 		var res RPCRes
-		if err := be.ForwardRPC(ctx, &res, "txmon", "eth_getBlockByNumber", tag, false); err != nil {
+		// ForwardRPC embeds the id verbatim as JSON, so it must be a valid
+		// JSON value — hence the quoted string.
+		if err := be.ForwardRPC(ctx, &res, `"txmon"`, "eth_getBlockByNumber", tag, false); err != nil {
 			lastErr = err
 			continue
 		}

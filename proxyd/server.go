@@ -102,6 +102,7 @@ type Server struct {
 	txValidationClient       *TxValidationClient
 	txValidationFailOpen     bool
 	txFilter                 *TxFilter
+	txMonitor                *TxMonitor
 	isDraining               atomic.Bool
 	gracefulShutdownDuration time.Duration
 }
@@ -843,6 +844,18 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				}
 			}
 
+			// Feed the tx-UX monitor. Non-blocking by construction (Observe is a
+			// select/default channel send); per-element RPC errors are skipped —
+			// a tx the backend rejected will never land and would only count as
+			// a false timeout.
+			if err == nil && s.txMonitor != nil {
+				for i, elem := range elems {
+					if txHash, ok := txHashes[elem.Index]; ok && i < len(res) && res[i] != nil && !res[i].IsError() {
+						s.txMonitor.Observe(txHash, group.backendGroup, RPCRequestSourceHTTP)
+					}
+				}
+			}
+
 			// sb is "" when the forward failed outright, and also when consensus or
 			// block-tag rewriting overrode every element so no backend was contacted at
 			// all (BackendGroup.ForwardWithSource). backendNameFromServedBy resolves
@@ -1014,6 +1027,10 @@ func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited li
 			"duration_ms", forwardDuration.Milliseconds(),
 			"source", RPCRequestSourceWS,
 		)
+	}
+
+	if txHash != nil && s.txMonitor != nil && !res[0].IsError() {
+		s.txMonitor.Observe(*txHash, group, RPCRequestSourceWS)
 	}
 
 	return res[0], servedBy

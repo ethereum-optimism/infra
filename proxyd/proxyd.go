@@ -544,6 +544,16 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
 	}
 
+	var txMonitor *TxMonitor
+	if config.TxMonitor.Enabled {
+		txMonitor, err = NewTxMonitor(config.TxMonitor, backendGroups, config.RPCMethodMappings)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error creating tx monitor: %w", err)
+		}
+		srv.txMonitor = txMonitor
+		txMonitor.Start()
+	}
+
 	// Enable to support browser websocket connections.
 	// See https://pkg.go.dev/github.com/gorilla/websocket#hdr-Origin_Considerations
 	if config.Server.AllowAllOrigins {
@@ -711,6 +721,10 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 		log.Info("shutting down proxyd")
 		srv.Shutdown()
+		if txMonitor != nil {
+			log.Info("stopping tx monitor")
+			txMonitor.Shutdown()
+		}
 		log.Info("goodbye")
 	}
 

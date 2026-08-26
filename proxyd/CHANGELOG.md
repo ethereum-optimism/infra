@@ -1,5 +1,11 @@
 # @eth-optimism/proxyd
 
+## Unreleased
+
+### Minor Changes
+
+- Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms from forwarded `eth_sendRawTransaction` to block/subblock visibility.
+
 ## 3.14.1
 
 ### Patch Changes

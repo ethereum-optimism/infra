@@ -147,6 +147,18 @@ Response example
 See [op-node receipt fetcher](https://github.com/ethereum-optimism/optimism/blob/186e46a47647a51a658e699e9ff047d39444c2de/op-node/sources/receipts.go#L186-L253).
 
 
+## Transaction UX monitor (`tx_monitor`)
+
+When `[tx_monitor]` is enabled, proxyd passively measures the latency from a
+successfully forwarded `eth_sendRawTransaction` until the transaction becomes
+visible in a block (and, optionally, in a subblocks preconfirmation stream),
+reporting the results as `proxyd_txmon_*` metrics. The monitor is purely
+observational: observations are non-blocking and never affect request
+handling, and its state is in-memory and shared-nothing across replicas —
+each proxyd instance only tracks the transactions it forwarded itself.
+Setting `subblocks_ws_url` additionally measures preconfirmation latency from
+a sequencer's subblocks websocket stream.
+
 ## Metrics
 
 See `metrics.go` for a list of all available metrics.
