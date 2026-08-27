@@ -727,6 +727,58 @@ var (
 	}, []string{
 		"backend_name",
 	})
+
+	txmonInclusionBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 45, 60}
+
+	txmonInclusionLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_inclusion_latency_seconds",
+		Help:      "Latency from successful eth_sendRawTransaction forward to first sighting, by source (block or subblock stream).",
+		Buckets:   txmonInclusionBuckets,
+	}, []string{
+		"source", // block | subblock
+		"backend_group",
+	})
+
+	txmonSubblockToBlock = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_subblock_to_block_seconds",
+		Help:      "Gap between a tx's subblock preconfirmation and its block inclusion (eventual consistency of the user experience).",
+		Buckets:   txmonInclusionBuckets,
+	})
+
+	txmonTimeoutsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_timeouts_total",
+		Help:      "Count of forwarded txs never seen in a block within inclusion_timeout.",
+	}, []string{
+		"backend_group",
+	})
+
+	txmonDroppedEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_dropped_events_total",
+		Help:      "Count of tx observations dropped by the monitor (never blocks ingestion).",
+	}, []string{
+		"reason", // channel_full | map_full
+	})
+
+	// Pre-bound so the hot-path drop branch stays lock-free (WithLabelValues
+	// takes a lock resolving the label set on every call).
+	txmonDroppedChannelFull = txmonDroppedEventsTotal.WithLabelValues("channel_full")
+	txmonDroppedMapFull     = txmonDroppedEventsTotal.WithLabelValues("map_full")
+
+	txmonPending = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_pending",
+		Help:      "Number of txs currently awaiting block inclusion.",
+	})
+
+	txmonStreamDisconnectsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "txmon_stream_disconnects_total",
+		Help:      "Count of subblocks websocket stream disconnects.",
+	})
 )
 
 func RecordUp() {

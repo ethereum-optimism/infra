@@ -256,6 +256,30 @@ type SenderRateLimitConfig struct {
 	AllowedChainIds []*big.Int `toml:"allowed_chain_ids"`
 }
 
+// TxMonitorConfig configures the passive transaction-UX monitor: it observes
+// successfully forwarded eth_sendRawTransaction hashes and measures latency
+// until they appear in a block (and, optionally, in the subblocks stream).
+// Purely observational — never blocks or affects tx ingestion.
+type TxMonitorConfig struct {
+	Enabled bool `toml:"enabled"`
+	// BlockPollURL is an explicit RPC endpoint for block polling. When empty,
+	// the monitor polls through a proxyd backend group instead (see
+	// BlockPollBackendGroup).
+	BlockPollURL string `toml:"block_poll_url"`
+	// BlockPollBackendGroup names the backend group to poll blocks from when
+	// BlockPollURL is empty. Defaults to the group mapped for
+	// eth_getBlockByNumber, falling back to eth_sendRawTransaction's group.
+	BlockPollBackendGroup string `toml:"block_poll_backend_group"`
+	// SubblocksWSURL enables the subblocks preconfirmation watcher when set.
+	SubblocksWSURL string `toml:"subblocks_ws_url"`
+	// InclusionTimeout evicts pending txs and counts a timeout. Default 60s.
+	InclusionTimeout TOMLDuration `toml:"inclusion_timeout"`
+	// MaxPending caps the in-memory pending map. Default 10000.
+	MaxPending int `toml:"max_pending"`
+	// PollInterval is the block poll cadence. Default 1s.
+	PollInterval TOMLDuration `toml:"poll_interval"`
+}
+
 type Config struct {
 	WSBackendGroup               string                       `toml:"ws_backend_group"`
 	Server                       ServerConfig                 `toml:"server"`
@@ -274,6 +298,7 @@ type Config struct {
 	SenderRateLimit              SenderRateLimitConfig        `toml:"sender_rate_limit"`
 	InteropValidationConfig      InteropValidationConfig      `toml:"interop_validation"`
 	TxValidationMiddlewareConfig TxValidationMiddlewareConfig `toml:"tx_validation_middleware"`
+	TxMonitor                    TxMonitorConfig              `toml:"tx_monitor"`
 }
 
 type InteropValidationConfig struct {

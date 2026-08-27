@@ -155,3 +155,25 @@ timeout_seconds = 5
 # Defaults to true (fail-open) for safety - service disruptions won't block all transactions.
 # Set to false to reject transactions when the validation service is unavailable.
 fail_open = true
+
+# Passive transaction-UX monitor: observes successfully forwarded
+# eth_sendRawTransaction hashes and measures latency until they appear in a
+# block (and, optionally, in the subblocks stream). Purely observational —
+# never blocks or affects tx ingestion. Emits proxyd_txmon_* metrics.
+# [tx_monitor]
+# enabled = true
+# Explicit RPC endpoint for block polling. When empty, the monitor polls
+# through a proxyd backend group instead (see block_poll_backend_group).
+# block_poll_url = "http://my-node:8545"
+# Backend group to poll blocks from when block_poll_url is empty. Defaults to
+# the group mapped for eth_getBlockByNumber, falling back to
+# eth_sendRawTransaction's group.
+# block_poll_backend_group = "main"
+# Enables the subblocks preconfirmation watcher when set.
+# subblocks_ws_url = "ws://my-sequencer:9545/ws"
+# Evicts pending txs and counts a timeout, default 60s
+# inclusion_timeout = "60s"
+# Cap on the in-memory pending map, default 10000
+# max_pending = 10000
+# Block poll cadence, default 1s
+# poll_interval = "1s"
