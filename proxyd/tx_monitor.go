@@ -230,7 +230,12 @@ func (m *TxMonitor) runSubblocks() {
 }
 
 func (m *TxMonitor) streamSubblocks() error {
-	conn, _, err := websocket.DefaultDialer.DialContext(m.ctx, m.cfg.SubblocksWSURL, nil)
+	conn, resp, err := websocket.DefaultDialer.DialContext(m.ctx, m.cfg.SubblocksWSURL, nil)
+	// On a successful upgrade gorilla replaces the body with a no-op reader,
+	// so closing is always safe; on handshake failure it's the error body.
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return err
 	}
