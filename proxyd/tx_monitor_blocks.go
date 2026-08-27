@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -85,32 +86,37 @@ func (f *backendGroupBlockFetcher) BlockByNumber(ctx context.Context, num uint64
 	return hashes, found, err
 }
 
-// fetch tries each backend in the group until one answers. First-success is
-// enough: this is a monitor, not a consensus mechanism.
+// fetch routes the poll through the group's Forward, so consensus-aware
+// groups serve the consensus view and routing/failover matches user traffic.
 func (f *backendGroupBlockFetcher) fetch(ctx context.Context, tag string) (uint64, []common.Hash, bool, error) {
-	var lastErr error
-	for _, be := range f.bg.Backends {
-		var res RPCRes
-		// ForwardRPC embeds the id verbatim as JSON, so it must be a valid
-		// JSON value — hence the quoted string.
-		if err := be.ForwardRPC(ctx, &res, `"txmon"`, "eth_getBlockByNumber", tag, false); err != nil {
-			lastErr = err
-			continue
-		}
-		if res.Result == nil {
-			return 0, nil, false, nil // block genuinely absent (walked past head)
-		}
-		num, hashes, err := parseRPCBlockResult(res.Result)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return num, hashes, true, nil
+	params, err := json.Marshal([]interface{}{tag, false})
+	if err != nil {
+		return 0, nil, false, err
 	}
-	if lastErr == nil {
-		lastErr = errors.New("tx_monitor: no backends in group")
+	req := &RPCReq{
+		JSONRPC: JSONRPCVersion,
+		Method:  "eth_getBlockByNumber",
+		Params:  params,
+		ID:      []byte(`"txmon"`),
 	}
-	return 0, nil, false, lastErr
+	res, _, err := f.bg.Forward(ctx, []*RPCReq{req}, false)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	if len(res) == 0 {
+		return 0, nil, false, errors.New("tx_monitor: empty forward response")
+	}
+	if res[0].IsError() {
+		return 0, nil, false, fmt.Errorf("tx_monitor: block poll: %w", res[0].Error)
+	}
+	if res[0].Result == nil {
+		return 0, nil, false, nil // block genuinely absent (walked past head)
+	}
+	num, hashes, err := parseRPCBlockResult(res[0].Result)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	return num, hashes, true, nil
 }
 
 // parseRPCBlockResult parses a generic eth_getBlockByNumber(…, false) result
