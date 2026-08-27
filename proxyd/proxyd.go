@@ -544,6 +544,19 @@ func Start(config *Config) (*Server, func(), error) {
 		return nil, nil, fmt.Errorf("error creating server: %w", err)
 	}
 
+	// Construct and assign the monitor before any listener goroutine spawns so
+	// the hot path's s.txMonitor read is never concurrent with the write.
+	// Start() happens after the consensus loop below: events observed in the
+	// window queue in the buffered channel and drain once ingest starts.
+	var txMonitor *TxMonitor
+	if config.TxMonitor.Enabled {
+		txMonitor, err = NewTxMonitor(config.TxMonitor, backendGroups, config.RPCMethodMappings)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error creating tx monitor: %w", err)
+		}
+		srv.txMonitor = txMonitor
+	}
+
 	// Enable to support browser websocket connections.
 	// See https://pkg.go.dev/github.com/gorilla/websocket#hdr-Origin_Considerations
 	if config.Server.AllowAllOrigins {
@@ -697,13 +710,7 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var txMonitor *TxMonitor
-	if config.TxMonitor.Enabled {
-		txMonitor, err = NewTxMonitor(config.TxMonitor, backendGroups, config.RPCMethodMappings)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error creating tx monitor: %w", err)
-		}
-		srv.txMonitor = txMonitor
+	if txMonitor != nil {
 		txMonitor.Start()
 	}
 
