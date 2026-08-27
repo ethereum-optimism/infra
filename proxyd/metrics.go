@@ -728,7 +728,7 @@ var (
 		"backend_name",
 	})
 
-	txmonInclusionBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 20, 30}
+	txmonInclusionBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 45, 60}
 
 	txmonInclusionLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: MetricsNamespace,
@@ -762,6 +762,11 @@ var (
 	}, []string{
 		"reason", // channel_full | map_full
 	})
+
+	// Pre-bound so the hot-path drop branch stays lock-free (WithLabelValues
+	// takes a lock resolving the label set on every call).
+	txmonDroppedChannelFull = txmonDroppedEventsTotal.WithLabelValues("channel_full")
+	txmonDroppedMapFull     = txmonDroppedEventsTotal.WithLabelValues("map_full")
 
 	txmonPending = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,

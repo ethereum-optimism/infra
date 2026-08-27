@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -48,6 +49,17 @@ type TxMonitor struct {
 }
 
 func NewTxMonitor(cfg TxMonitorConfig, backendGroups map[string]*BackendGroup, rpcMethodMappings map[string]string) (*TxMonitor, error) {
+	// Zero means default; negative values would panic time.NewTicker or make
+	// the reaper cutoff nonsensical, so fail fast at startup.
+	if cfg.PollInterval < 0 {
+		return nil, fmt.Errorf("tx_monitor: poll_interval must not be negative, got %s", time.Duration(cfg.PollInterval))
+	}
+	if cfg.InclusionTimeout < 0 {
+		return nil, fmt.Errorf("tx_monitor: inclusion_timeout must not be negative, got %s", time.Duration(cfg.InclusionTimeout))
+	}
+	if cfg.MaxPending < 0 {
+		return nil, fmt.Errorf("tx_monitor: max_pending must not be negative, got %d", cfg.MaxPending)
+	}
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = TOMLDuration(time.Second)
 	}
@@ -111,6 +123,9 @@ func (m *TxMonitor) Start() {
 func (m *TxMonitor) Shutdown() {
 	m.cancel()
 	m.wg.Wait()
+	if c, ok := m.fetcher.(io.Closer); ok {
+		c.Close()
+	}
 }
 
 // Observe records a successfully forwarded tx. Non-blocking by construction:
@@ -120,7 +135,7 @@ func (m *TxMonitor) Observe(hash common.Hash, backendGroup string, source string
 	select {
 	case m.events <- txmonEvent{hash: hash, backendGroup: backendGroup, source: source, at: m.now()}:
 	default:
-		txmonDroppedEventsTotal.WithLabelValues("channel_full").Inc()
+		txmonDroppedChannelFull.Inc()
 	}
 }
 
@@ -138,7 +153,7 @@ func (m *TxMonitor) runIngest() {
 				IngestedAt:   ev.at,
 			})
 			if !ok {
-				txmonDroppedEventsTotal.WithLabelValues("map_full").Inc()
+				txmonDroppedMapFull.Inc()
 			}
 		}
 	}
@@ -175,10 +190,15 @@ func (m *TxMonitor) pollOnce() {
 		if num-start > txmonMaxBlockWalk {
 			start = num - txmonMaxBlockWalk
 		}
+		// Advance the cursor only over successfully processed heights: a failed
+		// or not-yet-found gap height leaves lastBlock behind it so the
+		// remaining heights (and the tip) are retried next tick.
 		for h := start; h < num; h++ {
 			gapHashes, found, err := m.fetcher.BlockByNumber(ctx, h)
 			if err != nil || !found {
-				continue
+				log.Debug("tx_monitor: gap block fetch failed, retrying next tick", "height", h, "found", found, "err", err)
+				m.lastBlock = h - 1
+				return
 			}
 			m.handleBlock(gapHashes, m.now())
 		}

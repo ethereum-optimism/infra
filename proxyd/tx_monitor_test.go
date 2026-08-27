@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -103,12 +104,16 @@ type fakeFetcher struct {
 	latestNum    uint64
 	latestHashes []common.Hash
 	byNum        map[uint64][]common.Hash
+	errAt        map[uint64]error
 }
 
 func (f *fakeFetcher) LatestBlock(ctx context.Context) (uint64, []common.Hash, error) {
 	return f.latestNum, f.latestHashes, nil
 }
 func (f *fakeFetcher) BlockByNumber(ctx context.Context, num uint64) ([]common.Hash, bool, error) {
+	if err := f.errAt[num]; err != nil {
+		return nil, false, err
+	}
 	h, ok := f.byNum[num]
 	return h, ok, nil
 }
@@ -135,4 +140,53 @@ func TestTxMonitorPollWalksMissedHeights(t *testing.T) {
 
 	require.Equal(t, uint64(12), m.lastBlock)
 	require.Equal(t, 0, m.store.Len(), "both gap-block and tip-block txs must be matched")
+}
+
+func TestTxMonitorConfigValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  TxMonitorConfig
+		want string
+	}{
+		{"negative poll_interval", TxMonitorConfig{PollInterval: TOMLDuration(-time.Second)}, "poll_interval"},
+		{"negative inclusion_timeout", TxMonitorConfig{InclusionTimeout: TOMLDuration(-time.Second)}, "inclusion_timeout"},
+		{"negative max_pending", TxMonitorConfig{MaxPending: -1}, "max_pending"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewTxMonitor(tt.cfg, nil, nil)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestTxMonitorPollGapFetchErrorRetries(t *testing.T) {
+	m, now := newTestTxMonitor(t)
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	defer m.cancel()
+	hGap := common.Hash{0x11}
+	hTip := common.Hash{0x22}
+	m.store.Add(txmonEntry{Hash: hGap, IngestedAt: *now})
+	m.store.Add(txmonEntry{Hash: hTip, IngestedAt: *now})
+
+	f := &fakeFetcher{latestNum: 10, byNum: map[uint64][]common.Hash{}, errAt: map[uint64]error{}}
+	m.fetcher = f
+	m.pollOnce() // establishes lastBlock=10
+	require.Equal(t, uint64(10), m.lastBlock)
+
+	// Height 11 lands hGap but its fetch fails; tip jumps to 12 with hTip.
+	// The cursor must not advance past the failed height, and the tip must
+	// not be processed early.
+	f.errAt[11] = errors.New("backend hiccup")
+	f.latestNum = 12
+	f.latestHashes = []common.Hash{hTip}
+	m.pollOnce()
+	require.Equal(t, uint64(10), m.lastBlock, "cursor must stay at last processed height")
+	require.Equal(t, 2, m.store.Len(), "nothing matched while the gap is unread")
+
+	// Next tick the gap height fetch succeeds: both gap and tip are matched.
+	delete(f.errAt, 11)
+	f.byNum[11] = []common.Hash{hGap}
+	m.pollOnce()
+	require.Equal(t, uint64(12), m.lastBlock)
+	require.Equal(t, 0, m.store.Len(), "gap and tip txs matched after retry")
 }

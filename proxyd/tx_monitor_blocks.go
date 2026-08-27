@@ -32,6 +32,12 @@ func newRPCBlockFetcher(url string) (*rpcBlockFetcher, error) {
 	return &rpcBlockFetcher{c: c}, nil
 }
 
+// Close releases the underlying RPC client; Shutdown calls it via io.Closer.
+func (f *rpcBlockFetcher) Close() error {
+	f.c.Close()
+	return nil
+}
+
 // txmonRPCBlock decodes eth_getBlockByNumber(…, false): transactions are hashes.
 type txmonRPCBlock struct {
 	Number       hexutil.Uint64 `json:"number"`
