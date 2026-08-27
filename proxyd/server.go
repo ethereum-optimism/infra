@@ -37,6 +37,7 @@ const (
 	ContextKeyXForwardedFor                         = "x_forwarded_for"
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
+	ContextKeyReqReceivedAt                         = "req_received_at"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
 	MaxBatchRPCCallsHardLimit                       = 1000
@@ -849,9 +850,10 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 			// a tx the backend rejected will never land and would only count as
 			// a false timeout.
 			if err == nil && s.txMonitor != nil {
+				receivedAt := GetReqReceivedAt(ctx)
 				for i, elem := range elems {
 					if txHash, ok := txHashes[elem.Index]; ok && i < len(res) && res[i] != nil && !res[i].IsError() {
-						s.txMonitor.Observe(txHash, group.backendGroup, RPCRequestSourceHTTP)
+						s.txMonitor.Observe(txHash, group.backendGroup, RPCRequestSourceHTTP, receivedAt)
 					}
 				}
 			}
@@ -1030,7 +1032,7 @@ func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited li
 	}
 
 	if txHash != nil && s.txMonitor != nil && res[0] != nil && !res[0].IsError() {
-		s.txMonitor.Observe(*txHash, group, RPCRequestSourceWS)
+		s.txMonitor.Observe(*txHash, group, RPCRequestSourceWS, GetReqReceivedAt(ctx))
 	}
 
 	return res[0], servedBy
@@ -1045,6 +1047,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
+	ctx = context.WithValue(ctx, ContextKeyReqReceivedAt, time.Now())   // nolint:staticcheck
 
 	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
 	if opTxProxyAuth != "" {
@@ -1334,6 +1337,17 @@ func GetReqID(ctx context.Context) string {
 		return ""
 	}
 	return reqId
+}
+
+// GetReqReceivedAt returns the wall-clock time the request was received at
+// ingress, stamped by populateContext (HTTP) or per-message in the WS pump.
+// It falls back to time.Now() when unset (internal or test callers) so the tx
+// monitor never records a zero start time.
+func GetReqReceivedAt(ctx context.Context) time.Time {
+	if t, ok := ctx.Value(ContextKeyReqReceivedAt).(time.Time); ok {
+		return t
+	}
+	return time.Now()
 }
 
 func GetXForwardedFor(ctx context.Context) string {

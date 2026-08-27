@@ -1530,6 +1530,10 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			return
 		}
 
+		// Stamp per-message arrival so the tx monitor's inclusion clock starts
+		// when this request was read, not when the (long-lived) WS connection
+		// opened. Overrides the connection-open time from populateContext.
+		recvAt := time.Now()
 		RecordWSMessage(ctx, w.backend.Name, SourceClient)
 
 		// Route control messages to the backend. These don't
@@ -1616,7 +1620,8 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 				continue
 			}
 			// handleWSRPC records this call; do not record it here too.
-			go w.processClientRPC(ctx, msgType, req, errC)
+			msgCtx := context.WithValue(ctx, ContextKeyReqReceivedAt, recvAt) // nolint:staticcheck
+			go w.processClientRPC(msgCtx, msgType, req, errC)
 			continue
 		}
 

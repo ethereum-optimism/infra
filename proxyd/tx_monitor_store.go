@@ -37,12 +37,19 @@ func NewMemoryPendingStore(maxPending int) *MemoryPendingStore {
 }
 
 // Add records a pending tx. Returns false when the store is at capacity.
-// Re-adding a hash already present is a successful no-op: the first ingest
-// timestamp is the user-perceived submission time.
+// Re-adding a hash already present keeps whichever entry has the earlier
+// IngestedAt: that is the user-perceived submission time, and because
+// IngestedAt is stamped at request ingress, a later duplicate submission may
+// be observed (enqueued) before an earlier one. Any already-set SubblockAt on
+// the retained entry is preserved.
 func (s *MemoryPendingStore) Add(e txmonEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.txs[e.Hash]; ok {
+	if existing, ok := s.txs[e.Hash]; ok {
+		if e.IngestedAt.Before(existing.IngestedAt) {
+			e.SubblockAt = existing.SubblockAt
+			s.txs[e.Hash] = e
+		}
 		return true
 	}
 	if len(s.txs) >= s.max {

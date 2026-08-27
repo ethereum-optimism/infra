@@ -22,6 +22,37 @@ func TestMemoryPendingStoreAddAndCap(t *testing.T) {
 	require.Equal(t, 2, s.Len())
 }
 
+// A duplicate submission of the same hash must retain the earliest
+// IngestedAt (the user-perceived submission time). Because IngestedAt is
+// stamped at request ingress, a later-arriving duplicate can be observed
+// first, so Add must compare timestamps rather than keep whatever landed
+// first. Any SubblockAt already recorded is preserved across the swap.
+func TestMemoryPendingStoreAddKeepsEarliest(t *testing.T) {
+	s := NewMemoryPendingStore(10)
+	early := time.Unix(100, 0)
+	late := time.Unix(200, 0)
+
+	// Later arrival observed first, then the earlier one; earliest must win.
+	require.True(t, s.Add(txmonEntry{Hash: txmonHash(1), IngestedAt: late, BackendGroup: "late"}))
+	require.True(t, s.Add(txmonEntry{Hash: txmonHash(1), IngestedAt: early, BackendGroup: "early"}))
+	require.Equal(t, 1, s.Len())
+	got := s.MatchAndRemove([]common.Hash{txmonHash(1)})
+	require.Len(t, got, 1)
+	require.Equal(t, early, got[0].IngestedAt)
+	require.Equal(t, "early", got[0].BackendGroup)
+
+	// A later duplicate after the earliest is a no-op and preserves SubblockAt.
+	sub := time.Unix(150, 0)
+	require.True(t, s.Add(txmonEntry{Hash: txmonHash(2), IngestedAt: early}))
+	_, ok := s.MarkSubblock(txmonHash(2), sub)
+	require.True(t, ok)
+	require.True(t, s.Add(txmonEntry{Hash: txmonHash(2), IngestedAt: late}))
+	got = s.MatchAndRemove([]common.Hash{txmonHash(2)})
+	require.Len(t, got, 1)
+	require.Equal(t, early, got[0].IngestedAt)
+	require.Equal(t, sub, got[0].SubblockAt, "SubblockAt must survive a no-op duplicate")
+}
+
 func TestMemoryPendingStoreMatchAndRemove(t *testing.T) {
 	s := NewMemoryPendingStore(10)
 	t0 := time.Unix(100, 0)

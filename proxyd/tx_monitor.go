@@ -130,10 +130,12 @@ func (m *TxMonitor) Shutdown() {
 
 // Observe records a successfully forwarded tx. Non-blocking by construction:
 // a full channel drops the observation and counts it. This is the ONLY method
-// called from the request hot path.
-func (m *TxMonitor) Observe(hash common.Hash, backendGroup string, source string) {
+// called from the request hot path. at is the request-arrival time captured at
+// ingress, so inclusion latency accounts for proxyd-internal handling and the
+// forward round-trip, not just backend-ack-to-block.
+func (m *TxMonitor) Observe(hash common.Hash, backendGroup string, source string, at time.Time) {
 	select {
-	case m.events <- txmonEvent{hash: hash, backendGroup: backendGroup, source: source, at: m.now()}:
+	case m.events <- txmonEvent{hash: hash, backendGroup: backendGroup, source: source, at: at}:
 	default:
 		txmonDroppedChannelFull.Inc()
 	}

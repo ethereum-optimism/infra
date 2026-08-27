@@ -95,9 +95,29 @@ func TestTxMonitorObserveNeverBlocks(t *testing.T) {
 	m, _ := newTestTxMonitor(t) // events buffer of 4, no ingest loop running
 	before := testutil.ToFloat64(txmonDroppedEventsTotal.WithLabelValues("channel_full"))
 	for i := range 10 {
-		m.Observe(common.Hash{byte(i)}, "main", RPCRequestSourceHTTP) // must return immediately
+		m.Observe(common.Hash{byte(i)}, "main", RPCRequestSourceHTTP, time.Unix(1000, 0)) // must return immediately
 	}
 	require.Equal(t, before+6, testutil.ToFloat64(txmonDroppedEventsTotal.WithLabelValues("channel_full")))
+}
+
+// Observe must record the caller-supplied arrival time as the ingest
+// timestamp, so inclusion latency starts at request receipt rather than at
+// the moment the observation is enqueued.
+func TestTxMonitorObserveUsesArrivalTime(t *testing.T) {
+	m, _ := newTestTxMonitor(t)
+	arrival := time.Unix(500, 0)
+	m.Observe(common.Hash{0x01}, "main", RPCRequestSourceHTTP, arrival)
+	ev := <-m.events
+	require.Equal(t, arrival, ev.at)
+}
+
+// GetReqReceivedAt round-trips a stamped time and falls back to a non-zero
+// time when unset, so the monitor never records a zero start.
+func TestGetReqReceivedAt(t *testing.T) {
+	require.False(t, GetReqReceivedAt(context.Background()).IsZero(), "must fall back to now when unset")
+	want := time.Unix(1234, 0)
+	ctx := context.WithValue(context.Background(), ContextKeyReqReceivedAt, want) // nolint:staticcheck
+	require.Equal(t, want, GetReqReceivedAt(ctx))
 }
 
 type fakeFetcher struct {
