@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms from forwarded `eth_sendRawTransaction` to block/subblock visibility.
+- Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms measured from `eth_sendRawTransaction` request receipt (covering proxyd-internal handling and the forward round-trip) to block/subblock visibility.
 
 ## 3.14.1
 

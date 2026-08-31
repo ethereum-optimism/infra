@@ -149,10 +149,14 @@ See [op-node receipt fetcher](https://github.com/ethereum-optimism/optimism/blob
 
 ## Transaction UX monitor (`tx_monitor`)
 
-When `[tx_monitor]` is enabled, proxyd passively measures the latency from a
-successfully forwarded `eth_sendRawTransaction` until the transaction becomes
-visible in a block (and, optionally, in a subblocks preconfirmation stream),
-reporting the results as `proxyd_txmon_*` metrics. The monitor is purely
+When `[tx_monitor]` is enabled, proxyd passively measures the latency from
+when an `eth_sendRawTransaction` request is received until the transaction
+becomes visible in a block (and, optionally, in a subblocks preconfirmation
+stream). The clock starts at request ingress, so the measured latency
+includes proxyd-internal handling and the forward round-trip, not just the
+backend-ack-to-block window. Transactions rejected by validation or by the
+backend node (e.g. nonce too low) are never enrolled and so never counted.
+Results are reported as `proxyd_txmon_*` metrics. The monitor is purely
 observational: observations are non-blocking and never affect request
 handling, and its state is in-memory and shared-nothing across replicas —
 each proxyd instance only tracks the transactions it forwarded itself.
