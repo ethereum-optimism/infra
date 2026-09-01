@@ -52,6 +52,11 @@ type TxValidationMiddlewareConfig struct {
 	// FailOpen determines whether transactions should be allowed through if the validation
 	// service returns an error. Defaults to true for safety (fail-open).
 	FailOpen *bool `toml:"fail_open"`
+
+	// Custom TLS configuration for the validation service.
+	CAFile         string `toml:"ca_file"`
+	ClientCertFile string `toml:"client_cert_file"`
+	ClientKeyFile  string `toml:"client_key_file"`
 }
 
 // TxValidationClient is a reusable HTTP client for validation requests.
@@ -61,16 +66,24 @@ type TxValidationClient struct {
 }
 
 // NewTxValidationClient creates a new validation client with the given timeout.
-func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
+func NewTxValidationClient(cfg TxValidationMiddlewareConfig) *TxValidationClient {
+	timeoutSeconds := cfg.TimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultValidationTimeoutSeconds
 	}
+
+	tlsConfig, err := configureTLS(cfg.CAFile, cfg.ClientCertFile, cfg.ClientKeyFile)
+	if err != nil {
+		panic("failed to configure TLS for tx_validation_middleware: " + err.Error())
+	}
+
 	return &TxValidationClient{
 		client: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:    defaultValidationMaxIdleConns,
 				MaxConnsPerHost: defaultValidationMaxConnsPerHost,
 				IdleConnTimeout: defaultValidationIdleConnTimeout,
+				TLSClientConfig: tlsConfig,
 			},
 		},
 		timeout: time.Duration(timeoutSeconds) * time.Second,

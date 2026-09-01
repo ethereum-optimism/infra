@@ -257,7 +257,9 @@ func TestTxValidationClient_HTTPServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{
+		TimeoutSeconds: 5,
+	})
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
@@ -273,7 +275,9 @@ func TestTxValidationClient_UnauthorizedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{
+		TimeoutSeconds: 5,
+	})
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.True(t, unauthorized[txHash])
@@ -287,7 +291,9 @@ func TestTxValidationClient_ErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{
+		TimeoutSeconds: 5,
+	})
 	_, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.Error(t, err)
 	require.Equal(t, ErrInternal, err)
@@ -308,7 +314,9 @@ func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel parent request context before validation call
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{
+		TimeoutSeconds: 5,
+	})
 	unauthorized, err := client.Validate(ctx, server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
