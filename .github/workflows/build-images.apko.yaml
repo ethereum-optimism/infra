@@ -93,8 +93,8 @@ jobs:
           else
             DOCKER_TAG="$SHA"
           fi
-          echo "apko_tag=apko-${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
-          echo "apko_tag=apko-${DOCKER_TAG}"
+          echo "apko_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
+          echo "apko_tag=${DOCKER_TAG}"
 
   build:
     needs: [plan]
@@ -103,7 +103,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/apko.yaml@fdcd6acceb0cbad90040e0be9f59a1ad60e65a86
+    uses: ethereum-optimism/factory/.github/workflows/apko.yaml@c09fe439772f9391c9782aa051786f79c78cb7f6
     with:
       name: ${{ matrix.group }}
       melange_config: ${{ matrix.melange_config }}
@@ -112,6 +112,7 @@ jobs:
       smoke_test: ${{ matrix.smoke_test || '' }}
       registry: ${{ matrix.registry }}
       tag: ${{ needs.plan.outputs.apko_tag }}
+      tag_prefix: apko-
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
     permissions:
       contents: read
