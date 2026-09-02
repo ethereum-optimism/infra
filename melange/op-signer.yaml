@@ -28,8 +28,8 @@ pipeline:
       go-package: go-1.26
       ldflags: -s -w
 
-  - uses: app-compat/install-to-app
-    with:
-      binary-name: op-signer
+  - runs: |
+      mkdir -p "${{targets.destdir}}/app"
+      ln -sf "/usr/bin/op-signer" "${{targets.destdir}}/app/op-signer"
 
   - uses: strip

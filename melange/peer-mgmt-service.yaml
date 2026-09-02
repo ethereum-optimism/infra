@@ -28,8 +28,8 @@ pipeline:
       go-package: go-1.26
       ldflags: -s -w
 
-  - uses: app-compat/install-to-app
-    with:
-      binary-name: pms
+  - runs: |
+      mkdir -p "${{targets.destdir}}/app"
+      ln -sf "/usr/bin/pms" "${{targets.destdir}}/app/pms"
 
   - uses: strip
