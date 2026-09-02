@@ -76,7 +76,7 @@ func unmarshalECDSAPublicKey(derBytes []byte) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("invalid public key")
 	}
 
-	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil //nolint:staticcheck // secp256k1 is not a standard curve; no alternative to raw X/Y access
 }
 
 // ConvertCompactRecoverableSignatureToDER converts an Ethereum signature in
