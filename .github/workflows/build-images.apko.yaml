@@ -6,39 +6,10 @@ on:
       - main
     tags:
       - "*/v*"
-    paths:
-      - ".github/images.json"
-      - ".github/workflows/build-images.apko.yaml"
-      - "melange/**"
-      - "apko/**"
-      - "go.mod"
-      - "cci-stats/**"
-      - "op-conductor-mon/**"
-      - "op-conductor-ops/**"
-      - "op-signer/**"
-      - "op-txproxy/**"
-      - "op-ufm/**"
-      - "peer-mgmt-service/**"
-      - "proxyd/**"
-      - "replica-healthcheck/**"
+      - "v*"
   pull_request:
     branches:
       - main
-    paths:
-      - ".github/images.json"
-      - ".github/workflows/build-images.apko.yaml"
-      - "melange/**"
-      - "apko/**"
-      - "go.mod"
-      - "cci-stats/**"
-      - "op-conductor-mon/**"
-      - "op-conductor-ops/**"
-      - "op-signer/**"
-      - "op-txproxy/**"
-      - "op-ufm/**"
-      - "peer-mgmt-service/**"
-      - "proxyd/**"
-      - "replica-healthcheck/**"
   workflow_dispatch:
 
 concurrency:
@@ -81,17 +52,12 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$REF_TYPE" == "tag" ]]; then
-            if [[ "$REF_NAME" == */* ]]; then
-              DOCKER_TAG="${REF_NAME#*/}"
-            else
-              DOCKER_TAG="$REF_NAME"
-            fi
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" == */* ]]; then
+            DOCKER_TAG="${REF_NAME#*/}"
           else
-            DOCKER_TAG="$SHA"
+            DOCKER_TAG="$REF_NAME"
           fi
           echo "apko_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
           echo "apko_tag=${DOCKER_TAG}"
@@ -114,6 +80,8 @@ jobs:
       tag: ${{ needs.plan.outputs.apko_tag }}
       tag_prefix: apko-
       gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
+      env: |
+        GIT_VERSION=${{ needs.plan.outputs.apko_tag }}
     permissions:
       contents: read
       id-token: write

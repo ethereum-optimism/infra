@@ -26,7 +26,7 @@ pipeline:
       packages: ./cmd
       output: op-signer
       go-package: go-1.26
-      ldflags: -s -w
+      ldflags: -s -w -X main.GitCommit=${GIT_COMMIT} -X main.GitDate=${GIT_DATE} -X main.Version=${GIT_VERSION:-${{package.version}}}
 
   - runs: |
       mkdir -p "${{targets.destdir}}/app"
