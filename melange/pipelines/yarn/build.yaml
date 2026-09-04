@@ -1,0 +1,31 @@
+name: Build a standalone yarn application from source.
+
+needs:
+  packages:
+    - busybox
+    - nodejs
+    - yarn
+
+inputs:
+  output:
+    description: "Package name used for the install directory under /usr/share/"
+    required: true
+  subdir:
+    description: "Subdirectory containing the app within the source checkout"
+    default: "."
+  build-cmd:
+    description: "Build command to run"
+    default: "yarn build"
+
+pipeline:
+  - runs: |
+      set -euo pipefail
+      cd ${{inputs.subdir}}
+      yarn install --frozen-lockfile --ignore-scripts
+      ${{inputs.build-cmd}}
+      mkdir -p ${{targets.contextdir}}/usr/share/${{inputs.output}}
+      cp -r dist ${{targets.contextdir}}/usr/share/${{inputs.output}}/
+      cp -r node_modules ${{targets.contextdir}}/usr/share/${{inputs.output}}/
+      cp package.json ${{targets.contextdir}}/usr/share/${{inputs.output}}/
+      find ${{targets.contextdir}}/usr/share/${{inputs.output}}/node_modules -type d -name '*musl*' -exec rm -rf {} + 2>/dev/null || true
+      find ${{targets.contextdir}}/usr/share/${{inputs.output}}/node_modules -type f -name '*musl*.node' -delete 2>/dev/null || true

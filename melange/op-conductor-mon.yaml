@@ -26,7 +26,7 @@ pipeline:
       packages: ./cmd/monitor
       output: op-conductor-mon
       go-package: go-1.26
-      ldflags: -s -w -checklinkname=0 -X main.GitCommit=${GIT_COMMIT} -X main.GitDate=${GIT_DATE} -X main.GitVersion=${GIT_VERSION:-${{package.version}}}
+      ldflags: -s -w -checklinkname=0
 
   # The k8s chart invokes command: ["/app/op-conductor-mon", ...] (legacy WORKDIR
   # convention). go/build installs to /usr/bin; add a /app compat symlink so the

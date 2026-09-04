@@ -1,0 +1,53 @@
+name: Install pinned mise for CircleCI jobs
+
+# The Optimism CircleCI orb expects mise at $HOME/.local/bin/mise. Installing
+# there lets checkout-with-mise short-circuit its network install without
+# breaking the later cache-copy step.
+
+needs:
+  packages:
+    - busybox
+    - ca-certificates-bundle
+    - curl
+
+inputs:
+  version:
+    description: mise version without leading v
+    default: "2026.2.2"
+
+pipeline:
+  - runs: |
+      set -euo pipefail
+
+      case "${{build.arch}}" in
+        x86_64)
+          platform=linux-x64
+          checksum=7d1ffcceb32f861d9d0e00b7ccabe9ee962d6ca51daa7f66715c46b9856169d8
+          ;;
+        aarch64)
+          platform=linux-arm64
+          checksum=86576902e7cb0fe860d192961c6fecc756e585c16420b0c00c9485bc64f8f86d
+          ;;
+        *)
+          echo "unsupported melange arch for mise: ${{build.arch}}" >&2
+          exit 1
+          ;;
+      esac
+
+      archive="mise-v${{inputs.version}}-${platform}.tar.gz"
+      url="https://github.com/jdx/mise/releases/download/v${{inputs.version}}/${archive}"
+      work="$(mktemp -d)"
+      trap 'rm -rf "$work"' EXIT
+
+      curl -fsSL --retry 3 -o "$work/$archive" "$url"
+      printf '%s  %s\n' "$checksum" "$work/$archive" | sha256sum -c -
+      tar -xzf "$work/$archive" -C "$work"
+
+      install -Dm755 \
+        "$work/mise/bin/mise" \
+        "${{targets.contextdir}}/home/circleci/.local/bin/mise"
+
+      mkdir -p "${{targets.contextdir}}/usr/local/bin"
+      ln -sf /home/circleci/.local/bin/mise "${{targets.contextdir}}/usr/local/bin/mise"
+
+      chown -R 1001:1001 "${{targets.contextdir}}/home/circleci"

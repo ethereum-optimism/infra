@@ -26,10 +26,10 @@ pipeline:
       packages: ./cmd
       output: op-signer
       go-package: go-1.26
-      ldflags: -s -w -X main.GitCommit=${GIT_COMMIT} -X main.GitDate=${GIT_DATE} -X main.Version=${GIT_VERSION:-${{package.version}}}
+      ldflags: -s -w
 
-  - runs: |
-      mkdir -p "${{targets.destdir}}/app"
-      ln -sf "/usr/bin/op-signer" "${{targets.destdir}}/app/op-signer"
+  - uses: app-compat/install-to-app
+    with:
+      binary-name: op-signer
 
   - uses: strip

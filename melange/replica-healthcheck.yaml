@@ -20,14 +20,7 @@ environment:
       - build-base
 
 pipeline:
-  - runs: |
-      set -euo pipefail
-      cd replica-healthcheck
-      yarn install --frozen-lockfile --ignore-scripts
-      yarn build
-      mkdir -p ${{targets.contextdir}}/usr/share/replica-healthcheck
-      cp -r dist ${{targets.contextdir}}/usr/share/replica-healthcheck/
-      cp -r node_modules ${{targets.contextdir}}/usr/share/replica-healthcheck/
-      cp package.json ${{targets.contextdir}}/usr/share/replica-healthcheck/
-      find ${{targets.contextdir}}/usr/share/replica-healthcheck/node_modules -type d -name '*musl*' -exec rm -rf {} + 2>/dev/null || true
-      find ${{targets.contextdir}}/usr/share/replica-healthcheck/node_modules -type f -name '*musl*.node' -delete 2>/dev/null || true
+  - uses: yarn/build
+    with:
+      output: replica-healthcheck
+      subdir: replica-healthcheck

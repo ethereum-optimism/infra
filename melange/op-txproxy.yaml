@@ -26,6 +26,6 @@ pipeline:
       packages: ./cmd
       output: op-txproxy
       go-package: go-1.26
-      ldflags: -s -w -X main.GitCommit=${GIT_COMMIT} -X main.GitDate=${GIT_DATE}
+      ldflags: -s -w
 
   - uses: strip
