@@ -69,7 +69,7 @@ jobs:
 
       - name: Plan melange, apko, and smoke matrices
         id: plan
-        uses: ethereum-optimism/factory/actions/apko-plan@80fb1914d8f68ea4ac277beff4541cc4a669569f
+        uses: ethereum-optimism/factory/actions/apko-plan@7187fc18ff1d8594422facb623330653f6597e20
         with:
           config: .github/images.apko.json
 
@@ -86,7 +86,7 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    uses: ethereum-optimism/factory/.github/workflows/melange-build.yaml@80fb1914d8f68ea4ac277beff4541cc4a669569f
+    uses: ethereum-optimism/factory/.github/workflows/melange-build.yaml@7187fc18ff1d8594422facb623330653f6597e20
     with:
       stack: ${{ matrix.stack }}
       arch: ${{ matrix.arch }}
@@ -118,13 +118,14 @@ jobs:
       attestations: write
       artifact-metadata: write
       actions: read
-    uses: ethereum-optimism/factory/.github/workflows/apko-publish.yaml@80fb1914d8f68ea4ac277beff4541cc4a669569f
+    uses: ethereum-optimism/factory/.github/workflows/apko-publish.yaml@7187fc18ff1d8594422facb623330653f6597e20
     with:
       service: ${{ matrix.service }}
       needs-melange-apks: ${{ matrix.needs_melange_apks }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images/nexus
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
       publish-tag: ${{ matrix.publish_tag }}
       archs: ${{ matrix.archs }}
+      tag-prefix: apko-
 
   smoke-test:
     name: smoke test (${{ matrix.service }}, ${{ matrix.arch }})
@@ -141,10 +142,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ethereum-optimism/factory/.github/workflows/apko-smoke-test.yaml@80fb1914d8f68ea4ac277beff4541cc4a669569f
+    uses: ethereum-optimism/factory/.github/workflows/apko-smoke-test.yaml@7187fc18ff1d8594422facb623330653f6597e20
     with:
       service: ${{ matrix.service }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images/nexus
+      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
       arch: ${{ matrix.arch }}
       runner: ${{ matrix.runner }}
       smoke-test: ${{ matrix.smoke_test }}
+      expected-version: ${{ matrix.expected_version }}
+      tag-prefix: apko-

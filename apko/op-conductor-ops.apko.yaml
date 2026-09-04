@@ -1,0 +1,37 @@
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+  packages:
+    - ca-certificates-bundle
+    - wolfi-baselayout
+    - python-3.12
+    # Runtime deps (poetry deps aren't installed by the wheel build); apk pulls
+    # transitive deps (click, rich, typing-extensions) automatically.
+    - py3.12-requests
+    - py3.12-typer
+    - py3.12-toml
+    - op-conductor-ops@local
+
+environment:
+  PATH: /usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+  PYTHONUNBUFFERED: "1"
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+  run-as: 65532
+
+entrypoint:
+  command: /usr/bin/op-conductor-ops
+
+annotations:
+  org.opencontainers.image.source: https://github.com/ethereum-optimism/infra
+  org.opencontainers.image.title: op-conductor-ops

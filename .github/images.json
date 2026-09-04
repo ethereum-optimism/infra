@@ -60,5 +60,77 @@
       "dockerfile": "replica-healthcheck/Dockerfile",
       "paths": ["replica-healthcheck/**"]
     }
+  },
+  "apko_images": {
+    "cci-stats": {
+      "melange_config": "melange/cci-stats.yaml",
+      "apko_config_dir": "apko",
+      "services": "cci-stats",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "op-conductor-mon": {
+      "melange_config": "melange/op-conductor-mon.yaml",
+      "apko_config_dir": "apko",
+      "services": "op-conductor-mon",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "op-conductor-ops": {
+      "melange_config": "melange/op-conductor-ops.yaml",
+      "apko_config_dir": "apko",
+      "services": "op-conductor-ops",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "op-signer": {
+      "melange_config": "melange/op-signer.yaml",
+      "apko_config_dir": "apko",
+      "services": "op-signer",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "op-txproxy": {
+      "melange_config": "melange/op-txproxy.yaml",
+      "apko_config_dir": "apko",
+      "services": "op-txproxy",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "op-ufm": {
+      "melange_config": "melange/op-ufm.yaml",
+      "apko_config_dir": "apko",
+      "services": "op-ufm",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "peer-mgmt-service": {
+      "melange_config": "melange/peer-mgmt-service.yaml",
+      "apko_config_dir": "apko",
+      "services": "peer-mgmt-service",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "proxyd": {
+      "melange_config": "melange/proxyd.yaml",
+      "apko_config_dir": "apko",
+      "services": "proxyd",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "replica-healthcheck": {
+      "melange_config": "melange/replica-healthcheck.yaml",
+      "apko_config_dir": "apko",
+      "services": "replica-healthcheck",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    },
+    "circleci-runner-wolfi": {
+      "melange_config": "melange/circleci-runner.yaml",
+      "apko_config_dir": "apko",
+      "services": "circleci-runner-wolfi",
+      "smoke_test": "",
+      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+    }
   }
 }
