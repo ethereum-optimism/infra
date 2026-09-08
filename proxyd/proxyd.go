@@ -300,9 +300,16 @@ func Start(config *Config) (*Server, func(), error) {
 	}
 
 	if config.TxValidationMiddlewareConfig.Enabled {
+		apiKey, err := ReadFromEnvOrConfig(config.TxValidationMiddlewareConfig.APIKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		config.TxValidationMiddlewareConfig.APIKey = apiKey
+
 		log.Info("tx validation middleware enabled",
 			"endpoint", config.TxValidationMiddlewareConfig.Endpoint,
 			"methods", config.TxValidationMiddlewareConfig.Methods,
+			"api_key_set", apiKey != "",
 		)
 		if len(config.TxValidationMiddlewareConfig.Methods) == 0 {
 			log.Warn("tx_validation_middleware enabled without explicit methods config, using defaults",

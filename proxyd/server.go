@@ -234,7 +234,7 @@ func NewServer(
 		txValidationMethods = NewTxValidationMethodSet(txValidationConfig.Methods)
 	}
 
-	txValidationClient := NewTxValidationClient(txValidationConfig.TimeoutSeconds)
+	txValidationClient := NewTxValidationClient(txValidationConfig.TimeoutSeconds, txValidationConfig.APIKey)
 
 	txValidationFailOpen := true
 	if txValidationConfig.FailOpen != nil {

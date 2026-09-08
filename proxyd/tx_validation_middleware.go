@@ -46,6 +46,11 @@ type TxValidationMiddlewareConfig struct {
 	// Defaults to ["eth_sendRawTransaction", "eth_sendRawTransactionConditional", "eth_sendBundle"] if not specified.
 	Methods []string `toml:"methods"`
 
+	// APIKey is an optional credential sent to the validation service in the
+	// x-api-key header. No header is sent when empty. Supports $ENV_VAR
+	// indirection like other secrets in the config.
+	APIKey string `toml:"api_key"`
+
 	// TimeoutSeconds is the timeout for validation HTTP requests. Defaults to 5 seconds.
 	TimeoutSeconds int `toml:"timeout_seconds"`
 
@@ -58,10 +63,13 @@ type TxValidationMiddlewareConfig struct {
 type TxValidationClient struct {
 	client  *http.Client
 	timeout time.Duration
+	apiKey  string
 }
 
 // NewTxValidationClient creates a new validation client with the given timeout.
-func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
+// apiKey is optional: when non-empty it is sent on every request in the
+// x-api-key header.
+func NewTxValidationClient(timeoutSeconds int, apiKey string) *TxValidationClient {
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultValidationTimeoutSeconds
 	}
@@ -74,6 +82,7 @@ func NewTxValidationClient(timeoutSeconds int) *TxValidationClient {
 			},
 		},
 		timeout: time.Duration(timeoutSeconds) * time.Second,
+		apiKey:  apiKey,
 	}
 }
 
@@ -90,6 +99,9 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 		return nil, fmt.Errorf("failed to create validation request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("x-api-key", c.apiKey)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
