@@ -149,6 +149,9 @@ methods = [
   "eth_sendRawTransactionConditional",
   "eth_sendBundle",
 ]
+# Optional API key sent to the validation service in the x-api-key header.
+# No header is sent when unset. Reads from the environment when prefixed with $.
+# api_key = "$TX_VALIDATION_API_KEY"
 # Timeout in seconds for validation HTTP requests, default 5
 timeout_seconds = 5
 # Whether to allow transactions through if the validation service returns an error.

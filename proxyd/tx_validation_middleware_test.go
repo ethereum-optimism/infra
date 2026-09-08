@@ -250,6 +250,8 @@ func TestTxValidationClient_HTTPServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "POST", r.Method)
 		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		// No api key configured, so no x-api-key header is sent.
+		require.Empty(t, r.Header.Values("X-Api-Key"))
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -257,7 +259,23 @@ func TestTxValidationClient_HTTPServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(5, "")
+	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
+	require.NoError(t, err)
+	require.Empty(t, unauthorized)
+}
+
+func TestTxValidationClient_SendsAPIKeyHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "secret-key", r.Header.Get("X-Api-Key"))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"unauthorized": {}}`))
+	}))
+	defer server.Close()
+
+	client := NewTxValidationClient(5, "secret-key")
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
@@ -273,7 +291,7 @@ func TestTxValidationClient_UnauthorizedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(5, "")
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.True(t, unauthorized[txHash])
@@ -287,7 +305,7 @@ func TestTxValidationClient_ErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(5, "")
 	_, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.Error(t, err)
 	require.Equal(t, ErrInternal, err)
@@ -308,7 +326,7 @@ func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel parent request context before validation call
 
-	client := NewTxValidationClient(5)
+	client := NewTxValidationClient(5, "")
 	unauthorized, err := client.Validate(ctx, server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
