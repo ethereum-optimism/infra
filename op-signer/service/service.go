@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -86,6 +87,10 @@ func (s *EthService) SignTransaction(ctx context.Context, args signer.Transactio
 	defer func() {
 		MetricSignTransactionTotal.With(labels).Inc()
 	}()
+	if authConfig.MessageSigningOnly {
+		labels["error"] = "unauthorized_method"
+		return nil, &UnauthorizedTransactionError{"client is only authorized for message signing"}
+	}
 
 	if err := args.Check(); err != nil {
 		s.logger.Warn("invalid signing arguments", "err", err)
@@ -181,6 +186,66 @@ func (s *OpsignerService) SignBlockPayloadV2(ctx context.Context, args signer.Bl
 	return s.signBlockPayload(ctx, args.Message, args.SenderAddress)
 }
 
+// SignMessage signs the EIP-191 hash of an arbitrary message with the key authorized for the
+// authenticated client and requested sender address.
+func (s *OpsignerService) SignMessage(ctx context.Context, args SignMessageArgs) (*eth.Bytes65, error) {
+	clientInfo := ClientInfoFromContext(ctx)
+	labels := prometheus.Labels{"client": clientInfo.ClientName, "status": "error", "error": ""}
+	defer func() {
+		MetricSignMessageTotal.With(labels).Inc()
+	}()
+
+	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName, nil)
+	if err != nil {
+		labels["error"] = "unauthorized_client"
+		return nil, &UnauthorizedMessageError{err.Error()}
+	}
+	if !authConfig.MessageSigningOnly {
+		labels["error"] = "unauthorized_method"
+		return nil, &UnauthorizedMessageError{"client is not authorized for message signing"}
+	}
+
+	if args.SenderAddress == nil {
+		labels["error"] = "unauthorized_message"
+		return nil, &UnauthorizedMessageError{"sender address is required"}
+	}
+	if *args.SenderAddress != authConfig.FromAddress {
+		s.logger.Warn(
+			"user is trying to sign a message with a different account than actual signer-provider",
+			"provider", authConfig.FromAddress,
+			"request", *args.SenderAddress,
+		)
+		labels["error"] = "unauthorized_message"
+		return nil, &UnauthorizedMessageError{"unexpected sender address"}
+	}
+	if len(args.Message) == 0 {
+		labels["error"] = "invalid_message"
+		return nil, &InvalidMessageError{"message must not be empty"}
+	}
+
+	digest := accounts.TextHash(args.Message)
+	signature, err := s.provider.SignDigest(ctx, authConfig.KeyName, digest)
+	if err != nil {
+		labels["error"] = "sign_error"
+		return nil, &InvalidMessageError{err.Error()}
+	}
+	if len(signature) != 65 {
+		labels["error"] = "sign_error"
+		return nil, &InvalidMessageError{"signature has invalid length"}
+	}
+
+	result := eth.Bytes65(signature)
+	labels["status"] = "success"
+	s.logger.Info(
+		"Signed message",
+		"client.name", clientInfo.ClientName,
+		"client.keyname", authConfig.KeyName,
+		"digest", hexutil.Encode(digest),
+		"signature", hexutil.Encode(signature),
+	)
+	return &result, nil
+}
+
 func (s *OpsignerService) signBlockPayload(
 	ctx context.Context,
 	getMsg func() (*signer.BlockSigningMessage, error),
@@ -196,6 +261,10 @@ func (s *OpsignerService) signBlockPayload(
 	defer func() {
 		MetricSignBlockPayloadTotal.With(labels).Inc()
 	}()
+	if authConfig.MessageSigningOnly {
+		labels["error"] = "unauthorized_method"
+		return nil, &UnauthorizedBlockPayloadError{"client is only authorized for message signing"}
+	}
 
 	msg, err := getMsg()
 	if err != nil {

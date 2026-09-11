@@ -32,6 +32,8 @@ auth:
     chainID: 00000000
     # sender address that is sending the RPC request [optional]
     fromAddress: 0x0000000000000000000000000000000000000000
+    # restrict this client/key to opsigner_signMessage [optional, default false]
+    messageSigningOnly: true
     # addresses the sender is authorized to send transactions to [optional]
     toAddresses:
       - 0x0000000000000000000000000000000000000000
@@ -67,6 +69,27 @@ You can use the following command to generate such a key:
 ```shell
 openssl ecparam -name secp256k1 -genkey -noout -param_enc explicit -out "ec_private.pem"
 ```
+
+## Message signing
+
+The `opsigner_signMessage` JSON-RPC method signs arbitrary messages for clients configured with
+`messageSigningOnly: true`. The request supplies the raw message bytes and expected sender address:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "opsigner_signMessage",
+  "params": [{
+    "message": "0x68656c6c6f",
+    "senderAddress": "0x0000000000000000000000000000000000000000"
+  }],
+  "id": 1
+}
+```
+
+The server authorizes both the client certificate DNS name and `senderAddress`, computes the
+EIP-191 message hash, and returns a 65-byte signature. Clients must send the original message, not
+a precomputed digest.
 
 ## Testing with local TLS
 
