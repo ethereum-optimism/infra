@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axelKingsley/go-circleci"
+	cciclient "github.com/ethereum-optimism/infra/cci-stats/pkg/cci"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/config"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/db"
 	"github.com/sourcegraph/conc/pool"
@@ -28,7 +29,7 @@ type pipelineWork struct {
 	retry bool
 }
 
-func GenerateReport(ctx context.Context, config config.Config, client *circleci.Client, dbConn db.Connection) error {
+func GenerateReport(ctx context.Context, config config.Config, client *cciclient.Client, dbConn db.Connection) error {
 	lastPipeline, err := dbConn.LastPipeline(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch last pipeline: %w", err)
@@ -116,7 +117,7 @@ func GenerateReport(ctx context.Context, config config.Config, client *circleci.
 	return nil
 }
 
-func processPipeline(ctx context.Context, config config.Config, client *circleci.Client, dbConn db.Connection, work pipelineWork) error {
+func processPipeline(ctx context.Context, config config.Config, client *cciclient.Client, dbConn db.Connection, work pipelineWork) error {
 	pline := work.pipeline
 
 	state := work.state
@@ -266,7 +267,7 @@ func processPipeline(ctx context.Context, config config.Config, client *circleci
 	return nil
 }
 
-func fetchPipelines(ctx context.Context, config config.Config, cutoff time.Time, client *circleci.Client) ([]pipelineWork, error) {
+func fetchPipelines(ctx context.Context, config config.Config, cutoff time.Time, client *cciclient.Client) ([]pipelineWork, error) {
 	var res []pipelineWork
 	var pageToken string
 	opts := circleci.ProjectListPipelinesOptions{}
@@ -320,7 +321,7 @@ func fetchPipelines(ctx context.Context, config config.Config, cutoff time.Time,
 //
 // The list has to be exhausted: a truncated page would understate the workflows
 // and could mark a pipeline complete on a partial set.
-func fetchWorkflows(ctx context.Context, client *circleci.Client, pipelineID string) ([]*circleci.Workflow, error) {
+func fetchWorkflows(ctx context.Context, client *cciclient.Client, pipelineID string) ([]*circleci.Workflow, error) {
 	var res []*circleci.Workflow
 	var pageToken string
 	opts := circleci.PipelineListWorkflowsOptions{}
@@ -347,18 +348,26 @@ func fetchWorkflows(ctx context.Context, client *circleci.Client, pipelineID str
 	return res, nil
 }
 
-// fetchJobs cannot follow NextPageToken the way its siblings do: the client's
-// ListWorkflowJobs takes no options argument, so there is nowhere to pass a page
-// token. A workflow with more jobs than CircleCI's page size is therefore
-// truncated.
-// TODO(#710): paginate once the client can express it.
-func fetchJobs(ctx context.Context, client *circleci.Client, workflowID string) ([]*circleci.WorkflowJob, error) {
-	jobs, err := client.Workflows.ListWorkflowJobs(ctx, workflowID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list jobs: %w", err)
+type workflowJobPager interface {
+	ListWorkflowJobsPage(context.Context, string, string) (*circleci.WorkflowJobList, error)
+}
+
+func fetchJobs(ctx context.Context, client workflowJobPager, workflowID string) ([]*circleci.WorkflowJob, error) {
+	var res []*circleci.WorkflowJob
+	var pageToken string
+	for {
+		jobs, err := client.ListWorkflowJobsPage(ctx, workflowID, pageToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list jobs: %w", err)
+		}
+		res = append(res, jobs.Items...)
+		if jobs.NextPageToken == "" {
+			break
+		}
+		pageToken = jobs.NextPageToken
 	}
-	slog.Debug("fetched jobs", "count", len(jobs.Items), "workflow", workflowID)
-	return jobs.Items, nil
+	slog.Debug("fetched jobs", "count", len(res), "workflow", workflowID)
+	return res, nil
 }
 
 // terminalWorkflowStatuses are the CircleCI workflow statuses that will not
@@ -475,7 +484,7 @@ func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
-func fetchTestMetadata(ctx context.Context, config config.Config, client *circleci.Client, job *circleci.WorkflowJob) ([]*circleci.TestMetadata, error) {
+func fetchTestMetadata(ctx context.Context, config config.Config, client *cciclient.Client, job *circleci.WorkflowJob) ([]*circleci.TestMetadata, error) {
 	md, err := client.Jobs.ListTestMetadata(ctx, job.ProjectSlug, fmt.Sprintf("%d", job.JobNumber))
 	if err != nil {
 		// Some jobs don't have test metadata in certain states (e.g., running, queued, not_run, on_hold)
