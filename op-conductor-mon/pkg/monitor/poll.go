@@ -167,7 +167,9 @@ func (p *Poller) reportNodeMetrics(ctx context.Context, name string, state *Node
 	metrics.RecordNodeState(name, "leader", state.leader)
 
 	// raft status
-	metrics.ReportNodeLeader(name, state.leaderWithID.ID, true)
+	if leaderID := state.leaderWithID.ID; isServerID(leaderID) {
+		metrics.ReportNodeLeader(name, leaderID, true)
+	}
 	metrics.ReportClusterMembershipCount(name, len(state.clusterMembership.Servers))
 
 	voters := 0
@@ -177,4 +179,11 @@ func (p *Poller) reportNodeMetrics(ctx context.Context, name string, state *Node
 		}
 	}
 	metrics.ReportClusterVotersCount(name, voters)
+}
+
+// Ref: https://github.com/ethereum-optimism/optimism/blob/b249974788014c5a85f697a746c149683a5ba862/op-conductor/conductor/service.go#L590
+const leaderOverriddenID = "N/A (Leader overridden)"
+
+func isServerID(id string) bool {
+	return id != "" && id != leaderOverriddenID
 }
