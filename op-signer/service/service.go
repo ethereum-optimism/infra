@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/holiman/uint256"
@@ -195,7 +196,14 @@ func (s *OpsignerService) SignMessage(ctx context.Context, args SignMessageArgs)
 		MetricSignMessageTotal.With(labels).Inc()
 	}()
 
-	authConfig, err := s.config.GetAuthConfigForClient(clientInfo.ClientName, nil)
+	if args.SenderAddress == nil {
+		labels["error"] = "unauthorized_message"
+		return nil, &UnauthorizedMessageError{"sender address is required"}
+	}
+	authConfig, err := s.config.GetAuthConfigForClient(
+		clientInfo.ClientName,
+		args.SenderAddress,
+	)
 	if err != nil {
 		labels["error"] = "unauthorized_client"
 		return nil, &UnauthorizedMessageError{err.Error()}
@@ -203,20 +211,6 @@ func (s *OpsignerService) SignMessage(ctx context.Context, args SignMessageArgs)
 	if !authConfig.MessageSigningOnly {
 		labels["error"] = "unauthorized_method"
 		return nil, &UnauthorizedMessageError{"client is not authorized for message signing"}
-	}
-
-	if args.SenderAddress == nil {
-		labels["error"] = "unauthorized_message"
-		return nil, &UnauthorizedMessageError{"sender address is required"}
-	}
-	if *args.SenderAddress != authConfig.FromAddress {
-		s.logger.Warn(
-			"user is trying to sign a message with a different account than actual signer-provider",
-			"provider", authConfig.FromAddress,
-			"request", *args.SenderAddress,
-		)
-		labels["error"] = "unauthorized_message"
-		return nil, &UnauthorizedMessageError{"unexpected sender address"}
 	}
 	if len(args.Message) == 0 {
 		labels["error"] = "invalid_message"
@@ -232,6 +226,21 @@ func (s *OpsignerService) SignMessage(ctx context.Context, args SignMessageArgs)
 	if len(signature) != 65 {
 		labels["error"] = "sign_error"
 		return nil, &InvalidMessageError{"signature has invalid length"}
+	}
+	publicKey, err := crypto.SigToPub(digest, signature)
+	if err != nil {
+		labels["error"] = "sign_error"
+		return nil, &InvalidMessageError{fmt.Sprintf("failed to recover signature: %v", err)}
+	}
+	signerAddress := crypto.PubkeyToAddress(*publicKey)
+	if signerAddress != authConfig.FromAddress {
+		s.logger.Error(
+			"message signature does not match authorized sender",
+			"authorized", authConfig.FromAddress,
+			"recovered", signerAddress,
+		)
+		labels["error"] = "sign_error"
+		return nil, &InvalidMessageError{"signature does not match authorized sender"}
 	}
 
 	result := eth.Bytes65(signature)

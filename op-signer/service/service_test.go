@@ -319,10 +319,15 @@ func TestSignMessage(t *testing.T) {
 	privateKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(privateKey.PublicKey)
-	otherSender := common.HexToAddress("0x0000000000000000000000000000000000001234")
+	otherPrivateKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	otherSender := crypto.PubkeyToAddress(otherPrivateKey.PublicKey)
+	unauthorizedSender := common.HexToAddress("0x0000000000000000000000000000000000001234")
 	message := hexutil.Bytes("SPN proof request")
 	digest := accounts.TextHash(message)
 	signature, err := crypto.Sign(digest, privateKey)
+	require.NoError(t, err)
+	otherSignature, err := crypto.Sign(digest, otherPrivateKey)
 	require.NoError(t, err)
 
 	messageConfig := provider.ProviderConfig{
@@ -330,6 +335,18 @@ func TestSignMessage(t *testing.T) {
 			{
 				ClientName:         "spn-requester.oplabs.co",
 				KeyName:            "spn-requester-key",
+				FromAddress:        sender,
+				MessageSigningOnly: true,
+			},
+			{
+				ClientName:         "spn-requester.oplabs.co",
+				KeyName:            "other-spn-requester-key",
+				FromAddress:        otherSender,
+				MessageSigningOnly: true,
+			},
+			{
+				ClientName:         "misconfigured-spn-requester.oplabs.co",
+				KeyName:            "misconfigured-spn-requester-key",
 				FromAddress:        sender,
 				MessageSigningOnly: true,
 			},
@@ -342,23 +359,35 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		clientName  string
-		message     hexutil.Bytes
-		sender      *common.Address
-		wantErrCode int
+		name              string
+		clientName        string
+		message           hexutil.Bytes
+		sender            *common.Address
+		signerKey         string
+		returnedSignature []byte
+		wantErrCode       int
 	}{
 		{
-			name:       "signs EIP-191 message",
-			clientName: "spn-requester.oplabs.co",
-			message:    message,
-			sender:     &sender,
+			name:              "signs EIP-191 message",
+			clientName:        "spn-requester.oplabs.co",
+			message:           message,
+			sender:            &sender,
+			signerKey:         "spn-requester-key",
+			returnedSignature: signature,
+		},
+		{
+			name:              "selects key by sender",
+			clientName:        "spn-requester.oplabs.co",
+			message:           message,
+			sender:            &otherSender,
+			signerKey:         "other-spn-requester-key",
+			returnedSignature: otherSignature,
 		},
 		{
 			name:        "rejects mismatched sender",
 			clientName:  "spn-requester.oplabs.co",
 			message:     message,
-			sender:      &otherSender,
+			sender:      &unauthorizedSender,
 			wantErrCode: 403,
 		},
 		{
@@ -388,6 +417,15 @@ func TestSignMessage(t *testing.T) {
 			sender:      &sender,
 			wantErrCode: -32014,
 		},
+		{
+			name:              "rejects signature from wrong key",
+			clientName:        "misconfigured-spn-requester.oplabs.co",
+			message:           message,
+			sender:            &sender,
+			signerKey:         "misconfigured-spn-requester-key",
+			returnedSignature: otherSignature,
+			wantErrCode:       -32014,
+		},
 	}
 
 	for _, tt := range tests {
@@ -400,10 +438,10 @@ func TestSignMessage(t *testing.T) {
 				clientInfoContextKey{},
 				ClientInfo{ClientName: tt.clientName},
 			)
-			if tt.wantErrCode == 0 {
+			if tt.signerKey != "" {
 				signatureProvider.EXPECT().
-					SignDigest(ctx, "spn-requester-key", digest).
-					Return(signature, nil)
+					SignDigest(ctx, tt.signerKey, digest).
+					Return(tt.returnedSignature, nil)
 			}
 
 			response, err := service.opsigner.SignMessage(ctx, SignMessageArgs{
@@ -428,7 +466,7 @@ func TestSignMessage(t *testing.T) {
 			require.NotNil(t, response)
 			recoveredKey, err := crypto.SigToPub(digest, response[:])
 			require.NoError(t, err)
-			require.Equal(t, sender, crypto.PubkeyToAddress(*recoveredKey))
+			require.Equal(t, *tt.sender, crypto.PubkeyToAddress(*recoveredKey))
 		})
 	}
 }
