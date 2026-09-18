@@ -1,0 +1,28 @@
+[server]
+
+rpc_port = 8545
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.node1]
+rpc_url = "$NODE1_URL"
+
+[backends.node2]
+rpc_url = "$NODE2_URL"
+
+[backend_groups]
+[backend_groups.node]
+backends = ["node1", "node2"]
+routing_strategy = "consensus_aware"
+consensus_handler = "noop"
+consensus_ha = true
+
+[backend_groups.node.consensus_ha_redis]
+url = "$REDIS_URL"
+
+[rpc_method_mappings]
+eth_call = "node"
+eth_chainId = "node"
+eth_blockNumber = "node"

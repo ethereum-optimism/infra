@@ -697,7 +697,11 @@ func Start(config *Config) (*Server, func(), error) {
 				if bgcfg.ConsensusHAHeartbeatInterval > 0 {
 					topts = append(topts, WithHeartbeatInterval(time.Duration(bgcfg.ConsensusHAHeartbeatInterval)))
 				}
-				consensusHARedisClient, err := NewRedisClient(bgcfg.ConsensusHARedis.URL, bgcfg.ConsensusHARedis.RedisCluster)
+				haRedisURL, err := ReadFromEnvOrConfig(bgcfg.ConsensusHARedis.URL)
+				if err != nil {
+					return nil, nil, err
+				}
+				consensusHARedisClient, err := NewRedisClient(haRedisURL, bgcfg.ConsensusHARedis.RedisCluster)
 				if err != nil {
 					return nil, nil, err
 				}
