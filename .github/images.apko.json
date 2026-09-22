@@ -17,10 +17,6 @@
     "publish_tag": "${version}",
     "source_ref": "${ref_name}"
   },
-  "default_runners": {
-    "x86_64": "ubuntu-24.04",
-    "aarch64": "ubuntu-24.04-arm"
-  },
   "melange": {
     "cci-stats": {},
     "op-conductor-mon": {},
