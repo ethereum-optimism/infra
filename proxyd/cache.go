@@ -122,8 +122,8 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 
 func (c *redisCache) Put(ctx context.Context, key string, value string) error {
 	start := time.Now()
-	err := c.redisClient.Set(ctx, c.namespaced(key), value, c.ttl).Err()
-	redisCacheDurationSumm.WithLabelValues("SET").Observe(float64(time.Since(start).Milliseconds()))
+	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
+	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err != nil {
 		RecordRedisError("CacheSet")

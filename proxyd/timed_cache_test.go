@@ -17,19 +17,20 @@ func TestTimedCacheConfig(t *testing.T) {
 	_, err := toml.Decode(`[cache]
 enabled = true
 [cache.method_ttls]
-eth_getBlockByNumber = "250ms"
+eth_getBlockByNumber = "1s"
 eth_gasPrice = "1s"
 `, &cfg)
 	require.NoError(t, err)
 	require.NoError(t, cfg.Cache.validate())
-	require.Equal(t, TOMLDuration(250*time.Millisecond), cfg.Cache.MethodTTLs["eth_getBlockByNumber"])
+	require.Equal(t, TOMLDuration(time.Second), cfg.Cache.MethodTTLs["eth_getBlockByNumber"])
 	for _, tc := range []struct {
 		method string
 		ttl    TOMLDuration
 	}{
 		{"eth_call", 0},
 		{"eth_call", -1},
-		{"eth_call", TOMLDuration(time.Microsecond)},
+		{"eth_call", TOMLDuration(250 * time.Millisecond)},
+		{"eth_call", TOMLDuration(1500 * time.Millisecond)},
 		{"eth_sendRawTransaction", TOMLDuration(time.Second)},
 		{"eth_getFilterChanges", TOMLDuration(time.Second)},
 	} {
@@ -84,7 +85,7 @@ func TestTimedCacheExpiry(t *testing.T) {
 				advance = srv.FastForward
 			}
 			c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
-				"eth_getBlockByNumber": TOMLDuration(250 * time.Millisecond),
+				"eth_getBlockByNumber": TOMLDuration(time.Second),
 			}}, RedisConfig{}, client, client)
 			if !useRedis {
 				memory := c.handlers["eth_getBlockByNumber"].(*StaticMethodHandler).cache.(*cacheWithCompression).cache.(*cache)
@@ -94,7 +95,7 @@ func TestTimedCacheExpiry(t *testing.T) {
 			}
 			req := &RPCReq{Method: "eth_getBlockByNumber", Params: json.RawMessage(`["latest",false]`)}
 			require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "block"}))
-			advance(249 * time.Millisecond)
+			advance(999 * time.Millisecond)
 			hit, err := c.GetRPC(ctx, req)
 			require.NoError(t, err)
 			require.NotNil(t, hit)
@@ -147,7 +148,7 @@ func TestCacheRequestSurvivesBlockRewrite(t *testing.T) {
 
 func TestMemoryFallbackExpires(t *testing.T) {
 	ctx := context.Background()
-	memory := newMemoryCache(250 * time.Millisecond)
+	memory := newMemoryCache(time.Second)
 	now := time.Unix(1000, 0)
 	memory.now = func() time.Time { return now }
 	fallback := newFallbackCache(&errorCache{}, memory)
@@ -155,7 +156,7 @@ func TestMemoryFallbackExpires(t *testing.T) {
 	value, err := fallback.Get(ctx, "key")
 	require.NoError(t, err)
 	require.Equal(t, "value", value)
-	now = now.Add(250 * time.Millisecond)
+	now = now.Add(time.Second)
 	value, err = fallback.Get(ctx, "key")
 	require.NoError(t, err)
 	require.Empty(t, value)
@@ -164,7 +165,7 @@ func TestMemoryFallbackExpires(t *testing.T) {
 func TestTimedCacheCachesEachBlockSelector(t *testing.T) {
 	ctx := context.Background()
 	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
-		"eth_getBlockByNumber": TOMLDuration(250 * time.Millisecond),
+		"eth_getBlockByNumber": TOMLDuration(time.Second),
 	}}, RedisConfig{}, nil, nil)
 	for _, block := range []string{"latest", "safe", "finalized", "pending", "0x1234"} {
 		for _, full := range []bool{false, true} {

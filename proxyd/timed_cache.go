@@ -11,8 +11,8 @@ import (
 
 func (c CacheConfig) validate() error {
 	for method, ttl := range c.MethodTTLs {
-		if method == "" || time.Duration(ttl) < time.Millisecond {
-			return fmt.Errorf("cache.method_ttls.%s: method must be nonempty and ttl must be at least 1ms", method)
+		if method == "" || time.Duration(ttl) < time.Second || time.Duration(ttl)%time.Second != 0 {
+			return fmt.Errorf("cache.method_ttls.%s: method must be nonempty and ttl must be a positive whole number of seconds", method)
 		}
 		// These calls have side effects or consume connection-local state.
 		if strings.HasPrefix(method, "eth_send") || strings.HasPrefix(method, "eth_new") || method == "eth_uninstallFilter" || method == "eth_getFilterChanges" || method == "eth_subscribe" || method == "eth_unsubscribe" {

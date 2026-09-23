@@ -343,7 +343,7 @@ func TestTimedCaching(t *testing.T) {
 	t.Setenv("REDIS_URL", fmt.Sprintf("redis://%s", redis.Addr()))
 	config := ReadConfig("caching")
 	config.Cache.MethodTTLs = map[string]proxyd.TOMLDuration{
-		"eth_getBlockByNumber": proxyd.TOMLDuration(250 * time.Millisecond),
+		"eth_getBlockByNumber": proxyd.TOMLDuration(time.Second),
 	}
 	_, shutdown, err := proxyd.Start(config)
 	require.NoError(t, err)
@@ -364,7 +364,7 @@ func TestTimedCaching(t *testing.T) {
 	send([]interface{}{"pending", false})
 	send([]interface{}{"pending", false})
 	require.Equal(t, 3, countRequests(backend, "eth_getBlockByNumber"))
-	redis.FastForward(250 * time.Millisecond)
+	redis.FastForward(time.Second)
 	send(latest)
 	require.Equal(t, 4, countRequests(backend, "eth_getBlockByNumber"))
 }

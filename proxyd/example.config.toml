@@ -36,8 +36,8 @@ url = "redis://localhost:6379"
 # [cache]
 # enabled = true
 # [cache.method_ttls]
-# eth_getBlockByNumber = "250ms"
-# eth_getBalance = "250ms"
+# eth_getBlockByNumber = "1s"
+# eth_getBalance = "1s"
 # eth_gasPrice = "1s"
 
 [metrics]

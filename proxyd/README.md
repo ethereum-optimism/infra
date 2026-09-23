@@ -113,8 +113,8 @@ formatting differences can produce separate entries.
 enabled = true
 
 [cache.method_ttls]
-eth_getBlockByNumber = "250ms"
-eth_getBalance = "250ms"
+eth_getBlockByNumber = "1s"
+eth_getBalance = "1s"
 eth_gasPrice = "1s"
 ```
 
@@ -126,16 +126,15 @@ Other custom methods remain the operator's responsibility.
 Existing `[cache]` configurations need no changes: `enabled`, `ttl` (default 1h),
 and the built-in method list still apply. Built-in Redis keys remain compatible.
 Memory-only and memory-fallback caches now honor the global TTL instead of keeping
-entries until LRU eviction. Redis writes use `SET` with expiry instead of `SETEX`;
-Redis ACLs must allow `SET`, and command-specific duration queries should use
-`command="SET"` instead of `command="SETEX"`.
+entries until LRU eviction. Redis writes and command metrics continue using `SETEX`.
 
 Rules replace the built-in policy for that method. Unlisted methods retain their
 existing behavior. Only successful, non-null upstream results are stored. Results
 answered locally from consensus state are not stored by timed rules. Both single
 and batched HTTP requests use these rules; WebSocket forwarding does not.
 
-TTLs must be at least 1ms and run from cache insertion, not block production.
+Per-method TTLs must be positive whole seconds (e.g. `"1s"`, `"5s"`, `"1m"`)
+and run from cache insertion, not block production. Fractional-second values are rejected.
 Mutable results may lag by the TTL plus upstream latency/head lag; this is not
 reorg-aware caching. Redis, memory-only mode, and memory fallback enforce expiry.
 Memory capacity is 4096 entries per configured method. Changing a method's TTL
