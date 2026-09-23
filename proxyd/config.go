@@ -42,15 +42,9 @@ type ServerConfig struct {
 }
 
 type CacheConfig struct {
-	Enabled bool                         `toml:"enabled"`
-	TTL     TOMLDuration                 `toml:"ttl"`
-	Methods map[string]CacheMethodConfig `toml:"methods"`
-}
-
-// CacheMethodConfig opts a read-only RPC method into time-based HTTP caching.
-type CacheMethodConfig struct {
-	TTL      TOMLDuration `toml:"ttl"`
-	BlockTag string       `toml:"block_tag"`
+	Enabled    bool                    `toml:"enabled"`
+	TTL        TOMLDuration            `toml:"ttl"`
+	MethodTTLs map[string]TOMLDuration `toml:"method_ttls"`
 }
 
 type RedisConfig struct {

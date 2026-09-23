@@ -35,11 +35,10 @@ url = "redis://localhost:6379"
 # Optional HTTP response caching. Timed rules accept bounded staleness.
 # [cache]
 # enabled = true
-# [cache.methods.eth_getBlockByNumber]
-# ttl = "250ms"
-# block_tag = "latest"
-# [cache.methods.eth_gasPrice]
-# ttl = "1s"
+# [cache.method_ttls]
+# eth_getBlockByNumber = "250ms"
+# eth_getBalance = "250ms"
+# eth_gasPrice = "1s"
 
 [metrics]
 # Whether or not to enable Prometheus metrics.

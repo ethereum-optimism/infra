@@ -112,21 +112,14 @@ formatting differences can produce separate entries.
 [cache]
 enabled = true
 
-[cache.methods.eth_getBlockByNumber]
-ttl = "250ms"
-block_tag = "latest"
-
-[cache.methods.eth_gasPrice]
-ttl = "1s"
+[cache.method_ttls]
+eth_getBlockByNumber = "250ms"
+eth_getBalance = "250ms"
+eth_gasPrice = "1s"
 ```
 
-`block_tag` is optional. When present, only an explicit matching positional block
-tag qualifies; omitted selectors, block numbers, block-hash objects, and `pending`
-do not match. Supported tags are `latest`, `safe`, `finalized`, and `earliest`.
-This filter supports block-by-number reads, block receipts, state reads (including
-`eth_call`), proofs, and block traces; it does not support nested log filters.
-Without `block_tag`, all argument combinations for the configured method qualify,
-including `pending` if the method accepts it. Configure only read-only methods;
+All argument combinations for a configured method qualify, including numeric
+blocks and `pending`. Each combination is cached separately. Configure only read-only methods;
 transaction submissions, filter creation/polling, and subscriptions are rejected.
 Other custom methods remain the operator's responsibility.
 
@@ -145,7 +138,7 @@ and batched HTTP requests use these rules; WebSocket forwarding does not.
 TTLs must be at least 1ms and run from cache insertion, not block production.
 Mutable results may lag by the TTL plus upstream latency/head lag; this is not
 reorg-aware caching. Redis, memory-only mode, and memory fallback enforce expiry.
-Memory capacity is 4096 entries per configured method. Changing a rule's TTL or tag
+Memory capacity is 4096 entries per configured method. Changing a method's TTL
 uses separate Redis keys, so rolling deployments cannot reuse the old policy's entries.
 Use a separate Redis namespace per chain/deployment. Existing cache metrics report
 hits, misses, and errors by method. Concurrent misses are not coalesced.

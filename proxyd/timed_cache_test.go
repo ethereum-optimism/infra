@@ -16,35 +16,31 @@ func TestTimedCacheConfig(t *testing.T) {
 	var cfg Config
 	_, err := toml.Decode(`[cache]
 enabled = true
-[cache.methods.eth_getBlockByNumber]
-ttl = "250ms"
-block_tag = "latest"
-[cache.methods.eth_gasPrice]
-ttl = "1s"
+[cache.method_ttls]
+eth_getBlockByNumber = "250ms"
+eth_gasPrice = "1s"
 `, &cfg)
 	require.NoError(t, err)
 	require.NoError(t, cfg.Cache.validate())
-	require.Equal(t, TOMLDuration(250*time.Millisecond), cfg.Cache.Methods["eth_getBlockByNumber"].TTL)
+	require.Equal(t, TOMLDuration(250*time.Millisecond), cfg.Cache.MethodTTLs["eth_getBlockByNumber"])
 	for _, tc := range []struct {
 		method string
-		rule   CacheMethodConfig
+		ttl    TOMLDuration
 	}{
-		{"eth_call", CacheMethodConfig{}},
-		{"eth_call", CacheMethodConfig{TTL: -1}},
-		{"eth_call", CacheMethodConfig{TTL: TOMLDuration(time.Microsecond)}},
-		{"eth_sendRawTransaction", CacheMethodConfig{TTL: TOMLDuration(time.Second)}},
-		{"eth_getFilterChanges", CacheMethodConfig{TTL: TOMLDuration(time.Second)}},
-		{"eth_getLogs", CacheMethodConfig{TTL: TOMLDuration(time.Second), BlockTag: "latest"}},
-		{"eth_call", CacheMethodConfig{TTL: TOMLDuration(time.Second), BlockTag: "pending"}},
+		{"eth_call", 0},
+		{"eth_call", -1},
+		{"eth_call", TOMLDuration(time.Microsecond)},
+		{"eth_sendRawTransaction", TOMLDuration(time.Second)},
+		{"eth_getFilterChanges", TOMLDuration(time.Second)},
 	} {
-		require.Error(t, (CacheConfig{Methods: map[string]CacheMethodConfig{tc.method: tc.rule}}).validate())
+		require.Error(t, (CacheConfig{MethodTTLs: map[string]TOMLDuration{tc.method: tc.ttl}}).validate())
 	}
 }
 
-func TestTimedCacheScopeAndArguments(t *testing.T) {
+func TestTimedCacheArguments(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{Methods: map[string]CacheMethodConfig{
-		"eth_call": {TTL: TOMLDuration(time.Second), BlockTag: "latest"},
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_call": TOMLDuration(time.Second),
 	}}, RedisConfig{}, nil, nil)
 	req := &RPCReq{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "eth_call", Params: json.RawMessage(`[{"to":"0x123","data":"0x456"},"latest"]`)}
 	require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "0xbeef"}))
@@ -67,14 +63,6 @@ func TestTimedCacheScopeAndArguments(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, hit, params)
 	}
-	for _, params := range []string{`[{},"pending"]`, `[{},"safe"]`, `[{},"0x10"]`, `[{}]`} {
-		other := *req
-		other.Params = json.RawMessage(params)
-		require.NoError(t, c.PutRPC(ctx, &other, &RPCRes{Result: "0x1"}))
-		hit, err := c.GetRPC(ctx, &other)
-		require.NoError(t, err)
-		require.Nil(t, hit)
-	}
 }
 
 func TestTimedCacheExpiry(t *testing.T) {
@@ -95,8 +83,8 @@ func TestTimedCacheExpiry(t *testing.T) {
 				defer client.Close()
 				advance = srv.FastForward
 			}
-			c := newConfiguredRPCCache(CacheConfig{Methods: map[string]CacheMethodConfig{
-				"eth_getBlockByNumber": {TTL: TOMLDuration(250 * time.Millisecond), BlockTag: "latest"},
+			c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+				"eth_getBlockByNumber": TOMLDuration(250 * time.Millisecond),
 			}}, RedisConfig{}, client, client)
 			if !useRedis {
 				memory := c.handlers["eth_getBlockByNumber"].(*StaticMethodHandler).cache.(*cacheWithCompression).cache.(*cache)
@@ -120,8 +108,8 @@ func TestTimedCacheExpiry(t *testing.T) {
 
 func TestTimedCacheSkipsUnusableResults(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{Methods: map[string]CacheMethodConfig{
-		"eth_gasPrice": {TTL: TOMLDuration(time.Second)},
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_gasPrice": TOMLDuration(time.Second),
 	}}, RedisConfig{}, nil, nil)
 	req := &RPCReq{Method: "eth_gasPrice"}
 	for _, res := range []*RPCRes{
@@ -141,8 +129,8 @@ func TestTimedCacheSkipsUnusableResults(t *testing.T) {
 
 func TestCacheRequestSurvivesBlockRewrite(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{Methods: map[string]CacheMethodConfig{
-		"eth_getBlockByNumber": {TTL: TOMLDuration(time.Second), BlockTag: "latest"},
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_getBlockByNumber": TOMLDuration(time.Second),
 	}}, RedisConfig{}, nil, nil)
 	req := &RPCReq{Method: "eth_getBlockByNumber", Params: json.RawMessage(`["latest",false]`)}
 	batch := createBatchRequest([]batchElem{{Req: req}})
@@ -173,10 +161,10 @@ func TestMemoryFallbackExpires(t *testing.T) {
 	require.Empty(t, value)
 }
 
-func TestTimedCacheWithoutTagCachesEachBlockSelector(t *testing.T) {
+func TestTimedCacheCachesEachBlockSelector(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{Methods: map[string]CacheMethodConfig{
-		"eth_getBlockByNumber": {TTL: TOMLDuration(250 * time.Millisecond)},
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_getBlockByNumber": TOMLDuration(250 * time.Millisecond),
 	}}, RedisConfig{}, nil, nil)
 	for _, block := range []string{"latest", "safe", "finalized", "pending", "0x1234"} {
 		for _, full := range []bool{false, true} {
