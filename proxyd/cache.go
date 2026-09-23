@@ -25,22 +25,41 @@ const (
 
 type cache struct {
 	lru *lru.Cache
+	ttl time.Duration
+	now func() time.Time
 }
 
-func newMemoryCache() *cache {
+type memoryCacheEntry struct {
+	value     string
+	expiresAt time.Time
+}
+
+func newMemoryCache(ttl ...time.Duration) *cache {
 	rep, _ := lru.New(memoryCacheLimit)
-	return &cache{rep}
+	c := &cache{lru: rep, now: time.Now}
+	if len(ttl) > 0 {
+		c.ttl = ttl[0]
+	}
+	return c
 }
 
 func (c *cache) Get(ctx context.Context, key string) (string, error) {
 	if val, ok := c.lru.Get(key); ok {
-		return val.(string), nil
+		entry := val.(memoryCacheEntry)
+		if !entry.expiresAt.IsZero() && !c.now().Before(entry.expiresAt) {
+			return "", nil
+		}
+		return entry.value, nil
 	}
 	return "", nil
 }
 
 func (c *cache) Put(ctx context.Context, key string, value string) error {
-	c.lru.Add(key, value)
+	entry := memoryCacheEntry{value: value}
+	if c.ttl > 0 {
+		entry.expiresAt = c.now().Add(c.ttl)
+	}
+	c.lru.Add(key, entry)
 	return nil
 }
 
@@ -103,8 +122,8 @@ func (c *redisCache) Get(ctx context.Context, key string) (string, error) {
 
 func (c *redisCache) Put(ctx context.Context, key string, value string) error {
 	start := time.Now()
-	err := c.redisClient.SetEx(ctx, c.namespaced(key), value, c.ttl).Err()
-	redisCacheDurationSumm.WithLabelValues("SETEX").Observe(float64(time.Since(start).Milliseconds()))
+	err := c.redisClient.Set(ctx, c.namespaced(key), value, c.ttl).Err()
+	redisCacheDurationSumm.WithLabelValues("SET").Observe(float64(time.Since(start).Milliseconds()))
 
 	if err != nil {
 		RecordRedisError("CacheSet")
@@ -150,7 +169,7 @@ type rpcCache struct {
 	handlers map[string]RPCMethodHandler
 }
 
-func newRPCCache(cache Cache) RPCCache {
+func newRPCCache(cache Cache) *rpcCache {
 	staticHandler := &StaticMethodHandler{cache: cache}
 	debugGetRawReceiptsHandler := &StaticMethodHandler{cache: cache,
 		filterGet: func(req *RPCReq) bool {

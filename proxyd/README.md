@@ -101,6 +101,55 @@ Cache use Redis and can be enabled for the following immutable methods:
 * `eth_getUncleByBlockHashAndIndex`
 * `debug_getRawReceipts` (block hash only)
 
+### Timed HTTP caching
+
+Opt read-only methods into response caching with a per-method TTL. Every request
+parameter participates in the key (including call overrides and the full-transaction
+flag); the JSON-RPC request ID does not. Keys use the original parameter JSON, so
+formatting differences can produce separate entries.
+
+```toml
+[cache]
+enabled = true
+
+[cache.methods.eth_getBlockByNumber]
+ttl = "250ms"
+block_tag = "latest"
+
+[cache.methods.eth_gasPrice]
+ttl = "1s"
+```
+
+`block_tag` is optional. When present, only an explicit matching positional block
+tag qualifies; omitted selectors, block numbers, block-hash objects, and `pending`
+do not match. Supported tags are `latest`, `safe`, `finalized`, and `earliest`.
+This filter supports block-by-number reads, block receipts, state reads (including
+`eth_call`), proofs, and block traces; it does not support nested log filters.
+Without `block_tag`, all argument combinations for the configured method qualify,
+including `pending` if the method accepts it. Configure only read-only methods;
+transaction submissions, filter creation/polling, and subscriptions are rejected.
+Other custom methods remain the operator's responsibility.
+
+Existing `[cache]` configurations need no changes: `enabled`, `ttl` (default 1h),
+and the built-in method list still apply. Built-in Redis keys remain compatible.
+Memory-only and memory-fallback caches now honor the global TTL instead of keeping
+entries until LRU eviction. Redis writes use `SET` with expiry instead of `SETEX`;
+Redis ACLs must allow `SET`, and command-specific duration queries should use
+`command="SET"` instead of `command="SETEX"`.
+
+Rules replace the built-in policy for that method. Unlisted methods retain their
+existing behavior. Only successful, non-null upstream results are stored. Results
+answered locally from consensus state are not stored by timed rules. Both single
+and batched HTTP requests use these rules; WebSocket forwarding does not.
+
+TTLs must be at least 1ms and run from cache insertion, not block production.
+Mutable results may lag by the TTL plus upstream latency/head lag; this is not
+reorg-aware caching. Redis, memory-only mode, and memory fallback enforce expiry.
+Memory capacity is 4096 entries per configured method. Changing a rule's TTL or tag
+uses separate Redis keys, so rolling deployments cannot reuse the old policy's entries.
+Use a separate Redis namespace per chain/deployment. Existing cache metrics report
+hits, misses, and errors by method. Concurrent misses are not coalesced.
+
 ## Meta method `consensus_getReceipts`
 
 To support backends with different specifications in the same backend group,

@@ -24,6 +24,9 @@ func SetLogLevel(logLevel slog.Leveler) {
 }
 
 func Start(config *Config) (*Server, func(), error) {
+	if err := config.Cache.validate(); err != nil {
+		return nil, nil, err
+	}
 	if len(config.Backends) == 0 {
 		return nil, nil, errors.New("must define at least one backend")
 	}
@@ -440,26 +443,12 @@ func Start(config *Config) (*Server, func(), error) {
 		}
 	}
 
-	var (
-		cache    Cache
-		rpcCache RPCCache
-	)
+	var rpcCache RPCCache
 	if config.Cache.Enabled {
 		if redisClient == nil {
 			log.Warn("redis is not configured, using in-memory cache")
-			cache = newMemoryCache()
-		} else {
-			ttl := defaultCacheTtl
-			if config.Cache.TTL != 0 {
-				ttl = time.Duration(config.Cache.TTL)
-			}
-			cache = newRedisCache(redisClient, redisReadClient, config.Redis.Namespace, ttl)
-
-			if config.Redis.FallbackToMemory {
-				cache = newFallbackCache(cache, newMemoryCache())
-			}
 		}
-		rpcCache = newRPCCache(newCacheWithCompression(cache))
+		rpcCache = newConfiguredRPCCache(config.Cache, config.Redis, redisClient, redisReadClient)
 	}
 
 	limiterFactory := func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
