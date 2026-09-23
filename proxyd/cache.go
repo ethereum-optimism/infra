@@ -25,41 +25,22 @@ const (
 
 type cache struct {
 	lru *lru.Cache
-	ttl time.Duration
-	now func() time.Time
 }
 
-type memoryCacheEntry struct {
-	value     string
-	expiresAt time.Time
-}
-
-func newMemoryCache(ttl ...time.Duration) *cache {
+func newMemoryCache() *cache {
 	rep, _ := lru.New(memoryCacheLimit)
-	c := &cache{lru: rep, now: time.Now}
-	if len(ttl) > 0 {
-		c.ttl = ttl[0]
-	}
-	return c
+	return &cache{rep}
 }
 
 func (c *cache) Get(ctx context.Context, key string) (string, error) {
 	if val, ok := c.lru.Get(key); ok {
-		entry := val.(memoryCacheEntry)
-		if !entry.expiresAt.IsZero() && !c.now().Before(entry.expiresAt) {
-			return "", nil
-		}
-		return entry.value, nil
+		return val.(string), nil
 	}
 	return "", nil
 }
 
 func (c *cache) Put(ctx context.Context, key string, value string) error {
-	entry := memoryCacheEntry{value: value}
-	if c.ttl > 0 {
-		entry.expiresAt = c.now().Add(c.ttl)
-	}
-	c.lru.Add(key, entry)
+	c.lru.Add(key, value)
 	return nil
 }
 

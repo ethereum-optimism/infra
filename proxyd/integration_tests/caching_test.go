@@ -342,6 +342,7 @@ func TestTimedCaching(t *testing.T) {
 	t.Setenv("GOOD_BACKEND_RPC_URL", backend.URL())
 	t.Setenv("REDIS_URL", fmt.Sprintf("redis://%s", redis.Addr()))
 	config := ReadConfig("caching")
+	config.Redis.FallbackToMemory = true
 	config.Cache.MethodTTLs = map[string]proxyd.TOMLDuration{
 		"eth_getBlockByNumber": proxyd.TOMLDuration(time.Second),
 	}
@@ -367,4 +368,11 @@ func TestTimedCaching(t *testing.T) {
 	redis.FastForward(time.Second)
 	send(latest)
 	require.Equal(t, 4, countRequests(backend, "eth_getBlockByNumber"))
+	// Timed methods must continue forwarding during Redis outages, even when
+	// fallback_to_memory is enabled for the legacy immutable cache.
+	redis.Close()
+	send(latest)
+	send(latest)
+	require.Equal(t, 6, countRequests(backend, "eth_getBlockByNumber"))
+
 }

@@ -40,9 +40,9 @@ eth_gasPrice = "1s"
 
 func TestTimedCacheArguments(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+	c, _ := newTestTimedCache(t, CacheConfig{MethodTTLs: map[string]TOMLDuration{
 		"eth_call": TOMLDuration(time.Second),
-	}}, RedisConfig{}, nil, nil)
+	}})
 	req := &RPCReq{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "eth_call", Params: json.RawMessage(`[{"to":"0x123","data":"0x456"},"latest"]`)}
 	require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "0xbeef"}))
 	req.ID = json.RawMessage(`2`)
@@ -68,50 +68,26 @@ func TestTimedCacheArguments(t *testing.T) {
 
 func TestTimedCacheExpiry(t *testing.T) {
 	ctx := context.Background()
-	for _, useRedis := range []bool{false, true} {
-		name := "memory"
-		if useRedis {
-			name = "redis"
-		}
-		t.Run(name, func(t *testing.T) {
-			var client redis.UniversalClient
-			var advance func(time.Duration)
-			if useRedis {
-				srv, err := miniredis.Run()
-				require.NoError(t, err)
-				defer srv.Close()
-				client = redis.NewClient(&redis.Options{Addr: srv.Addr()})
-				defer client.Close()
-				advance = srv.FastForward
-			}
-			c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
-				"eth_getBlockByNumber": TOMLDuration(time.Second),
-			}}, RedisConfig{}, client, client)
-			if !useRedis {
-				memory := c.handlers["eth_getBlockByNumber"].(*StaticMethodHandler).cache.(*cacheWithCompression).cache.(*cache)
-				now := time.Unix(1000, 0)
-				memory.now = func() time.Time { return now }
-				advance = func(d time.Duration) { now = now.Add(d) }
-			}
-			req := &RPCReq{Method: "eth_getBlockByNumber", Params: json.RawMessage(`["latest",false]`)}
-			require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "block"}))
-			advance(999 * time.Millisecond)
-			hit, err := c.GetRPC(ctx, req)
-			require.NoError(t, err)
-			require.NotNil(t, hit)
-			advance(time.Millisecond)
-			hit, err = c.GetRPC(ctx, req)
-			require.NoError(t, err)
-			require.Nil(t, hit)
-		})
-	}
+	c, srv := newTestTimedCache(t, CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_getBlockByNumber": TOMLDuration(time.Second),
+	}})
+	req := &RPCReq{Method: "eth_getBlockByNumber", Params: json.RawMessage(`["latest",false]`)}
+	require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "block"}))
+	srv.FastForward(999 * time.Millisecond)
+	hit, err := c.GetRPC(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, hit)
+	srv.FastForward(time.Millisecond)
+	hit, err = c.GetRPC(ctx, req)
+	require.NoError(t, err)
+	require.Nil(t, hit)
 }
 
 func TestTimedCacheSkipsUnusableResults(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+	c, _ := newTestTimedCache(t, CacheConfig{MethodTTLs: map[string]TOMLDuration{
 		"eth_gasPrice": TOMLDuration(time.Second),
-	}}, RedisConfig{}, nil, nil)
+	}})
 	req := &RPCReq{Method: "eth_gasPrice"}
 	for _, res := range []*RPCRes{
 		{Error: ErrOverRateLimit}, {}, {Result: json.RawMessage(`null`)},
@@ -130,9 +106,9 @@ func TestTimedCacheSkipsUnusableResults(t *testing.T) {
 
 func TestCacheRequestSurvivesBlockRewrite(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+	c, _ := newTestTimedCache(t, CacheConfig{MethodTTLs: map[string]TOMLDuration{
 		"eth_getBlockByNumber": TOMLDuration(time.Second),
-	}}, RedisConfig{}, nil, nil)
+	}})
 	req := &RPCReq{Method: "eth_getBlockByNumber", Params: json.RawMessage(`["latest",false]`)}
 	batch := createBatchRequest([]batchElem{{Req: req}})
 	result, err := RewriteRequest(RewriteContext{latest: 100, consensusMode: true}, batch[0], &RPCRes{})
@@ -146,27 +122,11 @@ func TestCacheRequestSurvivesBlockRewrite(t *testing.T) {
 	require.NotNil(t, hit)
 }
 
-func TestMemoryFallbackExpires(t *testing.T) {
-	ctx := context.Background()
-	memory := newMemoryCache(time.Second)
-	now := time.Unix(1000, 0)
-	memory.now = func() time.Time { return now }
-	fallback := newFallbackCache(&errorCache{}, memory)
-	require.NoError(t, fallback.Put(ctx, "key", "value"))
-	value, err := fallback.Get(ctx, "key")
-	require.NoError(t, err)
-	require.Equal(t, "value", value)
-	now = now.Add(time.Second)
-	value, err = fallback.Get(ctx, "key")
-	require.NoError(t, err)
-	require.Empty(t, value)
-}
-
 func TestTimedCacheCachesEachBlockSelector(t *testing.T) {
 	ctx := context.Background()
-	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+	c, _ := newTestTimedCache(t, CacheConfig{MethodTTLs: map[string]TOMLDuration{
 		"eth_getBlockByNumber": TOMLDuration(time.Second),
-	}}, RedisConfig{}, nil, nil)
+	}})
 	for _, block := range []string{"latest", "safe", "finalized", "pending", "0x1234"} {
 		for _, full := range []bool{false, true} {
 			req := &RPCReq{Method: "eth_getBlockByNumber", Params: mustMarshalJSON([]interface{}{block, full})}
@@ -201,4 +161,56 @@ func TestConfiguredCachePreservesLegacyPolicy(t *testing.T) {
 	hit, err = configured.GetRPC(ctx, req)
 	require.NoError(t, err)
 	require.Nil(t, hit, "unconfigured methods must remain uncached")
+}
+
+func newTestTimedCache(t *testing.T, config CacheConfig) (*rpcCache, *miniredis.Miniredis) {
+	t.Helper()
+	srv, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(srv.Close)
+	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	return newConfiguredRPCCache(config, RedisConfig{}, client, client), srv
+}
+
+func TestTimedCacheWithoutRedis(t *testing.T) {
+	ctx := context.Background()
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_getBalance": TOMLDuration(time.Second),
+		"eth_chainId":    TOMLDuration(time.Second),
+	}}, RedisConfig{FallbackToMemory: true}, nil, nil)
+	for _, method := range []string{"eth_getBalance", "eth_chainId"} {
+		req := &RPCReq{Method: method}
+		require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "0x1"}))
+		hit, err := c.GetRPC(ctx, req)
+		require.NoError(t, err)
+		require.Nil(t, hit, "timed methods must not use legacy memory storage")
+	}
+	req := &RPCReq{Method: "net_version"}
+	require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "10"}))
+	hit, err := c.GetRPC(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, "10", hit.Result, "unconfigured immutable methods retain memory caching")
+}
+
+func TestTimedCacheRedisFailurePreservesLegacyFallback(t *testing.T) {
+	ctx := context.Background()
+	srv, err := miniredis.Run()
+	require.NoError(t, err)
+	defer srv.Close()
+	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	c := newConfiguredRPCCache(CacheConfig{MethodTTLs: map[string]TOMLDuration{
+		"eth_getBalance": TOMLDuration(time.Second),
+	}}, RedisConfig{FallbackToMemory: true}, client, client)
+	require.NoError(t, client.Close())
+	req := &RPCReq{Method: "eth_getBalance"}
+	require.Error(t, c.PutRPC(ctx, req, &RPCRes{Result: "0x1"}))
+	hit, err := c.GetRPC(ctx, req)
+	require.Error(t, err)
+	require.Nil(t, hit)
+	req = &RPCReq{Method: "eth_chainId"}
+	require.NoError(t, c.PutRPC(ctx, req, &RPCRes{Result: "0xa"}))
+	hit, err = c.GetRPC(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, "0xa", hit.Result, "legacy immutable cache still falls back to memory")
 }

@@ -23,26 +23,28 @@ func (c CacheConfig) validate() error {
 }
 
 func newConfiguredRPCCache(config CacheConfig, redisConfig RedisConfig, primary, reader redis.UniversalClient) *rpcCache {
-	makeCache := func(ttl time.Duration) Cache {
-		var c Cache
-		if primary == nil {
-			c = newMemoryCache(ttl)
-		} else {
-			c = newRedisCache(primary, reader, redisConfig.Namespace, ttl)
-			if redisConfig.FallbackToMemory {
-				c = newFallbackCache(c, newMemoryCache(ttl))
-			}
+	var storage Cache
+	if primary == nil {
+		storage = newMemoryCache()
+	} else {
+		ttl := defaultCacheTtl
+		if config.TTL != 0 {
+			ttl = time.Duration(config.TTL)
 		}
-		return newCacheWithCompression(c)
+		storage = newRedisCache(primary, reader, redisConfig.Namespace, ttl)
+		if redisConfig.FallbackToMemory {
+			storage = newFallbackCache(storage, newMemoryCache())
+		}
 	}
-	ttl := defaultCacheTtl
-	if config.TTL != 0 {
-		ttl = time.Duration(config.TTL)
-	}
-	c := newRPCCache(makeCache(ttl))
+	c := newRPCCache(newCacheWithCompression(storage))
 	for method, ttl := range config.MethodTTLs {
+		// Never fall back to the non-expiring legacy cache for a timed method.
+		if primary == nil {
+			delete(c.handlers, method)
+			continue
+		}
 		handler := &StaticMethodHandler{
-			cache: makeCache(time.Duration(ttl)),
+			cache: newCacheWithCompression(newRedisCache(primary, reader, redisConfig.Namespace, time.Duration(ttl))),
 			// Separate policies, including rolling deployments with different TTLs.
 			keyPrefix: fmt.Sprintf(":timed:%d", ttl),
 		}
