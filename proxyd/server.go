@@ -1399,7 +1399,10 @@ type batchElem struct {
 func createBatchRequest(elems []batchElem) []*RPCReq {
 	batch := make([]*RPCReq, len(elems))
 	for i := range elems {
-		batch[i] = elems[i].Req
+		// Backend rewriting must not change the request used for cache lookup/write.
+		req := *elems[i].Req
+		req.Params = append(json.RawMessage(nil), req.Params...)
+		batch[i] = &req
 	}
 	return batch
 }

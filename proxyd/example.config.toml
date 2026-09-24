@@ -32,6 +32,14 @@ log_level = "info"
 # URL to a Redis instance.
 url = "redis://localhost:6379"
 
+# Optional HTTP response caching. Timed rules require Redis and accept bounded staleness.
+# [cache]
+# enabled = true
+# [cache.method_ttls]
+# eth_getBlockByNumber = "1s"
+# eth_getBalance = "1s"
+# eth_gasPrice = "1s"
+
 [metrics]
 # Whether or not to enable Prometheus metrics.
 enabled = true
