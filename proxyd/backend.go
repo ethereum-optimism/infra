@@ -116,7 +116,7 @@ var (
 	ErrBackendResponseTooLarge = &RPCErr{
 		Code:          JSONRPCErrorInternal - 20,
 		Message:       "backend response too large",
-		HTTPErrorCode: 200,
+		HTTPErrorCode: 400,
 	}
 
 	ErrInteropAccessListOutOfBounds = &RPCErr{

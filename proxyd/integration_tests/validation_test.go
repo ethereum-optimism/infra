@@ -250,7 +250,7 @@ func TestSizeLimits(t *testing.T) {
 	out, code, err = client.SendRequest([]byte(`{"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}`))
 	require.NoError(t, err)
 	require.Equal(t, `{"jsonrpc":"2.0","error":{"code":-32020,"message":"backend response too large"},"id":1}`, strings.TrimSpace(string(out)))
-	require.Equal(t, 200, code)
+	require.Equal(t, 400, code)
 }
 
 func asArray(in ...string) string {
