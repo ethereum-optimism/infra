@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,6 +75,7 @@ var config = provider.ProviderConfig{
 	Auth: []provider.AuthConfig{
 		{ClientName: "client.oplabs.co", KeyName: "keyName"},
 		{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName"},
+		{ClientName: "message-only.oplabs.co", KeyName: "messageKeyName", MessageSigningOnly: true},
 		{ClientName: "authorized-to.oplabs.co", KeyName: "keyName", ToAddresses: []string{"0x000000000000000000000000000000000000Aaaa"}},
 		{ClientName: "unauthorized-to.oplabs.co", KeyName: "keyName", ToAddresses: []string{"0x000000000000000000000000000000000000bbbb"}},
 		{ClientName: "within-max-value.oplabs.co", KeyName: "keyName", MaxValue: hexutil.EncodeBig(big.NewInt(2))},
@@ -141,6 +143,7 @@ func testSignTransaction(t *testing.T, tx *types.Transaction) {
 		{"happy path - different client and key", *args, digest, "alt-client.oplabs.co", "altKeyName", 0},
 		{"client not authorized", *args, digest, "forbidden-client.oplabs.co", "keyName", 403},
 		{"client empty", *args, digest, "", "", 403},
+		{"message-only client", *args, digest, "message-only.oplabs.co", "messageKeyName", -32011},
 		{"authorized to address", *args, digest, "authorized-to.oplabs.co", "keyName", 0},
 		{"unauthorized to address", *args, digest, "unauthorized-to.oplabs.co", "keyName", -32011},
 		{"within max value", *args, digest, "within-max-value.oplabs.co", "keyName", 0},
@@ -194,6 +197,7 @@ func TestSignBlockPayload(t *testing.T) {
 			{ClientName: "invalid-chainId-client.oplabs.co", KeyName: "keyName", ChainID: 2, FromAddress: sender},
 			{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName", ChainID: 1, FromAddress: sender},
 			{ClientName: "unspecified-sender-client.oplabs.co", KeyName: "keyName", ChainID: 1},
+			{ClientName: "message-only.oplabs.co", KeyName: "messageKeyName", ChainID: 1, FromAddress: sender, MessageSigningOnly: true},
 		},
 	}
 
@@ -258,6 +262,7 @@ func TestSignBlockPayload(t *testing.T) {
 		{"invalid sender", invalidSender, invalidSenderV2, signingHash.Bytes(), "client.oplabs.co", "keyName", 403},
 		{"client not authorized", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "forbidden-client.oplabs.co", "keyName", 403},
 		{"client empty", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "", "", 403},
+		{"message-only client", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "message-only.oplabs.co", "messageKeyName", -32013},
 	}
 	for _, tt := range tests {
 
@@ -306,6 +311,162 @@ func TestSignBlockPayload(t *testing.T) {
 					return service.opsigner.SignBlockPayloadV2(ctx, tt.argsV2)
 				})
 			})
+		})
+	}
+}
+
+func TestSignMessage(t *testing.T) {
+	privateKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(privateKey.PublicKey)
+	otherPrivateKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	otherSender := crypto.PubkeyToAddress(otherPrivateKey.PublicKey)
+	unauthorizedSender := common.HexToAddress("0x0000000000000000000000000000000000001234")
+	message := hexutil.Bytes("SPN proof request")
+	digest := accounts.TextHash(message)
+	signature, err := crypto.Sign(digest, privateKey)
+	require.NoError(t, err)
+	otherSignature, err := crypto.Sign(digest, otherPrivateKey)
+	require.NoError(t, err)
+
+	messageConfig := provider.ProviderConfig{
+		Auth: []provider.AuthConfig{
+			{
+				ClientName:         "spn-requester.oplabs.co",
+				KeyName:            "spn-requester-key",
+				FromAddress:        sender,
+				MessageSigningOnly: true,
+			},
+			{
+				ClientName:         "spn-requester.oplabs.co",
+				KeyName:            "other-spn-requester-key",
+				FromAddress:        otherSender,
+				MessageSigningOnly: true,
+			},
+			{
+				ClientName:         "misconfigured-spn-requester.oplabs.co",
+				KeyName:            "misconfigured-spn-requester-key",
+				FromAddress:        sender,
+				MessageSigningOnly: true,
+			},
+			{
+				ClientName:  "transaction-signer.oplabs.co",
+				KeyName:     "transaction-key",
+				FromAddress: sender,
+			},
+		},
+	}
+
+	tests := []struct {
+		name              string
+		clientName        string
+		message           hexutil.Bytes
+		sender            *common.Address
+		signerKey         string
+		returnedSignature []byte
+		wantErrCode       int
+	}{
+		{
+			name:              "signs EIP-191 message",
+			clientName:        "spn-requester.oplabs.co",
+			message:           message,
+			sender:            &sender,
+			signerKey:         "spn-requester-key",
+			returnedSignature: signature,
+		},
+		{
+			name:              "selects key by sender",
+			clientName:        "spn-requester.oplabs.co",
+			message:           message,
+			sender:            &otherSender,
+			signerKey:         "other-spn-requester-key",
+			returnedSignature: otherSignature,
+		},
+		{
+			name:        "rejects mismatched sender",
+			clientName:  "spn-requester.oplabs.co",
+			message:     message,
+			sender:      &unauthorizedSender,
+			wantErrCode: 403,
+		},
+		{
+			name:        "rejects missing sender",
+			clientName:  "spn-requester.oplabs.co",
+			message:     message,
+			wantErrCode: 403,
+		},
+		{
+			name:        "rejects unknown client",
+			clientName:  "unknown.oplabs.co",
+			message:     message,
+			sender:      &sender,
+			wantErrCode: 403,
+		},
+		{
+			name:        "rejects transaction signer client",
+			clientName:  "transaction-signer.oplabs.co",
+			message:     message,
+			sender:      &sender,
+			wantErrCode: 403,
+		},
+		{
+			name:        "rejects empty message",
+			clientName:  "spn-requester.oplabs.co",
+			message:     hexutil.Bytes{},
+			sender:      &sender,
+			wantErrCode: -32014,
+		},
+		{
+			name:              "rejects signature from wrong key",
+			clientName:        "misconfigured-spn-requester.oplabs.co",
+			message:           message,
+			sender:            &sender,
+			signerKey:         "misconfigured-spn-requester-key",
+			returnedSignature: otherSignature,
+			wantErrCode:       -32014,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			signatureProvider := provider.NewMockSignatureProvider(ctrl)
+			service := NewSignerServiceWithProvider(log.Root(), messageConfig, signatureProvider)
+			ctx := context.WithValue(
+				context.Background(),
+				clientInfoContextKey{},
+				ClientInfo{ClientName: tt.clientName},
+			)
+			if tt.signerKey != "" {
+				signatureProvider.EXPECT().
+					SignDigest(ctx, tt.signerKey, digest).
+					Return(tt.returnedSignature, nil)
+			}
+
+			response, err := service.opsigner.SignMessage(ctx, SignMessageArgs{
+				Message:       tt.message,
+				SenderAddress: tt.sender,
+			})
+			if tt.wantErrCode != 0 {
+				require.Error(t, err)
+				require.Nil(t, response)
+				var rpcErr rpc.Error
+				var httpErr rpc.HTTPError
+				if errors.As(err, &rpcErr) {
+					require.Equal(t, tt.wantErrCode, rpcErr.ErrorCode())
+				} else {
+					require.ErrorAs(t, err, &httpErr)
+					require.Equal(t, tt.wantErrCode, httpErr.StatusCode)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, response)
+			recoveredKey, err := crypto.SigToPub(digest, response[:])
+			require.NoError(t, err)
+			require.Equal(t, *tt.sender, crypto.PubkeyToAddress(*recoveredKey))
 		})
 	}
 }

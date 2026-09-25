@@ -20,8 +20,10 @@ type AuthConfig struct {
 	ChainID uint64 `yaml:"chainID"`
 	// FromAddress sender address that is sending the rpc request
 	FromAddress common.Address `yaml:"fromAddress"`
-	ToAddresses []string       `yaml:"toAddresses"`
-	MaxValue    string         `yaml:"maxValue"`
+	// MessageSigningOnly permits EIP-191 message signing and denies transaction and block signing.
+	MessageSigningOnly bool     `yaml:"messageSigningOnly,omitempty"`
+	ToAddresses        []string `yaml:"toAddresses"`
+	MaxValue           string   `yaml:"maxValue"`
 }
 
 func (c AuthConfig) MaxValueToInt() *big.Int {
