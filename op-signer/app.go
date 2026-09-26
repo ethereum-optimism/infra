@@ -114,6 +114,7 @@ func (s *SignerApp) initMetrics(cfg *Config) error {
 
 func (s *SignerApp) initRPC(cfg *Config) error {
 	var httpOptions = []httputil.Option{}
+	var authMiddleware oprpc.Middleware
 
 	if cfg.TLSConfig.Enabled {
 		caCert, err := os.ReadFile(cfg.TLSConfig.TLSCaCert)
@@ -142,8 +143,13 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 		}
 
 		httpOptions = append(httpOptions, httputil.WithServerTLS(serverTlsConfig))
+
+		// Set the auth middleware to the default auth middleware
+		authMiddleware = service.NewAuthMiddleware()
 	} else {
-		s.log.Warn("TLS disabled. This is insecure and only supported for local development. Please enable TLS in production environments!")
+		s.log.Warn("TLS disabled. This disables authentication and is INSECURE! Please enable TLS in production environments!")
+		s.log.Info("Using anonymous authentication. You must explicitly set the 'auth[].name' config field to 'anonymous' to allow unauthenticated anonymous usage.")
+		authMiddleware = service.NewAnonMiddleware()
 	}
 
 	rpcCfg := cfg.RPCConfig
@@ -153,7 +159,7 @@ func (s *SignerApp) initRPC(cfg *Config) error {
 			Host:       rpcCfg.ListenAddr,
 			Port:       rpcCfg.ListenPort,
 			RpcOptions: []oprpc.Option{
-				oprpc.WithMiddleware(service.NewAuthMiddleware()),
+				oprpc.WithMiddleware(authMiddleware),
 				oprpc.WithHTTPRecorder(opmetrics.NewPromHTTPRecorder(s.registry, "signer")),
 				oprpc.WithLogger(s.log),
 			},
