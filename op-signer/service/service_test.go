@@ -76,6 +76,8 @@ var config = provider.ProviderConfig{
 		{ClientName: "client.oplabs.co", KeyName: "keyName"},
 		{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName"},
 		{ClientName: "message-only.oplabs.co", KeyName: "messageKeyName", MessageSigningOnly: true},
+		{ClientName: "shared.oplabs.co", KeyName: "messageKeyName", FromAddress: common.HexToAddress("0x0000000000000000000000000000000000005678"), MessageSigningOnly: true},
+		{ClientName: "shared.oplabs.co", KeyName: "sharedKeyName"},
 		{ClientName: "authorized-to.oplabs.co", KeyName: "keyName", ToAddresses: []string{"0x000000000000000000000000000000000000Aaaa"}},
 		{ClientName: "unauthorized-to.oplabs.co", KeyName: "keyName", ToAddresses: []string{"0x000000000000000000000000000000000000bbbb"}},
 		{ClientName: "within-max-value.oplabs.co", KeyName: "keyName", MaxValue: hexutil.EncodeBig(big.NewInt(2))},
@@ -143,7 +145,8 @@ func testSignTransaction(t *testing.T, tx *types.Transaction) {
 		{"happy path - different client and key", *args, digest, "alt-client.oplabs.co", "altKeyName", 0},
 		{"client not authorized", *args, digest, "forbidden-client.oplabs.co", "keyName", 403},
 		{"client empty", *args, digest, "", "", 403},
-		{"message-only client", *args, digest, "message-only.oplabs.co", "messageKeyName", -32011},
+		{"message-only client", *args, digest, "message-only.oplabs.co", "messageKeyName", 403},
+		{"skips message-only entry listed first", *args, digest, "shared.oplabs.co", "sharedKeyName", 0},
 		{"authorized to address", *args, digest, "authorized-to.oplabs.co", "keyName", 0},
 		{"unauthorized to address", *args, digest, "unauthorized-to.oplabs.co", "keyName", -32011},
 		{"within max value", *args, digest, "within-max-value.oplabs.co", "keyName", 0},
@@ -198,6 +201,8 @@ func TestSignBlockPayload(t *testing.T) {
 			{ClientName: "alt-client.oplabs.co", KeyName: "altKeyName", ChainID: 1, FromAddress: sender},
 			{ClientName: "unspecified-sender-client.oplabs.co", KeyName: "keyName", ChainID: 1},
 			{ClientName: "message-only.oplabs.co", KeyName: "messageKeyName", ChainID: 1, FromAddress: sender, MessageSigningOnly: true},
+			{ClientName: "shared.oplabs.co", KeyName: "messageKeyName", ChainID: 1, FromAddress: sender, MessageSigningOnly: true},
+			{ClientName: "shared.oplabs.co", KeyName: "sharedKeyName", ChainID: 1, FromAddress: sender},
 		},
 	}
 
@@ -262,7 +267,8 @@ func TestSignBlockPayload(t *testing.T) {
 		{"invalid sender", invalidSender, invalidSenderV2, signingHash.Bytes(), "client.oplabs.co", "keyName", 403},
 		{"client not authorized", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "forbidden-client.oplabs.co", "keyName", 403},
 		{"client empty", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "", "", 403},
-		{"message-only client", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "message-only.oplabs.co", "messageKeyName", -32013},
+		{"message-only client", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "message-only.oplabs.co", "messageKeyName", 403},
+		{"skips message-only entry listed first", blockPayloadArgs, blockPayloadArgsV2, signingHash.Bytes(), "shared.oplabs.co", "sharedKeyName", 0},
 	}
 	for _, tt := range tests {
 
@@ -355,6 +361,17 @@ func TestSignMessage(t *testing.T) {
 				KeyName:     "transaction-key",
 				FromAddress: sender,
 			},
+			{
+				ClientName:  "shared.oplabs.co",
+				KeyName:     "shared-transaction-key",
+				FromAddress: sender,
+			},
+			{
+				ClientName:         "shared.oplabs.co",
+				KeyName:            "shared-message-key",
+				FromAddress:        sender,
+				MessageSigningOnly: true,
+			},
 		},
 	}
 
@@ -382,6 +399,14 @@ func TestSignMessage(t *testing.T) {
 			sender:            &otherSender,
 			signerKey:         "other-spn-requester-key",
 			returnedSignature: otherSignature,
+		},
+		{
+			name:              "skips transaction entry listed first",
+			clientName:        "shared.oplabs.co",
+			message:           message,
+			sender:            &sender,
+			signerKey:         "shared-message-key",
+			returnedSignature: signature,
 		},
 		{
 			name:        "rejects mismatched sender",

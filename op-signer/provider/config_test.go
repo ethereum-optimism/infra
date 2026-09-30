@@ -75,3 +75,22 @@ auth:
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid provider")
 }
+
+func TestReadConfig_MessageSigningOnlyRequiresFromAddress(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	configData := `
+auth:
+  - name: "test-client"
+    key: "test-key"
+    messageSigningOnly: true
+`
+	err = os.WriteFile(tmpFile.Name(), []byte(configData), 0644)
+	require.NoError(t, err)
+
+	_, err = ReadConfig(tmpFile.Name())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "messageSigningOnly set but no fromAddress")
+}

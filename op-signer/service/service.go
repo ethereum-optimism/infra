@@ -200,9 +200,9 @@ func (s *OpsignerService) SignMessage(ctx context.Context, args SignMessageArgs)
 		labels["error"] = "unauthorized_message"
 		return nil, &UnauthorizedMessageError{"sender address is required"}
 	}
-	authConfig, err := s.config.GetAuthConfigForClient(
+	authConfig, err := s.config.GetMessageSigningAuthConfigForClient(
 		clientInfo.ClientName,
-		args.SenderAddress,
+		*args.SenderAddress,
 	)
 	if err != nil {
 		labels["error"] = "unauthorized_client"
