@@ -6,7 +6,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,7 +88,7 @@ func TestAWSKMSSignatureProvider_SignDigest(t *testing.T) {
 	assert.Equal(t, 65, len(signature))
 
 	// Verify signature is recoverable
-	recoveredPub, err := secp256k1.RecoverPubkey(digest, signature)
+	recoveredPub, err := crypto.Ecrecover(digest, signature)
 	require.NoError(t, err)
 
 	// Verify recovered public key matches original

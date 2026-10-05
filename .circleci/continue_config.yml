@@ -232,6 +232,14 @@ jobs:
             gotestsum --format=standard-verbose --junitfile=/tmp/test-results/<<parameters.module>>.xml \
             -- -ldflags="-checklinkname=0" -coverpkg=github.com/ethereum-optimism/infra/... -coverprofile=coverage.out ./...
           working_directory: <<parameters.module>>
+      - when:
+          condition:
+            equal: [op-signer, << parameters.module >>]
+          steps:
+            - run:
+                name: Build op-signer without CGO
+                command: CGO_ENABLED=0 go build ./...
+                working_directory: <<parameters.module>>
       - run:
           name: upload coverage
           command: codecov --verbose --clean --flags <<parameters.module>>
