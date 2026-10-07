@@ -16,7 +16,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -28,7 +27,7 @@ IHRNqIUNa8vAH/5l5MGXO/qVT5D/4sOTfpd29BQAkDVOgTAneA2Vrg==
 )
 
 func generateKey() *ecdsa.PrivateKey {
-	key, err := ecdsa.GenerateKey(secp256k1.S256(), rand.Reader)
+	key, err := crypto.GenerateKey()
 	if err != nil {
 		panic(err)
 	}
@@ -183,7 +182,7 @@ func TestVerifySignatureFromRecoveredPublicKey(t *testing.T) {
 		assert.Less(t, recId, 4)
 
 		sig = append(sig, byte(recId))
-		recoveredRawPubKey, err := secp256k1.RecoverPubkey(digest, sig)
+		recoveredRawPubKey, err := crypto.Ecrecover(digest, sig)
 		assert.Nil(t, err)
 
 		recoveredPubKey, err := crypto.UnmarshalPubkey(recoveredRawPubKey)

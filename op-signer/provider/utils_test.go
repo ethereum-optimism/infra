@@ -20,7 +20,9 @@ func TestMarshalAndUnmarshalECDSAPublicKey(t *testing.T) {
 	unmarshalledPublicKey, err := unmarshalECDSAPublicKey(publicKeyDER)
 	require.NoError(t, err)
 
-	assert.Equal(t, privateKey.PublicKey, *unmarshalledPublicKey)
+	assert.Equal(t, privateKey.PublicKey.Curve.Params().P, unmarshalledPublicKey.Curve.Params().P)
+	assert.Equal(t, privateKey.PublicKey.Curve.Params().N, unmarshalledPublicKey.Curve.Params().N)
+	assert.Equal(t, crypto.FromECDSAPub(&privateKey.PublicKey), crypto.FromECDSAPub(unmarshalledPublicKey))
 }
 
 // TestMarshalAndParseECDSAPublicKey tests that a secp256k1 public key can be

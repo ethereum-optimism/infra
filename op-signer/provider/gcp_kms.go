@@ -15,6 +15,7 @@ import (
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/log"
 	gax "github.com/googleapis/gax-go"
@@ -119,7 +120,7 @@ func convertToCompactRecoverableSignature(derSignature, digest, publicKey []byte
 		return nil, fmt.Errorf("signature failed malleability check: %w", err)
 	}
 
-	if !secp256k1.VerifySignature(publicKey, digest, signature) {
+	if !crypto.VerifySignature(publicKey, digest, signature) {
 		// should never happen
 		return nil, errors.New("signature could not be verified with public key")
 	}
@@ -167,7 +168,7 @@ func calculateRecoveryID(signature, digest, pubKey []byte) (int, error) {
 
 	for i := 0; i < 4; i++ {
 		recSig := append(signature, byte(i))
-		publicKey, err := secp256k1.RecoverPubkey(digest, recSig)
+		publicKey, err := crypto.Ecrecover(digest, recSig)
 		if err != nil {
 			errorRes = err
 			continue
