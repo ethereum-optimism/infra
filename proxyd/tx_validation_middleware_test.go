@@ -133,7 +133,7 @@ func TestValidateTransactions_SingleTx(t *testing.T) {
 		return map[string]bool{}, nil // empty map = no unauthorized txs
 	}
 
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err)
 	require.True(t, validationCalled)
 }
@@ -162,7 +162,7 @@ func TestValidateTransactions_MultipleTxs(t *testing.T) {
 		return map[string]bool{}, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
 	require.NoError(t, err)
 	require.Equal(t, 1, callCount) // Should be a single batch call now
 }
@@ -182,7 +182,7 @@ func TestValidateTransactions_RejectsUnauthorized(t *testing.T) {
 		}, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
 	require.Error(t, err)
 	require.Equal(t, ErrTransactionRejected, err)
 }
@@ -202,7 +202,7 @@ func TestValidateTransactions_AllowsAuthorized(t *testing.T) {
 		return result, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
 	require.NoError(t, err)
 }
 
@@ -216,7 +216,7 @@ func TestValidateTransactions_TooManyTxs(t *testing.T) {
 		return map[string]bool{}, nil
 	}
 
-	err := validateTransactions(context.Background(), txs, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "maximum allowed")
 }
@@ -229,7 +229,7 @@ func TestValidateTransactions_ServiceError_AllowsThrough(t *testing.T) {
 	}
 
 	// With failOpen=true, service errors should allow transaction through
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, true)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err)
 }
 
@@ -241,7 +241,7 @@ func TestValidateTransactions_ServiceError_FailClosed(t *testing.T) {
 	}
 
 	// With failOpen=false, service errors should reject transaction
-	err := validateTransactions(context.Background(), []*types.Transaction{tx}, "http://test", mockValidation, false)
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, false)
 	require.Error(t, err)
 	require.Equal(t, ErrTransactionRejected, err)
 }
@@ -379,7 +379,7 @@ func TestValidateTransactions_CanceledContext(t *testing.T) {
 
 	// Due to fail-open behavior, validation service errors
 	// result in allowing the transaction through, not returning an error
-	err := validateTransactions(ctx, []*types.Transaction{tx}, "http://test", mockValidation, true)
+	err := validateTransactions(ctx, "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, true)
 	require.NoError(t, err) // Transaction is allowed through
 }
 

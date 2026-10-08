@@ -154,5 +154,5 @@ func (m *txMiddlewareModule) Apply(ctx context.Context, sub *TxSubmission) error
 	if !m.methods.Contains(sub.Method) {
 		return nil
 	}
-	return validateTransactions(ctx, sub.Txs, m.endpoint, m.fn, m.failOpen)
+	return validateTransactions(ctx, sub.Method, sub.Txs, m.endpoint, m.fn, m.failOpen)
 }

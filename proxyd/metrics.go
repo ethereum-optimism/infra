@@ -120,17 +120,10 @@ var (
 	txValidationResultsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "tx_validation_results_total",
-		Help:      "Count of tx validation middleware checks by result (passed, rejected, error_fail_open, error_fail_closed, invalid, internal_error).",
+		Help:      "Count of tx validation middleware checks by method and result (passed, rejected, error_fail_open, error_fail_closed, invalid, internal_error).",
 	}, []string{
+		"method",
 		"result",
-	})
-
-	txValidationServiceErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: MetricsNamespace,
-		Name:      "tx_validation_service_errors_total",
-		Help:      "Count of tx validation service call failures by reason.",
-	}, []string{
-		"reason",
 	})
 
 	txValidationHTTPResponsesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
