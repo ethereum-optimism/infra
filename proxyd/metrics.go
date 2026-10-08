@@ -117,6 +117,30 @@ var (
 		"strategy",
 	})
 
+	txValidationResultsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "tx_validation_results_total",
+		Help:      "Count of tx validation middleware checks by method and result (passed, rejected, error_fail_open, error_fail_closed, invalid, internal_error).",
+	}, []string{
+		"method",
+		"result",
+	})
+
+	txValidationHTTPResponsesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "tx_validation_http_responses_total",
+		Help:      "Count of HTTP responses from the tx validation service by status code.",
+	}, []string{
+		"status_code",
+	})
+
+	txValidationDurationSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "tx_validation_duration_seconds",
+		Help:      "Time taken by tx validation service calls.",
+		Buckets:   prometheus.DefBuckets,
+	})
+
 	rpcErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_errors_total",

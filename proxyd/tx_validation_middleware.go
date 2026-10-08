@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -103,11 +104,15 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 		req.Header.Set("x-api-key", c.apiKey)
 	}
 
+	start := time.Now()
+	defer func() { txValidationDurationSeconds.Observe(time.Since(start).Seconds()) }()
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute validation request: %w", err)
 	}
 	defer resp.Body.Close()
+	txValidationHTTPResponsesTotal.WithLabelValues(strconv.Itoa(resp.StatusCode)).Inc()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -173,6 +178,7 @@ func defaultTxValidationMethods() TxValidationMethodSet {
 
 func validateTransactions(
 	ctx context.Context,
+	method string,
 	txs []*types.Transaction,
 	endpoint string,
 	validationFn TxValidationFunc,
@@ -181,37 +187,56 @@ func validateTransactions(
 	if len(txs) > maxBundleTransactions {
 		log.Warn("bundle contains too many transactions",
 			"req_id", GetReqID(ctx),
+			"method", method,
 			"tx_count", len(txs),
 			"max_allowed", maxBundleTransactions)
+		txValidationResultsTotal.WithLabelValues(method, "invalid").Inc()
 		return ErrInvalidParams(fmt.Sprintf("bundle contains %d transactions, maximum allowed is %d", len(txs), maxBundleTransactions))
 	}
 
 	txsWithSenders, err := buildTxsWithSenders(ctx, txs)
 	if err != nil {
+		txValidationResultsTotal.WithLabelValues(method, "invalid").Inc()
 		return err
 	}
 
 	payload, err := buildValidationPayload(txsWithSenders)
 	if err != nil {
 		log.Error("error building validation payload", "err", err, "req_id", GetReqID(ctx))
+		txValidationResultsTotal.WithLabelValues(method, "internal_error").Inc()
 		return ErrInternal
 	}
 
+	log.Debug("validating transactions with middleware",
+		"req_id", GetReqID(ctx),
+		"method", method,
+		"tx_count", len(txs),
+		"endpoint", endpoint,
+	)
+
+	start := time.Now()
 	validationResults, validationErr := validationFn(ctx, endpoint, payload)
+	duration := time.Since(start)
 	if validationErr != nil {
 		if failOpen {
 			log.Warn("tx validation service error, allowing transactions through (fail_open=true)",
 				"req_id", GetReqID(ctx),
+				"method", method,
 				"error", validationErr,
 				"tx_count", len(txs),
+				"duration", duration,
 			)
+			txValidationResultsTotal.WithLabelValues(method, "error_fail_open").Inc()
 			return nil
 		}
 		log.Warn("tx validation service error, rejecting transactions (fail_open=false)",
 			"req_id", GetReqID(ctx),
+			"method", method,
 			"error", validationErr,
 			"tx_count", len(txs),
+			"duration", duration,
 		)
+		txValidationResultsTotal.WithLabelValues(method, "error_fail_closed").Inc()
 		return ErrTransactionRejected // the fail_closed behaviour is about rejecting the transaction
 	}
 
@@ -220,12 +245,23 @@ func validateTransactions(
 			txData := txsWithSenders[txHash]
 			log.Info("transaction rejected by validation middleware",
 				"req_id", GetReqID(ctx),
+				"method", method,
 				"from", txData["from"],
 				"tx_hash", txHash,
+				"tx_count", len(txs),
+				"duration", duration,
 			)
+			txValidationResultsTotal.WithLabelValues(method, "rejected").Inc()
 			return ErrTransactionRejected
 		}
 	}
+	log.Info("transactions passed validation middleware",
+		"req_id", GetReqID(ctx),
+		"method", method,
+		"tx_count", len(txs),
+		"duration", duration,
+	)
+	txValidationResultsTotal.WithLabelValues(method, "passed").Inc()
 	return nil
 }
 
