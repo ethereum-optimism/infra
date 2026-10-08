@@ -215,13 +215,22 @@ func validateTransactions(
 		return ErrInternal
 	}
 
+	log.Debug("validating transactions with middleware",
+		"req_id", GetReqID(ctx),
+		"tx_count", len(txs),
+		"endpoint", endpoint,
+	)
+
+	start := time.Now()
 	validationResults, validationErr := validationFn(ctx, endpoint, payload)
+	duration := time.Since(start)
 	if validationErr != nil {
 		if failOpen {
 			log.Warn("tx validation service error, allowing transactions through (fail_open=true)",
 				"req_id", GetReqID(ctx),
 				"error", validationErr,
 				"tx_count", len(txs),
+				"duration", duration,
 			)
 			txValidationResultsTotal.WithLabelValues("error_fail_open").Inc()
 			return nil
@@ -230,6 +239,7 @@ func validateTransactions(
 			"req_id", GetReqID(ctx),
 			"error", validationErr,
 			"tx_count", len(txs),
+			"duration", duration,
 		)
 		txValidationResultsTotal.WithLabelValues("error_fail_closed").Inc()
 		return ErrTransactionRejected // the fail_closed behaviour is about rejecting the transaction
@@ -242,11 +252,18 @@ func validateTransactions(
 				"req_id", GetReqID(ctx),
 				"from", txData["from"],
 				"tx_hash", txHash,
+				"tx_count", len(txs),
+				"duration", duration,
 			)
 			txValidationResultsTotal.WithLabelValues("rejected").Inc()
 			return ErrTransactionRejected
 		}
 	}
+	log.Info("transactions passed validation middleware",
+		"req_id", GetReqID(ctx),
+		"tx_count", len(txs),
+		"duration", duration,
+	)
 	txValidationResultsTotal.WithLabelValues("passed").Inc()
 	return nil
 }
