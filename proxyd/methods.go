@@ -18,6 +18,7 @@ type RPCMethodHandler interface {
 
 type StaticMethodHandler struct {
 	cache     Cache
+	keyPrefix string
 	m         sync.RWMutex
 	filterGet func(*RPCReq) bool
 	filterPut func(*RPCReq, *RPCRes) bool
@@ -28,7 +29,7 @@ func (e *StaticMethodHandler) key(req *RPCReq) string {
 	h := sha256.New()
 	h.Write(req.Params)
 	signature := fmt.Sprintf("%x", h.Sum(nil))
-	return strings.Join([]string{"cache", req.Method, signature}, ":")
+	return strings.Join([]string{"cache" + e.keyPrefix, req.Method, signature}, ":")
 }
 
 func (e *StaticMethodHandler) GetRPCMethod(ctx context.Context, req *RPCReq) (*RPCRes, error) {
