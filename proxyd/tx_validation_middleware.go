@@ -22,6 +22,7 @@ const (
 	defaultValidationMaxIdleConns    = 10
 	defaultValidationIdleConnTimeout = 30 * time.Second
 	defaultValidationMaxConnsPerHost = 10
+	maxValidationErrorBodyLogLen     = 256
 )
 
 // TxValidationFunc validates a batch of transactions and returns a map of tx hashes to unauthorized status.
@@ -119,6 +120,10 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 		return nil, fmt.Errorf("failed to read validation response body: %w", err)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("validation service returned HTTP %d: %s", resp.StatusCode, truncate(string(body), maxValidationErrorBodyLogLen))
+	}
+
 	var validationRes txValidationResponse
 	if err := json.Unmarshal(body, &validationRes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal validation response: %w", err)
@@ -127,6 +132,9 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 	if msg := validationRes.ErrorCode + validationRes.ErrorMessage; msg != "" {
 		log.Error("tx validation service error", "req_id", GetReqID(ctx), "error", msg)
 		return nil, ErrInternal
+	}
+	if validationRes.Unauthorized == nil {
+		return nil, fmt.Errorf("validation response missing unauthorized field: %s", truncate(string(body), maxValidationErrorBodyLogLen))
 	}
 	return validationRes.Unauthorized, nil
 }
