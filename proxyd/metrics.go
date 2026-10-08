@@ -359,7 +359,7 @@ var (
 	frontendRateLimitedUniqueKeys = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "frontend_rate_limited_unique_keys",
-		Help: "Distinct rate-limit keys (IPs) with at least one rejected request in the last completed " +
+		Help: "Distinct rate-limit keys (IPs or authenticated aliases) with at least one rejected request in the last completed " +
 			"tracking window. Per-instance: summing across replicas may double-count keys that hit more than one replica.",
 	})
 
@@ -372,7 +372,7 @@ var (
 	frontendRateLimitedRequestsPerKey = promauto.NewHistogram(prometheus.HistogramOpts{
 		Namespace: MetricsNamespace,
 		Name:      "frontend_rate_limited_requests_per_key",
-		Help:      "Distribution of rejected-request counts per rate-limit key (IP), observed once per key per tracking window.",
+		Help:      "Distribution of rejected-request counts per rate-limit key (IP or authenticated alias), observed once per key per tracking window.",
 		Buckets:   []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
 	})
 

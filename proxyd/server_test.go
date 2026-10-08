@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -182,4 +183,86 @@ func TestPopulateContextRemoteAddrFallback(t *testing.T) {
 			require.Equal(t, tt.want, GetXForwardedFor(ctx))
 		})
 	}
+}
+
+func TestAuthAliasLimiterMissingIP(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		useAuthAlias  bool
+		authenticated bool
+		wantError     bool
+	}{
+		{"default authenticated", false, true, true},
+		{"alias authenticated", true, true, false},
+		{"alias public", true, false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{mainLim: NoopFrontendRateLimiter}
+			if tt.useAuthAlias {
+				s.authLims = map[string]FrontendRateLimiter{"": NewMemoryFrontendRateLimit(time.Hour, 1)}
+			}
+			ctx := context.Background()
+			if tt.authenticated {
+				// Authentication is determined by context presence, not the metrics sentinel.
+				ctx = context.WithValue(ctx, ContextKeyAuth, "none") // nolint:staticcheck
+			}
+			isLimited, err := s.limiterForRequest(ctx, httptest.NewRequest("POST", "/", nil), false)
+			if tt.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.False(t, isLimited(""))
+			require.True(t, isLimited(""))
+		})
+	}
+}
+
+func TestAuthAliasLimiterExemptions(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		bypass       bool
+		methodGlobal bool
+	}{
+		{name: "exempt origin"},
+		{name: "global ignores origin exemption", methodGlobal: true},
+		{name: "exempt key bypasses global", bypass: true, methodGlobal: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				authLims: map[string]FrontendRateLimiter{
+					"":             NewMemoryFrontendRateLimit(time.Hour, 0),
+					"eth_getProof": NewMemoryFrontendRateLimit(time.Hour, 0),
+				},
+				limExemptOrigins:       []*regexp.Regexp{regexp.MustCompile("^exempt$")},
+				globallyLimitedMethods: map[string]bool{"eth_getProof": tt.methodGlobal},
+			}
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Header.Set("Origin", "exempt")
+			ctx := context.WithValue(req.Context(), ContextKeyAuth, "alpha") // nolint:staticcheck
+			isLimited, err := s.limiterForRequest(ctx, req, tt.bypass)
+			require.NoError(t, err)
+			require.Equal(t, tt.methodGlobal && !tt.bypass, isLimited("eth_getProof"))
+			require.False(t, isLimited(""))
+		})
+	}
+}
+
+func TestAuthAliasLimiterErrorsAreTracked(t *testing.T) {
+	s := &Server{
+		mainLim:          &errorFrontend{},
+		authLims:         map[string]FrontendRateLimiter{"": &errorFrontend{}},
+		rateLimitTracker: newRateLimitTracker(10),
+	}
+	req := httptest.NewRequest("POST", "/", nil)
+	ctx := context.WithValue(req.Context(), ContextKeyAuth, "203.0.113.1") // nolint:staticcheck
+	authLimited, err := s.limiterForRequest(ctx, req, false)
+	require.NoError(t, err)
+	require.True(t, authLimited(""), "limiter errors fail closed")
+
+	publicCtx := context.WithValue(req.Context(), ContextKeyXForwardedFor, "203.0.113.1") // nolint:staticcheck
+	publicLimited, err := s.limiterForRequest(publicCtx, req, false)
+	require.NoError(t, err)
+	require.True(t, publicLimited(""))
+	require.Len(t, s.rateLimitTracker.limited, 2, "IP and alias are distinct tracked identities")
 }
