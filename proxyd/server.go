@@ -77,6 +77,7 @@ type Server struct {
 	upgrader                *websocket.Upgrader
 	mainLim                 FrontendRateLimiter
 	overrideLims            map[string]FrontendRateLimiter
+	authLims                map[string]FrontendRateLimiter
 	rateLimitTracker        *rateLimitTracker
 	senderLim               FrontendRateLimiter
 	interopSenderLim        FrontendRateLimiter
@@ -189,10 +190,22 @@ func NewServer(
 		mainLim = NoopFrontendRateLimiter
 	}
 
+	// Separate limiters keep aliases isolated from client-supplied IP keys.
+	var authLims map[string]FrontendRateLimiter
+	if rateLimitConfig.UseAuthAlias {
+		authLims = map[string]FrontendRateLimiter{"": NoopFrontendRateLimiter}
+		if rateLimitConfig.BaseRate > 0 {
+			authLims[""] = limiterFactory(time.Duration(rateLimitConfig.BaseInterval), rateLimitConfig.BaseRate, "auth_alias:main")
+		}
+	}
+
 	overrideLims := make(map[string]FrontendRateLimiter)
 	globalMethodLims := make(map[string]bool)
 	for method, override := range rateLimitConfig.MethodOverrides {
 		overrideLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, method)
+		if authLims != nil {
+			authLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, "auth_alias:"+method)
+		}
 
 		if override.Global {
 			globalMethodLims[method] = true
@@ -261,6 +274,7 @@ func NewServer(
 		},
 		mainLim:                  mainLim,
 		overrideLims:             overrideLims,
+		authLims:                 authLims,
 		rateLimitTracker:         tracker,
 		globallyLimitedMethods:   globalMethodLims,
 		senderLim:                senderLim,
@@ -1134,13 +1148,18 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 	origin := r.Header.Get("Origin")
 	userAgent := r.Header.Get("User-Agent")
 	// Use XFF in context since it will automatically be replaced by the remote IP
-	xff := stripXFF(GetXForwardedFor(ctx))
-	isUnlimitedOrigin := s.isUnlimitedOrigin(origin)
-	isUnlimitedUserAgent := s.isUnlimitedUserAgent(userAgent)
-
-	if xff == "" {
+	key := stripXFF(GetXForwardedFor(ctx))
+	mainLim, overrideLims := s.mainLim, s.overrideLims
+	trackingKey := "ip:" + key
+	if alias, authenticated := ctx.Value(ContextKeyAuth).(string); authenticated && s.authLims != nil {
+		key = alias
+		mainLim, overrideLims = s.authLims[""], s.authLims
+		trackingKey = "auth_alias:" + alias
+	} else if key == "" {
 		return nil, ErrInvalidRequest("request does not include a remote IP")
 	}
+	isUnlimitedOrigin := s.isUnlimitedOrigin(origin)
+	isUnlimitedUserAgent := s.isUnlimitedUserAgent(userAgent)
 
 	isLimited := func(method string) bool {
 		if bypassLimit {
@@ -1154,23 +1173,23 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 
 		var lim FrontendRateLimiter
 		if method == "" {
-			lim = s.mainLim
+			lim = mainLim
 		} else {
-			lim = s.overrideLims[method]
+			lim = overrideLims[method]
 		}
 
 		if lim == nil {
 			return false
 		}
 
-		ok, err := lim.Take(ctx, xff)
+		ok, err := lim.Take(ctx, key)
 		if err != nil {
 			log.Warn("error taking rate limit", "err", err)
-			s.trackRateLimited(xff)
+			s.trackRateLimited(trackingKey)
 			return true
 		}
 		if !ok {
-			s.trackRateLimited(xff)
+			s.trackRateLimited(trackingKey)
 		}
 		return !ok
 	}
