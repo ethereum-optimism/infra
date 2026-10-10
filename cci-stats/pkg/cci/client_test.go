@@ -40,3 +40,31 @@ func TestClientRetriesThroughEveryCall(t *testing.T) {
 		t.Errorf("server saw %d calls, want 2", calls)
 	}
 }
+
+func TestListWorkflowJobsPagePassesPageToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/workflow/workflow-id/job" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("page-token"); got != "next-page" {
+			t.Errorf("page-token = %q, want next-page", got)
+		}
+		if got := r.Header.Get("Circle-Token"); got != "token" {
+			t.Errorf("Circle-Token = %q, want token", got)
+		}
+		_, _ = w.Write([]byte(`{"items":[{"id":"job-2"}],"next_page_token":"last-page"}`))
+	}))
+	defer server.Close()
+
+	client, err := newClient(server.URL, "token")
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	page, err := client.ListWorkflowJobsPage(context.Background(), "workflow-id", "next-page")
+	if err != nil {
+		t.Fatalf("failed to fetch jobs page: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "job-2" || page.NextPageToken != "last-page" {
+		t.Fatalf("page = %+v", page)
+	}
+}
