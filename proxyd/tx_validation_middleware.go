@@ -19,9 +19,9 @@ import (
 const (
 	maxBundleTransactions            = 100
 	defaultValidationTimeoutSeconds  = 5
-	defaultValidationMaxIdleConns    = 30
+	defaultValidationMaxIdleConns    = 10
 	defaultValidationIdleConnTimeout = 30 * time.Second
-	defaultValidationMaxConnsPerHost = 30
+	defaultValidationMaxConnsPerHost = 10
 	maxValidationErrorBodyLogLen     = 256
 )
 
@@ -59,11 +59,11 @@ type TxValidationMiddlewareConfig struct {
 	// MaxConnsPerHost caps concurrent connections to the validation service.
 	// Over plain HTTP/1.1 this is also the cap on in-flight validations; further
 	// requests queue for a free connection, and that wait counts against
-	// TimeoutSeconds. Defaults to 30.
+	// TimeoutSeconds. Defaults to 10.
 	MaxConnsPerHost int `toml:"max_conns_per_host"`
 
 	// MaxIdleConns is the number of idle connections kept open to the validation
-	// service between bursts. Defaults to 30.
+	// service between bursts. Defaults to 10.
 	MaxIdleConns int `toml:"max_idle_conns"`
 
 	// FailOpen determines whether transactions should be allowed through if the validation
