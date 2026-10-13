@@ -259,7 +259,7 @@ func TestTxValidationClient_HTTPServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5, "")
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{TimeoutSeconds: 5})
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
@@ -275,7 +275,7 @@ func TestTxValidationClient_SendsAPIKeyHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5, "secret-key")
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{TimeoutSeconds: 5, APIKey: "secret-key"})
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
@@ -291,7 +291,7 @@ func TestTxValidationClient_UnauthorizedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5, "")
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{TimeoutSeconds: 5})
 	unauthorized, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.True(t, unauthorized[txHash])
@@ -305,7 +305,7 @@ func TestTxValidationClient_ErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTxValidationClient(5, "")
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{TimeoutSeconds: 5})
 	_, err := client.Validate(context.Background(), server.URL, []byte(`{}`))
 	require.Error(t, err)
 	require.Equal(t, ErrInternal, err)
@@ -326,7 +326,7 @@ func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel parent request context before validation call
 
-	client := NewTxValidationClient(5, "")
+	client := NewTxValidationClient(TxValidationMiddlewareConfig{TimeoutSeconds: 5})
 	unauthorized, err := client.Validate(ctx, server.URL, []byte(`{}`))
 	require.NoError(t, err)
 	require.Empty(t, unauthorized)
@@ -336,6 +336,22 @@ func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("validation request did not reach server")
 	}
+}
+
+func TestNewTxValidationClient_PoolConfig(t *testing.T) {
+	transport := func(c *TxValidationClient) *http.Transport {
+		return c.client.Transport.(*http.Transport)
+	}
+
+	def := transport(NewTxValidationClient(TxValidationMiddlewareConfig{}))
+	require.Equal(t, defaultValidationMaxConnsPerHost, def.MaxConnsPerHost)
+	require.Equal(t, defaultValidationMaxIdleConns, def.MaxIdleConns)
+	require.Equal(t, defaultValidationMaxIdleConns, def.MaxIdleConnsPerHost)
+
+	custom := transport(NewTxValidationClient(TxValidationMiddlewareConfig{MaxConnsPerHost: 64, MaxIdleConns: 48}))
+	require.Equal(t, 64, custom.MaxConnsPerHost)
+	require.Equal(t, 48, custom.MaxIdleConns)
+	require.Equal(t, 48, custom.MaxIdleConnsPerHost)
 }
 
 func TestDecodeSignedTx(t *testing.T) {
