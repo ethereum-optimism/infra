@@ -383,6 +383,16 @@ func (s *Server) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
+	// Time the whole HTTP JSON-RPC request, including body read and response
+	// write. methodLabel starts unknown and is replaced once the method, or the
+	// fact that this is a batch, is known. GET /healthz and WebSocket
+	// connections are not handled here.
+	start := time.Now()
+	methodLabel := MethodUnknown
+	defer func() {
+		RecordHTTPRequestByMethodDuration(methodLabel, time.Since(start))
+	}()
+
 	ctx := s.populateContext(w, r)
 	if ctx == nil {
 		return
@@ -441,6 +451,10 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if IsBatch(body) {
+		// A batch has no single method. Parse failures stay on this label: the
+		// body was a batch envelope even when its elements could not be read.
+		// handleBatchRPC may override it for the proxyd_healthz short-circuit.
+		methodLabel = MethodBatch
 		reqs, err := ParseBatchRPCReq(body)
 		if err != nil {
 			log.Error("error parsing batch RPC request", "err", err)
@@ -462,7 +476,8 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		batchRes, batchContainsCached, servedBy, err := s.handleBatchRPC(ctx, reqs, isLimited, true, bypassLimit)
+		batchRes, batchContainsCached, servedBy, label, err := s.handleBatchRPC(ctx, reqs, isLimited, true, bypassLimit)
+		methodLabel = label
 		if err == context.DeadlineExceeded {
 			writeRPCError(ctx, w, nil, ErrGatewayTimeout)
 			return
@@ -485,7 +500,8 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawBody := json.RawMessage(body)
-	backendRes, cached, servedBy, err := s.handleBatchRPC(ctx, []json.RawMessage{rawBody}, isLimited, false, bypassLimit)
+	backendRes, cached, servedBy, label, err := s.handleBatchRPC(ctx, []json.RawMessage{rawBody}, isLimited, false, bypassLimit)
+	methodLabel = label
 	if err != nil {
 		if errors.Is(err, ErrConsensusGetReceiptsCantBeBatched) ||
 			errors.Is(err, ErrConsensusGetReceiptsInvalidTarget) {
@@ -697,7 +713,21 @@ func (s *Server) metricMethodName(method string) string {
 	return method
 }
 
-func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, error) {
+// httpRequestMethodLabel is the method_name for one HTTP JSON-RPC request.
+// Batches collapse to MethodBatch. A single call uses the already-bounded
+// callMethods entry. The proxyd_healthz short-circuit returns before
+// callMethods is filled, so that path reports proxydHealthzMethod itself.
+func httpRequestMethodLabel(isBatch bool, callMethods []string) string {
+	if isBatch {
+		return MethodBatch
+	}
+	if len(callMethods) == 0 || callMethods[0] == "" {
+		return MethodUnknown
+	}
+	return callMethods[0]
+}
+
+func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isLimited limiterFunc, isBatch bool, bypassLimit bool) ([]*RPCRes, bool, string, string, error) {
 	// A request set is transformed into groups of batches.
 	// Each batch group maps to a forwarded JSON-RPC batch request (subject to maxUpstreamBatchSize constraints)
 	// A groupID is used to decouple Requests that have duplicate ID so they're not part of the same batch that's
@@ -736,7 +766,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				JSONRPC: JSONRPCVersion,
 				Result:  "OK",
 			}
-			return []*RPCRes{res}, false, "", nil
+			return []*RPCRes{res}, false, "", proxydHealthzMethod, nil
 		}
 
 		callMethods[i] = s.metricMethodName(parsedReq.Method)
@@ -796,7 +826,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 				// That status differs between the batch and single-request paths — see
 				// deadlineShortCircuitStatus.
 				recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, deadlineShortCircuitStatus(isBatch))
-				return nil, false, "", context.DeadlineExceeded
+				return nil, false, "", httpRequestMethodLabel(isBatch, callMethods), context.DeadlineExceeded
 			}
 
 			start := i * s.maxUpstreamBatchSize
@@ -815,7 +845,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 					// case above for why every element must use the fallback status
 					// rather than any per-element result computed so far.
 					recordRPCCallsAll(callMethods, callBackends, RPCRequestSourceHTTP, statusCodeBadRequest)
-					return nil, false, "", err
+					return nil, false, "", httpRequestMethodLabel(isBatch, callMethods), err
 				}
 				log.Error(
 					"error forwarding RPC batch",
@@ -899,7 +929,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 
 	recordRPCCalls(responses, callMethods, callBackends, RPCRequestSourceHTTP, statusCodeInternal)
 
-	return responses, cached, servedByString, nil
+	return responses, cached, servedByString, httpRequestMethodLabel(isBatch, callMethods), nil
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {

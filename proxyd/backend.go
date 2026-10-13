@@ -654,7 +654,7 @@ func (b *Backend) ForwardWithSource(ctx context.Context, reqs []*RPCReq, isBatch
 		RecordBatchRPCForward(ctx, b.Name, reqs, source)
 		metricLabelMethod := reqs[0].Method
 		if isBatch {
-			metricLabelMethod = "<batch>"
+			metricLabelMethod = MethodBatch
 		}
 		timer := prometheus.NewTimer(
 			rpcBackendRequestDurationSumm.WithLabelValues(
@@ -919,7 +919,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	metricLabelMethod := rpcReqs[0].Method
 	if isBatch {
-		metricLabelMethod = "<batch>"
+		metricLabelMethod = MethodBatch
 	}
 	rpcBackendHTTPResponseCodesTotal.WithLabelValues(
 		GetAuthCtx(ctx),
