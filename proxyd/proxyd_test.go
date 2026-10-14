@@ -1,9 +1,19 @@
 package proxyd
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMillisecondsToDuration(t *testing.T) {
@@ -88,4 +98,86 @@ func TestParseCommaSeparatedList(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigureBackendTLS(t *testing.T) {
+	t.Run("returns nil without TLS files", func(t *testing.T) {
+		tlsConfig, err := configureBackendTLS(&BackendConfig{})
+		require.NoError(t, err)
+		require.Nil(t, tlsConfig)
+	})
+
+	t.Run("supports client cert without CA file", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath, keyPath := writeSelfSignedClientCert(t, dir)
+
+		tlsConfig, err := configureBackendTLS(&BackendConfig{
+			ClientCertFile: certPath,
+			ClientKeyFile:  keyPath,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.Nil(t, tlsConfig.RootCAs)
+		require.Len(t, tlsConfig.Certificates, 1)
+	})
+
+	t.Run("supports CA file without client cert", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath, _ := writeSelfSignedClientCert(t, dir)
+
+		tlsConfig, err := configureBackendTLS(&BackendConfig{
+			CAFile: certPath,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.RootCAs)
+		require.Empty(t, tlsConfig.Certificates)
+	})
+
+	t.Run("supports CA and client cert together", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath, keyPath := writeSelfSignedClientCert(t, dir)
+
+		tlsConfig, err := configureBackendTLS(&BackendConfig{
+			CAFile:         certPath,
+			ClientCertFile: certPath,
+			ClientKeyFile:  keyPath,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, tlsConfig)
+		require.NotNil(t, tlsConfig.RootCAs)
+		require.Len(t, tlsConfig.Certificates, 1)
+	})
+}
+
+func writeSelfSignedClientCert(t *testing.T, dir string) (string, string) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "proxyd-test-client"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+
+	require.NoError(t, os.WriteFile(certPath, certPEM, 0o600))
+	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
+
+	return certPath, keyPath
 }
