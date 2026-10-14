@@ -27,6 +27,9 @@ const (
 	SourceBackend    = "backend"
 	MethodUnknown    = "unknown"
 	MethodNotAllowed = "method_not_allowed"
+	// MethodBatch is the method_name label for an HTTP request whose body is a
+	// JSON-RPC batch. One request carries many methods, so it cannot take a real one.
+	MethodBatch = "<batch>"
 
 	statusCodeOK             = "200"
 	statusCodeBadRequest     = "400"
@@ -234,6 +237,23 @@ var (
 		Name:       "http_request_duration_seconds",
 		Help:       "Summary of HTTP request durations, in seconds.",
 		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001},
+	})
+
+	// httpRequestByMethodDurationBuckets are SLO latency buckets, in seconds.
+	// A histogram so p95/p99 can be aggregated across proxyd replicas. The
+	// buckets cover fast local answers through the default 10s RPC timeout,
+	// with headroom for a longer configured timeout.
+	httpRequestByMethodDurationBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
+
+	httpRequestByMethodDurationHist = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: MetricsNamespace,
+		Name:      "http_request_by_method_duration_seconds",
+		Help: "Histogram of HTTP JSON-RPC request durations by method. " +
+			"Includes body read, response write; batches use method_name='<batch>', unknowns use 'unknown'. " +
+			"Label bounded by rpc_method_mappings. Excludes websockets and /healthz.",
+		Buckets: httpRequestByMethodDurationBuckets,
+	}, []string{
+		"method_name",
 	})
 
 	wsMessagesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -1113,6 +1133,14 @@ func statusCodeForRPCRes(res *RPCRes) string {
 		return strconv.Itoa(res.Error.HTTPErrorCode)
 	}
 	return statusCodeBadRequest
+}
+
+// RecordHTTPRequestByMethodDuration records an HTTP JSON-RPC request duration.
+func RecordHTTPRequestByMethodDuration(method string, d time.Duration) {
+	if method == "" {
+		method = MethodUnknown
+	}
+	httpRequestByMethodDurationHist.WithLabelValues(method).Observe(d.Seconds())
 }
 
 // RecordRPCCall records one client-initiated JSON-RPC call and the outcome the

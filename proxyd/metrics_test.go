@@ -3,11 +3,16 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 )
 
 func TestStatusCodeForRPCRes(t *testing.T) {
@@ -198,6 +203,154 @@ func TestServerMetricMethodNameBoundsCardinality(t *testing.T) {
 	require.Equal(t, "eth_accounts", s.metricMethodName("eth_accounts"))
 }
 
+func TestHTTPRequestMethodLabel(t *testing.T) {
+	require.Equal(t, MethodBatch, httpRequestMethodLabel(true, []string{"eth_chainId", "eth_blockNumber"}))
+	require.Equal(t, "eth_chainId", httpRequestMethodLabel(false, []string{"eth_chainId"}))
+	require.Equal(t, MethodUnknown, httpRequestMethodLabel(false, nil))
+	require.Equal(t, MethodUnknown, httpRequestMethodLabel(false, []string{""}))
+}
+
+func TestHTTPRequestByMethodDuration(t *testing.T) {
+	const metric = "proxyd_http_request_by_method_duration_seconds"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1","id":1}`))
+	}))
+	defer backend.Close()
+
+	group := &BackendGroup{
+		Name:     "main",
+		Backends: []*Backend{NewBackend("reth-0", backend.URL, "", semaphore.NewWeighted(1))},
+	}
+	srv := newMethodDurationServer(t, map[string]string{"eth_chainId": "main"}, map[string]*BackendGroup{"main": group}, 1024)
+
+	observe := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		srv.HandleRPC(httptest.NewRecorder(), req)
+	}
+	count := func(method string) uint64 {
+		t.Helper()
+		return gatherHistogramSampleCount(t, metric, map[string]string{"method_name": method})
+	}
+
+	t.Run("whitelisted method", func(t *testing.T) {
+		before := count("eth_chainId")
+		observe(`{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`)
+		require.Equal(t, before+1, count("eth_chainId"))
+	})
+
+	t.Run("unlisted method collapses", func(t *testing.T) {
+		evil := "evil_not_a_real_method"
+		beforeNotAllowed := count(MethodNotAllowed)
+		beforeEvil := count(evil)
+		observe(`{"jsonrpc":"2.0","method":"` + evil + `","params":[],"id":1}`)
+		require.Equal(t, beforeNotAllowed+1, count(MethodNotAllowed))
+		require.Equal(t, beforeEvil, count(evil))
+	})
+
+	t.Run("client cannot claim the batch sentinel", func(t *testing.T) {
+		beforeBatch := count(MethodBatch)
+		beforeNotAllowed := count(MethodNotAllowed)
+		observe(`{"jsonrpc":"2.0","method":"` + MethodBatch + `","params":[],"id":1}`)
+		require.Equal(t, beforeBatch, count(MethodBatch))
+		require.Equal(t, beforeNotAllowed+1, count(MethodNotAllowed))
+	})
+
+	t.Run("eth_accounts keeps its name", func(t *testing.T) {
+		before := count("eth_accounts")
+		observe(`{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}`)
+		require.Equal(t, before+1, count("eth_accounts"))
+	})
+
+	t.Run("healthz probe keeps its name", func(t *testing.T) {
+		before := count(proxydHealthzMethod)
+		beforeNotAllowed := count(MethodNotAllowed)
+		observe(`{"jsonrpc":"2.0","method":"proxyd_healthz","params":[],"id":1}`)
+		require.Equal(t, before+1, count(proxydHealthzMethod))
+		require.Equal(t, beforeNotAllowed, count(MethodNotAllowed))
+	})
+
+	t.Run("batch", func(t *testing.T) {
+		before := count(MethodBatch)
+		observe(`[{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1},{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":2}]`)
+		require.Equal(t, before+1, count(MethodBatch))
+	})
+
+	t.Run("unreadable batch stays batch", func(t *testing.T) {
+		beforeBatch := count(MethodBatch)
+		beforeUnknown := count(MethodUnknown)
+		observe(`[`)
+		require.Equal(t, beforeBatch+1, count(MethodBatch))
+		require.Equal(t, beforeUnknown, count(MethodUnknown))
+	})
+
+	t.Run("parse failure is unknown", func(t *testing.T) {
+		before := count(MethodUnknown)
+		observe(`not-json`)
+		require.Equal(t, before+1, count(MethodUnknown))
+	})
+
+	t.Run("body too large is unknown", func(t *testing.T) {
+		small := newMethodDurationServer(t, nil, nil, 8)
+		before := count(MethodUnknown)
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`))
+		small.HandleRPC(httptest.NewRecorder(), req)
+		require.Equal(t, before+1, count(MethodUnknown))
+	})
+
+	t.Run("rejected auth is unknown", func(t *testing.T) {
+		locked := newMethodDurationServer(t, nil, nil, 1024)
+		locked.authenticatedPaths = map[string]string{"secret": "alias"}
+		before := count(MethodUnknown)
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`))
+		locked.HandleRPC(httptest.NewRecorder(), req)
+		require.Equal(t, before+1, count(MethodUnknown))
+	})
+}
+
+func newMethodDurationServer(t *testing.T, mappings map[string]string, groups map[string]*BackendGroup, maxBody int64) *Server {
+	t.Helper()
+	if mappings == nil {
+		mappings = map[string]string{}
+	}
+	if groups == nil {
+		groups = map[string]*BackendGroup{}
+	}
+	srv, err := NewServer(
+		groups,
+		&BackendGroup{Name: "ws"},
+		NewStringSetFromStrings(nil),
+		mappings,
+		maxBody,
+		map[string]string{},
+		false,
+		5*time.Second,
+		10,
+		false,
+		&NoopRPCCache{},
+		RateLimitConfig{},
+		SenderRateLimitConfig{},
+		SenderRateLimitConfig{},
+		false,
+		0,
+		100,
+		func(time.Duration, int, string) FrontendRateLimiter {
+			return NoopFrontendRateLimiter
+		},
+		InteropValidationConfig{},
+		NewFirstFilterStrategy([]string{}),
+		false,
+		nil,
+		TxValidationMiddlewareConfig{},
+		10*time.Second,
+		defaultMaxConcurrentWSRPCs,
+	)
+	require.NoError(t, err)
+	return srv
+}
+
 func TestRecordRPCNotification(t *testing.T) {
 	labels := map[string]string{"backend_name": "reth-0"}
 	before := gatherCounter(t, "proxyd_rpc_notifications_total", labels)
@@ -209,6 +362,28 @@ func TestRecordRPCNotification(t *testing.T) {
 // labels are a superset of `labels`, or 0 if no such series exists yet.
 func gatherCounter(t *testing.T, name string, labels map[string]string) float64 {
 	t.Helper()
+	m := findMetric(t, name, labels)
+	if m == nil || m.GetCounter() == nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// gatherHistogramSampleCount returns the sample count of the histogram named
+// `name` whose labels are a superset of `labels`, or 0 if no such series exists yet.
+func gatherHistogramSampleCount(t *testing.T, name string, labels map[string]string) uint64 {
+	t.Helper()
+	m := findMetric(t, name, labels)
+	if m == nil || m.GetHistogram() == nil {
+		return 0
+	}
+	return m.GetHistogram().GetSampleCount()
+}
+
+// findMetric returns the first metric named `name` whose labels are a superset
+// of `labels`.
+func findMetric(t *testing.T, name string, labels map[string]string) *dto.Metric {
+	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	require.NoError(t, err)
 	for _, mf := range mfs {
@@ -216,23 +391,25 @@ func gatherCounter(t *testing.T, name string, labels map[string]string) float64 
 			continue
 		}
 		for _, m := range mf.GetMetric() {
-			got := make(map[string]string, len(m.GetLabel()))
-			for _, l := range m.GetLabel() {
-				got[l.GetName()] = l.GetValue()
-			}
-			match := true
-			for k, v := range labels {
-				if got[k] != v {
-					match = false
-					break
-				}
-			}
-			if match {
-				return m.GetCounter().GetValue()
+			if metricLabelsMatch(m, labels) {
+				return m
 			}
 		}
 	}
-	return 0
+	return nil
+}
+
+func metricLabelsMatch(m *dto.Metric, labels map[string]string) bool {
+	got := make(map[string]string, len(m.GetLabel()))
+	for _, l := range m.GetLabel() {
+		got[l.GetName()] = l.GetValue()
+	}
+	for k, v := range labels {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
