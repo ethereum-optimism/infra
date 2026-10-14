@@ -4,8 +4,11 @@ import os
 import time
 import requests
 import logging
+import concurrent.futures
+from collections import Counter
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 import typer
 from typing_extensions import Annotated
 
@@ -97,7 +100,12 @@ def list_networks():
 
 
 @app.command()
-def status(network: str):
+def status(
+    network: str,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Show per-sequencer Raft agreement.")
+    ] = False,
+):
     """Print the status of all sequencers in a network."""
     network_obj = get_network(network)
     sequencers = network_obj.sequencers
@@ -165,6 +173,10 @@ def status(network: str):
 
     console.print(table)
 
+    if verbose:
+        print_raft_status(network_obj)
+        return
+
     leader = network_obj.find_conductor_leader()
     if leader is None:
         print_warn(f"Could not find current leader in network {network}")
@@ -191,6 +203,108 @@ def status(network: str):
             )
         if display_correction:
             print_warn("Run 'update-cluster-membership' to correct membership issues")
+
+
+def print_raft_status(network_obj):
+    def query(sequencer):
+        results = {}
+        errors = []
+        for method in ("conductor_clusterMembership", "conductor_leaderWithID"):
+            try:
+                resp = requests.post(
+                    sequencer.conductor_rpc_url,
+                    json=make_rpc_payload(method),
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                if "error" in body:
+                    raise ValueError(body["error"])
+                results[method] = body["result"]
+            except (requests.RequestException, ValueError, KeyError) as e:
+                errors.append(f"{method}: {e}")
+        return results, errors
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        views = list(executor.map(query, network_obj.sequencers))
+
+    memberships = []
+    leader_views = []
+    for results, _ in views:
+        membership = results.get("conductor_clusterMembership")
+        memberships.append(
+            None
+            if membership is None
+            else tuple(
+                sorted(
+                    (m["id"], m["addr"], m["suffrage"])
+                    for m in (membership["servers"] or [])
+                )
+            )
+        )
+        leader = results.get("conductor_leaderWithID") or {}
+        leader_views.append(
+            (leader["id"], leader["addr"])
+            if leader.get("id") and leader.get("addr")
+            else None
+        )
+    membership_counts = Counter(m for m in memberships if m is not None)
+    leader_counts = Counter(l for l in leader_views if l is not None)
+    total = len(views)
+
+    def agreement(view, counts):
+        if view is None:
+            return Text("Unknown", style="bold yellow")
+        count = counts[view]
+        return Text(
+            f"{count}/{total}", style="green" if count == total else "bold yellow"
+        )
+
+    table = Table(
+        "Sequencer ID",
+        "Members seen",
+        "Matching membership views",
+        "Leader seen",
+        "Matching leader views",
+        "Notes",
+        title=f"Raft agreement: {network_obj.name}",
+        show_lines=True,
+    )
+    for column in table.columns:
+        column.overflow = "fold"
+    for sequencer, (_, errors), membership, leader in zip(
+        network_obj.sequencers, views, memberships, leader_views
+    ):
+        notes = list(errors)
+        if membership == ():
+            notes.append("Empty membership; not joined")
+        elif membership is not None and sequencer.sequencer_id not in {
+            m[0] for m in membership
+        }:
+            notes.append("Queried sequencer missing from membership")
+        if leader is None:
+            notes.append("Leader unknown")
+        members_text = "Unknown" if membership is None else "Empty"
+        if membership:
+            roles = {0: "Voter", 1: "Nonvoter"}
+            members_text = "\n".join(
+                f"{member_id} ({roles.get(role, f'Unknown role {role}')})"
+                for member_id, _, role in membership
+            )
+        table.add_row(
+            Text(sequencer.sequencer_id),
+            Text(members_text),
+            agreement(membership, membership_counts),
+            Text(leader[0] if leader else "Unknown"),
+            agreement(leader, leader_counts),
+            Text("\n".join(notes) or "—", style="bold yellow" if notes else ""),
+        )
+    console.print(table)
+    console.print(
+        "Matching views count all configured sequencers, including the queried node. "
+        "Membership compares IDs, Raft addresses and roles; leader compares ID and address. "
+        "Failed queries and unknown leaders do not count as agreement."
+    )
 
 
 @app.command()
