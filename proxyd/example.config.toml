@@ -154,6 +154,12 @@ methods = [
 # api_key = "$TX_VALIDATION_API_KEY"
 # Timeout in seconds for validation HTTP requests, default 5
 timeout_seconds = 5
+# Max concurrent connections to the validation service, default 10. Over plain
+# HTTP/1.1 this caps in-flight validations per proxyd instance; excess requests
+# queue for a connection, and the wait counts against timeout_seconds.
+# max_conns_per_host = 10
+# Idle connections kept open to the validation service between bursts, default 10.
+# max_idle_conns = 10
 # Whether to allow transactions through if the validation service returns an error.
 # Defaults to true (fail-open) for safety - service disruptions won't block all transactions.
 # Set to false to reject transactions when the validation service is unavailable.

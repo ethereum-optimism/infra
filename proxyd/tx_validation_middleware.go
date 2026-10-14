@@ -56,6 +56,16 @@ type TxValidationMiddlewareConfig struct {
 	// TimeoutSeconds is the timeout for validation HTTP requests. Defaults to 5 seconds.
 	TimeoutSeconds int `toml:"timeout_seconds"`
 
+	// MaxConnsPerHost caps concurrent connections to the validation service.
+	// Over plain HTTP/1.1 this is also the cap on in-flight validations; further
+	// requests queue for a free connection, and that wait counts against
+	// TimeoutSeconds. Defaults to 10.
+	MaxConnsPerHost int `toml:"max_conns_per_host"`
+
+	// MaxIdleConns is the number of idle connections kept open to the validation
+	// service between bursts. Defaults to 10.
+	MaxIdleConns int `toml:"max_idle_conns"`
+
 	// FailOpen determines whether transactions should be allowed through if the validation
 	// service returns an error. Defaults to true for safety (fail-open).
 	FailOpen *bool `toml:"fail_open"`
@@ -68,23 +78,36 @@ type TxValidationClient struct {
 	apiKey  string
 }
 
-// NewTxValidationClient creates a new validation client with the given timeout.
-// apiKey is optional: when non-empty it is sent on every request in the
+// NewTxValidationClient creates a new validation client from the middleware
+// config. Unset (zero or negative) numeric fields fall back to defaults.
+// cfg.APIKey is optional: when non-empty it is sent on every request in the
 // x-api-key header.
-func NewTxValidationClient(timeoutSeconds int, apiKey string) *TxValidationClient {
+func NewTxValidationClient(cfg TxValidationMiddlewareConfig) *TxValidationClient {
+	timeoutSeconds := cfg.TimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultValidationTimeoutSeconds
+	}
+	maxConnsPerHost := cfg.MaxConnsPerHost
+	if maxConnsPerHost <= 0 {
+		maxConnsPerHost = defaultValidationMaxConnsPerHost
+	}
+	maxIdleConns := cfg.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = defaultValidationMaxIdleConns
 	}
 	return &TxValidationClient{
 		client: &http.Client{
 			Transport: &http.Transport{
-				MaxIdleConns:    defaultValidationMaxIdleConns,
-				MaxConnsPerHost: defaultValidationMaxConnsPerHost,
-				IdleConnTimeout: defaultValidationIdleConnTimeout,
+				MaxConnsPerHost: maxConnsPerHost,
+				MaxIdleConns:    maxIdleConns,
+				// All traffic goes to a single host; without this Go keeps only 2
+				// idle conns per host and churns the rest after every burst.
+				MaxIdleConnsPerHost: maxIdleConns,
+				IdleConnTimeout:     defaultValidationIdleConnTimeout,
 			},
 		},
 		timeout: time.Duration(timeoutSeconds) * time.Second,
-		apiKey:  apiKey,
+		apiKey:  cfg.APIKey,
 	}
 }
 
