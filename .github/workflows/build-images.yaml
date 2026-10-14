@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@80fb1914d8f68ea4ac277beff4541cc4a669569f
+    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@6d3fc3a764d30eac014a38137c551a9ba74c0c9f
     with:
       image_name: ${{ matrix.image_name }}
       tag: ${{ matrix.tag }}
