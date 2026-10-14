@@ -239,13 +239,19 @@ var (
 		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001},
 	})
 
-	httpRequestByMethodDurationSumm = promauto.NewSummaryVec(prometheus.SummaryOpts{
+	// httpRequestByMethodDurationBuckets are SLO latency buckets, in seconds.
+	// A histogram so p95/p99 can be aggregated across proxyd replicas. The
+	// buckets cover fast local answers through the default 10s RPC timeout,
+	// with headroom for a longer configured timeout.
+	httpRequestByMethodDurationBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
+
+	httpRequestByMethodDurationHist = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: MetricsNamespace,
 		Name:      "http_request_by_method_duration_seconds",
-		Help: "Summary of HTTP JSON-RPC request durations by method. " +
+		Help: "Histogram of HTTP JSON-RPC request durations by method. " +
 			"Includes body read, response write; batches use method_name='<batch>', unknowns use 'unknown'. " +
 			"Label bounded by rpc_method_mappings. Excludes websockets and /healthz.",
-		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001},
+		Buckets: httpRequestByMethodDurationBuckets,
 	}, []string{
 		"method_name",
 	})
@@ -1134,7 +1140,7 @@ func RecordHTTPRequestByMethodDuration(method string, d time.Duration) {
 	if method == "" {
 		method = MethodUnknown
 	}
-	httpRequestByMethodDurationSumm.WithLabelValues(method).Observe(d.Seconds())
+	httpRequestByMethodDurationHist.WithLabelValues(method).Observe(d.Seconds())
 }
 
 // RecordRPCCall records one client-initiated JSON-RPC call and the outcome the

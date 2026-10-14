@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 )
@@ -231,7 +232,7 @@ func TestHTTPRequestByMethodDuration(t *testing.T) {
 	}
 	count := func(method string) uint64 {
 		t.Helper()
-		return gatherSummarySampleCount(t, metric, map[string]string{"method_name": method})
+		return gatherHistogramSampleCount(t, metric, map[string]string{"method_name": method})
 	}
 
 	t.Run("whitelisted method", func(t *testing.T) {
@@ -361,33 +362,27 @@ func TestRecordRPCNotification(t *testing.T) {
 // labels are a superset of `labels`, or 0 if no such series exists yet.
 func gatherCounter(t *testing.T, name string, labels map[string]string) float64 {
 	t.Helper()
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	require.NoError(t, err)
-	for _, mf := range mfs {
-		if mf.GetName() != name {
-			continue
-		}
-		for _, m := range mf.GetMetric() {
-			got := make(map[string]string, len(m.GetLabel()))
-			for _, l := range m.GetLabel() {
-				got[l.GetName()] = l.GetValue()
-			}
-			match := true
-			for k, v := range labels {
-				if got[k] != v {
-					match = false
-					break
-				}
-			}
-			if match {
-				return m.GetCounter().GetValue()
-			}
-		}
+	m := findMetric(t, name, labels)
+	if m == nil || m.GetCounter() == nil {
+		return 0
 	}
-	return 0
+	return m.GetCounter().GetValue()
 }
 
-func gatherSummarySampleCount(t *testing.T, name string, labels map[string]string) uint64 {
+// gatherHistogramSampleCount returns the sample count of the histogram named
+// `name` whose labels are a superset of `labels`, or 0 if no such series exists yet.
+func gatherHistogramSampleCount(t *testing.T, name string, labels map[string]string) uint64 {
+	t.Helper()
+	m := findMetric(t, name, labels)
+	if m == nil || m.GetHistogram() == nil {
+		return 0
+	}
+	return m.GetHistogram().GetSampleCount()
+}
+
+// findMetric returns the first metric named `name` whose labels are a superset
+// of `labels`.
+func findMetric(t *testing.T, name string, labels map[string]string) *dto.Metric {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	require.NoError(t, err)
@@ -396,23 +391,25 @@ func gatherSummarySampleCount(t *testing.T, name string, labels map[string]strin
 			continue
 		}
 		for _, m := range mf.GetMetric() {
-			got := make(map[string]string, len(m.GetLabel()))
-			for _, l := range m.GetLabel() {
-				got[l.GetName()] = l.GetValue()
-			}
-			match := true
-			for k, v := range labels {
-				if got[k] != v {
-					match = false
-					break
-				}
-			}
-			if match && m.GetSummary() != nil {
-				return m.GetSummary().GetSampleCount()
+			if metricLabelsMatch(m, labels) {
+				return m
 			}
 		}
 	}
-	return 0
+	return nil
+}
+
+func metricLabelsMatch(m *dto.Metric, labels map[string]string) bool {
+	got := make(map[string]string, len(m.GetLabel()))
+	for _, l := range m.GetLabel() {
+		got[l.GetName()] = l.GetValue()
+	}
+	for k, v := range labels {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
