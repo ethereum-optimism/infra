@@ -101,6 +101,51 @@ Cache use Redis and can be enabled for the following immutable methods:
 * `eth_getUncleByBlockHashAndIndex`
 * `debug_getRawReceipts` (block hash only)
 
+### Timed HTTP caching
+
+Opt read-only methods into response caching with a per-method TTL. Every request
+parameter participates in the key (including call overrides and the full-transaction
+flag); the JSON-RPC request ID does not. Keys use the original parameter JSON, so
+formatting differences can produce separate entries.
+
+```toml
+[cache]
+enabled = true
+
+[cache.method_ttls]
+eth_getBlockByNumber = "1s"
+eth_getBalance = "1s"
+eth_gasPrice = "1s"
+```
+
+All argument combinations for a configured method qualify, including numeric
+blocks and `pending`. Each combination is cached separately. Configure only read-only methods;
+transaction submissions, filter creation/polling, and subscriptions are rejected.
+Other custom methods remain the operator's responsibility.
+
+Existing `[cache]` configurations need no changes: `enabled`, `ttl` (default 1h),
+and the built-in method list still apply. Built-in Redis keys remain compatible.
+Legacy memory-only and memory-fallback caches retain their existing LRU behavior.
+Redis writes and command metrics continue using `SETEX`.
+
+Timed caching requires Redis and never falls back to memory. Without Redis configured,
+timed methods bypass the cache; Redis read/write failures also fall through to backend
+responses through the existing cache error handling. Existing Redis startup checks
+still apply. This also applies when a timed method overrides a built-in cached method.
+
+Rules replace the built-in policy for that method. Unlisted methods retain their
+existing behavior. Only successful, non-null upstream results are stored. Results
+answered locally from consensus state are not stored by timed rules. Both single
+and batched HTTP requests use these rules; WebSocket forwarding does not.
+
+Per-method TTLs must be positive whole seconds (e.g. `"1s"`, `"5s"`, `"1m"`)
+and run from cache insertion, not block production. Fractional-second values are rejected.
+Mutable results may lag by the TTL plus upstream latency/head lag; this is not
+reorg-aware caching. Redis enforces expiry. Changing a method's TTL
+uses separate Redis keys, so rolling deployments cannot reuse the old policy's entries.
+Use a separate Redis namespace per chain/deployment. Existing cache metrics report
+hits, misses, and errors by method. Concurrent misses are not coalesced.
+
 ## Meta method `consensus_getReceipts`
 
 To support backends with different specifications in the same backend group,
