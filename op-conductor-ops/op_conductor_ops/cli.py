@@ -5,7 +5,6 @@ import time
 import requests
 import logging
 import concurrent.futures
-from collections import Counter
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -103,7 +102,7 @@ def list_networks():
 def status(
     network: str,
     verbose: Annotated[
-        bool, typer.Option("--verbose", help="Show per-sequencer Raft agreement.")
+        bool, typer.Option("--verbose", help="Show per-sequencer Raft views.")
     ] = False,
 ):
     """Print the status of all sequencers in a network."""
@@ -228,83 +227,87 @@ def print_raft_status(network_obj):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         views = list(executor.map(query, network_obj.sequencers))
 
-    memberships = []
-    leader_views = []
-    for results, _ in views:
-        membership = results.get("conductor_clusterMembership")
-        memberships.append(
-            None
-            if membership is None
-            else tuple(
-                sorted(
-                    (m["id"], m["addr"], m["suffrage"])
-                    for m in (membership["servers"] or [])
-                )
-            )
-        )
-        leader = results.get("conductor_leaderWithID") or {}
-        leader_views.append(
-            (leader["id"], leader["addr"])
-            if leader.get("id") and leader.get("addr")
-            else None
-        )
-    membership_counts = Counter(m for m in memberships if m is not None)
-    leader_counts = Counter(l for l in leader_views if l is not None)
-    total = len(views)
-
-    def agreement(view, counts):
-        if view is None:
-            return Text("Unknown", style="bold yellow")
-        count = counts[view]
-        return Text(
-            f"{count}/{total}", style="green" if count == total else "bold yellow"
-        )
-
     table = Table(
-        "Sequencer ID",
+        "Conductor queried",
+        "Membership view",
         "Members seen",
-        "Matching membership views",
+        "Member Raft addresses",
+        "Roles seen",
         "Leader seen",
-        "Matching leader views",
-        "Notes",
-        title=f"Raft agreement: {network_obj.name}",
+        "Leader Raft address",
+        "Warnings",
+        title=f"Raft views: {network_obj.name}",
         show_lines=True,
     )
     for column in table.columns:
         column.overflow = "fold"
-    for sequencer, (_, errors), membership, leader in zip(
-        network_obj.sequencers, views, memberships, leader_views
-    ):
-        notes = list(errors)
-        if membership == ():
-            notes.append("Empty membership; not joined")
-        elif membership is not None and sequencer.sequencer_id not in {
-            m[0] for m in membership
-        }:
-            notes.append("Queried sequencer missing from membership")
-        if leader is None:
-            notes.append("Leader unknown")
-        members_text = "Unknown" if membership is None else "Empty"
-        if membership:
-            roles = {0: "Voter", 1: "Nonvoter"}
-            members_text = "\n".join(
-                f"{member_id} ({roles.get(role, f'Unknown role {role}')})"
-                for member_id, _, role in membership
-            )
+    groups = {}
+    leaders = {}
+    configured = {s.sequencer_id: s for s in network_obj.sequencers}
+    for sequencer, (results, errors) in zip(network_obj.sequencers, views):
+        membership = results.get("conductor_clusterMembership")
+        members = None if membership is None else membership["servers"]
+        leader = results.get("conductor_leaderWithID") or {}
+        leader_id = leader.get("id", "")
+        leader_addr = leader.get("addr", "")
+        warnings = list(errors)
+        group = "Unknown"
+        if members is not None:
+            members = sorted(members, key=lambda member: member["id"])
+            signature = tuple((m["id"], m["addr"], m["suffrage"]) for m in members)
+            group = groups.setdefault(signature, f"View {len(groups) + 1}")
+            member_ids = {m["id"] for m in members}
+            if sequencer.sequencer_id not in member_ids:
+                warnings.append("Queried conductor missing from membership")
+            for member in members:
+                config = configured.get(member["id"])
+                if config is None:
+                    warnings.append(f"{member['id']}: not in config")
+                else:
+                    if member["suffrage"] != int(not config.voting):
+                        warnings.append(f"{member['id']}: voting differs from config")
+                    if member["addr"] != config.raft_addr:
+                        warnings.append(
+                            f"{member['id']}: Raft address differs from config"
+                        )
+            if leader_id and leader_id not in member_ids:
+                warnings.append("Leader not in membership (possibly overridden)")
+            if leader_id and leader_addr:
+                leaders.setdefault(group, set()).add((leader_id, leader_addr))
+        if not leader_id or not leader_addr:
+            warnings.append("Leader unknown; check before join rehearsal")
         table.add_row(
             Text(sequencer.sequencer_id),
-            Text(members_text),
-            agreement(membership, membership_counts),
-            Text(leader[0] if leader else "Unknown"),
-            agreement(leader, leader_counts),
-            Text("\n".join(notes) or "—", style="bold yellow" if notes else ""),
+            group,
+            Text(
+                "\n".join(m["id"] for m in members)
+                if members
+                else "Unknown" if members is None else "Empty"
+            ),
+            Text("\n".join(m["addr"] for m in members) if members else "—"),
+            (
+                "\n".join(
+                    {0: "Voter", 1: "Nonvoter"}.get(
+                        m["suffrage"], f"Unknown ({m['suffrage']})"
+                    )
+                    for m in members
+                )
+                if members
+                else "—"
+            ),
+            Text(leader_id or "Unknown", style="" if leader_id else "bold yellow"),
+            Text(leader_addr or "Unknown", style="" if leader_addr else "bold yellow"),
+            Text("\n".join(warnings) or "—", style="bold yellow" if warnings else ""),
         )
     console.print(table)
-    console.print(
-        "Matching views count all configured sequencers, including the queried node. "
-        "Membership compares IDs, Raft addresses and roles; leader compares ID and address. "
-        "Failed queries and unknown leaders do not count as agreement."
-    )
+    if len(groups) > 1:
+        print_warn(
+            f"{len(groups)} distinct Raft membership views observed. "
+            "Separate clusters or inconsistent membership; check before joining."
+        )
+    for group, seen in leaders.items():
+        if len(seen) > 1:
+            print_warn(f"{group}: conductors disagree on leader ID/address")
 
 
 @app.command()
