@@ -306,6 +306,28 @@ func TestSlidingWindow_CustomBucket(t *testing.T) {
 	require.Equal(t, 0, sw.buckets.Size())
 }
 
+func TestSlidingWindow_AdvanceEvictsOutOfOrderBuckets(t *testing.T) {
+	now := ts("2023-04-21 15:04:05")
+	clock := NewAdjustableClock(now)
+
+	// buckets is insertion-ordered, so adding an older data point after a newer
+	// one leaves the keys out of chronological order.
+	sw := NewSlidingWindow(
+		WithWindowLength(10*time.Second),
+		WithBucketSize(time.Second),
+		WithClock(clock))
+	sw.AddWithTime(ts("2023-04-21 15:04:05"), 6)
+	sw.AddWithTime(ts("2023-04-21 15:04:01"), 4)
+	sw.AddWithTime(ts("2023-04-21 15:04:02"), 5)
+
+	// Window start is 15:04:02, so only the 15:04:05 bucket survives.
+	clock.Set(ts("2023-04-21 15:04:12"))
+	require.Equal(t, 6.0, sw.Avg())
+	require.Equal(t, 6.0, sw.Sum())
+	require.Equal(t, 1, int(sw.Count()))
+	require.Equal(t, 1, sw.buckets.Size())
+}
+
 // ts is a convenient method that must parse a time.Time from a string in format `"2006-01-02 15:04:05"`
 func ts(s string) time.Time {
 	t, err := time.Parse(time.DateTime, s)
