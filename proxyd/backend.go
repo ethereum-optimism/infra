@@ -2100,11 +2100,10 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 				res:   &res,
 			})
 			if errors.Is(err, ErrRewriteBlockOutOfRange) {
-				// Answer out-of-range blocks without forwarding (fail-fast): block lookups get
-				// null, log ranges -32602 and state reads -32001, so a block proxyd hasn't seen
-				// never reads as a zero balance or an empty log range.
+				// Return spec-compliant response for out-of-range blocks
+				// instead of forwarding to backend (fail-fast)
 				log.Debug(
-					"answering out-of-range block request without forwarding",
+					"returning spec-compliant response for out-of-range block request",
 					"method", req.Method,
 					"req_id", req.ID,
 				)
