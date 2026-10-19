@@ -772,6 +772,86 @@ func TestConsensus(t *testing.T) {
 		require.Equal(t, 0, len(nodes["node1"].mockBackend.Requests()))
 	})
 
+	t.Run("out of range state reads return block not found without hitting backend", func(t *testing.T) {
+		addr := "0x4200000000000000000000000000000000000011"
+		cases := []struct {
+			method string
+			params []interface{}
+		}{
+			{"eth_getBalance", []interface{}{addr, "0x300"}},
+			{"eth_getTransactionCount", []interface{}{addr, "0x300"}},
+			{"eth_getCode", []interface{}{addr, "0x300"}},
+			{"eth_getStorageAt", []interface{}{addr, "0x0", "0x300"}},
+			{"eth_getProof", []interface{}{addr, []interface{}{}, "0x300"}},
+			{"eth_call", []interface{}{map[string]interface{}{"to": addr, "data": "0x84411d65"}, "0x300"}},
+		}
+		for _, c := range cases {
+			t.Run(c.method, func(t *testing.T) {
+				reset()
+				useOnlyNode1()
+
+				resRaw, statusCode, err := client.SendRPC(c.method, c.params)
+				require.NoError(t, err)
+				require.Equal(t, 200, statusCode)
+
+				var jsonMap map[string]interface{}
+				require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
+				require.NotContains(t, jsonMap, "result", string(resRaw))
+				require.Equal(t, float64(-32001), jsonMap["error"].(map[string]interface{})["code"])
+				require.Equal(t, 0, len(nodes["node1"].mockBackend.Requests()))
+			})
+		}
+	})
+
+	t.Run("out of range log ranges return block range error without hitting backend", func(t *testing.T) {
+		cases := []struct {
+			name      string
+			method    string
+			fromBlock string
+			toBlock   string
+		}{
+			{"eth_getLogs range beyond latest", "eth_getLogs", "0x200", "0x300"},
+			{"eth_getLogs range spanning latest", "eth_getLogs", "0x100", "0x300"},
+			{"eth_newFilter range spanning latest", "eth_newFilter", "0x100", "0x300"},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				reset()
+				useOnlyNode1()
+
+				resRaw, statusCode, err := client.SendRPC(c.method, []interface{}{
+					map[string]interface{}{"fromBlock": c.fromBlock, "toBlock": c.toBlock},
+				})
+				require.NoError(t, err)
+				require.Equal(t, 200, statusCode)
+
+				var jsonMap map[string]interface{}
+				require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
+				require.NotContains(t, jsonMap, "result", string(resRaw))
+				require.Equal(t, float64(-32602), jsonMap["error"].(map[string]interface{})["code"])
+				require.Equal(t, 0, len(nodes["node1"].mockBackend.Requests()))
+			})
+		}
+	})
+
+	t.Run("batched out of range state read returns block not found", func(t *testing.T) {
+		reset()
+		useOnlyNode1()
+
+		resRaw, statusCode, err := client.SendBatchRPC(
+			NewRPCReq("1", "eth_getBlockByNumber", []interface{}{"latest"}),
+			NewRPCReq("2", "eth_getBalance", []interface{}{"0x4200000000000000000000000000000000000011", "0x300"}))
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+
+		var jsonMap []map[string]interface{}
+		require.NoError(t, json.Unmarshal(resRaw, &jsonMap))
+		require.Equal(t, 2, len(jsonMap))
+		require.Equal(t, "0x101", jsonMap[0]["result"].(map[string]interface{})["number"])
+		require.NotContains(t, jsonMap[1], "result", string(resRaw))
+		require.Equal(t, float64(-32001), jsonMap[1]["error"].(map[string]interface{})["code"])
+	})
+
 	t.Run("batched rewrite", func(t *testing.T) {
 		reset()
 		useOnlyNode1()

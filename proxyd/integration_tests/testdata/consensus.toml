@@ -25,6 +25,13 @@ consensus_min_peer_count = 4
 
 [rpc_method_mappings]
 eth_call = "node"
+eth_getBalance = "node"
+eth_getTransactionCount = "node"
+eth_getCode = "node"
+eth_getStorageAt = "node"
+eth_getProof = "node"
+eth_getLogs = "node"
+eth_newFilter = "node"
 eth_chainId = "node"
 eth_blockNumber = "node"
 eth_getBlockByNumber = "node"
