@@ -11,7 +11,7 @@ contents:
   packages:
     # CircleCI runtime / exec environment (parity with cimg/base)
     - wolfi-baselayout
-    - ca-certificates-bundle
+    - 'ca-certificates-bundle>=20260909-r3'
     - glibc
     - libgcc
     - libstdc++

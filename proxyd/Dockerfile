@@ -16,6 +16,7 @@ WORKDIR /app
 RUN make proxyd
 
 FROM ${RUNTIME_IMAGE}
+RUN apk add --no-cache 'ca-certificates-bundle>=20260909-r3'
 
 EXPOSE 8080
 
