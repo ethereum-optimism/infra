@@ -988,6 +988,15 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 		return nil, ErrBackendUnexpectedJSONRPC
 	}
 
+	// a null element in a batch response unmarshals to a nil *RPCRes
+	for _, res := range rpcRes {
+		if res == nil {
+			b.intermittentErrorsSlidingWindow.Incr()
+			RecordBackendNetworkErrorRateSlidingWindow(b, b.ErrorRate())
+			return nil, ErrBackendBadResponse
+		}
+	}
+
 	// capture the HTTP status code in the response. this will only
 	// ever be 400 given the status check on line 318 above.
 	if httpRes.StatusCode != 200 {
