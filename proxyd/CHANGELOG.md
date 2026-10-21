@@ -6,6 +6,10 @@
 
 - Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms measured from `eth_sendRawTransaction` request receipt (covering proxyd-internal handling and the forward round-trip) to block/subblock visibility.
 
+### Patch Changes
+
+- Consensus mode answers out-of-range `eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_getProof` and `eth_call` with a `-32001 block not found` error instead of a zero value, and an `eth_getLogs` or `eth_newFilter` range past the consensus head with `-32602 block range extends beyond current head block` instead of `[]` (`null` for `eth_newFilter`).
+
 ## 3.14.1
 
 ### Patch Changes

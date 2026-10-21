@@ -143,6 +143,19 @@ var (
 		HTTPErrorCode: 400,
 	}
 
+	// Out-of-range answers keep HTTP 200, as an execution client's do. -32001 is
+	// EIP-1898's "Resource not found", which op-reth returns for an unknown block.
+	ErrBlockNotFound = &RPCErr{
+		Code:    -32001,
+		Message: "block not found",
+	}
+
+	// What op-geth and op-reth return for an eth_getLogs range past their head.
+	ErrBlockRangeBeyondHead = &RPCErr{
+		Code:    -32602,
+		Message: "block range extends beyond current head block",
+	}
+
 	ErrCLConsensusSyncNotReady = &RPCErr{
 		Code:          JSONRPCErrorInternal - 25,
 		Message:       "optimism_syncStatus not available",
@@ -2105,18 +2118,11 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 					"debug_getRawReceipts",
 					"consensus_getReceipts":
 					res.Result = json.RawMessage("null")
-				case "eth_getLogs":
-					res.Result = json.RawMessage("[]")
-				case "eth_getCode":
-					res.Result = json.RawMessage("\"0x\"")
-				case "eth_getStorageAt":
-					res.Result = json.RawMessage("\"0x0000000000000000000000000000000000000000000000000000000000000000\"")
-				case "eth_getBalance",
-					"eth_getTransactionCount":
-					res.Result = json.RawMessage("\"0x0\"")
+				case "eth_getLogs",
+					"eth_newFilter":
+					res.Error = ErrBlockRangeBeyondHead
 				default:
-					// For unknown methods, return null
-					res.Result = json.RawMessage("null")
+					res.Error = ErrBlockNotFound
 				}
 			} else if errors.Is(err, ErrRewriteRangeTooLarge) {
 				res.Error = ErrInvalidParams(
