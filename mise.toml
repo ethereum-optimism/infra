@@ -18,7 +18,7 @@ asterisc = "github:ethereum-optimism/fake-asterisc"
 kontrol = "github:ethereum-optimism/fake-kontrol"
 binary_signer = "github:ethereum-optimism/fake-binary_signer"
 
-goreleaser-pro = "github:goreleaser/goreleaser-pro[exe=goreleaser]"
+goreleaser-pro = "github:goreleaser/goreleaser-pro"
 
 
 [settings]
