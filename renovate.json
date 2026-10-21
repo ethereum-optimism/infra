@@ -8,5 +8,14 @@
   },
   "automergeType": "pr",
   "platformAutomerge": false,
-  "rebaseWhen": "behind-base-branch"
+  "rebaseWhen": "behind-base-branch",
+  "npm": {
+    "packageRules": [
+      {
+        "description": "Block npm major updates, including vulnerability fixes.",
+        "matchUpdateTypes": ["major"],
+        "enabled": false
+      }
+    ]
+  }
 }
