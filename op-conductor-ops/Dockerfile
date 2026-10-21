@@ -1,6 +1,6 @@
 FROM chainguard/wolfi-base:latest
 
-RUN apk add --no-cache python-3.12 py3.12-poetry && \
+RUN apk add --no-cache 'ca-certificates-bundle>=20260909-r3' python-3.12 py3.12-poetry && \
     printf '#!/bin/sh\nexec python3.12 -m poetry "$@"\n' > /usr/bin/poetry && \
     chmod +x /usr/bin/poetry
 

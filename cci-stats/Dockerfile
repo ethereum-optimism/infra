@@ -11,6 +11,7 @@ RUN apk add --no-cache go-1.26 make jq bash git build-base
 RUN make build
 
 FROM chainguard/wolfi-base:latest
+RUN apk add --no-cache 'ca-certificates-bundle>=20260909-r3'
 
 WORKDIR /app
 

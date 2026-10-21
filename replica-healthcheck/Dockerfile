@@ -11,7 +11,7 @@ RUN yarn install --frozen-lockfile --ignore-scripts --production && yarn cache c
 
 FROM chainguard/wolfi-base:latest
 
-RUN apk add --no-cache nodejs-24
+RUN apk add --no-cache 'ca-certificates-bundle>=20260909-r3' nodejs-24
 
 WORKDIR /opt/optimism/replica-healthcheck
 

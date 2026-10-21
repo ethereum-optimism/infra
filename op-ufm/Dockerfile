@@ -13,6 +13,7 @@ WORKDIR /app
 RUN make ufm
 
 FROM chainguard/wolfi-base:latest
+RUN apk add --no-cache 'ca-certificates-bundle>=20260909-r3'
 
 VOLUME /etc/ufm
 
