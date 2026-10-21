@@ -89,6 +89,21 @@ func TestBatching(t *testing.T) {
 			numExpectedForwards:  2,
 		},
 		{
+			// a null element must fail the batch, not panic proxyd
+			name:    "backend returns null element in batch response",
+			handler: SingleResponseHandler(200, `[null,{"jsonrpc":"2.0","result":"hello2","id":2}]`),
+			reqs: []*proxyd.RPCReq{
+				NewRPCReq("1", "eth_chainId", nil),
+				NewRPCReq("2", "eth_chainId", nil),
+			},
+			expectedRes: asArray(
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":1,"jsonrpc":"2.0"}`,
+				`{"error":{"code":-32011,"message":"no backend is currently healthy to serve traffic"},"id":2,"jsonrpc":"2.0"}`,
+			),
+			maxUpstreamBatchSize: 10,
+			numExpectedForwards:  1,
+		},
+		{
 			name: "duplicate request ids are on distinct batches",
 			mocks: []mockResult{
 				netVersionMock1,
