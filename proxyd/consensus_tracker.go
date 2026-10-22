@@ -194,13 +194,7 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 		log.Error("failed to read the lock", "err", err)
 		RecordGroupConsensusError(ct.backendGroup, "read_lock", err)
 		if ct.leader {
-			ok, err := ct.redlock.Unlock()
-			if err != nil || !ok {
-				log.Error("failed to release the lock after error", "err", err)
-				RecordGroupConsensusError(ct.backendGroup, "leader_release_lock", err)
-				return
-			}
-			ct.leader = false
+			ct.stepDown()
 		}
 		return
 	}
@@ -211,13 +205,7 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 			if err != nil || !ok {
 				log.Error("failed to extend lock", "err", err, "mutex", ct.redlock.Name(), "val", ct.redlock.Value())
 				RecordGroupConsensusError(ct.backendGroup, "leader_extend_lock", err)
-				ok, err := ct.redlock.Unlock()
-				if err != nil || !ok {
-					log.Error("failed to release the lock after error", "err", err)
-					RecordGroupConsensusError(ct.backendGroup, "leader_release_lock", err)
-					return
-				}
-				ct.leader = false
+				ct.stepDown()
 				return
 			}
 			ct.postPayload(val)
@@ -292,6 +280,21 @@ func (ct *RedisConsensusTracker) stateHeartbeat() {
 		ct.leader = true
 		ct.postPayload(mutex.Value())
 	}
+}
+
+// stepDown gives up leadership after the lock could not be confirmed. The lock
+// is released on a best-effort basis: the release fails when another node has
+// already taken the lock or Redis is unreachable, and in both cases this node
+// is no longer the leader (an unreleased lock expires after lockPeriod).
+// Leadership must be dropped regardless, otherwise this node stops following
+// the remote state and keeps serving a frozen view.
+func (ct *RedisConsensusTracker) stepDown() {
+	ok, err := ct.redlock.Unlock()
+	if err != nil || !ok {
+		log.Warn("failed to release the lock while stepping down", "err", err)
+		RecordGroupConsensusError(ct.backendGroup, "leader_release_lock", err)
+	}
+	ct.leader = false
 }
 
 func (ct *RedisConsensusTracker) key(tag string) string {

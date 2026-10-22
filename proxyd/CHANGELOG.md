@@ -10,6 +10,7 @@
 
 - Consensus mode answers out-of-range `eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_getProof` and `eth_call` with a `-32001 block not found` error instead of a zero value, and an `eth_getLogs` or `eth_newFilter` range past the consensus head with `-32602 block range extends beyond current head block` instead of `[]` (`null` for `eth_newFilter`).
 - Treat a `null` element in a backend's batch response as a bad response instead of panicking with a nil pointer dereference, which crashed the whole process.
+- Consensus HA: a leader that fails to read or extend its Redis lock now steps down even when releasing the lock also fails (e.g. another node already took it). Previously it kept believing it was leader, stopped following the shared state, and served a frozen block head indefinitely.
 
 ## 3.14.1
 
