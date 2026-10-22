@@ -697,6 +697,9 @@ func Start(config *Config) (*Server, func(), error) {
 				if bgcfg.ConsensusHAHeartbeatInterval > 0 {
 					topts = append(topts, WithHeartbeatInterval(time.Duration(bgcfg.ConsensusHAHeartbeatInterval)))
 				}
+				if bgcfg.ConsensusHAServeLocalWhenStale {
+					topts = append(topts, WithServeLocalWhenStale(true))
+				}
 				haRedisURL, err := ReadFromEnvOrConfig(bgcfg.ConsensusHARedis.URL)
 				if err != nil {
 					return nil, nil, err

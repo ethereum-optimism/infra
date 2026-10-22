@@ -133,6 +133,9 @@ type RedisConsensusTracker struct {
 	// whether the last heartbeat found view() serving local state; heartbeat goroutine only
 	servingLocal bool
 
+	// serve local state instead of a remote state older than lockPeriod
+	serveLocalWhenStale bool
+
 	// holds the state collected by local pollers
 	local *InMemoryConsensusTracker
 
@@ -154,6 +157,13 @@ func WithHeartbeatInterval(heartbeatInterval time.Duration) RedisConsensusTracke
 		ct.heartbeatInterval = heartbeatInterval
 	}
 }
+
+func WithServeLocalWhenStale(serveLocalWhenStale bool) RedisConsensusTrackerOpt {
+	return func(ct *RedisConsensusTracker) {
+		ct.serveLocalWhenStale = serveLocalWhenStale
+	}
+}
+
 func NewRedisConsensusTracker(ctx context.Context,
 	redisClient redis.UniversalClient,
 	bg *BackendGroup,
@@ -319,9 +329,10 @@ func (ct *RedisConsensusTracker) key(tag string) string {
 // remote state, refreshed every heartbeat either by posting it as leader or by
 // reading it from Redis as follower. If it has not been refreshed for longer
 // than lockPeriod, no live leader is backing it (e.g. this node cannot reach
-// Redis), so serve the locally polled state instead of a frozen view.
+// Redis); with serveLocalWhenStale, serve the locally polled state instead of
+// a frozen view.
 func (ct *RedisConsensusTracker) view() *InMemoryConsensusTracker {
-	if time.Since(ct.remote.UpdatedAt()) > ct.lockPeriod && ct.local.Valid() {
+	if ct.serveLocalWhenStale && time.Since(ct.remote.UpdatedAt()) > ct.lockPeriod && ct.local.Valid() {
 		return ct.local
 	}
 	return ct.remote

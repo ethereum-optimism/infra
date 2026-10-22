@@ -14,7 +14,7 @@ import (
 
 const testLockPeriod = 30 * time.Second
 
-func newTestRedisTracker(t *testing.T, addr string) *RedisConsensusTracker {
+func newTestRedisTracker(t *testing.T, addr string, opts ...RedisConsensusTrackerOpt) *RedisConsensusTracker {
 	t.Helper()
 	client := redis.NewClient(&redis.Options{
 		Addr:        addr,
@@ -22,8 +22,9 @@ func newTestRedisTracker(t *testing.T, addr string) *RedisConsensusTracker {
 		MaxRetries:  -1,
 	})
 	t.Cleanup(func() { _ = client.Close() })
+	opts = append([]RedisConsensusTrackerOpt{WithLockPeriod(testLockPeriod)}, opts...)
 	return NewRedisConsensusTracker(context.Background(), client,
-		&BackendGroup{Name: "test"}, "test", WithLockPeriod(testLockPeriod),
+		&BackendGroup{Name: "test"}, "test", opts...,
 	).(*RedisConsensusTracker)
 }
 
@@ -117,15 +118,16 @@ func TestRedisConsensusTracker_RecoversFromRedisOutage(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(200), a.GetState().Latest)
 }
 
-// TestRedisConsensusTracker_ServesLocalWhenRemoteStale asserts that a node
-// whose copy of the shared state has not been refreshed within a lock period
-// serves its locally polled state rather than the frozen remote state.
+// TestRedisConsensusTracker_ServesLocalWhenRemoteStale asserts that, with
+// WithServeLocalWhenStale, a node whose copy of the shared state has not been
+// refreshed within a lock period serves its locally polled state rather than
+// the frozen remote state.
 func TestRedisConsensusTracker_ServesLocalWhenRemoteStale(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
 
-	a := newTestRedisTracker(t, mr.Addr())
+	a := newTestRedisTracker(t, mr.Addr(), WithServeLocalWhenStale(true))
 	b := newTestRedisTracker(t, mr.Addr())
 
 	b.SetState(testState(100))
@@ -169,4 +171,28 @@ func TestRedisConsensusTracker_ServesLocalWhenRemoteStale(t *testing.T) {
 	expireRemote()
 	a.local = NewInMemoryConsensusTracker().(*InMemoryConsensusTracker)
 	require.Equal(t, hexutil.Uint64(160), a.GetState().Latest)
+}
+
+// TestRedisConsensusTracker_ServesRemoteWhenStaleByDefault asserts that without
+// WithServeLocalWhenStale a node keeps serving the shared state even when stale.
+func TestRedisConsensusTracker_ServesRemoteWhenStaleByDefault(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	a := newTestRedisTracker(t, mr.Addr())
+	b := newTestRedisTracker(t, mr.Addr())
+
+	b.SetState(testState(100))
+	heartbeat(t, b, "node-b")
+	heartbeat(t, a, "node-a")
+	a.SetState(testState(150))
+
+	mr.Close()
+	a.remote.mutex.Lock()
+	a.remote.updatedAt = time.Now().Add(-testLockPeriod - time.Second)
+	a.remote.mutex.Unlock()
+	heartbeat(t, a, "node-a")
+	require.Equal(t, hexutil.Uint64(100), a.GetState().Latest)
+	require.Equal(t, 0.0, testutil.ToFloat64(consensusHAServingLocal.WithLabelValues("test")))
 }
