@@ -39,6 +39,8 @@ on:
       - "peer-mgmt-service/**"
       - "proxyd/**"
       - "replica-healthcheck/**"
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 concurrency:
