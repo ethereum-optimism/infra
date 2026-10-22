@@ -7,13 +7,14 @@ import (
 
 	"github.com/alicebob/miniredis"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 const testLockPeriod = 30 * time.Second
 
-func newTestRedisTracker(t *testing.T, addr string) *RedisConsensusTracker {
+func newTestRedisTracker(t *testing.T, addr string, opts ...RedisConsensusTrackerOpt) *RedisConsensusTracker {
 	t.Helper()
 	client := redis.NewClient(&redis.Options{
 		Addr:        addr,
@@ -21,8 +22,9 @@ func newTestRedisTracker(t *testing.T, addr string) *RedisConsensusTracker {
 		MaxRetries:  -1,
 	})
 	t.Cleanup(func() { _ = client.Close() })
+	opts = append([]RedisConsensusTrackerOpt{WithLockPeriod(testLockPeriod)}, opts...)
 	return NewRedisConsensusTracker(context.Background(), client,
-		&BackendGroup{Name: "test"}, "test", WithLockPeriod(testLockPeriod),
+		&BackendGroup{Name: "test"}, "test", opts...,
 	).(*RedisConsensusTracker)
 }
 
@@ -114,4 +116,83 @@ func TestRedisConsensusTracker_RecoversFromRedisOutage(t *testing.T) {
 	require.False(t, a.leader)
 	require.Equal(t, "node-b", a.leaderName)
 	require.Equal(t, hexutil.Uint64(200), a.GetState().Latest)
+}
+
+// TestRedisConsensusTracker_ServesLocalWhenRemoteStale asserts that, with
+// WithServeLocalWhenStale, a node whose copy of the shared state has not been
+// refreshed within a lock period serves its locally polled state rather than
+// the frozen remote state.
+func TestRedisConsensusTracker_ServesLocalWhenRemoteStale(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	a := newTestRedisTracker(t, mr.Addr(), WithServeLocalWhenStale(true))
+	b := newTestRedisTracker(t, mr.Addr())
+
+	b.SetState(testState(100))
+	heartbeat(t, b, "node-b")
+	require.True(t, b.leader)
+	heartbeat(t, a, "node-a")
+	require.False(t, a.leader)
+
+	a.SetState(testState(150))
+	require.Equal(t, hexutil.Uint64(100), a.GetState().Latest, "fresh remote state wins over local")
+
+	servingLocal := func() float64 {
+		return testutil.ToFloat64(consensusHAServingLocal.WithLabelValues("test"))
+	}
+	expireRemote := func() {
+		a.remote.mutex.Lock()
+		a.remote.updatedAt = time.Now().Add(-testLockPeriod - time.Second)
+		a.remote.mutex.Unlock()
+	}
+
+	// a can no longer refresh the remote state.
+	mr.Close()
+	heartbeat(t, a, "node-a")
+	require.Equal(t, hexutil.Uint64(100), a.GetState().Latest, "remote state is served within the lock period")
+	require.Equal(t, 0.0, servingLocal())
+
+	expireRemote()
+	require.Equal(t, hexutil.Uint64(150), a.GetState().Latest, "stale remote state must not be served")
+	heartbeat(t, a, "node-a")
+	require.Equal(t, 1.0, servingLocal())
+
+	// Once Redis is reachable again a follows the shared state again.
+	require.NoError(t, mr.Restart())
+	b.SetState(testState(160))
+	heartbeat(t, b, "node-b")
+	heartbeat(t, a, "node-a")
+	require.Equal(t, hexutil.Uint64(160), a.GetState().Latest)
+	require.Equal(t, 0.0, servingLocal())
+
+	// Without a valid local state there is nothing better to serve.
+	expireRemote()
+	a.local = NewInMemoryConsensusTracker().(*InMemoryConsensusTracker)
+	require.Equal(t, hexutil.Uint64(160), a.GetState().Latest)
+}
+
+// TestRedisConsensusTracker_ServesRemoteWhenStaleByDefault asserts that without
+// WithServeLocalWhenStale a node keeps serving the shared state even when stale.
+func TestRedisConsensusTracker_ServesRemoteWhenStaleByDefault(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	a := newTestRedisTracker(t, mr.Addr())
+	b := newTestRedisTracker(t, mr.Addr())
+
+	b.SetState(testState(100))
+	heartbeat(t, b, "node-b")
+	heartbeat(t, a, "node-a")
+	a.SetState(testState(150))
+
+	mr.Close()
+	a.remote.mutex.Lock()
+	a.remote.updatedAt = time.Now().Add(-testLockPeriod - time.Second)
+	a.remote.mutex.Unlock()
+	heartbeat(t, a, "node-a")
+	require.Equal(t, hexutil.Uint64(100), a.GetState().Latest)
+	require.Equal(t, 0.0, testutil.ToFloat64(consensusHAServingLocal.WithLabelValues("test")))
 }

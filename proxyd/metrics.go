@@ -455,6 +455,14 @@ var (
 		"leader",
 	})
 
+	consensusHAServingLocal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: MetricsNamespace,
+		Name:      "group_consensus_ha_serving_local",
+		Help:      "1 if this instance serves its locally polled consensus state because the shared HA state has not been refreshed within the lock period, 0 otherwise.",
+	}, []string{
+		"backend_group_name",
+	})
+
 	consensusHACLPinL1 = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "group_consensus_ha_cl_pin_l1",
@@ -916,6 +924,10 @@ func RecordGroupConsensusHAFinalizedBlock(group *BackendGroup, leader string, bl
 
 func RecordGroupConsensusHACLPinL1(group *BackendGroup, leader string, l1Num uint64) {
 	consensusHACLPinL1.WithLabelValues(group.Name, leader).Set(float64(l1Num))
+}
+
+func RecordGroupConsensusHAServingLocal(group *BackendGroup, servingLocal bool) {
+	consensusHAServingLocal.WithLabelValues(group.Name).Set(boolToFloat64(servingLocal))
 }
 
 func RecordGroupConsensusLatestBlock(group *BackendGroup, blockNumber hexutil.Uint64) {

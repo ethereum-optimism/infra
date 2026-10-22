@@ -5,6 +5,7 @@
 ### Minor Changes
 
 - Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms measured from `eth_sendRawTransaction` request receipt (covering proxyd-internal handling and the forward round-trip) to block/subblock visibility.
+- Consensus HA: new backend group option `consensus_ha_serve_local_when_stale` (default `false`). When enabled, an instance whose copy of the shared consensus state has not been refreshed for longer than the lock period (e.g. it cannot reach Redis) serves its locally polled consensus state instead of the frozen shared state. Instances may briefly disagree on the head while this happens. New gauge `proxyd_group_consensus_ha_serving_local` is 1 while an instance does this.
 
 ### Patch Changes
 

@@ -233,6 +233,12 @@ type BackendGroupConfig struct {
 	ConsensusHAHeartbeatInterval TOMLDuration `toml:"consensus_ha_heartbeat_interval"`
 	ConsensusHALockPeriod        TOMLDuration `toml:"consensus_ha_lock_period"`
 	ConsensusHARedis             RedisConfig  `toml:"consensus_ha_redis"`
+	// consensus_ha_serve_local_when_stale serves this instance's locally polled
+	// consensus state when its copy of the shared HA state has not been refreshed
+	// for longer than consensus_ha_lock_period (e.g. it cannot reach Redis),
+	// instead of the frozen shared state. Instances may then disagree on the head.
+	// Default: false.
+	ConsensusHAServeLocalWhenStale bool `toml:"consensus_ha_serve_local_when_stale"`
 
 	Fallbacks []string `toml:"fallbacks"`
 }

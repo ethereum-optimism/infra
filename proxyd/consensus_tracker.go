@@ -45,6 +45,7 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
 	ct.state.LocalSafe = o.LocalSafe
+	ct.updatedAt = time.Now()
 
 	// Only overwrite CL fields when the source has them set.
 	// SetState (EL path) does not populate CL fields; SetCLSyncBody does.
@@ -56,8 +57,9 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
 type InMemoryConsensusTracker struct {
-	mutex sync.Mutex
-	state *ConsensusTrackerState
+	mutex     sync.Mutex
+	state     *ConsensusTrackerState
+	updatedAt time.Time
 }
 
 func NewInMemoryConsensusTracker() ConsensusTracker {
@@ -88,6 +90,13 @@ func (ct *InMemoryConsensusTracker) GetState() ConsensusTrackerState {
 	ct.mutex.Lock()
 	defer ct.mutex.Unlock()
 	return *ct.state
+}
+
+// UpdatedAt returns when the state was last written by update.
+func (ct *InMemoryConsensusTracker) UpdatedAt() time.Time {
+	ct.mutex.Lock()
+	defer ct.mutex.Unlock()
+	return ct.updatedAt
 }
 
 func (ct *InMemoryConsensusTracker) SetState(state ConsensusTrackerState) {
@@ -121,6 +130,12 @@ type RedisConsensusTracker struct {
 	leader     bool
 	leaderName string
 
+	// whether the last heartbeat found view() serving local state; heartbeat goroutine only
+	servingLocal bool
+
+	// serve local state instead of a remote state older than lockPeriod
+	serveLocalWhenStale bool
+
 	// holds the state collected by local pollers
 	local *InMemoryConsensusTracker
 
@@ -142,6 +157,13 @@ func WithHeartbeatInterval(heartbeatInterval time.Duration) RedisConsensusTracke
 		ct.heartbeatInterval = heartbeatInterval
 	}
 }
+
+func WithServeLocalWhenStale(serveLocalWhenStale bool) RedisConsensusTrackerOpt {
+	return func(ct *RedisConsensusTracker) {
+		ct.serveLocalWhenStale = serveLocalWhenStale
+	}
+}
+
 func NewRedisConsensusTracker(ctx context.Context,
 	redisClient redis.UniversalClient,
 	bg *BackendGroup,
@@ -185,6 +207,8 @@ func (ct *RedisConsensusTracker) Init() {
 }
 
 func (ct *RedisConsensusTracker) stateHeartbeat() {
+	defer ct.recordView()
+
 	pool := goredis.NewPool(ct.client)
 	rs := redsync.New(pool)
 	key := ct.key("mutex")
@@ -301,8 +325,36 @@ func (ct *RedisConsensusTracker) key(tag string) string {
 	return fmt.Sprintf("consensus:%s:%s", ct.namespace, tag)
 }
 
+// view returns the tracker whose state is served. Normally that is the shared
+// remote state, refreshed every heartbeat either by posting it as leader or by
+// reading it from Redis as follower. If it has not been refreshed for longer
+// than lockPeriod, no live leader is backing it (e.g. this node cannot reach
+// Redis); with serveLocalWhenStale, serve the locally polled state instead of
+// a frozen view.
+func (ct *RedisConsensusTracker) view() *InMemoryConsensusTracker {
+	if ct.serveLocalWhenStale && time.Since(ct.remote.UpdatedAt()) > ct.lockPeriod && ct.local.Valid() {
+		return ct.local
+	}
+	return ct.remote
+}
+
+// recordView reports which state view() serves, logging when it switches.
+func (ct *RedisConsensusTracker) recordView() {
+	servingLocal := ct.view() == ct.local
+	if servingLocal != ct.servingLocal {
+		if servingLocal {
+			log.Warn("shared consensus state is stale, serving local state",
+				"remote_updated_at", ct.remote.UpdatedAt(), "lock_period", ct.lockPeriod)
+		} else {
+			log.Info("serving shared consensus state again", "leader", ct.leaderName)
+		}
+		ct.servingLocal = servingLocal
+	}
+	RecordGroupConsensusHAServingLocal(ct.backendGroup, servingLocal)
+}
+
 func (ct *RedisConsensusTracker) GetState() ConsensusTrackerState {
-	return ct.remote.GetState()
+	return ct.view().GetState()
 }
 
 func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
@@ -310,7 +362,7 @@ func (ct *RedisConsensusTracker) SetState(state ConsensusTrackerState) {
 }
 
 func (ct *RedisConsensusTracker) GetCLSyncBody() (json.RawMessage, uint64) {
-	return ct.remote.GetCLSyncBody()
+	return ct.view().GetCLSyncBody()
 }
 
 func (ct *RedisConsensusTracker) SetCLSyncBody(body json.RawMessage, l1Num uint64) {
