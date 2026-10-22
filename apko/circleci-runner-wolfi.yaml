@@ -12,7 +12,7 @@ contents:
     # CircleCI runtime / exec environment (parity with cimg/base)
     - wolfi-baselayout
     - 'ca-certificates-bundle>=20260909-r3'
-    - 'glibc<2.43-r14'
+    - glibc
     - libgcc
     - libstdc++
     - busybox
