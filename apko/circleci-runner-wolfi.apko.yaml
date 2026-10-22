@@ -23,6 +23,8 @@ contents:
     - curl
     - sudo                  # checkout-with-mise orb runs `sudo` to set up /data/mise-data
     - openssl               # cargo-hack `just hack` shuffle: shuf --random-source=<(openssl ...)
+    - libssl3
+    - libcrypto3
     - jq                    # cargo metadata | jq in several just recipes
     - zip                   # build-superchain-go recipe archives configs via `xargs zip`
     - unzip
