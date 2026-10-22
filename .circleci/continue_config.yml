@@ -2,7 +2,7 @@ version: 2.1
 
 orbs:
   gcp-cli: circleci/gcp-cli@3.3.0
-  circleci-utils: ethereum-optimism/circleci-utils@1.0.20
+  circleci-utils: ethereum-optimism/circleci-utils@1.0.33
 
 parameters:
   run-build-op-conductor-mon:
