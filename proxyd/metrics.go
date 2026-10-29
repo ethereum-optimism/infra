@@ -43,7 +43,7 @@ const (
 	StatusCodeRelayed = "relayed"
 )
 
-var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000, 10000000, 25000000, 50000000, 100000000}
+var PayloadSizeBuckets = []float64{10, 50, 100, 500, 1000, 5000, 10000, 100000, 1000000, 5000000, 10000000, 15000000, 20000000}
 var MillisecondDurationBuckets = []float64{1, 10, 50, 100, 500, 1000, 5000, 10000, 100000}
 
 var (
