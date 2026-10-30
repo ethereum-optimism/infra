@@ -163,6 +163,48 @@ each proxyd instance only tracks the transactions it forwarded itself.
 Setting `subblocks_ws_url` additionally measures preconfirmation latency from
 a sequencer's subblocks websocket stream.
 
+## Frontend rate limits
+
+`[rate_limit]` configures the base request quota and additional per-method quotas.
+By default, both are keyed by client IP, using `X-Forwarded-For` (or
+`ip_header_override`) with a fallback to the connection's remote IP.
+
+Set `use_auth_alias = true` to key authenticated requests by their configured
+`[authentication]` alias instead:
+
+```toml
+[authentication]
+"$CLIENT_A_KEY" = "client_a"
+"$CLIENT_B_KEY" = "client_b"
+
+[rate_limit]
+use_auth_alias = true
+base_rate = 100
+base_interval = "1s"
+use_redis = false
+
+[rate_limit.method_overrides.debug_traceTransaction]
+limit = 5
+interval = "1s"
+```
+
+Different aliases have independent quotas even when they share an IP. Requests
+with the same alias share a quota across IPs and credentials, including mapped
+WebSocket calls and individual calls within HTTP batches. Unauthenticated
+requests keep their IP-based quotas, and existing exemptions still apply.
+An override's `global = true` disables Origin/User-Agent exemptions for that
+method; its quota still uses the selected IP or alias.
+
+With `use_redis = true`, quotas are shared across proxyd instances using the same
+Redis and alias configuration. Alias buckets use `rate_limit:auth_alias:<scope>:<alias>:<window>`
+keys, where the scope is `main` or the method name; IP buckets keep their existing
+keys. Without Redis, or during fallback to memory, quotas are local to each instance.
+
+Rate-limit rejections are attributed by alias in
+`proxyd_rpc_errors_total{auth="client_a", backend_name="proxyd", error_code="-32016"}`.
+Directly relayed WebSocket methods are outside frontend rate limiting; add a
+method to `rpc_method_mappings` as well as the WS whitelist to apply these limits.
+
 ## Metrics
 
 See `metrics.go` for a list of all available metrics.
