@@ -3,6 +3,7 @@ package proxyd
 import (
 	"context"
 	"encoding/json"
+	"github.com/gorilla/mux"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -210,6 +211,34 @@ func TestHTTPRequestMethodLabel(t *testing.T) {
 	require.Equal(t, MethodUnknown, httpRequestMethodLabel(false, []string{""}))
 }
 
+func TestHTTPRequestByMethodDurationAuthLabel(t *testing.T) {
+	const metric = "proxyd_http_request_by_method_duration_seconds"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":"0x1","id":1}`))
+	}))
+	defer backend.Close()
+
+	group := &BackendGroup{
+		Name:     "main",
+		Backends: []*Backend{NewBackend("reth-0", backend.URL, "", semaphore.NewWeighted(1))},
+	}
+	srv := newMethodDurationServer(t, map[string]string{"eth_chainId": "main"}, map[string]*BackendGroup{"main": group}, 1024)
+	srv.authenticatedPaths = map[string]string{"secret": "alice"}
+
+	labels := map[string]string{"method_name": "eth_chainId", "auth": "alice"}
+	before := gatherHistogramSampleCount(t, metric, labels)
+	beforeCodes := gatherCounter(t, "proxyd_http_response_codes_total", map[string]string{"status_code": "200", "auth": "alice"})
+
+	req := httptest.NewRequest(http.MethodPost, "/secret", strings.NewReader(`{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`))
+	req = mux.SetURLVars(req, map[string]string{"authorization": "secret"})
+	srv.HandleRPC(httptest.NewRecorder(), req)
+
+	require.Equal(t, before+1, gatherHistogramSampleCount(t, metric, labels))
+	require.Equal(t, beforeCodes+1, gatherCounter(t, "proxyd_http_response_codes_total", map[string]string{"status_code": "200", "auth": "alice"}))
+}
+
 func TestHTTPRequestByMethodDuration(t *testing.T) {
 	const metric = "proxyd_http_request_by_method_duration_seconds"
 
@@ -232,7 +261,7 @@ func TestHTTPRequestByMethodDuration(t *testing.T) {
 	}
 	count := func(method string) uint64 {
 		t.Helper()
-		return gatherHistogramSampleCount(t, metric, map[string]string{"method_name": method})
+		return gatherHistogramSampleCount(t, metric, map[string]string{"method_name": method, "auth": "none"})
 	}
 
 	t.Run("whitelisted method", func(t *testing.T) {
@@ -430,7 +459,7 @@ func TestWSProxierMetricMethodNameBoundsCardinality(t *testing.T) {
 }
 
 func TestWriteBatchRPCResRecordsEnvelopeStatus(t *testing.T) {
-	labels := map[string]string{"status_code": "200"}
+	labels := map[string]string{"status_code": "200", "auth": "none"}
 	before := gatherCounter(t, "proxyd_http_response_codes_total", labels)
 
 	rec := httptest.NewRecorder()

@@ -389,18 +389,20 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	// connections are not handled here.
 	start := time.Now()
 	methodLabel := MethodUnknown
+	ctx := r.Context()
 	defer func() {
-		RecordHTTPRequestByMethodDuration(methodLabel, time.Since(start))
+		RecordHTTPRequestByMethodDuration(ctx, methodLabel, time.Since(start))
 	}()
 
-	ctx := s.populateContext(w, r)
-	if ctx == nil {
+	populated := s.populateContext(w, r)
+	if populated == nil {
 		return
 	}
+	ctx = populated
 
 	// Reject new requests during drain
 	if s.isDraining.Load() {
-		httpResponseCodesTotal.WithLabelValues(strconv.Itoa(http.StatusServiceUnavailable)).Inc()
+		httpResponseCodesTotal.WithLabelValues(strconv.Itoa(http.StatusServiceUnavailable), GetAuthCtx(ctx)).Inc()
 		http.Error(w, "Server is draining", http.StatusServiceUnavailable)
 		return
 	}
@@ -1091,13 +1093,13 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 				log.Debug("allowing unauthenticated request due to public_access enabled")
 			} else {
 				log.Info("blocked unauthorized request", "authorization", authorization)
-				httpResponseCodesTotal.WithLabelValues("401").Inc()
+				httpResponseCodesTotal.WithLabelValues("401", GetAuthCtx(ctx)).Inc()
 				w.WriteHeader(401)
 				return nil
 			}
 		} else if s.authenticatedPaths[authorization] == "" {
 			// Invalid API key provided - always reject regardless of public_access
-			httpResponseCodesTotal.WithLabelValues("401").Inc()
+			httpResponseCodesTotal.WithLabelValues("401", GetAuthCtx(ctx)).Inc()
 			w.WriteHeader(401)
 			return nil
 		} else {
@@ -1315,7 +1317,7 @@ func writeRPCRes(ctx context.Context, w http.ResponseWriter, res *RPCRes) {
 		RecordRPCError(ctx, BackendProxyd, MethodUnknown, err)
 		return
 	}
-	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(statusCode)).Inc()
+	httpResponseCodesTotal.WithLabelValues(strconv.Itoa(statusCode), GetAuthCtx(ctx)).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 
@@ -1332,7 +1334,7 @@ func writeBatchRPCRes(ctx context.Context, w http.ResponseWriter, res []*RPCRes)
 	// A batch envelope is always HTTP 200 — per-element outcomes are invisible to
 	// this metric by construction, so a batch in which every element failed still
 	// counts here as a 200. proxyd_rpc_calls_total is the per-element view.
-	httpResponseCodesTotal.WithLabelValues(statusCodeOK).Inc()
+	httpResponseCodesTotal.WithLabelValues(statusCodeOK, GetAuthCtx(ctx)).Inc()
 	RecordResponsePayloadSize(ctx, ww.Len)
 }
 

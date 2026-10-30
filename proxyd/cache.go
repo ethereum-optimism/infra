@@ -202,9 +202,9 @@ func (c *rpcCache) GetRPC(ctx context.Context, req *RPCReq) (*RPCRes, error) {
 		return nil, err
 	}
 	if res == nil {
-		RecordCacheMiss(req.Method)
+		RecordCacheMiss(ctx, req.Method)
 	} else {
-		RecordCacheHit(req.Method)
+		RecordCacheHit(ctx, req.Method)
 	}
 	return res, nil
 }

@@ -208,6 +208,7 @@ var (
 		Help:      "Count of total HTTP response codes.",
 	}, []string{
 		"status_code",
+		"auth",
 	})
 
 	rpcCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -254,6 +255,7 @@ var (
 		Buckets: httpRequestByMethodDurationBuckets,
 	}, []string{
 		"method_name",
+		"auth",
 	})
 
 	wsMessagesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -298,6 +300,7 @@ var (
 		Help:      "Number of cache hits.",
 	}, []string{
 		"method",
+		"auth",
 	})
 
 	cacheMissesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -306,6 +309,7 @@ var (
 		Help:      "Number of cache misses.",
 	}, []string{
 		"method",
+		"auth",
 	})
 
 	cacheErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -885,12 +889,12 @@ func RecordResponsePayloadSize(ctx context.Context, payloadSize int) {
 	responsePayloadSizesGauge.WithLabelValues(GetAuthCtx(ctx)).Observe(float64(payloadSize))
 }
 
-func RecordCacheHit(method string) {
-	cacheHitsTotal.WithLabelValues(method).Inc()
+func RecordCacheHit(ctx context.Context, method string) {
+	cacheHitsTotal.WithLabelValues(method, GetAuthCtx(ctx)).Inc()
 }
 
-func RecordCacheMiss(method string) {
-	cacheMissesTotal.WithLabelValues(method).Inc()
+func RecordCacheMiss(ctx context.Context, method string) {
+	cacheMissesTotal.WithLabelValues(method, GetAuthCtx(ctx)).Inc()
 }
 
 func RecordCacheError(method string) {
@@ -1149,11 +1153,11 @@ func statusCodeForRPCRes(res *RPCRes) string {
 }
 
 // RecordHTTPRequestByMethodDuration records an HTTP JSON-RPC request duration.
-func RecordHTTPRequestByMethodDuration(method string, d time.Duration) {
+func RecordHTTPRequestByMethodDuration(ctx context.Context, method string, d time.Duration) {
 	if method == "" {
 		method = MethodUnknown
 	}
-	httpRequestByMethodDurationHist.WithLabelValues(method).Observe(d.Seconds())
+	httpRequestByMethodDurationHist.WithLabelValues(method, GetAuthCtx(ctx)).Observe(d.Seconds())
 }
 
 // RecordRPCCall records one client-initiated JSON-RPC call and the outcome the
