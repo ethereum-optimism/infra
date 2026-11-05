@@ -4,8 +4,10 @@ import os
 import time
 import requests
 import logging
+import concurrent.futures
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 import typer
 from typing_extensions import Annotated
 
@@ -97,7 +99,12 @@ def list_networks():
 
 
 @app.command()
-def status(network: str):
+def status(
+    network: str,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Show per-sequencer Raft views.")
+    ] = False,
+):
     """Print the status of all sequencers in a network."""
     network_obj = get_network(network)
     sequencers = network_obj.sequencers
@@ -165,6 +172,10 @@ def status(network: str):
 
     console.print(table)
 
+    if verbose:
+        print_raft_status(network_obj)
+        return
+
     leader = network_obj.find_conductor_leader()
     if leader is None:
         print_warn(f"Could not find current leader in network {network}")
@@ -191,6 +202,112 @@ def status(network: str):
             )
         if display_correction:
             print_warn("Run 'update-cluster-membership' to correct membership issues")
+
+
+def print_raft_status(network_obj):
+    def query(sequencer):
+        results = {}
+        errors = []
+        for method in ("conductor_clusterMembership", "conductor_leaderWithID"):
+            try:
+                resp = requests.post(
+                    sequencer.conductor_rpc_url,
+                    json=make_rpc_payload(method),
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                if "error" in body:
+                    raise ValueError(body["error"])
+                results[method] = body["result"]
+            except (requests.RequestException, ValueError, KeyError) as e:
+                errors.append(f"{method}: {e}")
+        return results, errors
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        views = list(executor.map(query, network_obj.sequencers))
+
+    table = Table(
+        "Conductor queried",
+        "Membership view",
+        "Members seen",
+        "Member Raft addresses",
+        "Roles seen",
+        "Leader seen",
+        "Leader Raft address",
+        "Warnings",
+        title=f"Raft views: {network_obj.name}",
+        show_lines=True,
+    )
+    for column in table.columns:
+        column.overflow = "fold"
+    groups = {}
+    leaders = {}
+    configured = {s.sequencer_id: s for s in network_obj.sequencers}
+    for sequencer, (results, errors) in zip(network_obj.sequencers, views):
+        membership = results.get("conductor_clusterMembership")
+        members = None if membership is None else membership["servers"]
+        leader = results.get("conductor_leaderWithID") or {}
+        leader_id = leader.get("id", "")
+        leader_addr = leader.get("addr", "")
+        warnings = list(errors)
+        group = "Unknown"
+        if members is not None:
+            members = sorted(members, key=lambda member: member["id"])
+            signature = tuple((m["id"], m["addr"], m["suffrage"]) for m in members)
+            group = groups.setdefault(signature, f"View {len(groups) + 1}")
+            member_ids = {m["id"] for m in members}
+            if sequencer.sequencer_id not in member_ids:
+                warnings.append("Queried conductor missing from membership")
+            for member in members:
+                config = configured.get(member["id"])
+                if config is None:
+                    warnings.append(f"{member['id']}: not in config")
+                else:
+                    if member["suffrage"] != int(not config.voting):
+                        warnings.append(f"{member['id']}: voting differs from config")
+                    if member["addr"] != config.raft_addr:
+                        warnings.append(
+                            f"{member['id']}: Raft address differs from config"
+                        )
+            if leader_id and leader_id not in member_ids:
+                warnings.append("Leader not in membership (possibly overridden)")
+            if leader_id and leader_addr:
+                leaders.setdefault(group, set()).add((leader_id, leader_addr))
+        if not leader_id or not leader_addr:
+            warnings.append("Leader unknown; check before join rehearsal")
+        table.add_row(
+            Text(sequencer.sequencer_id),
+            group,
+            Text(
+                "\n".join(m["id"] for m in members)
+                if members
+                else "Unknown" if members is None else "Empty"
+            ),
+            Text("\n".join(m["addr"] for m in members) if members else "—"),
+            (
+                "\n".join(
+                    {0: "Voter", 1: "Nonvoter"}.get(
+                        m["suffrage"], f"Unknown ({m['suffrage']})"
+                    )
+                    for m in members
+                )
+                if members
+                else "—"
+            ),
+            Text(leader_id or "Unknown", style="" if leader_id else "bold yellow"),
+            Text(leader_addr or "Unknown", style="" if leader_addr else "bold yellow"),
+            Text("\n".join(warnings) or "—", style="bold yellow" if warnings else ""),
+        )
+    console.print(table)
+    if len(groups) > 1:
+        print_warn(
+            f"{len(groups)} distinct Raft membership views observed. "
+            "Separate clusters or inconsistent membership; check before joining."
+        )
+    for group, seen in leaders.items():
+        if len(seen) > 1:
+            print_warn(f"{group}: conductors disagree on leader ID/address")
 
 
 @app.command()

@@ -28,6 +28,26 @@ After installing with `poetry install`, the tool is invoked with `poetry run op-
 * Usage with explicit path to config and certificate
 ```poetry run op-conductor-ops -c ./<path>/config.toml --cert ./<path>/cacert.pem <command> <network-name>```
 
+`status --verbose <network-name>` adds a per-sequencer Raft agreement table:
+
+```sh
+poetry run op-conductor-ops -c ./config.toml status --verbose <network-name>
+```
+
+Each row shows members and their live voter/nonvoter roles, how many configured
+sequencers report the same membership, the observed leader, and how many report
+that same leader. Membership agreement compares member IDs, Raft addresses and
+roles, ignoring member order. Leader agreement compares ID and Raft address.
+Counts include the queried sequencer and use all configured sequencers as the
+denominator. Failed queries and unknown leaders show Unknown and never count as
+agreement. Successful empty membership is shown as not joined.
+
+Queries use read-only `conductor_clusterMembership` and `conductor_leaderWithID`
+with `params: []`. A snapshot may show temporary disagreement during a join or
+leader election. Plain `status` keeps the existing compact output and membership
+checks. The command's `--verbose` flag is separate from the global logging flag
+(`op-conductor-ops -v status <network-name>`).
+
 ## Example Configuration File: example.config.toml
 
 This configuration file is used to set up the networks and sequencers for your application.
