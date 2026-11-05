@@ -1,0 +1,258 @@
+name: release-go-binaries
+
+on:
+  push:
+    tags:
+      - "op-signer/v*"
+      - "op-txproxy/v*"
+      - "op-ufm/v*"
+      - "proxyd/v*"
+      - "op-conductor-mon/v*"
+      - "peer-mgmt-service/v*"
+      - "cci-stats/v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, e.g. proxyd/v1.2.3
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      module: ${{ steps.tag.outputs.module }}
+      version: ${{ steps.tag.outputs.version }}
+      binary: ${{ steps.tag.outputs.binary }}
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Check the tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^(op-signer|op-txproxy|op-ufm|proxyd|op-conductor-mon|peer-mgmt-service|cci-stats)/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The tag is not <module>/vMAJOR.MINOR.PATCH[-PRERELEASE] for a release module."
+            exit 1
+          fi
+          module=${TAG%/v*}
+          case "$module" in
+            op-signer)         main=./cmd;         binary=op-signer ;;
+            op-txproxy)        main=./cmd;         binary=op-txproxy ;;
+            op-ufm)            main=./cmd/ufm;     binary=op-ufm ;;
+            proxyd)            main=./cmd/proxyd;  binary=proxyd ;;
+            op-conductor-mon)  main=./cmd/monitor; binary=op-conductor-mon ;;
+            peer-mgmt-service) main=./cmd/pms;     binary=peer-mgmt-service ;;
+            cci-stats)         main=./cmd/runner;  binary=cci-stats ;;
+            *) echo "::error::Unknown module $module."; exit 1 ;;
+          esac
+          {
+            echo "module=$module"
+            echo "version=${TAG#*/v}"
+            echo "binary=$binary"
+            echo "main=$main"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e # v6
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Install tools
+        uses: jdx/mise-action@c1ecc8f748cd28cdeabf76dab3cccde4ce692fe4 # v4.0.0
+        with:
+          version: 2026.10.21
+          install_args: go
+          cache: false
+
+      - name: Build the release assets
+        shell: bash
+        env:
+          MODULE: ${{ steps.tag.outputs.module }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          BINARY: ${{ steps.tag.outputs.binary }}
+          MAIN: ${{ steps.tag.outputs.main }}
+        run: |
+          set -euo pipefail
+          root=$(pwd)
+          commit=$(git rev-parse HEAD)
+          commit_time=$(git show -s --format=%ct HEAD)
+          commit_date=$(date -u -d "@$commit_time" +%Y-%m-%dT%H:%M:%SZ)
+          stage=$(mktemp -d)
+          mkdir -p dist
+          shopt -s nullglob
+
+          for target in linux/amd64 darwin/amd64 darwin/arm64 windows/amd64; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            name="$MODULE-$VERSION-$goos-$goarch"
+            binary=$BINARY
+            if [ "$goos" = windows ]; then
+              binary=$BINARY.exe
+            fi
+
+            mkdir -p "$stage/$name"
+            (cd "$MODULE" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath \
+              -ldflags "-X main.GitCommit=$commit -X main.GitDate=$commit_date -X main.Version=$VERSION" \
+              -o "$stage/$name/$binary" "$MAIN")
+
+            files=("$binary")
+            for f in "$MODULE"/LICENSE* "$MODULE"/README* "$MODULE"/CHANGELOG*; do
+              cp "$f" "$stage/$name/"
+              files+=("$(basename "$f")")
+            done
+            chmod 644 "$stage/$name"/*
+            chmod 755 "$stage/$name/$binary"
+            touch -d "@$commit_time" "$stage/$name" "$stage/$name"/*
+
+            entries=()
+            while IFS= read -r f; do
+              entries+=("$name/$f")
+            done < <(printf '%s\n' "${files[@]}" | LC_ALL=C sort)
+
+            if [ "$goos" = windows ]; then
+              (cd "$stage" && zip -qX "$root/dist/$name.zip" "${entries[@]}")
+            else
+              tar -C "$stage" --owner=root:0 --group=root:0 --mtime="@$commit_time" -cf - "${entries[@]}" \
+                | gzip -n > "dist/$name.tar.gz"
+            fi
+          done
+
+          (cd dist && sha256sum -- *.tar.gz *.zip | LC_ALL=C sort -k2 > "${MODULE}_${VERSION}_checksums.txt")
+          ls -l dist
+
+      - name: Write the release notes
+        shell: bash
+        env:
+          MODULE: ${{ steps.tag.outputs.module }}
+        run: |
+          set -euo pipefail
+          mkdir -p notes
+          prev=$(git describe --tags --abbrev=0 --match "$MODULE/v*" "$TAG^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            range="$prev..$TAG"
+          else
+            range="$TAG"
+          fi
+          {
+            echo "## Changelog"
+            echo
+            git log --reverse --pretty='* %h %s' "$range" -- "$MODULE/"
+          } > notes/notes.md
+
+      - name: Upload the release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: notes/notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Download the release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Download the release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Attach the assets to a draft release
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          MODULE: ${{ needs.build.outputs.module }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          drafts=$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | [.tag_name, .draft] | @tsv' \
+            | awk -F'\t' -v tag="$TAG" '$1 == tag { print $2 }')
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          latest=()
+          if [ "$MODULE" = op-txproxy ]; then
+            latest=(--latest=false)
+          fi
+          case "$drafts" in
+            "")
+              gh release create "$TAG" --draft --verify-tag "${latest[@]}" "${prerelease[@]}" \
+                --title "$MODULE v$VERSION" --notes-file notes/notes.md
+              ;;
+            true) ;;
+            *)
+              echo "::error::$TAG is already published, so its assets can't change, or has several drafts. Found: $drafts"
+              exit 1
+              ;;
+          esac
+          gh release upload "$TAG" dist/* --clobber
+
+          expected=$(find dist -type f | wc -l)
+          attached=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          if [ "$attached" -ne "$expected" ]; then
+            echo "::error::$TAG has $attached assets, expected $expected."
+            exit 1
+          fi
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          MODULE: ${{ needs.build.outputs.module }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          latest=()
+          if [ "$MODULE" = op-txproxy ]; then
+            latest=(--latest=false)
+          fi
+          gh release edit "$TAG" --draft=false --notes-file notes/notes.md "${prerelease[@]}" "${latest[@]}"

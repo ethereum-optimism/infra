@@ -1,7 +1,7 @@
 # Release Process
 
 This documents the process of releasing a new version of one or more services in the `ethereum-optimism/infra` repository.
-The release process is driven by CircleCI to build and publish components
+The release process is driven by tags. GitHub Actions builds and publishes the Go binaries for the modules listed in step 2.
 
 ## Release Process Overview
 
@@ -13,11 +13,13 @@ The release process is driven by CircleCI to build and publish components
 
    > **Note**: Generally, the branch used for releases is `main` but if needed, you can use a different branch, say, if you'd like to create test releases from your branch.
 
-2. **Triggering the CircleCI Workflow**
+2. **Publishing Go Binaries**
 
-   Once a release tag is created, the CircleCI `release` workflow is triggered. The configuration for this workflow is located in `.circle/config.yml` within the tagged release.
+   Pushing a `<module>/vX.Y.Z` tag for one of `op-signer`, `op-txproxy`, `op-ufm`, `proxyd`, `op-conductor-mon`, `peer-mgmt-service`, or `cci-stats` runs the `release-go-binaries` GitHub Actions workflow (`.github/workflows/release-go-binaries.yaml`). The workflow builds archives for linux/amd64, darwin/amd64, darwin/arm64, and windows/amd64, writes a `<module>_<version>_checksums.txt` file, and publishes a GitHub release for the tag with the changelog generated from the commits that touched the module.
 
-   The workflow compares differences between the newly released tag and the `main` branch (the base revision). Based on these differences, it selectively toggles parameters to `true` only for services that have been updated. This prevents unnecessary builds or deployments when minor changes are made to unrelated services. [Refer to config here](https://github.com/ethereum-optimism/infra/blob/main/.circleci/config.yml#L18-L25).
+   Versions with a `-` suffix are published as prereleases. `op-txproxy` releases are never marked as the latest release.
+
+   The workflow only runs for a tag whose commit contains it. For any other tag, or to run the workflow again for an existing tag, start it manually with `workflow_dispatch` and the `tag` input. A manual run can only update a tag that has no published release.
 
 3. **Selective Component Release**
 
