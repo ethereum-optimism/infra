@@ -18,6 +18,7 @@ backends = ["good"]
 eth_chainId = "main"
 eth_foobar = "main"
 eth_baz = "main"
+eth_loose = "main"
 
 [rate_limit]
 base_rate = 2
@@ -34,3 +35,7 @@ interval = "1s"
 limit = 1
 interval = "1s"
 global = true
+
+[rate_limit.method_overrides.eth_loose]
+limit = 4
+interval = "1s"
