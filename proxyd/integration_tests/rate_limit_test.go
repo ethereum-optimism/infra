@@ -105,6 +105,15 @@ func TestFrontendMaxRPSLimit(t *testing.T) {
 
 	time.Sleep(time.Second)
 
+	t.Run("RPC override looser than base rate", func(t *testing.T) {
+		client := NewProxydClient("http://127.0.0.1:8545")
+		_, codes := spamReqs(t, client, "eth_loose", 429, 5)
+		require.Equal(t, 1, codes[429])
+		require.Equal(t, 4, codes[200])
+	})
+
+	time.Sleep(time.Second)
+
 	t.Run("RPC override in batch", func(t *testing.T) {
 		client := NewProxydClient("http://127.0.0.1:8545")
 		req := NewRPCReq("123", "eth_foobar", nil)
