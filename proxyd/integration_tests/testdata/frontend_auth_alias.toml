@@ -1,0 +1,30 @@
+[server]
+public_access = true
+
+[backend]
+response_timeout_seconds = 1
+
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+
+[backend_groups.main]
+backends = ["good"]
+
+[rpc_method_mappings]
+eth_chainId = "main"
+eth_foobar = "main"
+
+[authentication]
+secret_a = "alpha"
+secret_a_rotated = "alpha"
+secret_b = "beta"
+secret_ip = "203.0.113.1"
+
+[rate_limit]
+use_auth_alias = true
+base_rate = 2
+base_interval = "24h"
+
+[rate_limit.method_overrides.eth_foobar]
+limit = 2
+interval = "24h"
