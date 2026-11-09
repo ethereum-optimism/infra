@@ -33,6 +33,9 @@ func Start(config *Config) (*Server, func(), error) {
 	if len(config.RPCMethodMappings) == 0 {
 		return nil, nil, errors.New("must define at least one RPC method mapping")
 	}
+	if config.RateLimit.UseAuthAlias && len(config.Authentication) == 0 {
+		log.Warn("use_auth_alias is enabled without authentication entries; requests will use IP-based rate limits")
+	}
 
 	for authKey := range config.Authentication {
 		if authKey == "none" {

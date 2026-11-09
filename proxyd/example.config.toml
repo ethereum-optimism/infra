@@ -129,6 +129,14 @@ backends = ["alchemy"]
 # in order for it to be value TOML, e.g. "$FOO_AUTH_KEY" = "foo_alias".
 secret = "test"
 
+[rate_limit]
+# Use authenticated aliases for base and method quotas; public requests still use IPs.
+# Defaults to false. Credentials with the same alias share a quota across IPs.
+use_auth_alias = false
+# base_rate = 100
+# base_interval = "1s"
+# use_redis = false
+
 # Mapping of methods to backend groups.
 [rpc_method_mappings]
 eth_call = "main"
