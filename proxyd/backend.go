@@ -1323,7 +1323,11 @@ func (bg *BackendGroup) ProcessMulticallResponses(ch chan *multicallTuple, ctx c
 				"err", resp.error,
 				"backend", backendName,
 			)
-			finalResp = resp
+			// an RPC-level reply from another backend is more useful to the
+			// caller than this transport error, so don't overwrite it
+			if finalResp == nil || finalResp.error != nil {
+				finalResp = resp
+			}
 			if !errors.Is(resp.error, ErrNoBackends) {
 				allBackendsUnserviceable = false
 			}
