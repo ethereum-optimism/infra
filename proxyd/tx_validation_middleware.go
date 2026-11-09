@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -119,6 +121,8 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeout)
 	defer cancel()
 
+	ctx = httptrace.WithClientTrace(ctx, connTimingTrace(GetReqID(ctx)))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validation request: %w", err)
@@ -160,6 +164,28 @@ func (c *TxValidationClient) Validate(ctx context.Context, endpoint string, payl
 		return nil, fmt.Errorf("validation response missing unauthorized field: %s", truncate(string(body), maxValidationErrorBodyLogLen))
 	}
 	return validationRes.Unauthorized, nil
+}
+
+// connTimingTrace logs when a validation request starts waiting for a pooled
+// connection and when it gets one. conn_queued_ms includes any dial time.
+// Hooks may fire from other goroutines.
+func connTimingTrace(reqID string) *httptrace.ClientTrace {
+	var mu sync.Mutex
+	var connQueued time.Time
+	return &httptrace.ClientTrace{
+		GetConn: func(string) {
+			mu.Lock()
+			connQueued = time.Now()
+			mu.Unlock()
+			log.Info("tx validation conn queued", "req_id", reqID)
+		},
+		GotConn: func(httptrace.GotConnInfo) {
+			mu.Lock()
+			queued := time.Since(connQueued)
+			mu.Unlock()
+			log.Info("tx validation got conn", "req_id", reqID, "conn_queued_ms", queued.Milliseconds())
+		},
+	}
 }
 
 // txValidationResponse represents the response from the validation middleware.

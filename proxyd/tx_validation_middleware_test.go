@@ -1,9 +1,11 @@
 package proxyd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -336,6 +339,72 @@ func TestTxValidationClient_CanceledParentContextStillValidates(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("validation request did not reach server")
 	}
+}
+
+func TestTxValidationClient_LogsConnTiming(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := log.Root()
+	log.SetDefault(log.NewLogger(slog.NewJSONHandler(&logBuf, nil)))
+	t.Cleanup(func() { log.SetDefault(prev) })
+
+	findLog := func(msg, reqID string) map[string]any {
+		for _, line := range bytes.Split(logBuf.Bytes(), []byte("\n")) {
+			var entry map[string]any
+			if json.Unmarshal(line, &entry) == nil && entry["msg"] == msg && entry["req_id"] == reqID {
+				return entry
+			}
+		}
+		return nil
+	}
+	reqCtx := func(id string) context.Context {
+		return context.WithValue(context.Background(), ContextKeyReqID, id) // nolint:staticcheck
+	}
+
+	t.Run("queued for a connection", func(t *testing.T) {
+		release := make(chan struct{})
+		reached := make(chan struct{}, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reached <- struct{}{}
+			<-release
+		}))
+		defer server.Close()
+
+		client := NewTxValidationClient(TxValidationMiddlewareConfig{MaxConnsPerHost: 1})
+		client.timeout = 200 * time.Millisecond
+		// Shares the pool but outlives client's timeout, so the only connection stays busy.
+		holder := &TxValidationClient{client: client.client, timeout: 5 * time.Second}
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = holder.Validate(reqCtx("holder"), server.URL, []byte(`{}`))
+		}()
+		<-reached
+
+		_, err := client.Validate(reqCtx("queued"), server.URL, []byte(`{}`))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		require.NotNil(t, findLog("tx validation conn queued", "queued"))
+		require.Nil(t, findLog("tx validation got conn", "queued"))
+
+		close(release)
+		<-done
+	})
+
+	t.Run("got a connection", func(t *testing.T) {
+		okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"unauthorized": {}}`))
+		}))
+		defer okServer.Close()
+
+		_, err := NewTxValidationClient(TxValidationMiddlewareConfig{}).Validate(reqCtx("ok"), okServer.URL, []byte(`{}`))
+		require.NoError(t, err)
+
+		require.NotNil(t, findLog("tx validation conn queued", "ok"))
+		entry := findLog("tx validation got conn", "ok")
+		require.NotNil(t, entry)
+		require.Contains(t, entry, "conn_queued_ms")
+	})
 }
 
 func TestNewTxValidationClient_PoolConfig(t *testing.T) {
