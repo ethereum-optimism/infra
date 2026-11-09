@@ -641,23 +641,13 @@ func (s *Server) prepareRPCForForward(
 		return NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted), "", nil
 	}
 
-	// Take base rate limit first.
-	if isLimited("") {
-		log.Debug(
-			"rate limited individual RPC in a batch request",
-			"source", source,
-			"req_id", GetReqID(ctx),
-			"method", parsedReq.Method,
-			"remote_ip", stripXFF(GetXForwardedFor(ctx)),
-		)
-		RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
-		return NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit), "", nil
+	limiterKey := ""
+	if _, ok := s.overrideLims[parsedReq.Method]; ok {
+		limiterKey = parsedReq.Method
 	}
-
-	// Take rate limit for specific methods.
-	if _, ok := s.overrideLims[parsedReq.Method]; ok && isLimited(parsedReq.Method) {
+	if isLimited(limiterKey) {
 		log.Debug(
-			"rate limited specific RPC",
+			"rate limited RPC",
 			"source", source,
 			"req_id", GetReqID(ctx),
 			"method", parsedReq.Method,
