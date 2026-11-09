@@ -665,6 +665,7 @@ func (s *Server) prepareRPCForForward(
 			"source", source,
 			"req_id", GetReqID(ctx),
 			"method", parsedReq.Method,
+			"auth", GetAuthCtx(ctx),
 			"remote_ip", stripXFF(GetXForwardedFor(ctx)),
 		)
 		RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
