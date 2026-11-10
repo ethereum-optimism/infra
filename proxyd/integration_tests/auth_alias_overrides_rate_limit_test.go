@@ -2,6 +2,7 @@ package integration_tests
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -106,6 +107,40 @@ func TestFrontendAuthAliasOverridesRedisSharedQuota(t *testing.T) {
 	}
 	require.Len(t, redisServer.Keys(), 1)
 	require.True(t, strings.HasPrefix(redisServer.Keys()[0], "rate_limit:auth_alias:main:base_override_alias:"), redisServer.Keys()[0])
+}
+
+func TestFrontendAuthAliasOverridesExemptionsWithoutGlobalBase(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		header     string
+		value      string
+		lastStatus int
+	}{
+		{"exempt origin", "Origin", "exempt_origin", 200},
+		{"exempt user agent", "User-Agent", "exempt_agent", 200},
+		{"no exemption", "Origin", "other_origin", 429},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			config := authAliasTestConfigFrom(t, authAliasOverridesConfig, false, nil)
+			config.RateLimit.BaseRate = 0
+			config.RateLimit.ExemptOrigins = []string{"^exempt_origin$"}
+			config.RateLimit.ExemptUserAgents = []string{"^exempt_agent$"}
+			url := startAuthAliasTestProxy(t, config)
+			headers := make(http.Header)
+			headers.Set("X-Forwarded-For", "203.0.113.1")
+			headers.Set(tt.header, tt.value)
+			client := NewProxydClientWithHeaders(url+"/base_override_key", headers)
+			for i := 0; i < 5; i++ {
+				want := 200
+				if i == 4 {
+					want = tt.lastStatus
+				}
+				body, status, err := client.SendRPC("eth_chainId", nil)
+				require.NoError(t, err)
+				require.Equal(t, want, status, "call %d: %s", i, body)
+			}
+		})
+	}
 }
 
 func TestFrontendAuthAliasOverridesStartup(t *testing.T) {

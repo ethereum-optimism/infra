@@ -235,8 +235,9 @@ interval = "1s"
   method overrides replace or add to them.
 - A method override sets both `limit` and `interval`, or `infinite_rate_limit = true`
   to leave that method unlimited for the alias. `limit = 0` blocks the method.
-- `base_rate` must be greater than 0, `infinite_rate_limit` cannot be combined with
-  the rate or limit fields at the same level, and an override must set something.
+- `base_rate` must be greater than 0, intervals must be at least `1s`,
+  `infinite_rate_limit` cannot be combined with the rate or limit fields at the
+  same level, and an override must set something.
 - `use_redis`, exemptions, `global`, `ip_header_override` and `error_message` stay
   global settings. Unknown keys under an override are ignored.
 

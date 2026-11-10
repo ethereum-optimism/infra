@@ -414,6 +414,7 @@ func TestNewAliasLimiters(t *testing.T) {
 func TestNewAliasLimitersValidation(t *testing.T) {
 	second := ptr(TOMLDuration(time.Second))
 	zero := ptr(TOMLDuration(0))
+	subSecond := ptr(TOMLDuration(time.Millisecond))
 	method := func(override *AliasRateLimitMethodOverride) map[string]*AliasRateLimitMethodOverride {
 		return map[string]*AliasRateLimitMethodOverride{"eth_call": override}
 	}
@@ -469,7 +470,16 @@ func TestNewAliasLimitersValidation(t *testing.T) {
 		{
 			name:     "zero base_interval",
 			override: &AliasRateLimitConfig{BaseRate: ptr(1), BaseInterval: zero},
-			wantErr:  "rate_limit.alias_overrides.alpha: base_interval must be greater than 0",
+			wantErr:  "rate_limit.alias_overrides.alpha: base_interval must be at least 1s",
+		},
+		{
+			name:     "sub-second base_interval",
+			override: &AliasRateLimitConfig{BaseRate: ptr(1), BaseInterval: subSecond},
+			wantErr:  "rate_limit.alias_overrides.alpha: base_interval must be at least 1s",
+		},
+		{
+			name:     "non-whole-second base_interval is allowed",
+			override: &AliasRateLimitConfig{BaseRate: ptr(1), BaseInterval: ptr(TOMLDuration(1500 * time.Millisecond))},
 		},
 		{
 			name:     "empty override",
@@ -499,7 +509,12 @@ func TestNewAliasLimitersValidation(t *testing.T) {
 		{
 			name:     "zero method interval",
 			override: &AliasRateLimitConfig{MethodOverrides: method(&AliasRateLimitMethodOverride{Limit: ptr(1), Interval: zero})},
-			wantErr:  "rate_limit.alias_overrides.alpha: method_overrides.eth_call: interval must be greater than 0",
+			wantErr:  "rate_limit.alias_overrides.alpha: method_overrides.eth_call: interval must be at least 1s",
+		},
+		{
+			name:     "sub-second method interval",
+			override: &AliasRateLimitConfig{MethodOverrides: method(&AliasRateLimitMethodOverride{Limit: ptr(1), Interval: subSecond})},
+			wantErr:  "rate_limit.alias_overrides.alpha: method_overrides.eth_call: interval must be at least 1s",
 		},
 		{
 			name:     "zero method limit blocks the method",

@@ -170,25 +170,26 @@ func NewServer(
 		maxConcurrentWSRPCs = defaultMaxConcurrentWSRPCs
 	}
 
-	var mainLim FrontendRateLimiter
 	limExemptOrigins := make([]*regexp.Regexp, 0)
 	limExemptUserAgents := make([]*regexp.Regexp, 0)
+	for _, origin := range rateLimitConfig.ExemptOrigins {
+		pattern, err := regexp.Compile(origin)
+		if err != nil {
+			return nil, err
+		}
+		limExemptOrigins = append(limExemptOrigins, pattern)
+	}
+	for _, agent := range rateLimitConfig.ExemptUserAgents {
+		pattern, err := regexp.Compile(agent)
+		if err != nil {
+			return nil, err
+		}
+		limExemptUserAgents = append(limExemptUserAgents, pattern)
+	}
+
+	var mainLim FrontendRateLimiter
 	if rateLimitConfig.BaseRate > 0 {
 		mainLim = limiterFactory(time.Duration(rateLimitConfig.BaseInterval), rateLimitConfig.BaseRate, "main")
-		for _, origin := range rateLimitConfig.ExemptOrigins {
-			pattern, err := regexp.Compile(origin)
-			if err != nil {
-				return nil, err
-			}
-			limExemptOrigins = append(limExemptOrigins, pattern)
-		}
-		for _, agent := range rateLimitConfig.ExemptUserAgents {
-			pattern, err := regexp.Compile(agent)
-			if err != nil {
-				return nil, err
-			}
-			limExemptUserAgents = append(limExemptUserAgents, pattern)
-		}
 	} else {
 		mainLim = NoopFrontendRateLimiter
 	}
@@ -1292,8 +1293,9 @@ func validateAliasOverride(override *AliasRateLimitConfig) error {
 		return errors.New("base_rate and base_interval must be set together")
 	case override.BaseRate != nil && *override.BaseRate <= 0:
 		return errors.New("base_rate must be greater than 0")
-	case override.BaseInterval != nil && *override.BaseInterval <= 0:
-		return errors.New("base_interval must be greater than 0")
+	case override.BaseInterval != nil && time.Duration(*override.BaseInterval) < time.Second:
+		// Intervals must be at least 1s because truncateNow buckets windows by whole seconds.
+		return errors.New("base_interval must be at least 1s")
 	case !override.InfiniteRateLimit && override.BaseRate == nil && len(override.MethodOverrides) == 0:
 		return errors.New("must set base_rate and base_interval, infinite_rate_limit, or method_overrides")
 	}
@@ -1310,8 +1312,8 @@ func validateAliasOverride(override *AliasRateLimitConfig) error {
 			err = errors.New("limit and interval must be set unless infinite_rate_limit = true")
 		case *methodOverride.Limit < 0:
 			err = errors.New("limit must not be negative")
-		case *methodOverride.Interval <= 0:
-			err = errors.New("interval must be greater than 0")
+		case time.Duration(*methodOverride.Interval) < time.Second:
+			err = errors.New("interval must be at least 1s")
 		}
 		if err != nil {
 			return fmt.Errorf("method_overrides.%s: %w", method, err)
