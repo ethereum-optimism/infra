@@ -75,12 +75,26 @@ type RateLimitConfig struct {
 	ErrorMessage     string                              `toml:"error_message"`
 	MethodOverrides  map[string]*RateLimitMethodOverride `toml:"method_overrides"`
 	IPHeaderOverride string                              `toml:"ip_header_override"`
+	AliasOverrides   map[string]*AliasRateLimitConfig    `toml:"alias_overrides"`
 }
 
 type RateLimitMethodOverride struct {
 	Limit    int          `toml:"limit"`
 	Interval TOMLDuration `toml:"interval"`
 	Global   bool         `toml:"global"`
+}
+
+type AliasRateLimitConfig struct {
+	BaseRate          *int                                     `toml:"base_rate"`
+	BaseInterval      *TOMLDuration                            `toml:"base_interval"`
+	InfiniteRateLimit bool                                     `toml:"infinite_rate_limit"`
+	MethodOverrides   map[string]*AliasRateLimitMethodOverride `toml:"method_overrides"`
+}
+
+type AliasRateLimitMethodOverride struct {
+	Limit             *int          `toml:"limit"`
+	Interval          *TOMLDuration `toml:"interval"`
+	InfiniteRateLimit bool          `toml:"infinite_rate_limit"`
 }
 
 type TOMLDuration time.Duration
