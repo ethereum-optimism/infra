@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"math/big"
 	"net"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -77,7 +79,8 @@ type Server struct {
 	upgrader                *websocket.Upgrader
 	mainLim                 FrontendRateLimiter
 	overrideLims            map[string]FrontendRateLimiter
-	authLims                map[string]FrontendRateLimiter
+	authLims                *limiterSet
+	aliasLims               map[string]*limiterSet
 	rateLimitTracker        *rateLimitTracker
 	senderLim               FrontendRateLimiter
 	interopSenderLim        FrontendRateLimiter
@@ -167,35 +170,36 @@ func NewServer(
 		maxConcurrentWSRPCs = defaultMaxConcurrentWSRPCs
 	}
 
-	var mainLim FrontendRateLimiter
 	limExemptOrigins := make([]*regexp.Regexp, 0)
 	limExemptUserAgents := make([]*regexp.Regexp, 0)
+	for _, origin := range rateLimitConfig.ExemptOrigins {
+		pattern, err := regexp.Compile(origin)
+		if err != nil {
+			return nil, err
+		}
+		limExemptOrigins = append(limExemptOrigins, pattern)
+	}
+	for _, agent := range rateLimitConfig.ExemptUserAgents {
+		pattern, err := regexp.Compile(agent)
+		if err != nil {
+			return nil, err
+		}
+		limExemptUserAgents = append(limExemptUserAgents, pattern)
+	}
+
+	var mainLim FrontendRateLimiter
 	if rateLimitConfig.BaseRate > 0 {
 		mainLim = limiterFactory(time.Duration(rateLimitConfig.BaseInterval), rateLimitConfig.BaseRate, "main")
-		for _, origin := range rateLimitConfig.ExemptOrigins {
-			pattern, err := regexp.Compile(origin)
-			if err != nil {
-				return nil, err
-			}
-			limExemptOrigins = append(limExemptOrigins, pattern)
-		}
-		for _, agent := range rateLimitConfig.ExemptUserAgents {
-			pattern, err := regexp.Compile(agent)
-			if err != nil {
-				return nil, err
-			}
-			limExemptUserAgents = append(limExemptUserAgents, pattern)
-		}
 	} else {
 		mainLim = NoopFrontendRateLimiter
 	}
 
 	// Separate limiters keep aliases isolated from client-supplied IP keys.
-	var authLims map[string]FrontendRateLimiter
+	var authLims *limiterSet
 	if rateLimitConfig.UseAuthAlias {
-		authLims = map[string]FrontendRateLimiter{"": NoopFrontendRateLimiter}
+		authLims = &limiterSet{base: NoopFrontendRateLimiter, methods: make(map[string]FrontendRateLimiter)}
 		if rateLimitConfig.BaseRate > 0 {
-			authLims[""] = limiterFactory(time.Duration(rateLimitConfig.BaseInterval), rateLimitConfig.BaseRate, "auth_alias:main")
+			authLims.base = limiterFactory(time.Duration(rateLimitConfig.BaseInterval), rateLimitConfig.BaseRate, "auth_alias:main")
 		}
 	}
 
@@ -204,13 +208,23 @@ func NewServer(
 	for method, override := range rateLimitConfig.MethodOverrides {
 		overrideLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, method)
 		if authLims != nil {
-			authLims[method] = limiterFactory(time.Duration(override.Interval), override.Limit, "auth_alias:"+method)
+			authLims.methods[method] = limiterFactory(time.Duration(override.Interval), override.Limit, "auth_alias:"+method)
 		}
 
 		if override.Global {
 			globalMethodLims[method] = true
 		}
 	}
+
+	aliases := make(map[string]bool, len(authenticatedPaths))
+	for _, alias := range authenticatedPaths {
+		aliases[alias] = true
+	}
+	aliasLims, err := newAliasLimiters(rateLimitConfig, authLims, aliases, limiterFactory)
+	if err != nil {
+		return nil, err
+	}
+
 	var senderLim FrontendRateLimiter
 	if senderRateLimitConfig.Enabled {
 		senderLim = limiterFactory(time.Duration(senderRateLimitConfig.Interval), senderRateLimitConfig.Limit, "senders")
@@ -227,7 +241,7 @@ func NewServer(
 	}
 
 	var tracker *rateLimitTracker
-	if rateLimitConfig.BaseRate > 0 || len(overrideLims) > 0 {
+	if rateLimitConfig.BaseRate > 0 || len(overrideLims) > 0 || len(aliasLims) > 0 {
 		window := time.Duration(rateLimitConfig.BaseInterval)
 		if window <= 0 {
 			window = time.Minute
@@ -275,6 +289,7 @@ func NewServer(
 		mainLim:                  mainLim,
 		overrideLims:             overrideLims,
 		authLims:                 authLims,
+		aliasLims:                aliasLims,
 		rateLimitTracker:         tracker,
 		globallyLimitedMethods:   globalMethodLims,
 		senderLim:                senderLim,
@@ -655,11 +670,7 @@ func (s *Server) prepareRPCForForward(
 		return NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted), "", nil
 	}
 
-	limiterKey := ""
-	if _, ok := s.overrideLims[parsedReq.Method]; ok {
-		limiterKey = parsedReq.Method
-	}
-	if isLimited(limiterKey) {
+	if isLimited(parsedReq.Method) {
 		log.Debug(
 			"rate limited RPC",
 			"source", source,
@@ -1170,11 +1181,14 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 	userAgent := r.Header.Get("User-Agent")
 	// Use XFF in context since it will automatically be replaced by the remote IP
 	key := stripXFF(GetXForwardedFor(ctx))
-	mainLim, overrideLims := s.mainLim, s.overrideLims
+	lims := limiterSet{base: s.mainLim, methods: s.overrideLims}
 	trackingKey := "ip:" + key
 	if alias, authenticated := ctx.Value(ContextKeyAuth).(string); authenticated && s.authLims != nil {
 		key = alias
-		mainLim, overrideLims = s.authLims[""], s.authLims
+		lims = *s.authLims
+		if aliasLims, ok := s.aliasLims[alias]; ok {
+			lims = *aliasLims
+		}
 		trackingKey = "auth_alias:" + alias
 	} else if key == "" {
 		return nil, ErrInvalidRequest("request does not include a remote IP")
@@ -1187,16 +1201,14 @@ func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassL
 			return false
 		}
 
-		isGloballyLimitedMethod := s.isGlobalLimit(method)
-		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
-			return false
+		lim, isMethodLim := lims.methods[method]
+		if !isMethodLim {
+			lim = lims.base
 		}
 
-		var lim FrontendRateLimiter
-		if method == "" {
-			lim = mainLim
-		} else {
-			lim = overrideLims[method]
+		isGloballyLimitedMethod := isMethodLim && s.isGlobalLimit(method)
+		if !isGloballyLimitedMethod && (isUnlimitedOrigin || isUnlimitedUserAgent) {
+			return false
 		}
 
 		if lim == nil {
@@ -1226,6 +1238,88 @@ func (s *Server) trackRateLimited(key string) {
 
 func (s *Server) isGlobalLimit(method string) bool {
 	return s.globallyLimitedMethods[method]
+}
+
+// limiterSet checks a call against its method's limiter if one exists, otherwise against base.
+type limiterSet struct {
+	base    FrontendRateLimiter
+	methods map[string]FrontendRateLimiter
+}
+
+func newAliasLimiters(cfg RateLimitConfig, defaults *limiterSet, aliases map[string]bool, limiterFactory limiterFactoryFunc) (map[string]*limiterSet, error) {
+	if len(cfg.AliasOverrides) == 0 {
+		return nil, nil
+	}
+	if !cfg.UseAuthAlias {
+		return nil, errors.New("rate_limit.alias_overrides requires rate_limit.use_auth_alias = true")
+	}
+
+	aliasLims := make(map[string]*limiterSet, len(cfg.AliasOverrides))
+	for _, alias := range slices.Sorted(maps.Keys(cfg.AliasOverrides)) {
+		override := cfg.AliasOverrides[alias]
+		if !aliases[alias] {
+			return nil, fmt.Errorf("rate_limit.alias_overrides.%s: alias is not defined in [authentication]", alias)
+		}
+		if err := validateAliasOverride(override); err != nil {
+			return nil, fmt.Errorf("rate_limit.alias_overrides.%s: %w", alias, err)
+		}
+
+		lims := &limiterSet{base: defaults.base, methods: make(map[string]FrontendRateLimiter)}
+		if override.InfiniteRateLimit {
+			lims.base = NoopFrontendRateLimiter
+		} else if override.BaseRate != nil {
+			lims.base = limiterFactory(time.Duration(*override.BaseInterval), *override.BaseRate, "auth_alias:main")
+		} else {
+			// Limiter instances are shared with the default alias set because every key includes the alias.
+			maps.Copy(lims.methods, defaults.methods)
+		}
+		for method, methodOverride := range override.MethodOverrides {
+			if methodOverride.InfiniteRateLimit {
+				lims.methods[method] = NoopFrontendRateLimiter
+			} else {
+				lims.methods[method] = limiterFactory(time.Duration(*methodOverride.Interval), *methodOverride.Limit, "auth_alias:"+method)
+			}
+		}
+		aliasLims[alias] = lims
+	}
+	return aliasLims, nil
+}
+
+func validateAliasOverride(override *AliasRateLimitConfig) error {
+	switch {
+	case override.InfiniteRateLimit && (override.BaseRate != nil || override.BaseInterval != nil):
+		return errors.New("infinite_rate_limit cannot be combined with base_rate or base_interval")
+	case (override.BaseRate == nil) != (override.BaseInterval == nil):
+		return errors.New("base_rate and base_interval must be set together")
+	case override.BaseRate != nil && *override.BaseRate <= 0:
+		return errors.New("base_rate must be greater than 0")
+	case override.BaseInterval != nil && time.Duration(*override.BaseInterval) < time.Second:
+		// Intervals must be at least 1s because truncateNow buckets windows by whole seconds.
+		return errors.New("base_interval must be at least 1s")
+	case !override.InfiniteRateLimit && override.BaseRate == nil && len(override.MethodOverrides) == 0:
+		return errors.New("must set base_rate and base_interval, infinite_rate_limit, or method_overrides")
+	}
+
+	for _, method := range slices.Sorted(maps.Keys(override.MethodOverrides)) {
+		methodOverride := override.MethodOverrides[method]
+		var err error
+		switch {
+		case methodOverride.InfiniteRateLimit:
+			if methodOverride.Limit != nil || methodOverride.Interval != nil {
+				err = errors.New("infinite_rate_limit cannot be combined with limit or interval")
+			}
+		case methodOverride.Limit == nil || methodOverride.Interval == nil:
+			err = errors.New("limit and interval must be set unless infinite_rate_limit = true")
+		case *methodOverride.Limit < 0:
+			err = errors.New("limit must not be negative")
+		case time.Duration(*methodOverride.Interval) < time.Second:
+			err = errors.New("interval must be at least 1s")
+		}
+		if err != nil {
+			return fmt.Errorf("method_overrides.%s: %w", method, err)
+		}
+	}
+	return nil
 }
 
 // convertSendReqToSendTx converts a sendRawTransaction or sendRawTransactionConditional rpc to a transaction.

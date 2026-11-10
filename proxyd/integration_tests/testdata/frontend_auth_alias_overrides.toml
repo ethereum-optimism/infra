@@ -1,0 +1,50 @@
+[server]
+public_access = true
+
+[backend]
+response_timeout_seconds = 1
+
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+
+[backend_groups.main]
+backends = ["good"]
+
+[rpc_method_mappings]
+eth_chainId = "main"
+eth_foobar = "main"
+eth_baz = "main"
+
+[authentication]
+default_key = "default_alias"
+base_override_key = "base_override_alias"
+method_override_key = "method_override_alias"
+infinite_key = "infinite_alias"
+infinite_method_key = "infinite_method_alias"
+
+[rate_limit]
+use_auth_alias = true
+base_rate = 2
+base_interval = "24h"
+
+[rate_limit.method_overrides.eth_foobar]
+limit = 1
+interval = "24h"
+
+[rate_limit.alias_overrides.base_override_alias]
+base_rate = 4
+base_interval = "24h"
+
+[rate_limit.alias_overrides.method_override_alias.method_overrides.eth_baz]
+limit = 3
+interval = "24h"
+
+[rate_limit.alias_overrides.infinite_alias]
+infinite_rate_limit = true
+
+[rate_limit.alias_overrides.infinite_alias.method_overrides.eth_baz]
+limit = 0
+interval = "24h"
+
+[rate_limit.alias_overrides.infinite_method_alias.method_overrides.eth_chainId]
+infinite_rate_limit = true

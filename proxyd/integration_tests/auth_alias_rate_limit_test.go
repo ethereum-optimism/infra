@@ -40,12 +40,17 @@ func authAliasClient(url, secret, ip string) *ProxydHTTPClient {
 
 func authAliasTestConfig(t *testing.T, useRedis bool, handler http.Handler) *proxyd.Config {
 	t.Helper()
+	return authAliasTestConfigFrom(t, "frontend_auth_alias", useRedis, handler)
+}
+
+func authAliasTestConfigFrom(t *testing.T, name string, useRedis bool, handler http.Handler) *proxyd.Config {
+	t.Helper()
 	if handler == nil {
 		handler = SingleResponseHandler(200, goodResponse)
 	}
 	backend := NewMockBackend(handler)
 	t.Cleanup(backend.Close)
-	config := ReadConfig("frontend_auth_alias")
+	config := ReadConfig(name)
 	config.Backends["good"].RPCURL = backend.URL()
 	config.RateLimit.UseRedis = useRedis
 	if useRedis {

@@ -137,6 +137,16 @@ use_auth_alias = false
 # base_interval = "1s"
 # use_redis = false
 
+# Per-alias limits (requires use_auth_alias = true). Setting base_rate/base_interval or
+# infinite_rate_limit replaces the global base and global method overrides for the alias;
+# method_overrides alone keep the global limits and replace or add individual methods.
+# [rate_limit.alias_overrides.foo_alias]
+# base_rate = 1000
+# base_interval = "1s"
+# [rate_limit.alias_overrides.foo_alias.method_overrides.debug_traceTransaction]
+# limit = 50
+# interval = "1s"
+
 # Mapping of methods to backend groups.
 [rpc_method_mappings]
 eth_call = "main"

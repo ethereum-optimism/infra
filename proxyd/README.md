@@ -165,7 +165,9 @@ a sequencer's subblocks websocket stream.
 
 ## Frontend rate limits
 
-`[rate_limit]` configures the base request quota and additional per-method quotas.
+`[rate_limit]` configures the base request quota and per-method quotas. A call to
+a method with an override counts only against that method's quota; every other
+call counts against the base quota.
 By default, both are keyed by client IP, using `X-Forwarded-For` (or
 `ip_header_override`) with a fallback to the connection's remote IP.
 
@@ -194,6 +196,50 @@ WebSocket calls and individual calls within HTTP batches. Unauthenticated
 requests keep their IP-based quotas, and existing exemptions still apply.
 An override's `global = true` disables Origin/User-Agent exemptions for that
 method; its quota still uses the selected IP or alias.
+
+### Per-alias overrides
+
+With `use_auth_alias = true`, `[rate_limit.alias_overrides.<alias>]` replaces the
+global limits for a single alias. Each key must be an alias defined in
+`[authentication]`, otherwise proxyd fails to start.
+
+```toml
+# Own base: replaces the global base and all global method overrides.
+[rate_limit.alias_overrides.client_a]
+base_rate = 1000
+base_interval = "1s"
+
+[rate_limit.alias_overrides.client_a.method_overrides.debug_traceTransaction]
+limit = 50
+interval = "1s"
+
+# Method overrides only: keeps the global base and global method overrides while adding/replacing the following method-override.
+[rate_limit.alias_overrides.client_b.method_overrides.eth_getLogs]
+limit = 0 # blocks eth_getLogs for client_b
+interval = "1s"
+
+# Unlimited, except for the methods it overrides.
+[rate_limit.alias_overrides.client_c]
+infinite_rate_limit = true
+
+[rate_limit.alias_overrides.client_c.method_overrides.debug_traceTransaction]
+limit = 10
+interval = "1s"
+```
+
+- An alias has its own base when it sets both `base_rate` and `base_interval`, or
+  `infinite_rate_limit = true`. Its limits are then only its own base and its own
+  method overrides. **Global method overrides no longer apply to it**, so repeat
+  any you still want under the alias.
+- Otherwise the alias keeps the global base and global method overrides, and its
+  method overrides replace or add to them.
+- A method override sets both `limit` and `interval`, or `infinite_rate_limit = true`
+  to leave that method unlimited for the alias. `limit = 0` blocks the method.
+- `base_rate` must be greater than 0, intervals must be at least `1s`,
+  `infinite_rate_limit` cannot be combined with the rate or limit fields at the
+  same level, and an override must set something.
+- `use_redis`, exemptions, `global`, `ip_header_override` and `error_message` stay
+  global settings. Unknown keys under an override are ignored.
 
 With `use_redis = true`, quotas are shared across proxyd instances using the same
 Redis and alias configuration. Alias buckets use `rate_limit:auth_alias:<scope>:<alias>:<window>`
