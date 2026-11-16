@@ -575,3 +575,31 @@ func TestWSClientExceedReadLimit(t *testing.T) {
 		"connection should be closed after exceeding the read limit; write error: %v", writeErr)
 
 }
+
+func TestWSRelaysCheckedMethod(t *testing.T) {
+	received := make(chan []byte, 1)
+	backend := NewMockWSBackend(nil, func(conn *websocket.Conn, msgType int, data []byte) {
+		received <- data
+	}, nil)
+	defer backend.Close()
+
+	require.NoError(t, os.Setenv("GOOD_BACKEND_RPC_URL", backend.URL()))
+	_, shutdown, err := proxyd.Start(ReadConfig("ws"))
+	require.NoError(t, err)
+	defer shutdown()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:8546", nil) // nolint:bodyclose
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// eth_chainId is not whitelisted for WebSockets; the whitelist sees only
+	// the case-variant key.
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage,
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","METHOD":"eth_subscribe"}`)))
+	select {
+	case got := <-received:
+		require.JSONEq(t, `{"jsonrpc":"2.0","id":1,"method":"eth_subscribe"}`, string(got))
+	case <-time.After(5 * time.Second):
+		t.Fatal("backend received nothing")
+	}
+}

@@ -1655,7 +1655,11 @@ func (w *WSProxier) clientPump(ctx context.Context, errC chan error) {
 			"req_id", GetReqID(ctx),
 		)
 
-		err = w.writeBackendConn(msgType, msg)
+		// Relay the request as decoded, not the client's bytes: encoding/json
+		// matches keys case-insensitively and keeps the last duplicate, so the
+		// raw bytes can name a different method to the backend than the one
+		// checked against the whitelist.
+		err = w.writeBackendConn(msgType, mustMarshalJSON(wsRelayReq(*req)))
 		if err != nil {
 			errC <- err
 			return
@@ -1800,6 +1804,15 @@ func (w *WSProxier) close() {
 			w.onClose()
 		}
 	})
+}
+
+// wsRelayReq is an RPCReq as relayed to a WebSocket backend. Fields the client
+// omitted stay omitted, so a notification without an id stays a notification.
+type wsRelayReq struct {
+	JSONRPC string          `json:"jsonrpc,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
 }
 
 func (w *WSProxier) prepareClientMsg(msg []byte) (*RPCReq, error) {
