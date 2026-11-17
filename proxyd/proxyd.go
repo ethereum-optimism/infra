@@ -33,6 +33,15 @@ func Start(config *Config) (*Server, func(), error) {
 	if len(config.RPCMethodMappings) == 0 {
 		return nil, nil, errors.New("must define at least one RPC method mapping")
 	}
+	serverTimeout := secondsToDuration(config.Server.TimeoutSeconds)
+	if serverTimeout == 0 {
+		serverTimeout = defaultRPCTimeout
+	}
+	for bgName, bgcfg := range config.BackendGroups {
+		if wait := time.Duration(bgcfg.ConsensusOutOfRangeWait); wait > 0 && wait >= serverTimeout {
+			return nil, nil, fmt.Errorf("backend group %s: consensus_out_of_range_wait (%s) must be shorter than the server timeout (%s)", bgName, wait, serverTimeout)
+		}
+	}
 	if config.RateLimit.UseAuthAlias && len(config.Authentication) == 0 {
 		log.Warn("use_auth_alias is enabled without authentication entries; requests will use IP-based rate limits")
 	}
@@ -668,6 +677,9 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
+			}
+			if bgcfg.ConsensusOutOfRangeWait > 0 {
+				copts = append(copts, WithOutOfRangeWait(time.Duration(bgcfg.ConsensusOutOfRangeWait)))
 			}
 			if bgcfg.ConsensusCLSyncThreshold > 0 {
 				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))

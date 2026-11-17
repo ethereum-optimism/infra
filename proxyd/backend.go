@@ -22,6 +22,7 @@ import (
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
 	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/websocket"
@@ -1140,6 +1141,12 @@ func (bg *BackendGroup) ForwardWithSource(ctx context.Context, rpcReqs []*RPCReq
 		return nil, "", nil
 	}
 
+	// Wait before choosing backends: consensus can advance during the wait by
+	// dropping a lagging backend from the group, which must not then serve.
+	if bg.Consensus != nil {
+		bg.waitForOutOfRangeBlocks(ctx, rpcReqs)
+	}
+
 	backends := bg.orderedBackendsForRequest()
 
 	overriddenResponses := make([]*indexedReqRes, 0)
@@ -2062,6 +2069,63 @@ func OverrideResponses(res []*RPCRes, overriddenResponses []*indexedReqRes) []*R
 		}
 	}
 	return res
+}
+
+// waitForOutOfRangeBlocks holds requests that name a block above the consensus
+// latest block until consensus reaches it, for up to consensus_out_of_range_wait.
+// Clients that learn of a block from a websocket subscription, which a single
+// backend serves, otherwise get null for it over HTTP until every consensus
+// backend has it and the poller has seen that. Requests still out of range
+// after the wait are answered as out of range by OverwriteConsensusResponses.
+func (bg *BackendGroup) waitForOutOfRangeBlocks(ctx context.Context, rpcReqs []*RPCReq) {
+	cp := bg.Consensus
+	if cp.outOfRangeWait <= 0 || cp.IsConsensusLayer() {
+		return
+	}
+	latest := cp.GetLatestBlockNumber()
+	if latest == 0 {
+		return
+	}
+	target := highestOutOfRangeBlock(RewriteContext{latest: latest, consensusMode: true}, rpcReqs)
+	if target == 0 {
+		return
+	}
+	outcome := cp.waitForLatestBlock(ctx, target)
+	RecordGroupConsensusOutOfRangeWait(bg, outcome)
+	log.Debug("waited for consensus to reach requested block",
+		"req_id", GetReqID(ctx),
+		"requested_block", target,
+		"consensus_latest", latest,
+		"outcome", outcome,
+	)
+}
+
+// highestOutOfRangeBlock returns the highest block number above rctx.latest
+// named by any of rpcReqs, or 0 if none names one.
+func highestOutOfRangeBlock(rctx RewriteContext, rpcReqs []*RPCReq) uint64 {
+	var highest uint64
+	for _, req := range rpcReqs {
+		// The rewriter stops at the first out-of-range block it meets (fromBlock
+		// before toBlock in a log range), so probe again with latest raised to
+		// that block until none is out of range. Each pass raises latest, and a
+		// request names at most two blocks.
+		probeCtx := rctx
+		for {
+			// RewriteRequest replaces Params rather than editing it in place,
+			// so a shallow copy leaves req untouched.
+			probe := *req
+			_, err := RewriteRequest(probeCtx, &probe, &RPCRes{})
+			var oor *BlockOutOfRangeError
+			if !errors.As(err, &oor) || oor.Block <= uint64(probeCtx.latest) {
+				break
+			}
+			if oor.Block > highest {
+				highest = oor.Block
+			}
+			probeCtx.latest = hexutil.Uint64(oor.Block)
+		}
+	}
+	return highest
 }
 
 func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overriddenResponses []*indexedReqRes, rewrittenReqs []*RPCReq) ([]*RPCReq, []*indexedReqRes) {

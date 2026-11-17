@@ -40,6 +40,7 @@ const (
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
 	ContextKeyReqReceivedAt                         = "req_received_at"
+	ContextKeyOutOfRangeWaitBudget                  = "out_of_range_wait_budget"
 	DefaultOpTxProxyAuthHeader                      = "X-Optimism-Signature"
 	DefaultMaxBatchRPCCallsLimit                    = 100
 	MaxBatchRPCCallsHardLimit                       = 1000
@@ -437,6 +438,9 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+	// One consensus_out_of_range_wait budget for the whole request: a batch is
+	// forwarded as several minibatches, and each must not wait in full.
+	ctx = withOutOfRangeWaitBudget(ctx)
 
 	// User can provide an API key via the "X-Api-Key" header
 	apiKey := r.Header.Get("X-Api-Key")

@@ -405,6 +405,15 @@ var (
 		"backend_group_name",
 	})
 
+	consensusOutOfRangeWaits = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "group_consensus_out_of_range_waits_total",
+		Help:      "Requests for a block above the consensus latest block held by consensus_out_of_range_wait, by outcome (caught_up, timeout, too_far, canceled, exhausted)",
+	}, []string{
+		"backend_group_name",
+		"outcome",
+	})
+
 	consensusSafeBlock = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: MetricsNamespace,
 		Name:      "group_consensus_safe_block",
@@ -933,6 +942,10 @@ func RecordGroupConsensusHAServingLocal(group *BackendGroup, servingLocal bool) 
 
 func RecordGroupConsensusLatestBlock(group *BackendGroup, blockNumber hexutil.Uint64) {
 	consensusLatestBlock.WithLabelValues(group.Name).Set(float64(blockNumber))
+}
+
+func RecordGroupConsensusOutOfRangeWait(group *BackendGroup, outcome string) {
+	consensusOutOfRangeWaits.WithLabelValues(group.Name, outcome).Inc()
 }
 
 func RecordGroupConsensusSafeBlock(group *BackendGroup, blockNumber hexutil.Uint64) {

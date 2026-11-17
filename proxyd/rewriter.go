@@ -38,6 +38,21 @@ var (
 	ErrRewriteRangeTooLarge   = errors.New("block range is too large")
 )
 
+// BlockOutOfRangeError is returned when a request names a block above the
+// consensus latest block. It matches ErrRewriteBlockOutOfRange with errors.Is
+// and carries the requested block number.
+type BlockOutOfRangeError struct {
+	Block uint64
+}
+
+func (e *BlockOutOfRangeError) Error() string {
+	return ErrRewriteBlockOutOfRange.Error()
+}
+
+func (e *BlockOutOfRangeError) Is(target error) bool {
+	return target == ErrRewriteBlockOutOfRange
+}
+
 // RewriteTags modifies the request and the response based on block tags
 func RewriteTags(rctx RewriteContext, req *RPCReq, res *RPCRes) (RewriteResult, error) {
 	rw, err := RewriteResponse(rctx, req, res)
@@ -302,7 +317,7 @@ func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
 		}
 	default:
 		if rctx.latest > 0 && bnh.BlockNumber.Int64() > int64(rctx.latest) {
-			return "", false, ErrRewriteBlockOutOfRange
+			return "", false, &BlockOutOfRangeError{Block: uint64(bnh.BlockNumber.Int64())}
 		}
 	}
 
@@ -330,7 +345,7 @@ func rewriteTagBlockNumberOrHash(rctx RewriteContext, current *rpc.BlockNumberOr
 		return &bn, true, nil
 	default:
 		if current.BlockNumber.Int64() > int64(rctx.latest) {
-			return nil, false, ErrRewriteBlockOutOfRange
+			return nil, false, &BlockOutOfRangeError{Block: uint64(current.BlockNumber.Int64())}
 		}
 	}
 
