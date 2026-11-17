@@ -1,6 +1,8 @@
 [server]
 
 rpc_port = 8545
+# forward each batch element on its own, so a batch spans minibatches
+max_upstream_batch_size = 1
 
 [backend]
 response_timeout_seconds = 1

@@ -1086,11 +1086,30 @@ const (
 	outOfRangeWaitTimeout  = "timeout"
 	outOfRangeWaitTooFar   = "too_far"
 	outOfRangeWaitCanceled = "canceled"
+	// The request already spent its consensus_out_of_range_wait on an earlier
+	// minibatch.
+	outOfRangeWaitExhausted = "exhausted"
 )
 
+// outOfRangeWaitBudget is the consensus_out_of_range_wait one HTTP request has
+// spent so far, shared by the minibatches it is forwarded as.
+type outOfRangeWaitBudget struct {
+	mu    sync.Mutex
+	spent time.Duration
+}
+
+func withOutOfRangeWaitBudget(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ContextKeyOutOfRangeWaitBudget, &outOfRangeWaitBudget{}) // nolint:staticcheck
+}
+
+func outOfRangeWaitBudgetFrom(ctx context.Context) *outOfRangeWaitBudget {
+	budget, _ := ctx.Value(ContextKeyOutOfRangeWaitBudget).(*outOfRangeWaitBudget)
+	return budget
+}
+
 // waitForLatestBlock blocks until the consensus latest block reaches target,
-// consensus_out_of_range_wait elapses or ctx is done, and reports which
-// happened. A target more than consensus_max_block_lag blocks above the
+// the request's remaining consensus_out_of_range_wait elapses or ctx is done,
+// and reports which happened. A target more than consensus_max_block_lag blocks above the
 // consensus latest block cannot be on any consensus backend yet, so it does
 // not wait for it.
 func (cp *ConsensusPoller) waitForLatestBlock(ctx context.Context, target uint64) string {
@@ -1102,7 +1121,25 @@ func (cp *ConsensusPoller) waitForLatestBlock(ctx context.Context, target uint64
 		return outOfRangeWaitTooFar
 	}
 
-	timer := time.NewTimer(cp.outOfRangeWait)
+	wait := cp.outOfRangeWait
+	// Requests without a budget (websocket messages) are forwarded once, so
+	// they may wait in full.
+	if budget := outOfRangeWaitBudgetFrom(ctx); budget != nil {
+		budget.mu.Lock()
+		wait -= budget.spent
+		budget.mu.Unlock()
+		if wait <= 0 {
+			return outOfRangeWaitExhausted
+		}
+		start := time.Now()
+		defer func() {
+			budget.mu.Lock()
+			budget.spent += time.Since(start)
+			budget.mu.Unlock()
+		}()
+	}
+
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	ticker := time.NewTicker(outOfRangeWaitPollInterval)
 	defer ticker.Stop()

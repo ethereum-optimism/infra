@@ -408,7 +408,7 @@ var (
 	consensusOutOfRangeWaits = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "group_consensus_out_of_range_waits_total",
-		Help:      "Requests for a block above the consensus latest block held by consensus_out_of_range_wait, by outcome (caught_up, timeout, too_far, canceled)",
+		Help:      "Requests for a block above the consensus latest block held by consensus_out_of_range_wait, by outcome (caught_up, timeout, too_far, canceled, exhausted)",
 	}, []string{
 		"backend_group_name",
 		"outcome",

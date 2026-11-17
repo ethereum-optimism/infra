@@ -121,7 +121,7 @@ func TestConsensusOutOfRangeWait(t *testing.T) {
 		require.Less(t, elapsed, 500*time.Millisecond)
 	})
 
-	t.Run("a batch waits for its highest block and serves every element", func(t *testing.T) {
+	t.Run("a batch serves every element once consensus reaches its blocks", func(t *testing.T) {
 		reset()
 
 		go func() {
@@ -140,5 +140,29 @@ func TestConsensusOutOfRangeWait(t *testing.T) {
 		require.Equal(t, 2, len(res))
 		require.Equal(t, "0x101", res[0]["result"].(map[string]interface{})["number"])
 		require.Equal(t, "0x102", res[1]["result"].(map[string]interface{})["number"])
+	})
+
+	t.Run("a batch spends one wait across its minibatches", func(t *testing.T) {
+		reset()
+
+		start := time.Now()
+		resRaw, statusCode, err := client.SendBatchRPC(
+			NewRPCReq("1", "eth_getBlockByNumber", []interface{}{"0x102", false}),
+			NewRPCReq("2", "eth_getBlockByNumber", []interface{}{"0x103", false}),
+			NewRPCReq("3", "eth_getBlockByNumber", []interface{}{"0x104", false}))
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		require.Equal(t, 200, statusCode)
+
+		var res []map[string]interface{}
+		require.NoError(t, json.Unmarshal(resRaw, &res))
+		require.Equal(t, 3, len(res))
+		for _, r := range res {
+			require.Nil(t, r["error"])
+			require.Nil(t, r["result"])
+		}
+		// three minibatches, one 1s budget
+		require.GreaterOrEqual(t, elapsed, time.Second)
+		require.Less(t, elapsed, 2*time.Second)
 	})
 }

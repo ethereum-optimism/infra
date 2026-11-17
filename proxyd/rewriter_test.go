@@ -849,6 +849,13 @@ func TestHighestOutOfRangeBlock(t *testing.T) {
 	}
 
 	require.Equal(t, uint64(0), highestOutOfRangeBlock(rctx, reqs[:1]))
+
+	// both ends of a log range above latest: the range ends at toBlock
+	logs := &RPCReq{Method: "eth_getLogs", Params: mustParams(map[string]interface{}{
+		"fromBlock": hexutil.Uint64(101).String(),
+		"toBlock":   hexutil.Uint64(105).String(),
+	})}
+	require.Equal(t, uint64(105), highestOutOfRangeBlock(rctx, []*RPCReq{logs}))
 }
 
 func TestBlockOutOfRangeError(t *testing.T) {
