@@ -48,6 +48,7 @@ type ConsensusPoller struct {
 	maxBlockLag        uint64
 	maxBlockRange      uint64
 	interval           time.Duration
+	outOfRangeWait     time.Duration
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
@@ -285,6 +286,14 @@ func WithMaxBlockLag(maxBlockLag uint64) ConsensusOpt {
 func WithMaxBlockRange(maxBlockRange uint64) ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.maxBlockRange = maxBlockRange
+	}
+}
+
+// WithOutOfRangeWait sets how long a request for a block above the consensus
+// latest block waits for consensus to reach it (consensus_out_of_range_wait).
+func WithOutOfRangeWait(wait time.Duration) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.outOfRangeWait = wait
 	}
 }
 
@@ -1064,4 +1073,52 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 	}
 
 	return candidates
+}
+
+// outOfRangeWaitPollInterval is how often a request held by
+// consensus_out_of_range_wait rechecks the consensus latest block.
+const outOfRangeWaitPollInterval = 20 * time.Millisecond
+
+// Outcomes of waitForLatestBlock, recorded on
+// proxyd_group_consensus_out_of_range_waits_total.
+const (
+	outOfRangeWaitCaughtUp = "caught_up"
+	outOfRangeWaitTimeout  = "timeout"
+	outOfRangeWaitTooFar   = "too_far"
+	outOfRangeWaitCanceled = "canceled"
+)
+
+// waitForLatestBlock blocks until the consensus latest block reaches target,
+// consensus_out_of_range_wait elapses or ctx is done, and reports which
+// happened. A target more than consensus_max_block_lag blocks above the
+// consensus latest block cannot be on any consensus backend yet, so it does
+// not wait for it.
+func (cp *ConsensusPoller) waitForLatestBlock(ctx context.Context, target uint64) string {
+	latest := uint64(cp.GetLatestBlockNumber())
+	if target <= latest {
+		return outOfRangeWaitCaughtUp
+	}
+	if target-latest > cp.maxBlockLag {
+		return outOfRangeWaitTooFar
+	}
+
+	timer := time.NewTimer(cp.outOfRangeWait)
+	defer timer.Stop()
+	ticker := time.NewTicker(outOfRangeWaitPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return outOfRangeWaitCanceled
+		case <-timer.C:
+			if uint64(cp.GetLatestBlockNumber()) >= target {
+				return outOfRangeWaitCaughtUp
+			}
+			return outOfRangeWaitTimeout
+		case <-ticker.C:
+			if uint64(cp.GetLatestBlockNumber()) >= target {
+				return outOfRangeWaitCaughtUp
+			}
+		}
+	}
 }

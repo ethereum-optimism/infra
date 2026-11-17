@@ -220,6 +220,15 @@ type BackendGroupConfig struct {
 	ConsensusMaxBlockLag        uint64       `toml:"consensus_max_block_lag"`
 	ConsensusMaxBlockRange      uint64       `toml:"consensus_max_block_range"`
 	ConsensusMinPeerCount       int          `toml:"consensus_min_peer_count"`
+
+	// consensus_out_of_range_wait is how long a request that names a block above
+	// the consensus latest block, by at most consensus_max_block_lag, waits for
+	// consensus to reach that block before proxyd answers it as out of range.
+	// A block announced over a websocket subscription (served by a single
+	// backend) is otherwise not yet fetchable over HTTP until every consensus
+	// backend has it. Default: 0 (answer immediately).
+	ConsensusOutOfRangeWait TOMLDuration `toml:"consensus_out_of_range_wait"`
+
 	// Will set Max Block Range for non-consensus eth_getLogs and eth_newFilter
 	// Will override consensus_max_block_range if consensus_max_block range is also set
 	MaxBlockRange uint64 `toml:"max_block_range"`

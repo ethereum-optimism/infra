@@ -669,6 +669,9 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
 			}
+			if bgcfg.ConsensusOutOfRangeWait > 0 {
+				copts = append(copts, WithOutOfRangeWait(time.Duration(bgcfg.ConsensusOutOfRangeWait)))
+			}
 			if bgcfg.ConsensusCLSyncThreshold > 0 {
 				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))
 			}

@@ -113,6 +113,11 @@ backends = ["infura"]
 # consensus_max_block_lag = 16
 # Maximum block range (for eth_getLogs method), no default
 # consensus_max_block_range = 20000
+# How long a request for a block above the consensus latest block (by at most
+# consensus_max_block_lag) waits for consensus to reach it before it is answered
+# as out of range. Lets clients fetch a block over HTTP right after a websocket
+# newHeads notification announces it. Default 0 (no wait)
+# consensus_out_of_range_wait = "1s"
 # Minimum peer count, default 3
 # consensus_min_peer_count = 4
 

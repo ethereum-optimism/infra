@@ -629,7 +629,7 @@ func TestRewriteRequest(t *testing.T) {
 				require.Nil(t, err)
 				require.Equal(t, tt.expected, result)
 			} else {
-				require.Equal(t, tt.expectedErr, err)
+				require.EqualError(t, err, tt.expectedErr.Error())
 			}
 			if tt.check != nil {
 				tt.check(t, tt.args)
@@ -818,4 +818,43 @@ func TestRewriteRequest_NonConsensusMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHighestOutOfRangeBlock(t *testing.T) {
+	rctx := RewriteContext{latest: hexutil.Uint64(100), consensusMode: true}
+	addr := "0x4200000000000000000000000000000000000011"
+	mustParams := func(params ...interface{}) json.RawMessage {
+		raw, err := json.Marshal(params)
+		require.NoError(t, err)
+		return raw
+	}
+	reqs := []*RPCReq{
+		{Method: "eth_getBlockByNumber", Params: mustParams("latest", false)},
+		{Method: "eth_getBlockByNumber", Params: mustParams(hexutil.Uint64(101).String(), false)},
+		{Method: "eth_getBalance", Params: mustParams(addr, hexutil.Uint64(103).String())},
+		{Method: "eth_getLogs", Params: mustParams(map[string]interface{}{
+			"fromBlock": hexutil.Uint64(99).String(),
+			"toBlock":   hexutil.Uint64(102).String(),
+		})},
+		{Method: "eth_chainId", Params: mustParams()},
+	}
+	before := make([]string, len(reqs))
+	for i, req := range reqs {
+		before[i] = string(req.Params)
+	}
+
+	require.Equal(t, uint64(103), highestOutOfRangeBlock(rctx, reqs))
+	for i, req := range reqs {
+		require.Equal(t, before[i], string(req.Params), "request %d params changed", i)
+	}
+
+	require.Equal(t, uint64(0), highestOutOfRangeBlock(rctx, reqs[:1]))
+}
+
+func TestBlockOutOfRangeError(t *testing.T) {
+	_, _, err := rewriteTag(RewriteContext{latest: 10, consensusMode: true}, "0xc")
+	require.ErrorIs(t, err, ErrRewriteBlockOutOfRange)
+	var oor *BlockOutOfRangeError
+	require.ErrorAs(t, err, &oor)
+	require.Equal(t, uint64(12), oor.Block)
 }
