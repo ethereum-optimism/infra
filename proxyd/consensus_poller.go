@@ -981,12 +981,14 @@ func (cp *ConsensusPoller) getConsensusCandidates() map[*Backend]*backendState {
 //   - updated recently
 //   - not lagging latest block
 //   - (CL mode) finalized and local_safe blocks are at or above the current group consensus,
-//     preventing a restarting backend from dragging consensus backward
+//     preventing a restarting backend from dragging consensus backward, unless every
+//     otherwise-eligible backend is below it (a group-wide rewind)
 func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*backendState {
 
 	candidates := make(map[*Backend]*backendState, len(cp.backendGroup.Backends))
 
 	var consensusFinalized, consensusLocalSafe hexutil.Uint64
+	belowConsensus := make(map[*Backend]*backendState)
 	if cp.consensusLayer {
 		consensusFinalized = cp.GetFinalizedBlockNumber()
 		consensusLocalSafe = cp.GetLocalSafeBlockNumber()
@@ -1016,6 +1018,9 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 		if !be.skipIsSyncingCheck && !bs.inSync {
 			continue
 		}
+		if bs.lastUpdate.Add(cp.maxUpdateThreshold).Before(time.Now()) {
+			continue
+		}
 		if cp.consensusLayer {
 			if consensusFinalized > 0 && bs.finalizedBlockNumber < consensusFinalized {
 				log.Warn("backend excluded: finalized block below consensus",
@@ -1023,6 +1028,7 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 					"backend_finalized", bs.finalizedBlockNumber,
 					"consensus_finalized", consensusFinalized,
 				)
+				belowConsensus[be] = bs
 				continue
 			}
 			if consensusLocalSafe > 0 && bs.localSafeBlockNumber < consensusLocalSafe {
@@ -1031,14 +1037,28 @@ func (cp *ConsensusPoller) FilterCandidates(backends []*Backend) map[*Backend]*b
 					"backend_local_safe", bs.localSafeBlockNumber,
 					"consensus_local_safe", consensusLocalSafe,
 				)
+				belowConsensus[be] = bs
 				continue
 			}
 		}
-		if bs.lastUpdate.Add(cp.maxUpdateThreshold).Before(time.Now()) {
-			continue
-		}
 
 		candidates[be] = bs
+	}
+
+	// The below-consensus rule keeps one restarting backend from dragging consensus
+	// backward. When every otherwise-eligible backend is below consensus, the whole group
+	// moved back together (e.g. interop supernodes after an invalidation replaced a
+	// local-safe block), so excluding them all would leave no consensus group and fail
+	// every request. Accept the group-wide rewind instead.
+	if len(candidates) == 0 && len(belowConsensus) > 0 {
+		log.Warn("all eligible CL backends are below consensus; accepting group-wide rewind",
+			"backends", len(belowConsensus),
+			"consensus_finalized", consensusFinalized,
+			"consensus_local_safe", consensusLocalSafe,
+		)
+		for be, bs := range belowConsensus {
+			candidates[be] = bs
+		}
 	}
 
 	// find the highest block, in order to use it defining the highest non-lagging ancestor block

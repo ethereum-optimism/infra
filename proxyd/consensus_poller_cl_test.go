@@ -432,3 +432,34 @@ func TestUpdateBackendGroupConsensus_HaltFreezesAndRecovers(t *testing.T) {
 	require.EqualValues(t, 230, cp.GetLatestBlockNumber(), "latest block must advance after recovery")
 	require.Len(t, cp.GetConsensusGroup(), 2, "both backends must repopulate the group after recovery")
 }
+
+// When every eligible backend's local_safe is below the group consensus (all supernodes
+// rewound together after an interop invalidation), FilterCandidates must accept them
+// instead of emptying the consensus group. A single lagging backend among healthy peers
+// is still excluded.
+func TestFilterCandidates_CLGroupWideRewindAccepted(t *testing.T) {
+	srvs := make([]*httptest.Server, 3)
+	backends := make([]*Backend, 3)
+	for i := range srvs {
+		srvs[i] = httptest.NewServer(outputRootHandler("0xroot"))
+		defer srvs[i].Close()
+		backends[i] = newTestBackend(t, srvs[i], time.Second)
+	}
+	cp := newTestPoller(backends, WithCLConsensusMode())
+	cp.tracker.SetState(ConsensusTrackerState{Latest: 300, Safe: 225, Finalized: 193, LocalSafe: 225})
+
+	// One backend behind, two at consensus: the lagging one is excluded.
+	seedCLBackendState(cp, backends[0], 300, 224, 224, 193)
+	seedCLBackendState(cp, backends[1], 300, 225, 225, 193)
+	seedCLBackendState(cp, backends[2], 300, 225, 225, 193)
+	got := cp.FilterCandidates(backends)
+	require.Len(t, got, 2)
+	require.NotContains(t, got, backends[0])
+
+	// All three rewound together: the group-wide rewind is accepted.
+	for _, be := range backends {
+		seedCLBackendState(cp, be, 300, 224, 224, 193)
+	}
+	got = cp.FilterCandidates(backends)
+	require.Len(t, got, 3)
+}
