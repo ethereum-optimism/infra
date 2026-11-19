@@ -1,136 +1,297 @@
 {
+  "version": 2,
+  "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images",
+  "release": {
+    "publish_tag": "${version}",
+    "source_ref": "${ref_name}"
+  },
   "shared_paths": [
     ".github/workflows/build-images.yaml",
     ".github/images.json",
-    "go.mod"
+    "go.mod",
+    "melange/pipelines/**"
   ],
+  "packages": {
+    "cci-stats": {},
+    "circleci-runner": {},
+    "op-conductor-mon": {},
+    "op-conductor-ops": {},
+    "op-signer": {},
+    "op-txproxy": {},
+    "op-ufm": {},
+    "peer-mgmt-service": {},
+    "proxyd": {},
+    "replica-healthcheck": {}
+  },
   "images": {
     "bailiff": {
-      "context": "bailiff",
-      "dockerfile": "Dockerfile",
-      "paths": ["bailiff/**"]
+      "builders": {
+        "docker": {
+          "context": "bailiff",
+          "dockerfile": "Dockerfile"
+        }
+      },
+      "paths": [
+        "bailiff/**"
+      ]
     },
     "ci-base-clang": {
-      "context": "ci-base-clang",
-      "dockerfile": "Dockerfile",
-      "paths": ["ci-base-clang/**"]
+      "builders": {
+        "docker": {
+          "context": "ci-base-clang",
+          "dockerfile": "Dockerfile"
+        }
+      },
+      "paths": [
+        "ci-base-clang/**"
+      ]
     },
     "cci-stats": {
-      "context": ".",
-      "dockerfile": "cci-stats/Dockerfile",
-      "paths": ["cci-stats/**"]
-    },
-    "op-conductor-mon": {
-      "context": ".",
-      "dockerfile": "op-conductor-mon/Dockerfile",
-      "paths": ["op-conductor-mon/**"]
-    },
-    "op-conductor-ops": {
-      "context": ".",
-      "dockerfile": "op-conductor-ops/Dockerfile",
-      "paths": ["op-conductor-ops/**"]
-    },
-    "op-signer": {
-      "context": ".",
-      "dockerfile": "op-signer/Dockerfile",
-      "paths": ["op-signer/**"]
-    },
-    "op-txproxy": {
-      "context": ".",
-      "dockerfile": "op-txproxy/Dockerfile",
-      "paths": ["op-txproxy/**"]
-    },
-    "op-ufm": {
-      "context": ".",
-      "dockerfile": "op-ufm/Dockerfile",
-      "paths": ["op-ufm/**"]
-    },
-    "peer-mgmt-service": {
-      "context": ".",
-      "dockerfile": "peer-mgmt-service/Dockerfile",
-      "paths": ["peer-mgmt-service/**"]
-    },
-    "proxyd": {
-      "context": ".",
-      "dockerfile": "proxyd/Dockerfile",
-      "paths": ["proxyd/**"]
-    },
-    "replica-healthcheck": {
-      "context": ".",
-      "dockerfile": "replica-healthcheck/Dockerfile",
-      "paths": ["replica-healthcheck/**"]
-    }
-  },
-  "apko_images": {
-    "cci-stats": {
-      "melange_config": "melange/cci-stats.yaml",
-      "apko_config_dir": "apko",
-      "services": "cci-stats",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "op-conductor-mon": {
-      "melange_config": "melange/op-conductor-mon.yaml",
-      "apko_config_dir": "apko",
-      "services": "op-conductor-mon",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "op-conductor-ops": {
-      "melange_config": "melange/op-conductor-ops.yaml",
-      "apko_config_dir": "apko",
-      "services": "op-conductor-ops",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "op-signer": {
-      "melange_config": "melange/op-signer.yaml",
-      "apko_config_dir": "apko",
-      "services": "op-signer",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "op-txproxy": {
-      "melange_config": "melange/op-txproxy.yaml",
-      "apko_config_dir": "apko",
-      "services": "op-txproxy",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "op-ufm": {
-      "melange_config": "melange/op-ufm.yaml",
-      "apko_config_dir": "apko",
-      "services": "op-ufm",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "peer-mgmt-service": {
-      "melange_config": "melange/peer-mgmt-service.yaml",
-      "apko_config_dir": "apko",
-      "services": "peer-mgmt-service",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "proxyd": {
-      "melange_config": "melange/proxyd.yaml",
-      "apko_config_dir": "apko",
-      "services": "proxyd",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
-    },
-    "replica-healthcheck": {
-      "melange_config": "melange/replica-healthcheck.yaml",
-      "apko_config_dir": "apko",
-      "services": "replica-healthcheck",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "cci-stats/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "cci-stats"
+          ],
+          "smoke": {
+            "commands": [
+              "cci-stats --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "cci-stats/**",
+        "melange/cci-stats.yaml",
+        "apko/cci-stats.yaml"
+      ]
     },
     "circleci-runner-wolfi": {
-      "melange_config": "melange/circleci-runner.yaml",
-      "apko_config_dir": "apko",
-      "services": "circleci-runner-wolfi",
-      "smoke_test": "",
-      "registry": "us-docker.pkg.dev/oplabs-tools-artifacts/images"
+      "builders": {
+        "apko": {
+          "needs_packages": [
+            "circleci-runner"
+          ],
+          "tag_prefix": "apko-",
+          "smoke": {
+            "commands": [
+              "mise --version",
+              "go version",
+              "rustc --version",
+              "cargo --version",
+              "sccache --version",
+              "clang --version",
+              "mold --version",
+              "cc --version",
+              "pkg-config --version",
+              "git --version",
+              "bash --version"
+            ]
+          }
+        }
+      },
+      "primary": "apko",
+      "paths": [
+        "melange/circleci-runner.yaml",
+        "melange/pipelines/circleci-runner/**",
+        "apko/circleci-runner-wolfi.yaml"
+      ]
+    },
+    "op-conductor-mon": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "op-conductor-mon/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "op-conductor-mon"
+          ],
+          "smoke": {
+            "commands": [
+              "op-conductor-mon --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "op-conductor-mon/**",
+        "melange/op-conductor-mon.yaml",
+        "apko/op-conductor-mon.yaml"
+      ]
+    },
+    "op-conductor-ops": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "op-conductor-ops/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "op-conductor-ops"
+          ],
+          "smoke": {
+            "commands": [
+              "op-conductor-ops --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "op-conductor-ops/**",
+        "melange/op-conductor-ops.yaml",
+        "apko/op-conductor-ops.yaml"
+      ]
+    },
+    "op-signer": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "op-signer/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "op-signer"
+          ],
+          "smoke": {
+            "commands": [
+              "op-signer --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "op-signer/**",
+        "melange/op-signer.yaml",
+        "apko/op-signer.yaml"
+      ]
+    },
+    "op-txproxy": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "op-txproxy/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "op-txproxy"
+          ],
+          "smoke": {
+            "commands": [
+              "op-txproxy --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "op-txproxy/**",
+        "melange/op-txproxy.yaml",
+        "apko/op-txproxy.yaml"
+      ]
+    },
+    "op-ufm": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "op-ufm/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "op-ufm"
+          ],
+          "smoke": {
+            "commands": [
+              "ufm --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "op-ufm/**",
+        "melange/op-ufm.yaml",
+        "apko/op-ufm.yaml"
+      ]
+    },
+    "peer-mgmt-service": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "peer-mgmt-service/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "peer-mgmt-service"
+          ],
+          "smoke": {
+            "commands": [
+              "pms --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "peer-mgmt-service/**",
+        "melange/peer-mgmt-service.yaml",
+        "apko/peer-mgmt-service.yaml"
+      ]
+    },
+    "proxyd": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "proxyd/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "proxyd"
+          ],
+          "smoke": {
+            "commands": [
+              "proxyd --help"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "proxyd/**",
+        "melange/proxyd.yaml",
+        "apko/proxyd.yaml"
+      ]
+    },
+    "replica-healthcheck": {
+      "builders": {
+        "docker": {
+          "context": ".",
+          "dockerfile": "replica-healthcheck/Dockerfile"
+        },
+        "apko": {
+          "needs_packages": [
+            "replica-healthcheck"
+          ],
+          "smoke": {
+            "commands": [
+              "node --version"
+            ]
+          }
+        }
+      },
+      "primary": "docker",
+      "paths": [
+        "replica-healthcheck/**",
+        "melange/replica-healthcheck.yaml",
+        "apko/replica-healthcheck.yaml"
+      ]
     }
   }
 }
