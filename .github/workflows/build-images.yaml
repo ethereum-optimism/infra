@@ -1,54 +1,31 @@
-name: build images
+# Caller for ethereum-optimism/factory build-images.yaml.
+# Copy to .github/workflows/build-images.yaml in the repository that owns the images.
+# The repository needs .github/images.json (see docs/images-catalog.md) and a
+# GitHub environment named "release" for publishing. Require the "result" job of
+# this workflow as the status check.
+name: Build images
 
 on:
   push:
     branches:
-      - 'main'
+      - main
     tags:
-      - '*/v*' # Match tags like proxyd/v1.2.3
+      - '*/v*'
       - 'v*'
   pull_request:
-    branches:
-      - 'main'
+  merge_group:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      matrix_json: ${{ steps.plan.outputs.matrix_json }}
-      has_builds: ${{ steps.plan.outputs.has_builds }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@71cf2267d89c5cb81562390fa70a37fa40b1305e # v6
-        with:
-          fetch-depth: 0
-      - name: Plan
-        id: plan
-        uses: ethereum-optimism/factory/actions/plan@80fb1914d8f68ea4ac277beff4541cc4a669569f
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-  build:
-    needs: [plan]
-    if: needs.plan.outputs.has_builds == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.plan.outputs.matrix_json) }}
-    uses: ethereum-optimism/factory/.github/workflows/docker.yaml@6d3fc3a764d30eac014a38137c551a9ba74c0c9f
-    with:
-      image_name: ${{ matrix.image_name }}
-      tag: ${{ matrix.tag }}
-      context: ${{ matrix.context }}
-      dockerfile: ${{ matrix.dockerfile }}
-      env: ${{ matrix.env }}
-      build_args: ${{ matrix.build_args }}
-      gcp_project_id: ${{ vars.GCP_PROJECT_ID_OPLABS_TOOLS_ARTIFACTS }}
-      registry: us-docker.pkg.dev/oplabs-tools-artifacts/images
+jobs:
+  build-images:
     permissions:
       contents: read
       id-token: write
       attestations: write
+    uses: ethereum-optimism/factory/.github/workflows/build-images.yaml@8d8e180e5993952ca1c7e6c6380dc4b2ba7d1bfa
