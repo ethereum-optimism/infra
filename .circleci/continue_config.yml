@@ -1,7 +1,7 @@
 version: 2.1
 
 orbs:
-  circleci-utils: ethereum-optimism/circleci-utils@1.0.33
+  circleci-utils: ethereum-optimism/circleci-utils@1.0.34
 
 parameters:
   run-build-op-conductor-mon:
