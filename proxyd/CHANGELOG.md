@@ -4,6 +4,7 @@
 
 ### Minor Changes
 
+- Consensus mode: new backend group option `consensus_out_of_range_wait` (default `0`, off). A request that names a block above the consensus latest block, by at most `consensus_max_block_lag`, waits up to this long for consensus to reach that block instead of being answered as out of range at once. Websocket subscriptions are served by a single backend, so a client that fetches a block over HTTP right after a `newHeads` notification otherwise gets `null` until every consensus backend has the block and the poller has seen it. One HTTP request (a batch included, across its minibatches) waits at most this long in total, and the wait must be shorter than the server `timeout_seconds`. New counter `proxyd_group_consensus_out_of_range_waits_total{outcome}` (`caught_up`, `timeout`, `too_far`, `canceled`, `exhausted`).
 - Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms measured from `eth_sendRawTransaction` request receipt (covering proxyd-internal handling and the forward round-trip) to block/subblock visibility.
 - Consensus HA: new backend group option `consensus_ha_serve_local_when_stale` (default `false`). When enabled, an instance whose copy of the shared consensus state has not been refreshed for longer than the lock period (e.g. it cannot reach Redis) serves its locally polled consensus state instead of the frozen shared state. Instances may briefly disagree on the head while this happens. New gauge `proxyd_group_consensus_ha_serving_local` is 1 while an instance does this.
 

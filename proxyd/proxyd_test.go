@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,5 +88,31 @@ func TestParseCommaSeparatedList(t *testing.T) {
 				t.Errorf("parseCommaSeparatedList(%q) = %v, want %v", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestStartRejectsOutOfRangeWaitAtServerTimeout(t *testing.T) {
+	newConfig := func(timeoutSeconds int, wait time.Duration) *Config {
+		return &Config{
+			Server:   ServerConfig{TimeoutSeconds: timeoutSeconds},
+			Backends: BackendsConfig{"node": &BackendConfig{RPCURL: "http://127.0.0.1:1"}},
+			BackendGroups: BackendGroupsConfig{"main": &BackendGroupConfig{
+				Backends:                []string{"node"},
+				RoutingStrategy:         ConsensusAwareRoutingStrategy,
+				ConsensusOutOfRangeWait: TOMLDuration(wait),
+			}},
+			RPCMethodMappings: map[string]string{"eth_chainId": "main"},
+		}
+	}
+
+	_, _, err := Start(newConfig(2, 2*time.Second))
+	if err == nil || !strings.Contains(err.Error(), "consensus_out_of_range_wait") {
+		t.Fatalf("expected consensus_out_of_range_wait error at the server timeout, got %v", err)
+	}
+
+	// timeout_seconds unset: the default server timeout applies
+	_, _, err = Start(newConfig(0, defaultRPCTimeout))
+	if err == nil || !strings.Contains(err.Error(), "consensus_out_of_range_wait") {
+		t.Fatalf("expected consensus_out_of_range_wait error at the default server timeout, got %v", err)
 	}
 }
