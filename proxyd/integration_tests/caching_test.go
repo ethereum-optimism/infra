@@ -330,3 +330,49 @@ func countRequests(backend *MockBackend, name string) int {
 	}
 	return count
 }
+
+func TestTimedCaching(t *testing.T) {
+	redis, err := miniredis.Run()
+	require.NoError(t, err)
+	defer redis.Close()
+	hdlr := NewBatchRPCResponseRouter()
+	hdlr.SetRoute("eth_getBlockByNumber", "999", "block")
+	backend := NewMockBackend(hdlr)
+	defer backend.Close()
+	t.Setenv("GOOD_BACKEND_RPC_URL", backend.URL())
+	t.Setenv("REDIS_URL", fmt.Sprintf("redis://%s", redis.Addr()))
+	config := ReadConfig("caching")
+	config.Redis.FallbackToMemory = true
+	config.Cache.MethodTTLs = map[string]proxyd.TOMLDuration{
+		"eth_getBlockByNumber": proxyd.TOMLDuration(time.Second),
+	}
+	_, shutdown, err := proxyd.Start(config)
+	require.NoError(t, err)
+	defer shutdown()
+	client := NewProxydClient("http://127.0.0.1:8545")
+	send := func(params []interface{}) {
+		t.Helper()
+		res, _, err := client.SendRPC("eth_getBlockByNumber", params)
+		require.NoError(t, err)
+		RequireEqualJSON(t, []byte(`{"jsonrpc":"2.0","id":999,"result":"block"}`), res)
+	}
+	latest := []interface{}{"latest", false}
+	send(latest)
+	send(latest)
+	require.Equal(t, 1, countRequests(backend, "eth_getBlockByNumber"))
+	send([]interface{}{"latest", true})
+	require.Equal(t, 2, countRequests(backend, "eth_getBlockByNumber"))
+	send([]interface{}{"pending", false})
+	send([]interface{}{"pending", false})
+	require.Equal(t, 3, countRequests(backend, "eth_getBlockByNumber"))
+	redis.FastForward(time.Second)
+	send(latest)
+	require.Equal(t, 4, countRequests(backend, "eth_getBlockByNumber"))
+	// Timed methods must continue forwarding during Redis outages, even when
+	// fallback_to_memory is enabled for the legacy immutable cache.
+	redis.Close()
+	send(latest)
+	send(latest)
+	require.Equal(t, 6, countRequests(backend, "eth_getBlockByNumber"))
+
+}

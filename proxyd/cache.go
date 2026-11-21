@@ -150,7 +150,7 @@ type rpcCache struct {
 	handlers map[string]RPCMethodHandler
 }
 
-func newRPCCache(cache Cache) RPCCache {
+func newRPCCache(cache Cache) *rpcCache {
 	staticHandler := &StaticMethodHandler{cache: cache}
 	debugGetRawReceiptsHandler := &StaticMethodHandler{cache: cache,
 		filterGet: func(req *RPCReq) bool {
