@@ -5,11 +5,13 @@ import (
 	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/axelKingsley/go-circleci"
+	cciclient "github.com/ethereum-optimism/infra/cci-stats/pkg/cci"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/config"
 	"github.com/ethereum-optimism/infra/cci-stats/pkg/db"
 )
@@ -81,6 +83,34 @@ func (f *fakePipelines) ListWorkflows(_ context.Context, id string, opts circlec
 type fakeWorkflows struct {
 	circleci.Workflows
 	jobs map[string][]*circleci.WorkflowJob
+}
+
+type fakeWorkflowJobPager struct {
+	pages map[string]*circleci.WorkflowJobList
+	calls []string
+}
+
+func (f *fakeWorkflowJobPager) ListWorkflowJobsPage(_ context.Context, _ string, pageToken string) (*circleci.WorkflowJobList, error) {
+	f.calls = append(f.calls, pageToken)
+	return f.pages[pageToken], nil
+}
+
+func TestFetchJobsExhaustsPages(t *testing.T) {
+	pager := &fakeWorkflowJobPager{pages: map[string]*circleci.WorkflowJobList{
+		"":     {Items: []*circleci.WorkflowJob{{ID: "job-1"}}, NextPageToken: "next"},
+		"next": {Items: []*circleci.WorkflowJob{{ID: "job-2"}}},
+	}}
+
+	jobs, err := fetchJobs(context.Background(), pager, "workflow-1")
+	if err != nil {
+		t.Fatalf("fetchJobs failed: %v", err)
+	}
+	if len(jobs) != 2 || jobs[0].ID != "job-1" || jobs[1].ID != "job-2" {
+		t.Fatalf("jobs = %+v, want both pages in order", jobs)
+	}
+	if got := strings.Join(pager.calls, ","); got != ",next" {
+		t.Fatalf("page tokens = %q, want empty token followed by next", got)
+	}
 }
 
 func (f *fakeWorkflows) ListWorkflowJobs(_ context.Context, id string) (*circleci.WorkflowJobList, error) {
@@ -248,7 +278,7 @@ func TestGenerateReport_RetriesUnfinishedPipeline(t *testing.T) {
 	conn := newFakeDB()
 
 	// Run one: main is still running, so nothing of it is recorded yet.
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	got, ok := conn.pipelines["pipeline-1"]
@@ -273,7 +303,7 @@ func TestGenerateReport_RetriesUnfinishedPipeline(t *testing.T) {
 		{ID: "wf-main", Name: "main", Status: "success"},
 	}
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if pipelinesAPI.getCalls == 0 {
@@ -320,7 +350,7 @@ func TestGenerateReport_KeepsTestResultsWhenMetadataMissing(t *testing.T) {
 
 	// Run one records the job and its results; extra is still running, so the
 	// pipeline stays on the retry list.
-	if err := GenerateReport(context.Background(), cfg, client, conn); err != nil {
+	if err := GenerateReport(context.Background(), cfg, &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	if len(conn.testResults["wf-main/job-1"]) != 1 {
@@ -336,7 +366,7 @@ func TestGenerateReport_KeepsTestResultsWhenMetadataMissing(t *testing.T) {
 	}
 
 	before := conn.replaceCalls["wf-main/job-1"]
-	if err := GenerateReport(context.Background(), cfg, client, conn); err != nil {
+	if err := GenerateReport(context.Background(), cfg, &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if got := conn.testResults["wf-main/job-1"]; len(got) != 1 || got[0].Name != "TestFoo" {
@@ -371,7 +401,7 @@ func TestGenerateReport_SkipsFailedRetry(t *testing.T) {
 		Jobs: &fakeJobs{},
 	}
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("a retried pipeline that cannot be fetched failed the whole run: %v", err)
 	}
 	if got := conn.pipelines["healthy"]; !got.Complete {
@@ -401,7 +431,7 @@ func TestGenerateReport_ClaimsPipelinesBeforeIndexing(t *testing.T) {
 	}
 	conn := newFakeDB()
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err == nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err == nil {
 		t.Fatal("expected the run to fail on the listed pipeline that could not be indexed")
 	}
 
@@ -452,7 +482,7 @@ func TestGenerateReport_SkipsFailedRetryThatIsAlsoListed(t *testing.T) {
 		Jobs:      &fakeJobs{},
 	}
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("a pipeline already on the retry list failed the whole run: %v", err)
 	}
 	if conn.pipelines["stuck"].Complete {
@@ -482,7 +512,7 @@ func TestGenerateReport_DoesNotClaimBeyondTheHorizon(t *testing.T) {
 		Jobs:      &fakeJobs{},
 	}
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if _, ok := conn.pipelines["stale"]; ok {
@@ -511,7 +541,7 @@ func TestGenerateReport_PaginatesWorkflows(t *testing.T) {
 	}
 	conn := newFakeDB()
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if pipelinesAPI.pagesServed != 2 {
@@ -539,7 +569,7 @@ func TestGenerateReport_PipelineWithNoMatchingWorkflows(t *testing.T) {
 	}
 	conn := newFakeDB()
 
-	if err := GenerateReport(context.Background(), testConfig(), client, conn); err != nil {
+	if err := GenerateReport(context.Background(), testConfig(), &cciclient.Client{Client: client}, conn); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := conn.pipelines["tag-pipeline"]
