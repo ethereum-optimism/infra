@@ -16,12 +16,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
-	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log/logcli"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
@@ -213,7 +213,7 @@ var _ cliapp.Lifecycle = (*SignerApp)(nil)
 func MainAppAction(version string) cliapp.LifecycleAction {
 	return func(cliCtx *cli.Context, _ context.CancelCauseFunc) (cliapp.Lifecycle, error) {
 		cfg := NewConfig(cliCtx)
-		logger := oplog.NewLogger(cliCtx.App.Writer, cfg.LogConfig)
+		logger := logcli.NewLogger(cliCtx.App.Writer, cfg.LogConfig)
 		return InitFromConfig(cliCtx.Context, logger, cfg, version)
 	}
 }
@@ -235,9 +235,9 @@ func ClientSign(action SignActionType) func(cliCtx *cli.Context) error {
 			return fmt.Errorf("invalid CLI flags: %w", err)
 		}
 
-		logCfg := oplog.ReadCLIConfig(cliCtx)
-		l := oplog.NewLogger(os.Stdout, logCfg)
-		oplog.SetGlobalLogHandler(l.Handler())
+		logCfg := logcli.ReadCLIConfig(cliCtx)
+		l := logcli.NewLogger(os.Stdout, logCfg)
+		logcli.SetGlobalLogHandler(l.Handler())
 
 		cl, err := signer.NewSignerClient(l, cfg.Endpoint, cfg.Headers, cfg.TLSConfig)
 		if err != nil {

@@ -14,9 +14,9 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
