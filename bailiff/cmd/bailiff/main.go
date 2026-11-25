@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
-	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log/logcli"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/google/go-github/v66/github"
 	"github.com/urfave/cli/v2"
@@ -77,9 +77,9 @@ func main() {
 	app.Usage = "Tool to authorize pull requests from external contributors."
 	app.Flags = cliapp.ProtectFlags(GlobalFlags)
 	app.Action = func(cliCtx *cli.Context) error {
-		logCfg := oplog.ReadCLIConfig(cliCtx)
-		l := oplog.NewLogger(oplog.AppOut(cliCtx), logCfg)
-		oplog.SetGlobalLogHandler(l.Handler())
+		logCfg := logcli.ReadCLIConfig(cliCtx)
+		l := logcli.NewLogger(logcli.AppOut(cliCtx), logCfg)
+		logcli.SetGlobalLogHandler(l.Handler())
 
 		cfgPath := cliCtx.String(ConfigPathFlagName)
 		cfg, err := bailiff.ReadConfig(cfgPath)
@@ -160,6 +160,6 @@ func main() {
 }
 
 func init() {
-	GlobalFlags = append(GlobalFlags, oplog.CLIFlags(EnvVarPrefix)...)
+	GlobalFlags = append(GlobalFlags, logcli.CLIFlags(EnvVarPrefix)...)
 	GlobalFlags = append(GlobalFlags, opmetrics.CLIFlags(EnvVarPrefix)...)
 }
