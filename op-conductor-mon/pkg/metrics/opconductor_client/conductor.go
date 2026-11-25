@@ -31,7 +31,8 @@ func New(ctx context.Context, config *config.Config, nodeName string, rpcUrl str
 			"err", err)
 		return nil, errors.Errorf("failed to create op-conductor rpc client with nodeName [%s], rpcUrl [%s]: %v", nodeName, rpcUrl, err)
 	}
-	// The wrapper applies its own per-call timeout (10s by default): keep the configured one.
+	// The wrapper caps every call at a timeout of its own: use rpc_timeout for it. When rpc_timeout
+	// is unset (0), the wrapper's 10s default applies, where the bare HTTP client had no limit.
 	p2pClient := opconductor.NewAPIClient(client.NewBaseRPCClient(pc, client.WithCallTimeout(config.RPCTimeout)))
 
 	return &InstrumentedOpConductorClient{

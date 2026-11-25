@@ -87,8 +87,6 @@ func (m *interopModule) Apply(ctx context.Context, sub *TxSubmission) error {
 	for i, tx := range sub.Txs {
 		interopAccessList, isInterop, err := checkInteropAndReturnAccessList(ctx, tx)
 		if err != nil {
-			// A malformed access list is the filter's verdict too: count it the same way.
-			m.recordValidation(err)
 			return err
 		}
 		if !isInterop {
@@ -123,7 +121,12 @@ func (m *interopModule) Apply(ctx context.Context, sub *TxSubmission) error {
 		}
 
 		finalErr := m.strategy.ValidateAccessList(ctx, interopAccessList)
-		m.recordValidation(finalErr)
+
+		rpcInteropValidationsTotal.WithLabelValues(
+			interopValidationResult(finalErr),
+			interopValidationReason(finalErr),
+			string(m.validatingCfg.Strategy),
+		).Inc()
 
 		if finalErr == nil {
 			log.Info("interop access list validated successfully", "req_id", GetReqID(ctx), "tx_hash", tx.Hash())
@@ -133,14 +136,6 @@ func (m *interopModule) Apply(ctx context.Context, sub *TxSubmission) error {
 		}
 	}
 	return nil
-}
-
-func (m *interopModule) recordValidation(err error) {
-	rpcInteropValidationsTotal.WithLabelValues(
-		interopValidationResult(err),
-		interopValidationReason(err),
-		string(m.validatingCfg.Strategy),
-	).Inc()
 }
 
 // txMiddlewareModule applies the configurable transaction-validation

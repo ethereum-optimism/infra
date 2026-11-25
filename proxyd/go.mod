@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/alicebob/miniredis v2.5.0+incompatible
 	github.com/emirpasic/gods v1.18.1
-	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
+	github.com/ethereum-optimism/optimism v1.21.0
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/go-redsync/redsync/v4 v4.10.0
 	github.com/golang/snappy v1.0.1-0.20260716114414-9ae09f520e93

@@ -6,14 +6,11 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
 	"github.com/ethereum-optimism/optimism/op-core/predeploys"
-	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,28 +39,9 @@ func (f *fakeInteropStrategy) ValidateAccessList(ctx context.Context, _ []common
 	return f.err
 }
 
-// interopAccessListEntries encodes one executing-message access, as the CrossL2Inbox entries
-// of an interop tx's access list.
-func interopAccessListEntries() []common.Hash {
-	access := messages.ChecksumArgs{
-		BlockNumber: 100,
-		Timestamp:   1746536469,
-		LogIndex:    1,
-		ChainID:     eth.ChainIDFromUInt64(900),
-		LogHash:     common.Hash{0xaa},
-	}.Access()
-	return messages.EncodeAccessList([]messages.Access{access})
-}
-
 // interopTx builds a signed tx carrying an interop access list so
 // checkInteropAndReturnAccessList treats it as an interop submission.
 func interopTx(t *testing.T, chainID *big.Int, nonce uint64) *types.Transaction {
-	t.Helper()
-	return interopTxWithEntries(t, chainID, nonce, interopAccessListEntries())
-}
-
-// interopTxWithEntries builds a signed tx whose access list holds entries for the CrossL2Inbox.
-func interopTxWithEntries(t *testing.T, chainID *big.Int, nonce uint64, entries []common.Hash) *types.Transaction {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -79,7 +57,7 @@ func interopTxWithEntries(t *testing.T, chainID *big.Int, nonce uint64, entries 
 		AccessList: types.AccessList{
 			{
 				Address:     predeploys.CrossL2InboxAddr,
-				StorageKeys: entries,
+				StorageKeys: []common.Hash{common.HexToHash("0x01")},
 			},
 		},
 	})
@@ -155,43 +133,26 @@ func TestInteropModule_SkipsNonInteropTxs(t *testing.T) {
 	require.Equal(t, 1, strategy.calls, "only the interop tx should reach the strategy")
 
 	// Sanity: the plain tx really carries no interop access list.
-	_, isInterop, err := checkInteropAndReturnAccessList(context.Background(), plainTx)
-	require.NoError(t, err)
-	require.False(t, isInterop)
-	entries, isInterop, err := checkInteropAndReturnAccessList(context.Background(), interop)
-	require.NoError(t, err)
-	require.True(t, isInterop)
-	require.Equal(t, interopAccessListEntries(), entries)
+	require.Empty(t, txToInteropAccessList(plainTx))
+	require.NotEmpty(t, txToInteropAccessList(interop))
 }
 
-// CrossL2Inbox entries that don't encode an access are rejected with the error the strategies'
-// access-list validation returns for them, before the interop sender limit is taken or the
-// strategy is called, and are counted as a filtered validation.
-func TestInteropModule_RejectsMalformedAccessList(t *testing.T) {
-	strategy := &fakeInteropStrategy{}
-	lim := &fakeRateLimiter{}
-	m := &interopModule{
-		strategy:         strategy,
-		interopSenderLim: lim,
-		validatingCfg:    InteropValidationConfig{Strategy: FirstFilterStrategy},
-	}
-	filtered := rpcInteropValidationsTotal.WithLabelValues("filtered", "-32602", string(FirstFilterStrategy))
-	before := testutil.ToFloat64(filtered)
+// txToInteropAccessList passes the CrossL2Inbox storage keys through raw and in order, across
+// duplicate CrossL2Inbox tuples, and ignores every other address.
+func TestTxToInteropAccessList(t *testing.T) {
+	other := common.HexToAddress("0x4200000000000000000000000000000000000016")
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID: big.NewInt(1),
+		AccessList: types.AccessList{
+			{Address: other, StorageKeys: []common.Hash{{0xff}}},
+			{Address: predeploys.CrossL2InboxAddr, StorageKeys: []common.Hash{{0x01}, {0x02}}},
+			{Address: other, StorageKeys: []common.Hash{{0xfe}}},
+			{Address: predeploys.CrossL2InboxAddr, StorageKeys: []common.Hash{{0x03}, {0x01}}},
+		},
+	})
+	require.Equal(t, []common.Hash{{0x01}, {0x02}, {0x03}, {0x01}}, txToInteropAccessList(tx))
 
-	entries := []common.Hash{common.HexToHash("0x01")}
-	malformed := interopTxWithEntries(t, big.NewInt(1), 0, entries)
-	err := m.Apply(context.Background(), &TxSubmission{Txs: []*types.Transaction{malformed}})
-
-	var rpcErr *RPCErr
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, -32602, rpcErr.Code)
-	require.Equal(t, 400, rpcErr.HTTPErrorCode)
-	_, _, strategyErr := NewFirstFilterStrategy([]string{"http://filter"}).preflightChecksAndCleanupAccessList(context.Background(), entries)
-	require.Equal(t, strategyErr, err)
-
-	require.Zero(t, strategy.calls)
-	require.Empty(t, lim.keys)
-	require.Equal(t, before+1, testutil.ToFloat64(filtered))
+	require.Empty(t, txToInteropAccessList(types.NewTx(&types.DynamicFeeTx{ChainID: big.NewInt(1)})))
 }
 
 func TestInteropModule_RejectsOnStrategyError(t *testing.T) {

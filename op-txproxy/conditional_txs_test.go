@@ -124,6 +124,27 @@ func TestSendRawTransactionConditionals(t *testing.T) {
 	}
 }
 
+// The cost limit is op-geth's params.TransactionConditionalMaxCost, 1000, and it is inclusive.
+func TestSendRawTransactionConditionalCostLimit(t *testing.T) {
+	withCost := func(cost int) TransactionConditional {
+		cond := TransactionConditional{KnownAccounts: make(KnownAccounts)}
+		for i := 0; i < cost; i++ {
+			cond.KnownAccounts[common.BigToAddress(big.NewInt(int64(i)))] = KnownAccount{} // costs 1
+		}
+		require.Equal(t, cost, cond.Cost())
+		return cond
+	}
+
+	svc := setupSvc(t)
+	txBytes, err := rlp.EncodeToBytes(types.NewTransaction(0, predeploys.EntryPoint_v060Addr, big.NewInt(0), 0, big.NewInt(0), nil))
+	require.NoError(t, err)
+
+	_, err = svc.SendRawTransactionConditional(context.Background(), txBytes, withCost(1000))
+	require.NoError(t, err)
+	_, err = svc.SendRawTransactionConditional(context.Background(), txBytes, withCost(1001))
+	require.Equal(t, maxCostExceededErr, err)
+}
+
 // The JSON-RPC errors are part of this service's wire format; the codes are op-geth's.
 func TestConditionalErrors(t *testing.T) {
 	tests := []struct {
