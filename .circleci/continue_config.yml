@@ -207,6 +207,17 @@ jobs:
       - store_test_results:
           path: /tmp/test-results
 
+  no-op-geth:
+    docker:
+      - image: cimg/go:1.26
+    resource_class: small
+    steps:
+      - checkout:
+          method: blobless
+      - run:
+          name: check no module depends on op-geth
+          command: ./ops/scripts/check-no-op-geth.sh
+
   op-conductor-ops-lint:
     docker:
       - image: cimg/python:3.12
@@ -261,6 +272,10 @@ workflows:
               only: /.*/
             branches:
               ignore: /.*/
+  # Not path-filtered: a new or changed go.mod anywhere can bring op-geth back.
+  no-op-geth:
+    jobs:
+      - no-op-geth
   bailiff:
     when:
       or: [<< pipeline.parameters.run-build-bailiff >>, << pipeline.parameters.run-all >>]
