@@ -4,6 +4,9 @@ orbs:
   circleci-utils: ethereum-optimism/circleci-utils@1.0.33
 
 parameters:
+  run-build-bailiff:
+    type: boolean
+    default: false
   run-build-op-conductor-mon:
     type: boolean
     default: false
@@ -51,6 +54,7 @@ jobs:
           name: Log Configuration Results
           command: |
             echo "Configuration Results:"
+            echo "run-build-bailiff: << pipeline.parameters.run-build-bailiff >>"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
             echo "run-build-op-conductor-ops: << pipeline.parameters.run-build-op-conductor-ops >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
@@ -257,6 +261,16 @@ workflows:
               only: /.*/
             branches:
               ignore: /.*/
+  bailiff:
+    when:
+      or: [<< pipeline.parameters.run-build-bailiff >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: bailiff-lint
+          module: bailiff
+      - go-test:
+          name: bailiff-tests
+          module: bailiff
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]

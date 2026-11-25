@@ -150,11 +150,11 @@ func (s *ShellRepusher) Clone(ctx context.Context, repoURL string) error {
 
 	doneC := make(chan struct{})
 	if err := s.logOutput(cmd, doneC); err != nil {
-		return fmt.Errorf("output logger setup failed: %s", err)
+		return fmt.Errorf("output logger setup failed: %w", err)
 	}
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("command execution failed: %s", err)
+		return fmt.Errorf("command execution failed: %w", err)
 	}
 
 	<-doneC
@@ -181,15 +181,15 @@ func (s *ShellRepusher) Repush(ctx context.Context, forkRepo, srcBranch, upstrea
 
 	doneC := make(chan struct{})
 	if err := s.logOutput(cmd, doneC); err != nil {
-		return fmt.Errorf("output logger setup failed: %s", err)
+		return fmt.Errorf("output logger setup failed: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("command start failed: %s", err)
+		return fmt.Errorf("command start failed: %w", err)
 	}
 
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("command execution failed: %s", err)
+		return fmt.Errorf("command execution failed: %w", err)
 	}
 
 	<-doneC
@@ -200,12 +200,12 @@ func (s *ShellRepusher) Repush(ctx context.Context, forkRepo, srcBranch, upstrea
 func (s *ShellRepusher) logOutput(cmd *exec.Cmd, doneC chan struct{}) error {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("stdout pipe creation failed: %s", err)
+		return fmt.Errorf("stdout pipe creation failed: %w", err)
 	}
 
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("stderr pipe creation failed: %s", err)
+		return fmt.Errorf("stderr pipe creation failed: %w", err)
 	}
 
 	var wg sync.WaitGroup

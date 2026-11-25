@@ -97,7 +97,7 @@ func TestEventHandler_OnIssueComment(t *testing.T) {
 					return
 				}
 
-				w.Write(mock.MustMarshal(pr))
+				_, _ = w.Write(mock.MustMarshal(pr))
 			}),
 		),
 		mock.WithRequestMatch(
