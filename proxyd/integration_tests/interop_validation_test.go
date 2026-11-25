@@ -12,13 +12,12 @@ import (
 	"github.com/ethereum-optimism/infra/proxyd"
 	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
 	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,7 +67,7 @@ func fakeTxBuilder(txModifiers ...func(tx *types.AccessListTx)) *types.Transacti
 		S:       s,
 		AccessList: types.AccessList{
 			{
-				Address:     params.InteropCrossL2InboxAddress,
+				Address:     predeploys.CrossL2InboxAddr,
 				StorageKeys: accessListEntries,
 			},
 		},
@@ -437,7 +436,7 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 
 		tx.AccessList = types.AccessList{
 			{
-				Address:     params.InteropCrossL2InboxAddress,
+				Address:     predeploys.CrossL2InboxAddr,
 				StorageKeys: accessListEntries,
 			},
 		}
@@ -471,7 +470,11 @@ func TestInteropValidation_Deduplication(t *testing.T) {
 
 	{
 		// basic checks confirming our fakeTx has 10 (duplicated) entries in it
-		fakeTxStorageEntries := interoptypes.TxToInteropAccessList(fakeTx)
+		var fakeTxStorageEntries []common.Hash
+		for _, tuple := range fakeTx.AccessList() {
+			require.Equal(t, predeploys.CrossL2InboxAddr, tuple.Address)
+			fakeTxStorageEntries = append(fakeTxStorageEntries, tuple.StorageKeys...)
+		}
 		require.Equal(t, len(fakeTxStorageEntries), 10)
 
 		// the original duplicated access list is greater than the old as well as new access list size limits

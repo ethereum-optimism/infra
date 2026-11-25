@@ -21,8 +21,8 @@ import (
 
 	sw "github.com/ethereum-optimism/infra/proxyd/pkg/avg-sliding-window"
 	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"

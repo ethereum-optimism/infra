@@ -21,11 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
@@ -573,9 +573,17 @@ func reqSizeLimitCheck(ctx context.Context, tx *types.Transaction, maxSize int) 
 	return nil
 }
 
+// checkInteropAndReturnAccessList returns the CrossL2Inbox access-list entries of tx, and whether
+// it executes any interop message. The entries are decoded into the accesses they declare and
+// re-encoded. Entries that don't encode accesses are rejected with the error the strategies'
+// access-list validation returns for them.
 func checkInteropAndReturnAccessList(ctx context.Context, tx *types.Transaction) ([]common.Hash, bool, error) {
-	interopAccessList := interoptypes.TxToInteropAccessList(tx)
-	if len(interopAccessList) == 0 {
+	accesses, err := messages.DecodeAccessList(tx.AccessList())
+	if err != nil {
+		log.Error("error validating interop access list", "req_id", GetReqID(ctx), "error", err)
+		return nil, false, ParseInteropError(fmt.Errorf("failed to read data: %w", err))
+	}
+	if len(accesses) == 0 {
 		log.Debug(
 			"no interop access list found, inferring the absence of executing messages and skipping interop validation",
 			"source", "rpc",
@@ -584,7 +592,7 @@ func checkInteropAndReturnAccessList(ctx context.Context, tx *types.Transaction)
 		return nil, false, nil
 	}
 
-	return interopAccessList, true, nil
+	return messages.EncodeAccessList(accesses), true, nil
 }
 
 // interopValidationResult classifies the outcome of an interop access list

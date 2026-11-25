@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/infra/proxyd"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/stretchr/testify/require"
 )
 
