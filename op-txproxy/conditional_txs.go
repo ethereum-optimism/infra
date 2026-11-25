@@ -8,12 +8,11 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 
+	"github.com/ethereum-optimism/optimism/op-service/jsonrpc"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -22,11 +21,11 @@ import (
 
 var (
 	// errs
-	rateLimitErr         = &rpc.JsonError{Message: "rate limited", Code: params.TransactionConditionalCostExceededMaxErrCode}
-	endpointDisabledErr  = &rpc.JsonError{Message: "endpoint disabled", Code: params.TransactionConditionalRejectedErrCode}
-	entrypointSupportErr = &rpc.JsonError{Message: "only 4337 Entrypoint contract support", Code: params.TransactionConditionalRejectedErrCode}
-	failedValidationErr  = &rpc.JsonError{Message: "failed conditional validation", Code: params.TransactionConditionalRejectedErrCode}
-	maxCostExceededErr   = &rpc.JsonError{Message: "max cost exceeded", Code: params.TransactionConditionalRejectedErrCode}
+	rateLimitErr         = &jsonrpc.Error{Message: "rate limited", Code: conditionalCostExceededMaxErrCode}
+	endpointDisabledErr  = &jsonrpc.Error{Message: "endpoint disabled", Code: conditionalRejectedErrCode}
+	entrypointSupportErr = &jsonrpc.Error{Message: "only 4337 Entrypoint contract support", Code: conditionalRejectedErrCode}
+	failedValidationErr  = &jsonrpc.Error{Message: "failed conditional validation", Code: conditionalRejectedErrCode}
+	maxCostExceededErr   = &jsonrpc.Error{Message: "max cost exceeded", Code: conditionalRejectedErrCode}
 )
 
 type ConditionalTxService struct {
@@ -50,7 +49,7 @@ func NewConditionalTxService(ctx context.Context, log log.Logger, m metrics.Fact
 		return nil, fmt.Errorf("failed to dial backend %s: %w", cfg.SendRawTransactionConditionalBackend, err)
 	}
 
-	limiter := rate.NewLimiter(rate.Limit(cfg.SendRawTransactionConditionalRateLimit), params.TransactionConditionalMaxCost)
+	limiter := rate.NewLimiter(rate.Limit(cfg.SendRawTransactionConditionalRateLimit), maxConditionalCost)
 	entrypointAddresses := map[common.Address]bool{predeploys.EntryPoint_v060Addr: true, predeploys.EntryPoint_v070Addr: true}
 
 	return &ConditionalTxService{
@@ -79,7 +78,7 @@ func NewConditionalTxService(ctx context.Context, log log.Logger, m metrics.Fact
 	}, nil
 }
 
-func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context, txBytes hexutil.Bytes, cond types.TransactionConditional) (common.Hash, error) {
+func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context, txBytes hexutil.Bytes, cond TransactionConditional) (common.Hash, error) {
 	s.requests.Inc()
 	if !s.cfg.SendRawTransactionConditionalEnabled {
 		s.failures.WithLabelValues("disabled").Inc()
@@ -95,7 +94,7 @@ func (s *ConditionalTxService) SendRawTransactionConditional(ctx context.Context
 	return hash, err
 }
 
-func (s *ConditionalTxService) sendCondTx(ctx context.Context, txBytes hexutil.Bytes, cond *types.TransactionConditional) (common.Hash, error) {
+func (s *ConditionalTxService) sendCondTx(ctx context.Context, txBytes hexutil.Bytes, cond *TransactionConditional) (common.Hash, error) {
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(txBytes); err != nil {
 		return common.Hash{}, fmt.Errorf("failed to unmarshal tx: %w", err)
@@ -111,8 +110,8 @@ func (s *ConditionalTxService) sendCondTx(ctx context.Context, txBytes hexutil.B
 		s.log.Info("failed conditional validation", "err", err)
 		return txHash, failedValidationErr
 	}
-	if cost > params.TransactionConditionalMaxCost {
-		s.log.Info("conditional max cost exceeded", "cost", cost, "max", params.TransactionConditionalMaxCost)
+	if cost > maxConditionalCost {
+		s.log.Info("conditional max cost exceeded", "cost", cost, "max", maxConditionalCost)
 		return txHash, maxCostExceededErr
 	}
 
