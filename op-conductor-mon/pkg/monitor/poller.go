@@ -7,7 +7,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/config"
 	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 type Poller struct {
