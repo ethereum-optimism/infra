@@ -31,7 +31,8 @@ type ServerConfig struct {
 	EnableRequestLog     bool `toml:"enable_request_log"`
 	MaxRequestBodyLogLen int  `toml:"max_request_body_log_len"`
 	// RequestLogSampleRate is the fraction of HTTP requests, in [0, 1], logged at
-	// info with the client IP, method and status code.
+	// info as a one-line summary (client IP, method, status code). Unlike
+	// EnableRequestLog, it never logs request bodies.
 	RequestLogSampleRate  float64 `toml:"request_log_sample_rate"`
 	EnablePprof           bool    `toml:"enable_pprof"`
 	EnableXServedByHeader bool    `toml:"enable_served_by_header"`

@@ -23,8 +23,5 @@ eth_loose = "main"
 [rate_limit]
 base_rate = 2
 base_interval = "1m"
-exempt_origins = ["exempt_origin"]
-exempt_user_agents = ["exempt_agent"]
 error_message = "over rate limit with special message"
 xff_trusted_hops = 1
-

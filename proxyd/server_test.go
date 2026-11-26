@@ -689,3 +689,24 @@ func TestHandleRPCSampledRequestLogUnauthorized(t *testing.T) {
 	require.Equal(t, "203.0.113.7", entry["remote_ip"])
 	require.EqualValues(t, http.StatusUnauthorized, entry["status"])
 }
+
+func TestClientIPFallbackCounter(t *testing.T) {
+	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: 1}
+	for _, tt := range []struct {
+		reason string
+		header string
+	}{
+		{"header_too_short", "192.0.2.77"},
+		{"invalid_entry", "unknown, 34.0.0.1"},
+	} {
+		t.Run(tt.reason, func(t *testing.T) {
+			labels := map[string]string{"reason": tt.reason}
+			before := gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels)
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = "10.0.0.1:41000"
+			req.Header.Set(defaultRateLimitHeader, tt.header)
+			require.Equal(t, "10.0.0.1", s.clientIP(req))
+			require.Equal(t, before+1, gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels))
+		})
+	}
+}

@@ -1199,12 +1199,17 @@ func (s *Server) clientIP(r *http.Request) string {
 		return stripXFF(header)
 	}
 	header := s.forwardedChain(r)
+	if header == "" {
+		return hostFromRemoteAddr(r.RemoteAddr)
+	}
 	entries := strings.Split(header, ",")
-	if header == "" || len(entries) <= s.xffTrustedHops {
+	if len(entries) <= s.xffTrustedHops {
+		clientIPFallbacksTotal.WithLabelValues("header_too_short").Inc()
 		return hostFromRemoteAddr(r.RemoteAddr)
 	}
 	ip := strings.TrimSpace(entries[len(entries)-1-s.xffTrustedHops])
 	if net.ParseIP(ip) == nil {
+		clientIPFallbacksTotal.WithLabelValues("invalid_entry").Inc()
 		return hostFromRemoteAddr(r.RemoteAddr)
 	}
 	return ip

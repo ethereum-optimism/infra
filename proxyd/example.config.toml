@@ -27,7 +27,8 @@ max_concurrent_ws_rpcs = 100
 log_level = "info"
 # Allow both authenticated and unauthenticated requests when authentication is configured
 # public_access = false
-# Fraction of HTTP requests, in [0, 1], logged at info with client IP, method and status.
+# Fraction of HTTP requests, in [0, 1], logged at info as a one-line summary (client IP,
+# method, status, duration). Unlike enable_request_log, it never logs request bodies.
 # request_log_sample_rate = 0.01
 
 [redis]
