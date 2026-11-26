@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/kms v1.25.0
 	github.com/aws/aws-sdk-go-v2/config v1.28.11
-	github.com/ethereum-optimism/optimism v1.21.0
+	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/golang/mock v1.6.0
 	github.com/googleapis/gax-go v1.0.3

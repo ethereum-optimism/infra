@@ -3,7 +3,7 @@ module github.com/ethereum-optimism/infra/peer-mgmt-service
 go 1.26.0
 
 require (
-	github.com/ethereum-optimism/optimism v1.21.0
+	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/gorilla/mux v1.8.0
 	github.com/libp2p/go-libp2p v0.49.0
