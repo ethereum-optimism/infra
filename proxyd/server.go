@@ -1175,16 +1175,18 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 // xffTrustedHops entries appended by trusted proxies, or the peer address when
 // the header is absent or too short to have passed through them.
 func (s *Server) clientIP(r *http.Request) string {
-	header := r.Header.Get(s.rateLimitHeader)
-	if header == "" {
-		return hostFromRemoteAddr(r.RemoteAddr)
-	}
 	if s.xffTrustedHops == 0 {
+		header := r.Header.Get(s.rateLimitHeader)
+		if header == "" {
+			return hostFromRemoteAddr(r.RemoteAddr)
+		}
 		return stripXFF(header)
 	}
-	// Proxies may append to any header line, so count across all of them.
-	entries := strings.Split(strings.Join(r.Header.Values(s.rateLimitHeader), ","), ",")
-	if len(entries) <= s.xffTrustedHops {
+	// Proxies may append to any header line, including after an empty one, so
+	// count across all of them.
+	header := strings.Join(r.Header.Values(s.rateLimitHeader), ",")
+	entries := strings.Split(header, ",")
+	if strings.TrimSpace(strings.ReplaceAll(header, ",", "")) == "" || len(entries) <= s.xffTrustedHops {
 		return hostFromRemoteAddr(r.RemoteAddr)
 	}
 	ip := strings.TrimSpace(entries[len(entries)-1-s.xffTrustedHops])

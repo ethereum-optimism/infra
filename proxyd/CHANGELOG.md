@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- New `[rate_limit]` option `xff_trusted_hops` (default `0`, unchanged behaviour). When set, the client IP used as the rate-limit key and logged as `remote_ip` is the `X-Forwarded-For` (or `ip_header_override`) entry immediately left of that many proxy-appended entries, instead of the leftmost entry. Behind a GCP Application Load Balancer, set it to `1`.
+- New `[rate_limit]` option `xff_trusted_hops` (default `0`, unchanged behaviour). When set, the client IP used as the rate-limit key and logged as `remote_ip` is the `X-Forwarded-For` entry immediately left of that many proxy-appended entries, instead of the leftmost entry. Behind a GCP Application Load Balancer, set it to `1`.
 - New `[server]` option `request_log_sample_rate` (default `0`). Logs that fraction of HTTP requests at info as `served RPC request`, with `remote_ip`, method, HTTP status and duration. WebSocket connection logs now include `remote_ip`.
 - Added passive tx-UX monitor (`[tx_monitor]`): inclusion-latency histograms measured from `eth_sendRawTransaction` request receipt (covering proxyd-internal handling and the forward round-trip) to block/subblock visibility.
 - Consensus HA: new backend group option `consensus_ha_serve_local_when_stale` (default `false`). When enabled, an instance whose copy of the shared consensus state has not been refreshed for longer than the lock period (e.g. it cannot reach Redis) serves its locally polled consensus state instead of the frozen shared state. Instances may briefly disagree on the head while this happens. New gauge `proxyd_group_consensus_ha_serving_local` is 1 while an instance does this.

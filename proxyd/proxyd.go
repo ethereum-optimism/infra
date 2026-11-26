@@ -23,6 +23,20 @@ func SetLogLevel(logLevel slog.Leveler) {
 		os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 }
 
+func validateClientIPConfig(config *Config) error {
+	if config.RateLimit.XFFTrustedHops < 0 {
+		return errors.New("xff_trusted_hops in rate_limit must be >= 0")
+	}
+	if config.RateLimit.XFFTrustedHops > 0 && config.RateLimit.IPHeaderOverride != "" {
+		return errors.New("xff_trusted_hops in rate_limit cannot be combined with ip_header_override")
+	}
+	// Written so that NaN, which TOML accepts as nan, fails too.
+	if rate := config.Server.RequestLogSampleRate; !(rate >= 0 && rate <= 1) {
+		return errors.New("request_log_sample_rate in server must be between 0 and 1")
+	}
+	return nil
+}
+
 func Start(config *Config) (*Server, func(), error) {
 	if len(config.Backends) == 0 {
 		return nil, nil, errors.New("must define at least one backend")
@@ -106,14 +120,8 @@ func Start(config *Config) (*Server, func(), error) {
 		ErrTooManyBatchRequests.Message = config.BatchConfig.ErrorMessage
 	}
 
-	if config.RateLimit.XFFTrustedHops < 0 {
-		return nil, nil, errors.New("xff_trusted_hops in rate_limit must be >= 0")
-	}
-	if config.RateLimit.XFFTrustedHops > 0 && config.RateLimit.IPHeaderOverride != "" {
-		return nil, nil, errors.New("xff_trusted_hops in rate_limit cannot be combined with ip_header_override")
-	}
-	if config.Server.RequestLogSampleRate < 0 || config.Server.RequestLogSampleRate > 1 {
-		return nil, nil, errors.New("request_log_sample_rate in server must be between 0 and 1")
+	if err := validateClientIPConfig(config); err != nil {
+		return nil, nil, err
 	}
 
 	if config.SenderRateLimit.Enabled {

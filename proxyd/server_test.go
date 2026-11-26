@@ -234,6 +234,12 @@ func TestClientIPMultipleHeaderLines(t *testing.T) {
 	req.Header.Add(defaultRateLimitHeader, "192.0.2.77, 192.0.2.78")
 	req.Header.Add(defaultRateLimitHeader, "203.0.113.7, 34.0.0.1")
 	require.Equal(t, "203.0.113.7", s.clientIP(req))
+
+	emptyFirst := httptest.NewRequest("POST", "/", nil)
+	emptyFirst.RemoteAddr = "10.0.0.1:41000"
+	emptyFirst.Header.Add(defaultRateLimitHeader, "")
+	emptyFirst.Header.Add(defaultRateLimitHeader, "203.0.113.7, 34.0.0.1")
+	require.Equal(t, "203.0.113.7", s.clientIP(emptyFirst))
 }
 
 func TestAuthAliasLimiterMissingIP(t *testing.T) {
