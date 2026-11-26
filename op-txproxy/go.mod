@@ -3,7 +3,7 @@ module github.com/ethereum-optimism/infra/op-txproxy
 go 1.26.0
 
 require (
-	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
+	github.com/ethereum-optimism/optimism v1.21.1-0.20261125221802-62847fe1edae
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/prometheus/client_golang v1.22.0
 	github.com/stretchr/testify v1.12.1
@@ -54,7 +54,7 @@ require (
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -65,10 +65,11 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/pointerstructure v1.2.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/pion/dtls/v3 v3.1.5 // indirect
+	github.com/pion/dtls/v3 v3.1.14 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/stun/v3 v3.1.7 // indirect
 	github.com/pion/transport/v4 v4.1.0 // indirect
+	github.com/pion/transport/v5 v5.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.64.0 // indirect

@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/alicebob/miniredis v2.5.0+incompatible
 	github.com/emirpasic/gods v1.18.1
-	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
+	github.com/ethereum-optimism/optimism v1.21.1-0.20261125221802-62847fe1edae
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/go-redsync/redsync/v4 v4.10.0
 	github.com/golang/snappy v1.0.1-0.20260716114414-9ae09f520e93
@@ -75,7 +75,7 @@ require (
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/ipfs/go-cid v0.5.0 // indirect
 	github.com/ipfs/go-datastore v0.8.2 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect

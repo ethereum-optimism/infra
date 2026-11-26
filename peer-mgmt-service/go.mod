@@ -3,7 +3,7 @@ module github.com/ethereum-optimism/infra/peer-mgmt-service
 go 1.26.0
 
 require (
-	github.com/ethereum-optimism/optimism v1.20.3-0.20261123123354-2ad37990e12c
+	github.com/ethereum-optimism/optimism v1.21.1-0.20261125221802-62847fe1edae
 	github.com/ethereum/go-ethereum v1.17.11-0.20261028021739-3dee18e7108c
 	github.com/gorilla/mux v1.8.0
 	github.com/libp2p/go-libp2p v0.49.0
@@ -62,7 +62,7 @@ require (
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/ipfs/go-cid v0.6.2 // indirect
 	github.com/ipfs/go-datastore v0.9.2 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
