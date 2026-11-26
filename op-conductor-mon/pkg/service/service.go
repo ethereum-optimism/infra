@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/config"
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/metrics"
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/monitor"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 type Service struct {

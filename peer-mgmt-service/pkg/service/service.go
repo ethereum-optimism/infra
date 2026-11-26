@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/config"
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/metrics"
 	"github.com/ethereum-optimism/infra/peer-mgmt-service/pkg/pms"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 type Service struct {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/google/go-github/v66/github"
 	"github.com/gorilla/mux"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
@@ -97,7 +97,7 @@ func TestEventHandler_OnIssueComment(t *testing.T) {
 					return
 				}
 
-				w.Write(mock.MustMarshal(pr))
+				_, _ = w.Write(mock.MustMarshal(pr))
 			}),
 		),
 		mock.WithRequestMatch(

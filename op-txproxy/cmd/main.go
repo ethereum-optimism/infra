@@ -10,11 +10,11 @@ import (
 	opservice "github.com/ethereum-optimism/optimism/op-service"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/ctxinterrupt"
-	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log/logcli"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
 
-	"github.com/ethereum/go-ethereum/log"
 	gethversion "github.com/ethereum/go-ethereum/version"
 
 	"github.com/urfave/cli/v2"
@@ -27,7 +27,7 @@ var (
 )
 
 func main() {
-	oplog.SetupDefaults()
+	logcli.SetupDefaults()
 
 	app := cli.NewApp()
 	version := fmt.Sprintf("%d.%d.%d", gethversion.Major, gethversion.Minor, gethversion.Patch)
@@ -37,7 +37,7 @@ func main() {
 	app.Description = "Auxiliary service to supplement op-stack transaction pool management"
 	app.Action = cliapp.LifecycleCmd(TxProxyMain)
 
-	logFlags := oplog.CLIFlags(EnvVarPrefix)
+	logFlags := logcli.CLIFlags(EnvVarPrefix)
 	rpcFlags := rpc.CLIFlags(EnvVarPrefix)
 	metricsFlags := metrics.CLIFlags(EnvVarPrefix)
 	backendFlags := optxproxy.CLIFlags(EnvVarPrefix)
@@ -50,7 +50,7 @@ func main() {
 }
 
 func TxProxyMain(ctx *cli.Context, closeApp context.CancelCauseFunc) (cliapp.Lifecycle, error) {
-	log := oplog.NewLogger(oplog.AppOut(ctx), oplog.ReadCLIConfig(ctx))
+	log := logcli.NewLogger(logcli.AppOut(ctx), logcli.ReadCLIConfig(ctx))
 
 	cfg := optxproxy.ReadCLIConfig(ctx)
 	txproxy, err := optxproxy.NewTxProxy(ctx.Context, log, ctx.App.Version, &cfg)

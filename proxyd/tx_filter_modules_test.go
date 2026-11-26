@@ -6,12 +6,11 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/types/interoptypes"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +56,7 @@ func interopTx(t *testing.T, chainID *big.Int, nonce uint64) *types.Transaction 
 		Value:     big.NewInt(0),
 		AccessList: types.AccessList{
 			{
-				Address:     params.InteropCrossL2InboxAddress,
+				Address:     predeploys.CrossL2InboxAddr,
 				StorageKeys: []common.Hash{common.HexToHash("0x01")},
 			},
 		},
@@ -134,8 +133,26 @@ func TestInteropModule_SkipsNonInteropTxs(t *testing.T) {
 	require.Equal(t, 1, strategy.calls, "only the interop tx should reach the strategy")
 
 	// Sanity: the plain tx really carries no interop access list.
-	require.Empty(t, interoptypes.TxToInteropAccessList(plainTx))
-	require.NotEmpty(t, interoptypes.TxToInteropAccessList(interop))
+	require.Empty(t, txToInteropAccessList(plainTx))
+	require.NotEmpty(t, txToInteropAccessList(interop))
+}
+
+// txToInteropAccessList passes the CrossL2Inbox storage keys through raw and in order, across
+// duplicate CrossL2Inbox tuples, and ignores every other address.
+func TestTxToInteropAccessList(t *testing.T) {
+	other := common.HexToAddress("0x4200000000000000000000000000000000000016")
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID: big.NewInt(1),
+		AccessList: types.AccessList{
+			{Address: other, StorageKeys: []common.Hash{{0xff}}},
+			{Address: predeploys.CrossL2InboxAddr, StorageKeys: []common.Hash{{0x01}, {0x02}}},
+			{Address: other, StorageKeys: []common.Hash{{0xfe}}},
+			{Address: predeploys.CrossL2InboxAddr, StorageKeys: []common.Hash{{0x03}, {0x01}}},
+		},
+	})
+	require.Equal(t, []common.Hash{{0x01}, {0x02}, {0x03}, {0x01}}, txToInteropAccessList(tx))
+
+	require.Empty(t, txToInteropAccessList(types.NewTx(&types.DynamicFeeTx{ChainID: big.NewInt(1)})))
 }
 
 func TestInteropModule_RejectsOnStrategyError(t *testing.T) {

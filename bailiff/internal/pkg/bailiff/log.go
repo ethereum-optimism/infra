@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 func RequestID() string {
@@ -14,12 +14,14 @@ func RequestID() string {
 	return hex.EncodeToString(buf[:])
 }
 
+type reqIDKey struct{}
+
 func ReqIDContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, "requestID", RequestID())
+	return context.WithValue(ctx, reqIDKey{}, RequestID())
 }
 
 func ReqIDLogger(ctx context.Context, l log.Logger) log.Logger {
-	reqIDRaw := ctx.Value("requestID")
+	reqIDRaw := ctx.Value(reqIDKey{})
 	reqID, ok := reqIDRaw.(string)
 	if !ok {
 		reqID = "unknown"

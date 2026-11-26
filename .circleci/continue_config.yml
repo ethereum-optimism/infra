@@ -4,6 +4,9 @@ orbs:
   circleci-utils: ethereum-optimism/circleci-utils@1.0.33
 
 parameters:
+  run-build-bailiff:
+    type: boolean
+    default: false
   run-build-op-conductor-mon:
     type: boolean
     default: false
@@ -51,6 +54,7 @@ jobs:
           name: Log Configuration Results
           command: |
             echo "Configuration Results:"
+            echo "run-build-bailiff: << pipeline.parameters.run-build-bailiff >>"
             echo "run-build-op-conductor-mon: << pipeline.parameters.run-build-op-conductor-mon >>"
             echo "run-build-op-conductor-ops: << pipeline.parameters.run-build-op-conductor-ops >>"
             echo "run-build-op-signer: << pipeline.parameters.run-build-op-signer >>"
@@ -203,6 +207,17 @@ jobs:
       - store_test_results:
           path: /tmp/test-results
 
+  no-op-geth:
+    docker:
+      - image: cimg/go:1.26
+    resource_class: small
+    steps:
+      - checkout:
+          method: blobless
+      - run:
+          name: check no module depends on op-geth
+          command: ./ops/scripts/check-no-op-geth.sh
+
   op-conductor-ops-lint:
     docker:
       - image: cimg/python:3.12
@@ -257,6 +272,20 @@ workflows:
               only: /.*/
             branches:
               ignore: /.*/
+  # Not path-filtered: a new or changed go.mod anywhere can bring op-geth back.
+  no-op-geth:
+    jobs:
+      - no-op-geth
+  bailiff:
+    when:
+      or: [<< pipeline.parameters.run-build-bailiff >>, << pipeline.parameters.run-all >>]
+    jobs:
+      - go-lint:
+          name: bailiff-lint
+          module: bailiff
+      - go-test:
+          name: bailiff-tests
+          module: bailiff
   op-conductor-mon:
     when:
       or: [<< pipeline.parameters.run-build-op-conductor-mon >>, << pipeline.parameters.run-all >>]

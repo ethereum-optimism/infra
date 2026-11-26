@@ -9,9 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ethereum/go-ethereum/log"
-
-	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log/logcli"
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/config"
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/service"
 )
@@ -23,7 +22,7 @@ var (
 )
 
 func main() {
-	oplog.SetGlobalLogHandler(slog.NewJSONHandler(
+	logcli.SetGlobalLogHandler(slog.NewJSONHandler(
 		os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	log.Info("initializing",
@@ -58,7 +57,7 @@ func initConfig(cfgFile string) *config.Config {
 	}
 
 	// update log level from config
-	logLevel, err := oplog.LevelFromString(cfg.LogLevel)
+	logLevel, err := log.LevelFromString(cfg.LogLevel)
 	if err != nil {
 		logLevel = log.LevelInfo
 		if cfg.LogLevel != "" {
@@ -66,7 +65,7 @@ func initConfig(cfgFile string) *config.Config {
 				"log_level", cfg.LogLevel)
 		}
 	}
-	oplog.SetGlobalLogHandler(slog.NewJSONHandler(
+	logcli.SetGlobalLogHandler(slog.NewJSONHandler(
 		os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 
 	// readable parsed config

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/google/go-github/v66/github"
 )
 
@@ -36,7 +36,8 @@ func (m *TeamWhitelist) Whitelisted(login string) bool {
 	return m.logins[login]
 }
 
-func (m *TeamWhitelist) SyncPeriodically(ctx context.Context, lgr log.Logger, interval time.Duration) error {
+// SyncPeriodically syncs the whitelist every interval until ctx is done.
+func (m *TeamWhitelist) SyncPeriodically(ctx context.Context, lgr log.Logger, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 
@@ -51,7 +52,7 @@ func (m *TeamWhitelist) SyncPeriodically(ctx context.Context, lgr log.Logger, in
 		case <-tick.C:
 			continue
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		}
 	}
 }

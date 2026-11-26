@@ -12,12 +12,12 @@ import (
 	"github.com/ethereum-optimism/infra/proxyd"
 	interopErrors "github.com/ethereum-optimism/optimism/op-core/interop"
 	"github.com/ethereum-optimism/optimism/op-core/interop/messages"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,7 +61,7 @@ func filterInteropTx(t *testing.T, key *ecdsa.PrivateKey, chainID int64, nonce u
 		Value:     big.NewInt(0),
 		AccessList: types.AccessList{
 			{
-				Address:     params.InteropCrossL2InboxAddress,
+				Address:     predeploys.CrossL2InboxAddr,
 				StorageKeys: interopAccessListEntries(),
 			},
 		},

@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/metrics"
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/metrics/opconductor_client"
 	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 func (p *Poller) cleanup(ctx context.Context) {

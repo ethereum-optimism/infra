@@ -9,7 +9,8 @@ import (
 	"github.com/ethereum-optimism/optimism/op-conductor-mon/pkg/metrics"
 	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	opconductor "github.com/ethereum-optimism/optimism/op-conductor/rpc"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/client"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/pkg/errors"
 )
@@ -30,7 +31,9 @@ func New(ctx context.Context, config *config.Config, nodeName string, rpcUrl str
 			"err", err)
 		return nil, errors.Errorf("failed to create op-conductor rpc client with nodeName [%s], rpcUrl [%s]: %v", nodeName, rpcUrl, err)
 	}
-	p2pClient := opconductor.NewAPIClient(pc)
+	// The wrapper caps every call at a timeout of its own: use rpc_timeout for it. When rpc_timeout
+	// is unset (0), the wrapper's 10s default applies, where the bare HTTP client had no limit.
+	p2pClient := opconductor.NewAPIClient(client.NewBaseRPCClient(pc, client.WithCallTimeout(config.RPCTimeout)))
 
 	return &InstrumentedOpConductorClient{
 		c:      p2pClient,

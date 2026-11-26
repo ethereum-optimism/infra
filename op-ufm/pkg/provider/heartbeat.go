@@ -6,8 +6,8 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics"
 
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/pkg/errors"
 )
 

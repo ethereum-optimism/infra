@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/metrics"
 	"github.com/ethereum-optimism/optimism/op-ufm/pkg/provider"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
 )
 
 type Service struct {

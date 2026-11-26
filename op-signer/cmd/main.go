@@ -6,11 +6,10 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ethereum/go-ethereum/log"
-
 	signer "github.com/ethereum-optimism/infra/op-signer"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
-	oplog "github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log"
+	"github.com/ethereum-optimism/optimism/op-service/log/logcli"
 	clsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 )
 
@@ -21,7 +20,7 @@ var (
 )
 
 func main() {
-	oplog.SetupDefaults()
+	logcli.SetupDefaults()
 
 	app := cli.NewApp()
 	app.Flags = cliapp.ProtectFlags(signer.CLIFlags("OP_SIGNER"))
