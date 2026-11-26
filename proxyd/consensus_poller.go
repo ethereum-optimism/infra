@@ -597,12 +597,23 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		var verified bool
 		proposedBlock, proposedBlockHash, broken, failed, verified = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
 		if !verified {
-			// Nothing confirmed the proposal: keep the previous tracker state and group
-			// rather than advancing on, or publishing, unchecked backends.
+			// Nothing confirmed the proposal: keep the tracker frozen, but still drop
+			// previous members that are no longer eligible (banned, stale, lagging, ...),
+			// which would otherwise keep receiving traffic.
 			log.Warn("skipping consensus update: no backend answered the block hash check",
 				"backend_group", cp.backendGroup.Name,
 				"candidates", len(candidates),
 				"proposedBlock", proposedBlock)
+			cp.consensusGroupMux.Lock()
+			kept := make([]*Backend, 0, len(cp.consensusGroup))
+			for _, be := range cp.consensusGroup {
+				if _, eligible := candidates[be]; eligible {
+					kept = append(kept, be)
+				}
+			}
+			cp.consensusGroup = kept
+			cp.consensusGroupMux.Unlock()
+			RecordGroupConsensusCount(cp.backendGroup, len(kept))
 			return
 		}
 		// A failed check cannot rule out a conflicting hash, so the backend sits out this cycle.
@@ -761,9 +772,11 @@ func (cp *ConsensusPoller) fetchWithTimeout(
 // label identifies the safety level ("unsafe", "safe", "finalized") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
 //
-// A failed check proves nothing about the backend's chain, so failed holds every backend whose
-// check failed during the walk, and verified is false when no backend answered for the returned
-// block. Callers must not publish failed backends, and must not advance at all when !verified.
+// A failed check proves nothing about the backend's chain, so failed holds the backends whose
+// check failed for the returned block, and verified is false when none answered for it. Every
+// other candidate confirmed the returned block, so publishing candidates minus failed yields a
+// non-empty group of confirmed backends exactly when verified. Callers must not advance when
+// !verified.
 func (cp *ConsensusPoller) findConsensusBlock(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -775,11 +788,13 @@ func (cp *ConsensusPoller) findConsensusBlock(
 ) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool, failed map[*Backend]bool, verified bool) {
 	proposedBlock = startBlock
 	proposedBlockHash = startHash
-	failed = make(map[*Backend]bool)
 
 	for {
 		allAgreed := true
 		answered := 0
+		// Only failures at the returned block matter: a backend that timed out at a
+		// later height and then confirmed this one agrees with what gets published.
+		failed = make(map[*Backend]bool)
 		for be := range candidates {
 			actualBlockNumber, actualHash, err := cp.fetchWithTimeout(ctx, fetch, be, proposedBlock)
 			if err != nil {

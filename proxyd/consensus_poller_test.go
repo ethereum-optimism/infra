@@ -172,3 +172,26 @@ func TestFindConsensusBlock_unverifiedWhenEveryCheckFails(t *testing.T) {
 	require.False(t, verified)
 	require.Equal(t, map[*Backend]bool{be1: true, be2: true}, failed)
 }
+
+// A backend that times out at a later height but confirms the selected block during the
+// walkback agrees with what gets published, so it must not be reported as failed.
+func TestFindConsensusBlock_walkbackKeepsBackendThatConfirmsSelectedBlock(t *testing.T) {
+	cp := &ConsensusPoller{}
+	slow, forked := &Backend{Name: "slow"}, &Backend{Name: "forked"}
+	fetch := func(_ context.Context, be *Backend, block hexutil.Uint64) (hexutil.Uint64, string, error) {
+		switch {
+		case block == 10 && be == slow:
+			return 0, "", context.DeadlineExceeded
+		case block == 10:
+			return block, "hash-10-fork", nil // disagrees with the proposal, forcing a walkback
+		default:
+			return block, "hash-9", nil
+		}
+	}
+
+	num, hash, _, failed, verified := cp.findConsensusBlock(context.Background(), map[*Backend]*backendState{slow: {}, forked: {}}, 8, 10, "hash-10", fetch, "test")
+	require.Equal(t, hexutil.Uint64(9), num)
+	require.Equal(t, "hash-9", hash)
+	require.True(t, verified)
+	require.Empty(t, failed)
+}

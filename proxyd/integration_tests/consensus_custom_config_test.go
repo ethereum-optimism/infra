@@ -298,9 +298,14 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	})
 }
 
+// hashCheckHang outlasts consensus_fetch_timeout (300ms) in consensus_connect_timeouts.toml.
+// The hang must end on its own: MockBackend serves requests one at a time and hands
+// handlers a context that is never cancelled.
+const hashCheckHang = 500 * time.Millisecond
+
 // hangHashChecks makes node hang on the consensus loop's block-hash checks, which
 // ask for a block by number. Head polls use tags and are still answered.
-func hangHashChecks(node nodeContext, release <-chan struct{}) {
+func hangHashChecks(node nodeContext) {
 	inner := node.handler.Handler
 	node.mockBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -311,10 +316,7 @@ func hangHashChecks(node nodeContext, release <-chan struct{}) {
 		}
 		if json.Unmarshal(body, &req) == nil && req.Method == "eth_getBlockByNumber" && len(req.Params) > 0 {
 			if n, _ := req.Params[0].(string); strings.HasPrefix(n, "0x") {
-				select {
-				case <-r.Context().Done():
-				case <-release:
-				}
+				time.Sleep(hashCheckHang)
 				return
 			}
 		}
@@ -340,9 +342,7 @@ func TestConsensusFetchTimeoutConfig(t *testing.T) {
 	defer nodes["node2"].mockBackend.Close()
 	defer shutdown()
 
-	release := make(chan struct{})
-	defer close(release)
-	hangHashChecks(nodes["node2"], release)
+	hangHashChecks(nodes["node2"])
 
 	start := time.Now()
 	updateConsensus(bg)
@@ -366,18 +366,24 @@ func TestConsensusFetchTimeoutAllChecksFail(t *testing.T) {
 	require.Len(t, group, 2)
 
 	// Heads move to 0x102, but no backend answers the hash check for it.
-	release := make(chan struct{})
-	defer close(release)
 	for _, name := range []string{"node1", "node2"} {
 		nodes[name].handler.AddOverride(&ms.MethodTemplate{
 			Method:   "eth_getBlockByNumber",
 			Block:    "latest",
 			Response: buildResponse(map[string]string{"number": "0x102", "hash": "hash_0x102"}),
 		})
-		hangHashChecks(nodes[name], release)
+		hangHashChecks(nodes[name])
 	}
 	updateConsensus(bg)
 
 	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String(), "advanced on an unverified block")
 	require.Equal(t, group, bg.Consensus.GetConsensusGroup())
+
+	// A member that is no longer eligible must still leave the group while the tracker
+	// stays frozen, or it keeps receiving traffic.
+	bg.Consensus.Ban(nodes["node2"].backend)
+	updateConsensus(bg)
+
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	require.Equal(t, []*proxyd.Backend{nodes["node1"].backend}, bg.Consensus.GetConsensusGroup())
 }
