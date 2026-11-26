@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"slices"
 	"sort"
@@ -476,6 +477,29 @@ func WithTLSConfig(tlsConfig *tls.Config) BackendOpt {
 			b.client.Transport = &http.Transport{}
 		}
 		b.client.Transport.(*http.Transport).TLSClientConfig = tlsConfig
+	}
+}
+
+// WithDialTimeout bounds TCP connect time, so a backend that drops SYNs (e.g. a Service
+// with no endpoints) fails over quickly instead of hanging for Go's 30s dial timeout.
+// Apply after WithTLSConfig so both land on the same transport.
+func WithDialTimeout(timeout time.Duration) BackendOpt {
+	return func(b *Backend) {
+		if timeout <= 0 {
+			return
+		}
+		if b.client.Transport == nil {
+			b.client.Transport = http.DefaultTransport.(*http.Transport).Clone()
+		}
+		t, ok := b.client.Transport.(*http.Transport)
+		if !ok {
+			log.Warn("cannot set dial timeout on non-standard backend transport", "name", b.Name)
+			return
+		}
+		t.DialContext = (&net.Dialer{
+			Timeout:   timeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
 	}
 }
 
@@ -1891,7 +1915,9 @@ func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error)
 			return nil, ErrContextCanceled
 		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
-		return nil, wrapErr(err, ErrTooManyRequests.Message)
+		// Wrap the sentinel too, so doForward keeps this local admission
+		// failure out of the backend's error rate.
+		return nil, fmt.Errorf("%w %w", ErrTooManyRequests, err)
 	}
 	defer c.sem.Release(1)
 	return c.Do(req)

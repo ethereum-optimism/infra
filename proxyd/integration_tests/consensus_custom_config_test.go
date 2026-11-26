@@ -1,11 +1,16 @@
 package integration_tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	ms "github.com/ethereum-optimism/infra/proxyd/tools/mockserver/handler"
@@ -291,4 +296,94 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 		require.Equal(t, "0xb1", bg.Consensus.GetSafeBlockNumber().String())
 		require.Equal(t, "0x91", bg.Consensus.GetFinalizedBlockNumber().String())
 	})
+}
+
+// hashCheckHang outlasts consensus_fetch_timeout (300ms) in consensus_connect_timeouts.toml.
+// The hang must end on its own: MockBackend serves requests one at a time and hands
+// handlers a context that is never cancelled.
+const hashCheckHang = 500 * time.Millisecond
+
+// hangHashChecks makes node hang on the consensus loop's block-hash checks, which
+// ask for a block by number. Head polls use tags and are still answered.
+func hangHashChecks(node nodeContext) {
+	inner := node.handler.Handler
+	node.mockBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		var req struct {
+			Method string `json:"method"`
+			Params []any  `json:"params"`
+		}
+		if json.Unmarshal(body, &req) == nil && req.Method == "eth_getBlockByNumber" && len(req.Params) > 0 {
+			if n, _ := req.Params[0].(string); strings.HasPrefix(n, "0x") {
+				time.Sleep(hashCheckHang)
+				return
+			}
+		}
+		inner(w, r)
+	}))
+}
+
+func updateConsensus(bg *proxyd.BackendGroup) {
+	ctx := context.Background()
+	for _, be := range bg.Backends {
+		bg.Consensus.UpdateBackend(ctx, be)
+	}
+	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+}
+
+// A backend that hangs on its block-hash check must cost the loop
+// consensus_fetch_timeout (300ms), not the 5s response timeout, and must sit out
+// the cycle: a timed-out check cannot rule out a conflicting hash. The config also
+// sets dial_timeout_milliseconds, so both keys are wired through Start.
+func TestConsensusFetchTimeoutConfig(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	hangHashChecks(nodes["node2"])
+
+	start := time.Now()
+	updateConsensus(bg)
+
+	require.Less(t, time.Since(start), 2*time.Second, "consensus loop waited on the hanging backend")
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	require.Equal(t, []*proxyd.Backend{nodes["node1"].backend}, bg.Consensus.GetConsensusGroup())
+}
+
+// When no backend answers its block-hash check, nothing confirms the proposal, so
+// the cycle must keep the previous tracker state and group.
+func TestConsensusFetchTimeoutAllChecksFail(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	updateConsensus(bg)
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	group := bg.Consensus.GetConsensusGroup()
+	require.Len(t, group, 2)
+
+	// Heads move to 0x102, but no backend answers the hash check for it.
+	for _, name := range []string{"node1", "node2"} {
+		nodes[name].handler.AddOverride(&ms.MethodTemplate{
+			Method:   "eth_getBlockByNumber",
+			Block:    "latest",
+			Response: buildResponse(map[string]string{"number": "0x102", "hash": "hash_0x102"}),
+		})
+		hangHashChecks(nodes[name])
+	}
+	updateConsensus(bg)
+
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String(), "advanced on an unverified block")
+	require.Equal(t, group, bg.Consensus.GetConsensusGroup())
+
+	// A member that is no longer eligible must still leave the group while the tracker
+	// stays frozen, or it keeps receiving traffic.
+	bg.Consensus.Ban(nodes["node2"].backend)
+	updateConsensus(bg)
+
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	require.Equal(t, []*proxyd.Backend{nodes["node1"].backend}, bg.Consensus.GetConsensusGroup())
 }

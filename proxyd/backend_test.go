@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,8 +85,31 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		}
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "too many requests")
+		require.ErrorIs(t, err, ErrTooManyRequests)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, resp)
 	})
+}
+
+// A deadline that expires while queued for the shared RPC semaphore never
+// reaches the backend, so it must not count toward the backend's error rate.
+func TestSemaphoreTimeoutNotCountedAsBackendError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+	}))
+	defer server.Close()
+
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1)) // queue is full
+	be := NewBackend("be", server.URL, "", sem, WithMaxRetries(0))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var res RPCRes
+	err := be.ForwardRPC(ctx, &res, "1", "eth_chainId")
+
+	require.ErrorIs(t, err, ErrTooManyRequests)
+	require.Zero(t, be.intermittentErrorsSlidingWindow.Sum())
 }
 
 func TestWSProxierRequestSlotLimit(t *testing.T) {
@@ -265,4 +289,29 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 		}
 	}
 	return 0
+}
+
+func TestWithDialTimeout(t *testing.T) {
+	t.Run("clones the default transport when none is set", func(t *testing.T) {
+		be := NewBackend("be", "http://127.0.0.1:1", "", nil, WithDialTimeout(250*time.Millisecond))
+		tr, ok := be.client.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.NotSame(t, http.DefaultTransport, tr, "must not mutate the shared default transport")
+		require.NotNil(t, tr.DialContext)
+		require.NotNil(t, tr.Proxy, "default transport settings should be preserved")
+	})
+
+	t.Run("keeps an existing TLS config", func(t *testing.T) {
+		tlsCfg := &tls.Config{ServerName: "example.internal"}
+		be := NewBackend("be", "https://127.0.0.1:1", "", nil, WithTLSConfig(tlsCfg), WithDialTimeout(250*time.Millisecond))
+		tr, ok := be.client.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.Same(t, tlsCfg, tr.TLSClientConfig)
+		require.NotNil(t, tr.DialContext)
+	})
+
+	t.Run("zero leaves the transport untouched", func(t *testing.T) {
+		be := NewBackend("be", "http://127.0.0.1:1", "", nil, WithDialTimeout(0))
+		require.Nil(t, be.client.Transport)
+	})
 }

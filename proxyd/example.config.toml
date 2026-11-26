@@ -55,6 +55,8 @@ max_latency_threshold = "30s"
 max_degraded_latency_threshold = "10s"
 # Maximum error rate accepted to serve requests, default 0.5 (i.e. 50%)
 max_error_rate_threshold = 0.3
+# Maximum TCP connect time to a backend, default Go's 30s. Can be set per backend too.
+# dial_timeout_milliseconds = 2000
 
 [backends]
 # A map of backends by name.
@@ -109,6 +111,8 @@ backends = ["infura"]
 # consensus_ban_period = "1m"
 # Maximum delay for update the backend, default 30s
 # consensus_max_update_threshold = "20s"
+# Timeout for each block fetch in the consensus loop, default 5s. EL (consensus_aware) only
+# consensus_fetch_timeout = "2s"
 # Maximum block lag, default 8
 # consensus_max_block_lag = 16
 # Maximum block range (for eth_getLogs method), no default

@@ -16,6 +16,8 @@ import (
 
 const (
 	DefaultPollerInterval = 1 * time.Second
+
+	DefaultConsensusFetchTimeout = 5 * time.Second
 )
 
 var (
@@ -48,6 +50,7 @@ type ConsensusPoller struct {
 	maxBlockLag        uint64
 	maxBlockRange      uint64
 	interval           time.Duration
+	fetchTimeout       time.Duration // per-fetch timeout in findConsensusBlock; 0 disables
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
@@ -300,6 +303,14 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
+// WithFetchTimeout sets the per-fetch timeout of the EL group consensus loop; 0 disables it.
+// CL groups ignore it: verifyCLOutputRoots is bounded by the backend timeout.
+func WithFetchTimeout(timeout time.Duration) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.fetchTimeout = timeout
+	}
+}
+
 func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
@@ -316,6 +327,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:              8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:             3,
 		interval:                 DefaultPollerInterval,
+		fetchTimeout:             DefaultConsensusFetchTimeout,
 		clSyncThreshold:          10,              // 10 L1 blocks ~ 2 minutes
 		clHeadL1MaxAge:           5 * time.Minute, // L1 head older than this → node is stalled
 		clOutputRootBanThreshold: 3,
@@ -581,7 +593,33 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	// backend cache (a single-backend snapshot), so unsafe block hash consensus is irrelevant.
 	// optimism_outputAtBlock also does not work for unsafe blocks.
 	if proposedBlock > 0 && !cp.consensusLayer {
-		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
+		var failed map[*Backend]bool
+		var verified bool
+		proposedBlock, proposedBlockHash, broken, failed, verified = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
+		if !verified {
+			// Nothing confirmed the proposal: keep the tracker frozen, but still drop
+			// previous members that are no longer eligible (banned, stale, lagging, ...),
+			// which would otherwise keep receiving traffic.
+			log.Warn("skipping consensus update: no backend answered the block hash check",
+				"backend_group", cp.backendGroup.Name,
+				"candidates", len(candidates),
+				"proposedBlock", proposedBlock)
+			cp.consensusGroupMux.Lock()
+			kept := make([]*Backend, 0, len(cp.consensusGroup))
+			for _, be := range cp.consensusGroup {
+				if _, eligible := candidates[be]; eligible {
+					kept = append(kept, be)
+				}
+			}
+			cp.consensusGroup = kept
+			cp.consensusGroupMux.Unlock()
+			RecordGroupConsensusCount(cp.backendGroup, len(kept))
+			return
+		}
+		// A failed check cannot rule out a conflicting hash, so the backend sits out this cycle.
+		for be := range failed {
+			delete(candidates, be)
+		}
 	}
 
 	if broken {
@@ -713,9 +751,32 @@ func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, bloc
 	return cp.fetchELBlock(ctx, be, block.String())
 }
 
+// fetchWithTimeout bounds a single fetch. findConsensusBlock fetches sequentially, so an
+// unresponsive backend would otherwise stall the whole consensus loop until its dial or
+// client timeout fires.
+func (cp *ConsensusPoller) fetchWithTimeout(
+	ctx context.Context,
+	fetch blockHashFetcher,
+	be *Backend,
+	block hexutil.Uint64,
+) (hexutil.Uint64, string, error) {
+	if cp.fetchTimeout <= 0 {
+		return fetch(ctx, be, block)
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, cp.fetchTimeout)
+	defer cancel()
+	return fetch(fetchCtx, be, block)
+}
+
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
 // label identifies the safety level ("unsafe", "safe", "finalized") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+//
+// A failed check proves nothing about the backend's chain, so failed holds the backends whose
+// check failed for the returned block, and verified is false when none answered for it. Every
+// other candidate confirmed the returned block, so publishing candidates minus failed yields a
+// non-empty group of confirmed backends exactly when verified. Callers must not advance when
+// !verified.
 func (cp *ConsensusPoller) findConsensusBlock(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -724,18 +785,24 @@ func (cp *ConsensusPoller) findConsensusBlock(
 	startHash string,
 	fetch blockHashFetcher,
 	label string,
-) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool) {
+) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool, failed map[*Backend]bool, verified bool) {
 	proposedBlock = startBlock
 	proposedBlockHash = startHash
 
 	for {
 		allAgreed := true
+		answered := 0
+		// Only failures at the returned block matter: a backend that timed out at a
+		// later height and then confirmed this one agrees with what gets published.
+		failed = make(map[*Backend]bool)
 		for be := range candidates {
-			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
+			actualBlockNumber, actualHash, err := cp.fetchWithTimeout(ctx, fetch, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
+				failed[be] = true
 				continue
 			}
+			answered++
 			if proposedBlockHash == "" {
 				proposedBlockHash = actualHash
 			}
@@ -755,10 +822,10 @@ func (cp *ConsensusPoller) findConsensusBlock(
 			}
 		}
 		if allAgreed {
-			return proposedBlock, proposedBlockHash, broken
+			return proposedBlock, proposedBlockHash, broken, failed, answered > 0
 		}
 		if proposedBlock == 0 {
-			return 0, "", true
+			return 0, "", true, failed, true
 		}
 		proposedBlock -= 1
 		proposedBlockHash = ""

@@ -216,6 +216,12 @@ func Start(config *Config) (*Server, func(), error) {
 		if cfg.MaxRetries != nil {
 			opts = append(opts, WithMaxRetries(*cfg.MaxRetries))
 		}
+		// Must come after WithTLSConfig.
+		if dialTimeoutMs := cfg.DialTimeoutMilliseconds; dialTimeoutMs > 0 {
+			opts = append(opts, WithDialTimeout(millisecondsToDuration(dialTimeoutMs)))
+		} else if dialTimeoutMs := config.BackendOptions.DialTimeoutMilliseconds; dialTimeoutMs > 0 {
+			opts = append(opts, WithDialTimeout(millisecondsToDuration(dialTimeoutMs)))
+		}
 		opts = append(opts, WithProxydIP(os.Getenv("PROXYD_IP")))
 		opts = append(opts, WithSkipIsSyncingCheck(cfg.SkipIsSyncingCheck))
 		opts = append(opts, WithSafeBlockDriftThreshold(cfg.SafeBlockDriftThreshold))
@@ -647,6 +653,11 @@ func Start(config *Config) (*Server, func(), error) {
 						)
 					}
 				}
+				if bgcfg.ConsensusFetchTimeout > 0 {
+					log.Warn("consensus_fetch_timeout has no effect on CL consensus groups; output-root fetches are bounded by the backend timeout",
+						"backend_group", bgName,
+					)
+				}
 			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))
@@ -668,6 +679,9 @@ func Start(config *Config) (*Server, func(), error) {
 			}
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
+			}
+			if bgcfg.ConsensusFetchTimeout > 0 {
+				copts = append(copts, WithFetchTimeout(time.Duration(bgcfg.ConsensusFetchTimeout)))
 			}
 			if bgcfg.ConsensusCLSyncThreshold > 0 {
 				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))
