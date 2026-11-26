@@ -2,6 +2,7 @@ package proxyd
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -265,4 +266,29 @@ func getHttpResponseCodeCount(statusCode string) float64 {
 		}
 	}
 	return 0
+}
+
+func TestWithDialTimeout(t *testing.T) {
+	t.Run("clones the default transport when none is set", func(t *testing.T) {
+		be := NewBackend("be", "http://127.0.0.1:1", "", nil, WithDialTimeout(250*time.Millisecond))
+		tr, ok := be.client.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.NotSame(t, http.DefaultTransport, tr, "must not mutate the shared default transport")
+		require.NotNil(t, tr.DialContext)
+		require.NotNil(t, tr.Proxy, "default transport settings should be preserved")
+	})
+
+	t.Run("keeps an existing TLS config", func(t *testing.T) {
+		tlsCfg := &tls.Config{ServerName: "example.internal"}
+		be := NewBackend("be", "https://127.0.0.1:1", "", nil, WithTLSConfig(tlsCfg), WithDialTimeout(250*time.Millisecond))
+		tr, ok := be.client.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.Same(t, tlsCfg, tr.TLSClientConfig)
+		require.NotNil(t, tr.DialContext)
+	})
+
+	t.Run("zero leaves the transport untouched", func(t *testing.T) {
+		be := NewBackend("be", "http://127.0.0.1:1", "", nil, WithDialTimeout(0))
+		require.Nil(t, be.client.Transport)
+	})
 }

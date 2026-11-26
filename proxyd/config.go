@@ -119,6 +119,8 @@ type BackendOptions struct {
 	MaxDegradedLatencyThreshold TOMLDuration `toml:"max_degraded_latency_threshold"`
 	MaxLatencyThreshold         TOMLDuration `toml:"max_latency_threshold"`
 	MaxErrorRateThreshold       float64      `toml:"max_error_rate_threshold"`
+	// Max TCP connect time to a backend; 0 keeps Go's 30s default.
+	DialTimeoutMilliseconds int `toml:"dial_timeout_milliseconds"`
 }
 
 type BackendConfig struct {
@@ -146,6 +148,7 @@ type BackendConfig struct {
 	SkipIsSyncingCheck          bool `toml:"skip_is_syncing_check"`
 	ResponseTimeoutMilliseconds int  `toml:"response_timeout_milliseconds"`
 	MaxRetries                  *int `toml:"max_retries"`
+	DialTimeoutMilliseconds     int  `toml:"dial_timeout_milliseconds"` // overrides backend.dial_timeout_milliseconds
 
 	SafeBlockDriftThreshold      uint64 `toml:"safe_block_drift_threshold"`
 	FinalizedBlockDriftThreshold uint64 `toml:"finalized_block_drift_threshold"`
@@ -214,6 +217,7 @@ type BackendGroupConfig struct {
 	ConsensusAware          bool         `toml:"consensus_aware"`
 	ConsensusAsyncHandler   string       `toml:"consensus_handler"`
 	ConsensusPollerInterval TOMLDuration `toml:"consensus_poller_interval"`
+	ConsensusFetchTimeout   TOMLDuration `toml:"consensus_fetch_timeout"` // default 5s
 
 	ConsensusBanPeriod          TOMLDuration `toml:"consensus_ban_period"`
 	ConsensusMaxUpdateThreshold TOMLDuration `toml:"consensus_max_update_threshold"`

@@ -16,6 +16,8 @@ import (
 
 const (
 	DefaultPollerInterval = 1 * time.Second
+
+	DefaultConsensusFetchTimeout = 5 * time.Second
 )
 
 var (
@@ -48,6 +50,7 @@ type ConsensusPoller struct {
 	maxBlockLag        uint64
 	maxBlockRange      uint64
 	interval           time.Duration
+	fetchTimeout       time.Duration // per-fetch timeout in findConsensusBlock; 0 disables
 
 	// CL (op-node) consensus fields — only populated when consensusLayer is true.
 	// All logic that reads these fields lives in consensus_poller_cl.go.
@@ -300,6 +303,13 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
+// WithFetchTimeout sets the per-fetch timeout of the group consensus loop; 0 disables it.
+func WithFetchTimeout(timeout time.Duration) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.fetchTimeout = timeout
+	}
+}
+
 func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
@@ -316,6 +326,7 @@ func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller
 		maxBlockLag:              8, // 8*12 seconds = 96 seconds ~ 1.6 minutes
 		minPeerCount:             3,
 		interval:                 DefaultPollerInterval,
+		fetchTimeout:             DefaultConsensusFetchTimeout,
 		clSyncThreshold:          10,              // 10 L1 blocks ~ 2 minutes
 		clHeadL1MaxAge:           5 * time.Minute, // L1 head older than this → node is stalled
 		clOutputRootBanThreshold: 3,
@@ -713,6 +724,23 @@ func (cp *ConsensusPoller) elBlockFetcher(ctx context.Context, be *Backend, bloc
 	return cp.fetchELBlock(ctx, be, block.String())
 }
 
+// fetchWithTimeout bounds a single fetch. findConsensusBlock fetches sequentially, so an
+// unresponsive backend would otherwise stall the whole consensus loop until its dial or
+// client timeout fires.
+func (cp *ConsensusPoller) fetchWithTimeout(
+	ctx context.Context,
+	fetch blockHashFetcher,
+	be *Backend,
+	block hexutil.Uint64,
+) (hexutil.Uint64, string, error) {
+	if cp.fetchTimeout <= 0 {
+		return fetch(ctx, be, block)
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, cp.fetchTimeout)
+	defer cancel()
+	return fetch(fetchCtx, be, block)
+}
+
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
 // label identifies the safety level ("unsafe", "safe", "finalized") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
@@ -731,7 +759,7 @@ func (cp *ConsensusPoller) findConsensusBlock(
 	for {
 		allAgreed := true
 		for be := range candidates {
-			actualBlockNumber, actualHash, err := fetch(ctx, be, proposedBlock)
+			actualBlockNumber, actualHash, err := cp.fetchWithTimeout(ctx, fetch, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
 				continue
