@@ -242,6 +242,30 @@ func TestClientIPMultipleHeaderLines(t *testing.T) {
 	require.Equal(t, "203.0.113.7", s.clientIP(emptyFirst))
 }
 
+func TestPopulateContextForwardsFullXFFChain(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		hops  int
+		lines []string
+		want  string
+	}{
+		{"trusted hops keep every field in order", 1, []string{"192.0.2.77", "", "203.0.113.7, 34.0.0.1"}, "192.0.2.77, 203.0.113.7, 34.0.0.1"},
+		{"zero hops keeps the first field", 0, []string{"192.0.2.77", "203.0.113.7, 34.0.0.1"}, "192.0.2.77"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: tt.hops}
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = "10.0.0.1:41000"
+			for _, l := range tt.lines {
+				req.Header.Add(defaultRateLimitHeader, l)
+			}
+			ctx := s.populateContext(httptest.NewRecorder(), req)
+			require.NotNil(t, ctx)
+			require.Equal(t, tt.want, GetXForwardedFor(ctx))
+		})
+	}
+}
+
 func TestAuthAliasLimiterMissingIP(t *testing.T) {
 	for _, tt := range []struct {
 		name          string

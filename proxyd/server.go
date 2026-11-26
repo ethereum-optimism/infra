@@ -1128,7 +1128,7 @@ func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited li
 func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
-	xff := r.Header.Get(s.rateLimitHeader)
+	xff := s.forwardedChain(r)
 	if xff == "" {
 		xff = hostFromRemoteAddr(r.RemoteAddr)
 	}
@@ -1171,6 +1171,22 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	)
 }
 
+// forwardedChain returns the IP header as forwarded to backends. With trusted
+// hops it joins every non-empty field in order, since proxies may append to
+// any field and the backend should see the chain proxyd resolved against.
+func (s *Server) forwardedChain(r *http.Request) string {
+	if s.xffTrustedHops == 0 {
+		return r.Header.Get(s.rateLimitHeader)
+	}
+	var fields []string
+	for _, v := range r.Header.Values(s.rateLimitHeader) {
+		if v = strings.TrimSpace(v); v != "" {
+			fields = append(fields, v)
+		}
+	}
+	return strings.Join(fields, ", ")
+}
+
 // clientIP returns the caller's IP: the IP header entry immediately left of the
 // xffTrustedHops entries appended by trusted proxies, or the peer address when
 // the header is absent or too short to have passed through them.
@@ -1182,11 +1198,9 @@ func (s *Server) clientIP(r *http.Request) string {
 		}
 		return stripXFF(header)
 	}
-	// Proxies may append to any header line, including after an empty one, so
-	// count across all of them.
-	header := strings.Join(r.Header.Values(s.rateLimitHeader), ",")
+	header := s.forwardedChain(r)
 	entries := strings.Split(header, ",")
-	if strings.TrimSpace(strings.ReplaceAll(header, ",", "")) == "" || len(entries) <= s.xffTrustedHops {
+	if header == "" || len(entries) <= s.xffTrustedHops {
 		return hostFromRemoteAddr(r.RemoteAddr)
 	}
 	ip := strings.TrimSpace(entries[len(entries)-1-s.xffTrustedHops])
