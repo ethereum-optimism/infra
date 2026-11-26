@@ -298,26 +298,17 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 	})
 }
 
-// A backend that hangs on the consensus loop's block-hash checks must cost the
-// loop consensus_fetch_timeout (300ms), not the 5s response timeout. The config
-// also sets dial_timeout_milliseconds, so both keys are wired through Start.
-func TestConsensusFetchTimeoutConfig(t *testing.T) {
-	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
-	defer nodes["node1"].mockBackend.Close()
-	defer nodes["node2"].mockBackend.Close()
-	defer shutdown()
-
-	release := make(chan struct{})
-	defer close(release)
-	inner := nodes["node2"].handler.Handler
-	nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// hangHashChecks makes node hang on the consensus loop's block-hash checks, which
+// ask for a block by number. Head polls use tags and are still answered.
+func hangHashChecks(node nodeContext, release <-chan struct{}) {
+	inner := node.handler.Handler
+	node.mockBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var req struct {
 			Method string `json:"method"`
 			Params []any  `json:"params"`
 		}
-		// Block-hash checks ask for a block by number; head polling uses tags.
 		if json.Unmarshal(body, &req) == nil && req.Method == "eth_getBlockByNumber" && len(req.Params) > 0 {
 			if n, _ := req.Params[0].(string); strings.HasPrefix(n, "0x") {
 				select {
@@ -329,14 +320,64 @@ func TestConsensusFetchTimeoutConfig(t *testing.T) {
 		}
 		inner(w, r)
 	}))
+}
 
+func updateConsensus(bg *proxyd.BackendGroup) {
 	ctx := context.Background()
 	for _, be := range bg.Backends {
 		bg.Consensus.UpdateBackend(ctx, be)
 	}
-	start := time.Now()
 	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+}
+
+// A backend that hangs on its block-hash check must cost the loop
+// consensus_fetch_timeout (300ms), not the 5s response timeout, and must sit out
+// the cycle: a timed-out check cannot rule out a conflicting hash. The config also
+// sets dial_timeout_milliseconds, so both keys are wired through Start.
+func TestConsensusFetchTimeoutConfig(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	release := make(chan struct{})
+	defer close(release)
+	hangHashChecks(nodes["node2"], release)
+
+	start := time.Now()
+	updateConsensus(bg)
 
 	require.Less(t, time.Since(start), 2*time.Second, "consensus loop waited on the hanging backend")
 	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	require.Equal(t, []*proxyd.Backend{nodes["node1"].backend}, bg.Consensus.GetConsensusGroup())
+}
+
+// When no backend answers its block-hash check, nothing confirms the proposal, so
+// the cycle must keep the previous tracker state and group.
+func TestConsensusFetchTimeoutAllChecksFail(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	updateConsensus(bg)
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
+	group := bg.Consensus.GetConsensusGroup()
+	require.Len(t, group, 2)
+
+	// Heads move to 0x102, but no backend answers the hash check for it.
+	release := make(chan struct{})
+	defer close(release)
+	for _, name := range []string{"node1", "node2"} {
+		nodes[name].handler.AddOverride(&ms.MethodTemplate{
+			Method:   "eth_getBlockByNumber",
+			Block:    "latest",
+			Response: buildResponse(map[string]string{"number": "0x102", "hash": "hash_0x102"}),
+		})
+		hangHashChecks(nodes[name], release)
+	}
+	updateConsensus(bg)
+
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String(), "advanced on an unverified block")
+	require.Equal(t, group, bg.Consensus.GetConsensusGroup())
 }

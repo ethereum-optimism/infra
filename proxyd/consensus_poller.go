@@ -593,7 +593,22 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	// backend cache (a single-backend snapshot), so unsafe block hash consensus is irrelevant.
 	// optimism_outputAtBlock also does not work for unsafe blocks.
 	if proposedBlock > 0 && !cp.consensusLayer {
-		proposedBlock, proposedBlockHash, broken = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
+		var failed map[*Backend]bool
+		var verified bool
+		proposedBlock, proposedBlockHash, broken, failed, verified = cp.findConsensusBlock(ctx, candidates, currentConsensusBlockNumber, proposedBlock, proposedBlockHash, cp.elBlockFetcher, "unsafe")
+		if !verified {
+			// Nothing confirmed the proposal: keep the previous tracker state and group
+			// rather than advancing on, or publishing, unchecked backends.
+			log.Warn("skipping consensus update: no backend answered the block hash check",
+				"backend_group", cp.backendGroup.Name,
+				"candidates", len(candidates),
+				"proposedBlock", proposedBlock)
+			return
+		}
+		// A failed check cannot rule out a conflicting hash, so the backend sits out this cycle.
+		for be := range failed {
+			delete(candidates, be)
+		}
 	}
 
 	if broken {
@@ -745,6 +760,10 @@ func (cp *ConsensusPoller) fetchWithTimeout(
 // findConsensusBlock walks back from startBlock until all candidates agree on the same block hash.
 // label identifies the safety level ("unsafe", "safe", "finalized") for log context.
 // It returns the agreed block number, hash, and whether consensus was broken relative to currentConsensusBlock.
+//
+// A failed check proves nothing about the backend's chain, so failed holds every backend whose
+// check failed during the walk, and verified is false when no backend answered for the returned
+// block. Callers must not publish failed backends, and must not advance at all when !verified.
 func (cp *ConsensusPoller) findConsensusBlock(
 	ctx context.Context,
 	candidates map[*Backend]*backendState,
@@ -753,18 +772,22 @@ func (cp *ConsensusPoller) findConsensusBlock(
 	startHash string,
 	fetch blockHashFetcher,
 	label string,
-) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool) {
+) (proposedBlock hexutil.Uint64, proposedBlockHash string, broken bool, failed map[*Backend]bool, verified bool) {
 	proposedBlock = startBlock
 	proposedBlockHash = startHash
+	failed = make(map[*Backend]bool)
 
 	for {
 		allAgreed := true
+		answered := 0
 		for be := range candidates {
 			actualBlockNumber, actualHash, err := cp.fetchWithTimeout(ctx, fetch, be, proposedBlock)
 			if err != nil {
 				log.Warn("error fetching block for consensus check", "label", label, "name", be.Name, "err", err)
+				failed[be] = true
 				continue
 			}
+			answered++
 			if proposedBlockHash == "" {
 				proposedBlockHash = actualHash
 			}
@@ -784,10 +807,10 @@ func (cp *ConsensusPoller) findConsensusBlock(
 			}
 		}
 		if allAgreed {
-			return proposedBlock, proposedBlockHash, broken
+			return proposedBlock, proposedBlockHash, broken, failed, answered > 0
 		}
 		if proposedBlock == 0 {
-			return 0, "", true
+			return 0, "", true, failed, true
 		}
 		proposedBlock -= 1
 		proposedBlockHash = ""
