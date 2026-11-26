@@ -653,6 +653,11 @@ func Start(config *Config) (*Server, func(), error) {
 						)
 					}
 				}
+				if bgcfg.ConsensusFetchTimeout > 0 {
+					log.Warn("consensus_fetch_timeout has no effect on CL consensus groups; output-root fetches are bounded by the backend timeout",
+						"backend_group", bgName,
+					)
+				}
 			}
 			if bgcfg.ConsensusAsyncHandler == "noop" {
 				copts = append(copts, WithAsyncHandler(NewNoopAsyncHandler()))

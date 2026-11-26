@@ -1,11 +1,16 @@
 package integration_tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum-optimism/infra/proxyd"
 	ms "github.com/ethereum-optimism/infra/proxyd/tools/mockserver/handler"
@@ -291,4 +296,47 @@ func TestConsensusBlockDriftThreshold(t *testing.T) {
 		require.Equal(t, "0xb1", bg.Consensus.GetSafeBlockNumber().String())
 		require.Equal(t, "0x91", bg.Consensus.GetFinalizedBlockNumber().String())
 	})
+}
+
+// A backend that hangs on the consensus loop's block-hash checks must cost the
+// loop consensus_fetch_timeout (300ms), not the 5s response timeout. The config
+// also sets dial_timeout_milliseconds, so both keys are wired through Start.
+func TestConsensusFetchTimeoutConfig(t *testing.T) {
+	nodes, bg, _, shutdown := setupCustomConfig(t, "consensus_connect_timeouts")
+	defer nodes["node1"].mockBackend.Close()
+	defer nodes["node2"].mockBackend.Close()
+	defer shutdown()
+
+	release := make(chan struct{})
+	defer close(release)
+	inner := nodes["node2"].handler.Handler
+	nodes["node2"].mockBackend.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		var req struct {
+			Method string `json:"method"`
+			Params []any  `json:"params"`
+		}
+		// Block-hash checks ask for a block by number; head polling uses tags.
+		if json.Unmarshal(body, &req) == nil && req.Method == "eth_getBlockByNumber" && len(req.Params) > 0 {
+			if n, _ := req.Params[0].(string); strings.HasPrefix(n, "0x") {
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+				return
+			}
+		}
+		inner(w, r)
+	}))
+
+	ctx := context.Background()
+	for _, be := range bg.Backends {
+		bg.Consensus.UpdateBackend(ctx, be)
+	}
+	start := time.Now()
+	bg.Consensus.UpdateBackendGroupConsensus(ctx)
+
+	require.Less(t, time.Since(start), 2*time.Second, "consensus loop waited on the hanging backend")
+	require.Equal(t, "0x101", bg.Consensus.GetLatestBlockNumber().String())
 }

@@ -85,8 +85,31 @@ func TestLimitedHTTPClientDoLimited(t *testing.T) {
 		}
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "too many requests")
+		require.ErrorIs(t, err, ErrTooManyRequests)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, resp)
 	})
+}
+
+// A deadline that expires while queued for the shared RPC semaphore never
+// reaches the backend, so it must not count toward the backend's error rate.
+func TestSemaphoreTimeoutNotCountedAsBackendError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+	}))
+	defer server.Close()
+
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1)) // queue is full
+	be := NewBackend("be", server.URL, "", sem, WithMaxRetries(0))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var res RPCRes
+	err := be.ForwardRPC(ctx, &res, "1", "eth_chainId")
+
+	require.ErrorIs(t, err, ErrTooManyRequests)
+	require.Zero(t, be.intermittentErrorsSlidingWindow.Sum())
 }
 
 func TestWSProxierRequestSlotLimit(t *testing.T) {

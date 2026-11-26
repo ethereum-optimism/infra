@@ -217,7 +217,7 @@ type BackendGroupConfig struct {
 	ConsensusAware          bool         `toml:"consensus_aware"`
 	ConsensusAsyncHandler   string       `toml:"consensus_handler"`
 	ConsensusPollerInterval TOMLDuration `toml:"consensus_poller_interval"`
-	ConsensusFetchTimeout   TOMLDuration `toml:"consensus_fetch_timeout"` // default 5s
+	ConsensusFetchTimeout   TOMLDuration `toml:"consensus_fetch_timeout"` // default 5s; EL consensus only
 
 	ConsensusBanPeriod          TOMLDuration `toml:"consensus_ban_period"`
 	ConsensusMaxUpdateThreshold TOMLDuration `toml:"consensus_max_update_threshold"`

@@ -1915,7 +1915,9 @@ func (c *LimitedHTTPClient) DoLimited(req *http.Request) (*http.Response, error)
 			return nil, ErrContextCanceled
 		}
 		tooManyRequestErrorsTotal.WithLabelValues(c.backendName).Inc()
-		return nil, wrapErr(err, ErrTooManyRequests.Message)
+		// Wrap the sentinel too, so doForward keeps this local admission
+		// failure out of the backend's error rate.
+		return nil, fmt.Errorf("%w %w", ErrTooManyRequests, err)
 	}
 	defer c.sem.Release(1)
 	return c.Do(req)

@@ -303,7 +303,8 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
-// WithFetchTimeout sets the per-fetch timeout of the group consensus loop; 0 disables it.
+// WithFetchTimeout sets the per-fetch timeout of the EL group consensus loop; 0 disables it.
+// CL groups ignore it: verifyCLOutputRoots is bounded by the backend timeout.
 func WithFetchTimeout(timeout time.Duration) ConsensusOpt {
 	return func(cp *ConsensusPoller) {
 		cp.fetchTimeout = timeout
