@@ -12,11 +12,13 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +39,7 @@ const (
 	ContextKeyAuth                                  = "authorization"
 	ContextKeyReqID                                 = "req_id"
 	ContextKeyXForwardedFor                         = "x_forwarded_for"
+	ContextKeyClientIP                              = "client_ip"
 	ContextKeyOpTxProxyAuth                         = "op_txproxy_auth"
 	ContextKeyInteropValidationStrategy             = "interop_validation_strategy"
 	ContextKeyReqReceivedAt                         = "req_received_at"
@@ -94,6 +97,8 @@ type Server struct {
 	cache                   RPCCache
 	srvMu                   sync.Mutex
 	rateLimitHeader         string
+	xffTrustedHops          int
+	requestLogSampleRate    float64
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
 	publicAccess            bool
@@ -133,6 +138,7 @@ func NewServer(
 	interopSenderRateLimitConfig SenderRateLimitConfig,
 	enableRequestLog bool,
 	maxRequestBodyLogLen int,
+	requestLogSampleRate float64,
 	maxBatchSize int,
 	limiterFactory limiterFactoryFunc,
 	interopValidatingConfig InteropValidationConfig,
@@ -299,6 +305,8 @@ func NewServer(
 		limExemptUserAgents:      limExemptUserAgents,
 		limExemptKeys:            limExemptKeys,
 		rateLimitHeader:          rateLimitHeader,
+		xffTrustedHops:           rateLimitConfig.XFFTrustedHops,
+		requestLogSampleRate:     requestLogSampleRate,
 		interopValidatingConfig:  interopValidatingConfig,
 		interopStrategy:          interopStrategy,
 		enableTxHashLogging:      enableTxHashLogging,
@@ -422,7 +430,28 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		RecordHTTPRequestByMethodDuration(methodLabel, time.Since(start))
 	}()
 
-	ctx := s.populateContext(w, r)
+	var ctx context.Context
+	if s.requestLogSampleRate > 0 && mrand.Float64() < s.requestLogSampleRate {
+		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		w = sw
+		defer func() {
+			// ctx is nil when populateContext rejected the request.
+			reqID, auth, remoteIP := "", "", s.clientIP(r)
+			if ctx != nil {
+				reqID, auth, remoteIP = GetReqID(ctx), GetAuthCtx(ctx), GetClientIP(ctx)
+			}
+			log.Info("served RPC request",
+				"req_id", reqID,
+				"auth", auth,
+				"remote_ip", remoteIP,
+				"method", methodLabel,
+				"status", sw.status,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
+		}()
+	}
+
+	ctx = s.populateContext(w, r)
 	if ctx == nil {
 		return
 	}
@@ -454,7 +483,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		"auth", GetAuthCtx(ctx),
 		"user_agent", r.Header.Get("User-Agent"),
 		"origin", r.Header.Get("Origin"),
-		"remote_ip", stripXFF(GetXForwardedFor(ctx)),
+		"remote_ip", GetClientIP(ctx),
 	)
 
 	body, err := io.ReadAll(LimitReader(r.Body, s.maxBodySize))
@@ -676,7 +705,7 @@ func (s *Server) prepareRPCForForward(
 			"source", source,
 			"req_id", GetReqID(ctx),
 			"method", parsedReq.Method,
-			"remote_ip", stripXFF(GetXForwardedFor(ctx)),
+			"remote_ip", GetClientIP(ctx),
 		)
 		RecordRPCError(ctx, BackendProxyd, MethodNotAllowed, ErrMethodNotWhitelisted)
 		return NewRPCErrorRes(parsedReq.ID, ErrMethodNotWhitelisted), "", nil
@@ -689,7 +718,7 @@ func (s *Server) prepareRPCForForward(
 			"req_id", GetReqID(ctx),
 			"method", parsedReq.Method,
 			"auth", GetAuthCtx(ctx),
-			"remote_ip", stripXFF(GetXForwardedFor(ctx)),
+			"remote_ip", GetClientIP(ctx),
 		)
 		RecordRPCError(ctx, BackendProxyd, parsedReq.Method, ErrOverRateLimit)
 		return NewRPCErrorRes(parsedReq.ID, ErrOverRateLimit), "", nil
@@ -978,7 +1007,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx = context.WithoutCancel(ctx)
 
-	log.Info("received WS connection", "req_id", GetReqID(ctx))
+	log.Info("received WS connection", "req_id", GetReqID(ctx), "remote_ip", GetClientIP(ctx))
 
 	// User can provide an API key via the "X-Api-Key" header
 	apiKey := r.Header.Get("X-Api-Key")
@@ -1105,6 +1134,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
+	ctx = context.WithValue(ctx, ContextKeyClientIP, s.clientIP(r))     // nolint:staticcheck
 	ctx = context.WithValue(ctx, ContextKeyReqReceivedAt, time.Now())   // nolint:staticcheck
 
 	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
@@ -1139,6 +1169,29 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 		ContextKeyReqID, // nolint:staticcheck
 		randStr(10),
 	)
+}
+
+// clientIP returns the caller's IP: the IP header entry immediately left of the
+// xffTrustedHops entries appended by trusted proxies, or the peer address when
+// the header is absent or too short to have passed through them.
+func (s *Server) clientIP(r *http.Request) string {
+	header := r.Header.Get(s.rateLimitHeader)
+	if header == "" {
+		return hostFromRemoteAddr(r.RemoteAddr)
+	}
+	if s.xffTrustedHops == 0 {
+		return stripXFF(header)
+	}
+	// Proxies may append to any header line, so count across all of them.
+	entries := strings.Split(strings.Join(r.Header.Values(s.rateLimitHeader), ","), ",")
+	if len(entries) <= s.xffTrustedHops {
+		return hostFromRemoteAddr(r.RemoteAddr)
+	}
+	ip := strings.TrimSpace(entries[len(entries)-1-s.xffTrustedHops])
+	if net.ParseIP(ip) == nil {
+		return hostFromRemoteAddr(r.RemoteAddr)
+	}
+	return ip
 }
 
 func hostFromRemoteAddr(remoteAddr string) string {
@@ -1191,8 +1244,7 @@ func (s *Server) isValidAPIKey(key string) bool {
 func (s *Server) limiterForRequest(ctx context.Context, r *http.Request, bypassLimit bool) (limiterFunc, error) {
 	origin := r.Header.Get("Origin")
 	userAgent := r.Header.Get("User-Agent")
-	// Use XFF in context since it will automatically be replaced by the remote IP
-	key := stripXFF(GetXForwardedFor(ctx))
+	key := GetClientIP(ctx)
 	lims := limiterSet{base: s.mainLim, methods: s.overrideLims}
 	trackingKey := "ip:" + key
 	if alias, authenticated := ctx.Value(ContextKeyAuth).(string); authenticated && s.authLims != nil {
@@ -1496,12 +1548,34 @@ func GetReqReceivedAt(ctx context.Context) time.Time {
 	return time.Now()
 }
 
+func GetClientIP(ctx context.Context) string {
+	ip, ok := ctx.Value(ContextKeyClientIP).(string)
+	if !ok {
+		return ""
+	}
+	return ip
+}
+
 func GetXForwardedFor(ctx context.Context) string {
 	xff, ok := ctx.Value(ContextKeyXForwardedFor).(string)
 	if !ok {
 		return ""
 	}
 	return xff
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	if !r.wroteHeader {
+		r.status = code
+		r.wroteHeader = true
+	}
+	r.ResponseWriter.WriteHeader(code)
 }
 
 type recordLenWriter struct {

@@ -335,6 +335,7 @@ func newMethodDurationServer(t *testing.T, mappings map[string]string, groups ma
 		SenderRateLimitConfig{},
 		false,
 		0,
+		0,
 		100,
 		func(time.Duration, int, string) FrontendRateLimiter {
 			return NoopFrontendRateLimiter

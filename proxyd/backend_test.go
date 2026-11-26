@@ -165,6 +165,7 @@ func TestClientDisconnectionFlow499(t *testing.T) {
 		SenderRateLimitConfig{}, // interopSenderRateLimitConfig
 		false,                   // enableRequestLog
 		0,                       // maxRequestBodyLogLen
+		0,                       // requestLogSampleRate
 		100,                     // maxBatchSize
 		func(dur time.Duration, max int, prefix string) FrontendRateLimiter {
 			return NoopFrontendRateLimiter

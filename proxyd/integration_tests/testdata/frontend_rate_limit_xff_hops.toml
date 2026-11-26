@@ -1,0 +1,30 @@
+[server]
+
+rpc_port = 8545
+
+[backend]
+response_timeout_seconds = 1
+
+[backends]
+[backends.good]
+rpc_url = "$GOOD_BACKEND_RPC_URL"
+ws_url = "$GOOD_BACKEND_RPC_URL"
+
+[backend_groups]
+[backend_groups.main]
+backends = ["good"]
+
+[rpc_method_mappings]
+eth_chainId = "main"
+eth_foobar = "main"
+eth_baz = "main"
+eth_loose = "main"
+
+[rate_limit]
+base_rate = 2
+base_interval = "1m"
+exempt_origins = ["exempt_origin"]
+exempt_user_agents = ["exempt_agent"]
+error_message = "over rate limit with special message"
+xff_trusted_hops = 1
+

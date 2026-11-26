@@ -106,6 +106,16 @@ func Start(config *Config) (*Server, func(), error) {
 		ErrTooManyBatchRequests.Message = config.BatchConfig.ErrorMessage
 	}
 
+	if config.RateLimit.XFFTrustedHops < 0 {
+		return nil, nil, errors.New("xff_trusted_hops in rate_limit must be >= 0")
+	}
+	if config.RateLimit.XFFTrustedHops > 0 && config.RateLimit.IPHeaderOverride != "" {
+		return nil, nil, errors.New("xff_trusted_hops in rate_limit cannot be combined with ip_header_override")
+	}
+	if config.Server.RequestLogSampleRate < 0 || config.Server.RequestLogSampleRate > 1 {
+		return nil, nil, errors.New("request_log_sample_rate in server must be between 0 and 1")
+	}
+
 	if config.SenderRateLimit.Enabled {
 		if config.SenderRateLimit.Limit <= 0 {
 			return nil, nil, errors.New("limit in sender_rate_limit must be > 0")
@@ -540,6 +550,7 @@ func Start(config *Config) (*Server, func(), error) {
 		config.InteropValidationConfig.RateLimit,
 		config.Server.EnableRequestLog,
 		config.Server.MaxRequestBodyLogLen,
+		config.Server.RequestLogSampleRate,
 		config.BatchConfig.MaxSize,
 		limiterFactory,
 		config.InteropValidationConfig,

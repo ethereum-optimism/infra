@@ -902,7 +902,7 @@ func (b *Backend) doForward(ctx context.Context, rpcReqs []*RPCReq, isBatch bool
 
 	xForwardedFor := GetXForwardedFor(ctx)
 	if b.stripTrailingXFF {
-		xForwardedFor = stripXFF(xForwardedFor)
+		xForwardedFor = GetClientIP(ctx)
 	} else if b.proxydIP != "" {
 		xForwardedFor = fmt.Sprintf("%s, %s", xForwardedFor, b.proxydIP)
 	}
