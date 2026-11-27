@@ -24,10 +24,11 @@ func SetLogLevel(logLevel slog.Leveler) {
 }
 
 func validateClientIPConfig(config *Config) error {
-	if config.RateLimit.XFFTrustedHops < 0 {
+	hops := config.RateLimit.XFFTrustedHops
+	if hops != nil && *hops < 0 {
 		return errors.New("xff_trusted_hops in rate_limit must be >= 0")
 	}
-	if config.RateLimit.XFFTrustedHops > 0 && config.RateLimit.IPHeaderOverride != "" {
+	if hops != nil && config.RateLimit.IPHeaderOverride != "" {
 		return errors.New("xff_trusted_hops in rate_limit cannot be combined with ip_header_override")
 	}
 	// Written so that NaN, which TOML accepts as nan, fails too.

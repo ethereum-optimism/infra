@@ -97,7 +97,7 @@ type Server struct {
 	cache                   RPCCache
 	srvMu                   sync.Mutex
 	rateLimitHeader         string
-	xffTrustedHops          int
+	xffTrustedHops          *int
 	requestLogSampleRate    float64
 	interopValidatingConfig InteropValidationConfig
 	interopStrategy         InteropStrategy
@@ -1175,7 +1175,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 // hops it joins every non-empty field in order, since proxies may append to
 // any field and the backend should see the chain proxyd resolved against.
 func (s *Server) forwardedChain(r *http.Request) string {
-	if s.xffTrustedHops == 0 {
+	if s.xffTrustedHops == nil {
 		return r.Header.Get(s.rateLimitHeader)
 	}
 	var fields []string
@@ -1191,28 +1191,38 @@ func (s *Server) forwardedChain(r *http.Request) string {
 // xffTrustedHops entries appended by trusted proxies, or the peer address when
 // the header is absent or too short to have passed through them.
 func (s *Server) clientIP(r *http.Request) string {
-	if s.xffTrustedHops == 0 {
+	if s.xffTrustedHops == nil {
 		header := r.Header.Get(s.rateLimitHeader)
 		if header == "" {
 			return hostFromRemoteAddr(r.RemoteAddr)
 		}
 		return stripXFF(header)
 	}
+	hops := *s.xffTrustedHops
 	header := s.forwardedChain(r)
 	if header == "" {
 		return hostFromRemoteAddr(r.RemoteAddr)
 	}
 	entries := strings.Split(header, ",")
-	if len(entries) <= s.xffTrustedHops {
-		clientIPFallbacksTotal.WithLabelValues("header_too_short").Inc()
-		return hostFromRemoteAddr(r.RemoteAddr)
+	if len(entries) <= hops {
+		return s.clientIPFallback(r, header, "header_too_short")
 	}
-	ip := strings.TrimSpace(entries[len(entries)-1-s.xffTrustedHops])
+	ip := strings.TrimSpace(entries[len(entries)-1-hops])
 	if net.ParseIP(ip) == nil {
-		clientIPFallbacksTotal.WithLabelValues("invalid_entry").Inc()
-		return hostFromRemoteAddr(r.RemoteAddr)
+		return s.clientIPFallback(r, header, "invalid_entry")
 	}
 	return ip
+}
+
+func (s *Server) clientIPFallback(r *http.Request, header, reason string) string {
+	clientIPFallbacksTotal.WithLabelValues(reason).Inc()
+	log.Debug("client IP fell back to peer address",
+		"reason", reason,
+		"xff", truncate(header, 256),
+		"peer", r.RemoteAddr,
+		"xff_trusted_hops", *s.xffTrustedHops,
+	)
+	return hostFromRemoteAddr(r.RemoteAddr)
 }
 
 func hostFromRemoteAddr(remoteAddr string) string {

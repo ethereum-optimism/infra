@@ -193,19 +193,21 @@ func TestPopulateContextRemoteAddrFallback(t *testing.T) {
 func TestClientIP(t *testing.T) {
 	tests := []struct {
 		name   string
-		hops   int
+		hops   *int
 		header string
 		want   string
 	}{
-		{"no header uses peer", 1, "", "10.0.0.1"},
-		{"zero hops keeps leftmost", 0, "192.0.2.77, 203.0.113.7, 34.0.0.1", "192.0.2.77"},
-		{"one hop skips the load balancer", 1, "203.0.113.7,34.0.0.1", "203.0.113.7"},
-		{"one hop ignores client-supplied entries", 1, "192.0.2.77, 192.0.2.78, 203.0.113.7, 34.0.0.1", "203.0.113.7"},
-		{"two hops", 2, "192.0.2.77, 203.0.113.7, 34.0.0.1, 10.1.1.1", "203.0.113.7"},
-		{"header no longer than hops uses peer", 1, "192.0.2.77", "10.0.0.1"},
-		{"ipv6 client", 1, "2001:db8::1, 34.0.0.1", "2001:db8::1"},
-		{"empty selected entry uses peer", 1, "192.0.2.77,,34.0.0.1", "10.0.0.1"},
-		{"non-ip selected entry uses peer", 1, "unknown, 34.0.0.1", "10.0.0.1"},
+		{"no header uses peer", ptr(1), "", "10.0.0.1"},
+		{"unset hops keeps leftmost", nil, "192.0.2.77, 203.0.113.7, 34.0.0.1", "192.0.2.77"},
+		{"zero hops takes rightmost", ptr(0), "192.0.2.77, 203.0.113.7", "203.0.113.7"},
+		{"one hop skips the load balancer", ptr(1), "203.0.113.7,34.0.0.1", "203.0.113.7"},
+		{"one hop ignores client-supplied entries", ptr(1), "192.0.2.77, 192.0.2.78, 203.0.113.7, 34.0.0.1", "203.0.113.7"},
+		{"two hops", ptr(2), "192.0.2.77, 203.0.113.7, 34.0.0.1, 10.1.1.1", "203.0.113.7"},
+		{"header no longer than hops uses peer", ptr(1), "192.0.2.77", "10.0.0.1"},
+		{"ipv6 client", ptr(1), "2001:db8::1, 34.0.0.1", "2001:db8::1"},
+		{"empty selected entry uses peer", ptr(1), "192.0.2.77,,34.0.0.1", "10.0.0.1"},
+		{"non-ip selected entry uses peer", ptr(1), "unknown, 34.0.0.1", "10.0.0.1"},
+		{"zero hops non-ip rightmost uses peer", ptr(0), "203.0.113.7, unknown", "10.0.0.1"},
 	}
 
 	for _, tt := range tests {
@@ -228,7 +230,7 @@ func TestClientIP(t *testing.T) {
 }
 
 func TestClientIPMultipleHeaderLines(t *testing.T) {
-	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: 1}
+	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: ptr(1)}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.RemoteAddr = "10.0.0.1:41000"
 	req.Header.Add(defaultRateLimitHeader, "192.0.2.77, 192.0.2.78")
@@ -245,12 +247,13 @@ func TestClientIPMultipleHeaderLines(t *testing.T) {
 func TestPopulateContextForwardsFullXFFChain(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
-		hops  int
+		hops  *int
 		lines []string
 		want  string
 	}{
-		{"trusted hops keep every field in order", 1, []string{"192.0.2.77", "", "203.0.113.7, 34.0.0.1"}, "192.0.2.77, 203.0.113.7, 34.0.0.1"},
-		{"zero hops keeps the first field", 0, []string{"192.0.2.77", "203.0.113.7, 34.0.0.1"}, "192.0.2.77"},
+		{"trusted hops keep every field in order", ptr(1), []string{"192.0.2.77", "", "203.0.113.7, 34.0.0.1"}, "192.0.2.77, 203.0.113.7, 34.0.0.1"},
+		{"zero hops keep every field in order", ptr(0), []string{"192.0.2.77", "203.0.113.7"}, "192.0.2.77, 203.0.113.7"},
+		{"unset hops keeps the first field", nil, []string{"192.0.2.77", "203.0.113.7, 34.0.0.1"}, "192.0.2.77"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: tt.hops}
@@ -634,7 +637,7 @@ func TestHandleRPCSampledRequestLog(t *testing.T) {
 			t.Cleanup(func() { log.SetDefault(prev) })
 
 			srv := newMethodDurationServer(t, nil, nil, 1024)
-			srv.xffTrustedHops = 1
+			srv.xffTrustedHops = ptr(1)
 			srv.requestLogSampleRate = tt.sampleRate
 
 			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"eth_notMapped","params":[]}`))
@@ -668,7 +671,7 @@ func TestHandleRPCSampledRequestLogUnauthorized(t *testing.T) {
 	t.Cleanup(func() { log.SetDefault(prev) })
 
 	srv := newMethodDurationServer(t, nil, nil, 1024)
-	srv.xffTrustedHops = 1
+	srv.xffTrustedHops = ptr(1)
 	srv.requestLogSampleRate = 1
 	srv.authenticatedPaths = map[string]string{"secret": "alias"}
 
@@ -691,7 +694,12 @@ func TestHandleRPCSampledRequestLogUnauthorized(t *testing.T) {
 }
 
 func TestClientIPFallbackCounter(t *testing.T) {
-	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: 1}
+	var logBuf bytes.Buffer
+	prev := log.Root()
+	log.SetDefault(log.NewLogger(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { log.SetDefault(prev) })
+
+	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: ptr(1)}
 	for _, tt := range []struct {
 		reason string
 		header string
@@ -707,6 +715,7 @@ func TestClientIPFallbackCounter(t *testing.T) {
 			req.Header.Set(defaultRateLimitHeader, tt.header)
 			require.Equal(t, "10.0.0.1", s.clientIP(req))
 			require.Equal(t, before+1, gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels))
+			require.Contains(t, logBuf.String(), `"reason":"`+tt.reason+`"`)
 		})
 	}
 }

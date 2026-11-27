@@ -139,9 +139,10 @@ use_auth_alias = false
 # base_rate = 100
 # base_interval = "1s"
 # use_redis = false
-# Number of trusted proxies that append to X-Forwarded-For.
-# The client IP is the entry just left of them; set 1 behind a GCP Application Load
-# Balancer, which appends CLIENT_IP,LOAD_BALANCER_IP. Defaults to 0 (leftmost entry).
+# Number of trailing X-Forwarded-For entries appended by trusted proxies.
+# The client IP is the entry just left of them, so 0 takes the rightmost entry; set 1
+# behind a GCP Application Load Balancer, which appends CLIENT_IP,LOAD_BALANCER_IP.
+# Unset by default, which keeps the leftmost entry.
 # Callers that bypass those proxies choose their own key. Not combinable with ip_header_override.
 # xff_trusted_hops = 1
 

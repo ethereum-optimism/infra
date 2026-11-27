@@ -94,19 +94,21 @@ func TestParseCommaSeparatedList(t *testing.T) {
 func TestValidateClientIPConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		hops    int
+		hops    *int
 		header  string
 		rate    float64
 		wantErr bool
 	}{
-		{"defaults", 0, "", 0, false},
-		{"hops and sampling", 1, "", 0.01, false},
-		{"negative hops", -1, "", 0, true},
-		{"hops with ip_header_override", 1, "CF-Connecting-IP", 0, true},
-		{"ip_header_override without hops", 0, "CF-Connecting-IP", 0, false},
-		{"rate above one", 0, "", 1.5, true},
-		{"negative rate", 0, "", -0.1, true},
-		{"nan rate", 0, "", math.NaN(), true},
+		{"defaults", nil, "", 0, false},
+		{"hops and sampling", ptr(1), "", 0.01, false},
+		{"zero hops", ptr(0), "", 0, false},
+		{"negative hops", ptr(-1), "", 0, true},
+		{"hops with ip_header_override", ptr(1), "CF-Connecting-IP", 0, true},
+		{"zero hops with ip_header_override", ptr(0), "CF-Connecting-IP", 0, true},
+		{"ip_header_override without hops", nil, "CF-Connecting-IP", 0, false},
+		{"rate above one", nil, "", 1.5, true},
+		{"negative rate", nil, "", -0.1, true},
+		{"nan rate", nil, "", math.NaN(), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -79,10 +79,10 @@ type RateLimitConfig struct {
 	ErrorMessage     string                              `toml:"error_message"`
 	MethodOverrides  map[string]*RateLimitMethodOverride `toml:"method_overrides"`
 	IPHeaderOverride string                              `toml:"ip_header_override"`
-	// XFFTrustedHops is the number of trusted proxies that append to the IP
-	// header. The client IP is the entry immediately left of them; entries
-	// further left are client-supplied and ignored. 0 keeps the leftmost entry.
-	XFFTrustedHops int                              `toml:"xff_trusted_hops"`
+	// XFFTrustedHops is the number of trailing IP header entries appended by
+	// trusted proxies. The client IP is the entry immediately left of them, so 0
+	// takes the rightmost entry. Unset keeps the leftmost entry.
+	XFFTrustedHops *int                             `toml:"xff_trusted_hops"`
 	AliasOverrides map[string]*AliasRateLimitConfig `toml:"alias_overrides"`
 }
 
