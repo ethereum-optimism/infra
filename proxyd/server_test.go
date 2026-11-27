@@ -1,14 +1,19 @@
 package proxyd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -108,7 +113,7 @@ func TestRateLimitedRequestIsTracked(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Header.Set(defaultRateLimitHeader, "203.0.113.9")
-	ctx := s.populateContext(httptest.NewRecorder(), req)
+	ctx := s.populateContext(httptest.NewRecorder(), req, s.clientIP(req))
 	require.NotNil(t, ctx)
 
 	isLimited, err := s.limiterForRequest(ctx, req, false)
@@ -131,7 +136,7 @@ func TestRateLimitedRequestWithoutTracker(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Header.Set(defaultRateLimitHeader, "203.0.113.9")
-	ctx := s.populateContext(httptest.NewRecorder(), req)
+	ctx := s.populateContext(httptest.NewRecorder(), req, s.clientIP(req))
 	require.NotNil(t, ctx)
 
 	isLimited, err := s.limiterForRequest(ctx, req, false)
@@ -178,7 +183,86 @@ func TestPopulateContextRemoteAddrFallback(t *testing.T) {
 				req.Header.Set(defaultRateLimitHeader, tt.header)
 			}
 
-			ctx := s.populateContext(httptest.NewRecorder(), req)
+			ctx := s.populateContext(httptest.NewRecorder(), req, s.clientIP(req))
+			require.NotNil(t, ctx)
+			require.Equal(t, tt.want, GetXForwardedFor(ctx))
+		})
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name   string
+		hops   *int
+		header string
+		want   string
+	}{
+		{"no header uses peer", ptr(1), "", "10.0.0.1"},
+		{"unset hops keeps leftmost", nil, "192.0.2.77, 203.0.113.7, 34.0.0.1", "192.0.2.77"},
+		{"zero hops takes rightmost", ptr(0), "192.0.2.77, 203.0.113.7", "203.0.113.7"},
+		{"one hop skips the load balancer", ptr(1), "203.0.113.7,34.0.0.1", "203.0.113.7"},
+		{"one hop ignores client-supplied entries", ptr(1), "192.0.2.77, 192.0.2.78, 203.0.113.7, 34.0.0.1", "203.0.113.7"},
+		{"two hops", ptr(2), "192.0.2.77, 203.0.113.7, 34.0.0.1, 10.1.1.1", "203.0.113.7"},
+		{"header no longer than hops uses peer", ptr(1), "192.0.2.77", "10.0.0.1"},
+		{"ipv6 client", ptr(1), "2001:db8::1, 34.0.0.1", "2001:db8::1"},
+		{"empty selected entry uses peer", ptr(1), "192.0.2.77,,34.0.0.1", "10.0.0.1"},
+		{"non-ip selected entry uses peer", ptr(1), "unknown, 34.0.0.1", "10.0.0.1"},
+		{"zero hops non-ip rightmost uses peer", ptr(0), "203.0.113.7, unknown", "10.0.0.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: tt.hops}
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = "10.0.0.1:41000"
+			if tt.header != "" {
+				req.Header.Set(defaultRateLimitHeader, tt.header)
+			}
+
+			ctx := s.populateContext(httptest.NewRecorder(), req, s.clientIP(req))
+			require.NotNil(t, ctx)
+			require.Equal(t, tt.want, GetClientIP(ctx))
+			if tt.header != "" {
+				require.Equal(t, tt.header, GetXForwardedFor(ctx), "the forwarded header must stay unmodified")
+			}
+		})
+	}
+}
+
+func TestClientIPMultipleHeaderLines(t *testing.T) {
+	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: ptr(1)}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.RemoteAddr = "10.0.0.1:41000"
+	req.Header.Add(defaultRateLimitHeader, "192.0.2.77, 192.0.2.78")
+	req.Header.Add(defaultRateLimitHeader, "203.0.113.7, 34.0.0.1")
+	require.Equal(t, "203.0.113.7", s.clientIP(req))
+
+	emptyFirst := httptest.NewRequest("POST", "/", nil)
+	emptyFirst.RemoteAddr = "10.0.0.1:41000"
+	emptyFirst.Header.Add(defaultRateLimitHeader, "")
+	emptyFirst.Header.Add(defaultRateLimitHeader, "203.0.113.7, 34.0.0.1")
+	require.Equal(t, "203.0.113.7", s.clientIP(emptyFirst))
+}
+
+func TestPopulateContextForwardsFullXFFChain(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		hops  *int
+		lines []string
+		want  string
+	}{
+		{"trusted hops keep every field in order", ptr(1), []string{"192.0.2.77", "", "203.0.113.7, 34.0.0.1"}, "192.0.2.77, 203.0.113.7, 34.0.0.1"},
+		{"zero hops keep every field in order", ptr(0), []string{"192.0.2.77", "203.0.113.7"}, "192.0.2.77, 203.0.113.7"},
+		{"unset hops keeps the first field", nil, []string{"192.0.2.77", "203.0.113.7, 34.0.0.1"}, "192.0.2.77"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: tt.hops}
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = "10.0.0.1:41000"
+			for _, l := range tt.lines {
+				req.Header.Add(defaultRateLimitHeader, l)
+			}
+			ctx := s.populateContext(httptest.NewRecorder(), req, s.clientIP(req))
 			require.NotNil(t, ctx)
 			require.Equal(t, tt.want, GetXForwardedFor(ctx))
 		})
@@ -260,7 +344,7 @@ func TestAuthAliasLimiterErrorsAreTracked(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, authLimited(""), "limiter errors fail closed")
 
-	publicCtx := context.WithValue(req.Context(), ContextKeyXForwardedFor, "203.0.113.1") // nolint:staticcheck
+	publicCtx := context.WithValue(req.Context(), ContextKeyClientIP, "203.0.113.1") // nolint:staticcheck
 	publicLimited, err := s.limiterForRequest(publicCtx, req, false)
 	require.NoError(t, err)
 	require.True(t, publicLimited(""))
@@ -302,7 +386,7 @@ func TestAliasOverrideLimiterSelection(t *testing.T) {
 				}},
 			}
 			req := httptest.NewRequest("POST", "/", nil)
-			ctx := context.WithValue(req.Context(), ContextKeyXForwardedFor, "203.0.113.1") // nolint:staticcheck
+			ctx := context.WithValue(req.Context(), ContextKeyClientIP, "203.0.113.1") // nolint:staticcheck
 			if tt.alias != "" {
 				ctx = context.WithValue(ctx, ContextKeyAuth, tt.alias) // nolint:staticcheck
 			}
@@ -533,6 +617,134 @@ func TestNewAliasLimitersValidation(t *testing.T) {
 				return
 			}
 			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestHandleRPCSampledRequestLog(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		sampleRate float64
+		wantLogged bool
+	}{
+		{"sampled", 1, true},
+		{"disabled", 0, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			prev := log.Root()
+			log.SetDefault(log.NewLogger(slog.NewJSONHandler(&logBuf, nil)))
+			t.Cleanup(func() { log.SetDefault(prev) })
+
+			srv := newMethodDurationServer(t, nil, nil, 1024)
+			srv.xffTrustedHops = ptr(1)
+			srv.requestLogSampleRate = tt.sampleRate
+
+			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"eth_notMapped","params":[]}`))
+			req.Header.Set(defaultRateLimitHeader, "192.0.2.77, 203.0.113.7, 34.0.0.1")
+			rec := httptest.NewRecorder()
+			srv.HandleRPC(rec, req)
+
+			var entry map[string]any
+			for _, line := range bytes.Split(logBuf.Bytes(), []byte("\n")) {
+				var e map[string]any
+				if json.Unmarshal(line, &e) == nil && e["msg"] == "served RPC request" {
+					entry = e
+				}
+			}
+			if !tt.wantLogged {
+				require.Nil(t, entry)
+				return
+			}
+			require.NotNil(t, entry, "missing served RPC request log in %s", logBuf.String())
+			require.Equal(t, "203.0.113.7", entry["remote_ip"])
+			require.Equal(t, MethodNotAllowed, entry["method"])
+			require.EqualValues(t, rec.Code, entry["status"])
+		})
+	}
+}
+
+func TestHandleRPCSampledRequestLogUnauthorized(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := log.Root()
+	log.SetDefault(log.NewLogger(slog.NewJSONHandler(&logBuf, nil)))
+	t.Cleanup(func() { log.SetDefault(prev) })
+
+	srv := newMethodDurationServer(t, nil, nil, 1024)
+	srv.xffTrustedHops = ptr(1)
+	srv.requestLogSampleRate = 1
+	srv.authenticatedPaths = map[string]string{"secret": "alias"}
+
+	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`))
+	req.Header.Set(defaultRateLimitHeader, "192.0.2.77, 203.0.113.7, 34.0.0.1")
+	rec := httptest.NewRecorder()
+	srv.HandleRPC(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	var entry map[string]any
+	for _, line := range bytes.Split(logBuf.Bytes(), []byte("\n")) {
+		var e map[string]any
+		if json.Unmarshal(line, &e) == nil && e["msg"] == "served RPC request" {
+			entry = e
+		}
+	}
+	require.NotNil(t, entry, "missing served RPC request log in %s", logBuf.String())
+	require.Equal(t, "203.0.113.7", entry["remote_ip"])
+	require.EqualValues(t, http.StatusUnauthorized, entry["status"])
+}
+
+func TestClientIPFallbackCounter(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := log.Root()
+	log.SetDefault(log.NewLogger(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { log.SetDefault(prev) })
+
+	s := &Server{rateLimitHeader: defaultRateLimitHeader, xffTrustedHops: ptr(1)}
+	for _, tt := range []struct {
+		name   string
+		reason string
+		header string
+	}{
+		{"missing header", "header_too_short", ""},
+		{"short header", "header_too_short", "192.0.2.77"},
+		{"invalid entry", "invalid_entry", "unknown, 34.0.0.1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logBuf.Reset()
+			labels := map[string]string{"reason": tt.reason}
+			before := gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels)
+			req := httptest.NewRequest("POST", "/", nil)
+			req.RemoteAddr = "10.0.0.1:41000"
+			if tt.header != "" {
+				req.Header.Set(defaultRateLimitHeader, tt.header)
+			}
+			require.Equal(t, "10.0.0.1", s.clientIP(req))
+			require.Equal(t, before+1, gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels))
+			require.Contains(t, logBuf.String(), `"reason":"`+tt.reason+`"`)
+		})
+	}
+}
+
+func TestHandleRPCSampledFallbackCountedOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		authPath map[string]string
+	}{
+		{"accepted", nil},
+		{"unauthorized", map[string]string{"secret": "alias"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newMethodDurationServer(t, nil, nil, 1024)
+			srv.xffTrustedHops = ptr(1)
+			srv.requestLogSampleRate = 1
+			srv.authenticatedPaths = tt.authPath
+
+			labels := map[string]string{"reason": "header_too_short"}
+			before := gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels)
+			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`))
+			req.Header.Set(defaultRateLimitHeader, "192.0.2.77")
+			srv.HandleRPC(httptest.NewRecorder(), req)
+			require.Equal(t, before+1, gatherCounter(t, "proxyd_client_ip_fallbacks_total", labels))
 		})
 	}
 }

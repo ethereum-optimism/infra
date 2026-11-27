@@ -27,6 +27,9 @@ max_concurrent_ws_rpcs = 100
 log_level = "info"
 # Allow both authenticated and unauthenticated requests when authentication is configured
 # public_access = false
+# Fraction of HTTP requests, in [0, 1], logged at info as a one-line summary (client IP,
+# method, status, duration). Unlike enable_request_log, it never logs request bodies.
+# request_log_sample_rate = 0.01
 
 [redis]
 # URL to a Redis instance.
@@ -140,6 +143,12 @@ use_auth_alias = false
 # base_rate = 100
 # base_interval = "1s"
 # use_redis = false
+# Number of trailing X-Forwarded-For entries appended by trusted proxies.
+# The client IP is the entry just left of them, so 0 takes the rightmost entry; set 1
+# behind a GCP Application Load Balancer, which appends CLIENT_IP,LOAD_BALANCER_IP.
+# Unset by default, which keeps the leftmost entry.
+# Callers that bypass those proxies choose their own key. Not combinable with ip_header_override.
+# xff_trusted_hops = 1
 
 # Per-alias limits (requires use_auth_alias = true). Setting base_rate/base_interval or
 # infinite_rate_limit replaces the global base and global method overrides for the alias;

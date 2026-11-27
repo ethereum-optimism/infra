@@ -28,13 +28,17 @@ type ServerConfig struct {
 
 	MaxUpstreamBatchSize int `toml:"max_upstream_batch_size"`
 
-	EnableRequestLog      bool `toml:"enable_request_log"`
-	MaxRequestBodyLogLen  int  `toml:"max_request_body_log_len"`
-	EnablePprof           bool `toml:"enable_pprof"`
-	EnableXServedByHeader bool `toml:"enable_served_by_header"`
-	AllowAllOrigins       bool `toml:"allow_all_origins"`
-	PublicAccess          bool `toml:"public_access"`
-	EnableTxHashLogging   bool `toml:"enable_tx_hash_logging"`
+	EnableRequestLog     bool `toml:"enable_request_log"`
+	MaxRequestBodyLogLen int  `toml:"max_request_body_log_len"`
+	// RequestLogSampleRate is the fraction of HTTP requests, in [0, 1], logged at
+	// info as a one-line summary (client IP, method, status code). Unlike
+	// EnableRequestLog, it never logs request bodies.
+	RequestLogSampleRate  float64 `toml:"request_log_sample_rate"`
+	EnablePprof           bool    `toml:"enable_pprof"`
+	EnableXServedByHeader bool    `toml:"enable_served_by_header"`
+	AllowAllOrigins       bool    `toml:"allow_all_origins"`
+	PublicAccess          bool    `toml:"public_access"`
+	EnableTxHashLogging   bool    `toml:"enable_tx_hash_logging"`
 
 	// GracefulShutdownSeconds is the duration to wait during drain before shutting down.
 	// Defaults to 0 (no drain delay). Set to a positive value to enable graceful drain.
@@ -75,7 +79,11 @@ type RateLimitConfig struct {
 	ErrorMessage     string                              `toml:"error_message"`
 	MethodOverrides  map[string]*RateLimitMethodOverride `toml:"method_overrides"`
 	IPHeaderOverride string                              `toml:"ip_header_override"`
-	AliasOverrides   map[string]*AliasRateLimitConfig    `toml:"alias_overrides"`
+	// XFFTrustedHops is the number of trailing IP header entries appended by
+	// trusted proxies. The client IP is the entry immediately left of them, so 0
+	// takes the rightmost entry. Unset keeps the leftmost entry.
+	XFFTrustedHops *int                             `toml:"xff_trusted_hops"`
+	AliasOverrides map[string]*AliasRateLimitConfig `toml:"alias_overrides"`
 }
 
 type RateLimitMethodOverride struct {

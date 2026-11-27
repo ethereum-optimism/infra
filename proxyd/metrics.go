@@ -210,6 +210,17 @@ var (
 		"status_code",
 	})
 
+	// clientIPFallbacksTotal counts requests whose IP header was missing, too
+	// short or unusable under xff_trusted_hops, so the peer address was used.
+	// A steady rate suggests xff_trusted_hops does not match the proxy chain.
+	clientIPFallbacksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      "client_ip_fallbacks_total",
+		Help:      "Count of requests whose client IP fell back to the peer address under xff_trusted_hops.",
+	}, []string{
+		"reason",
+	})
+
 	rpcCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
 		Name:      "rpc_calls_total",

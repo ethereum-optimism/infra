@@ -170,6 +170,15 @@ a method with an override counts only against that method's quota; every other
 call counts against the base quota.
 By default, both are keyed by client IP, using `X-Forwarded-For` (or
 `ip_header_override`) with a fallback to the connection's remote IP.
+When `xff_trusted_hops` is unset, proxyd takes the leftmost header entry, which
+the client controls. Behind trusted proxies, set `xff_trusted_hops` to the
+number of trailing entries they append; the client IP is then the entry just
+left of them (`0` takes the rightmost entry), and a header with no more
+entries than that falls back to the connection's remote IP. The same client IP
+is logged as `remote_ip`. This holds only if every request reaches proxyd
+through exactly that many appending proxies: a caller that can reach proxyd
+directly (for example through its ClusterIP Service) chooses its own key. It
+cannot be combined with `ip_header_override`.
 
 Set `use_auth_alias = true` to key authenticated requests by their configured
 `[authentication]` alias instead:

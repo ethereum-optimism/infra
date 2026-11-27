@@ -1,6 +1,7 @@
 package proxyd
 
 import (
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -85,6 +86,38 @@ func TestParseCommaSeparatedList(t *testing.T) {
 			result := parseCommaSeparatedList(tt.input)
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("parseCommaSeparatedList(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateClientIPConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		hops    *int
+		header  string
+		rate    float64
+		wantErr bool
+	}{
+		{"defaults", nil, "", 0, false},
+		{"hops and sampling", ptr(1), "", 0.01, false},
+		{"zero hops", ptr(0), "", 0, false},
+		{"negative hops", ptr(-1), "", 0, true},
+		{"hops with ip_header_override", ptr(1), "CF-Connecting-IP", 0, true},
+		{"zero hops with ip_header_override", ptr(0), "CF-Connecting-IP", 0, true},
+		{"ip_header_override without hops", nil, "CF-Connecting-IP", 0, false},
+		{"rate above one", nil, "", 1.5, true},
+		{"negative rate", nil, "", -0.1, true},
+		{"nan rate", nil, "", math.NaN(), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.RateLimit.XFFTrustedHops = tt.hops
+			cfg.RateLimit.IPHeaderOverride = tt.header
+			cfg.Server.RequestLogSampleRate = tt.rate
+			if err := validateClientIPConfig(cfg); (err != nil) != tt.wantErr {
+				t.Fatalf("validateClientIPConfig() err = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
