@@ -210,8 +210,8 @@ var (
 		"status_code",
 	})
 
-	// clientIPFallbacksTotal counts requests whose IP header was present but
-	// unusable under xff_trusted_hops, so the peer address was used instead.
+	// clientIPFallbacksTotal counts requests whose IP header was missing, too
+	// short or unusable under xff_trusted_hops, so the peer address was used.
 	// A steady rate suggests xff_trusted_hops does not match the proxy chain.
 	clientIPFallbacksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,

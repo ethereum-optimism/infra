@@ -431,19 +431,20 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	var ctx context.Context
+	clientIP := s.clientIP(r)
 	if s.requestLogSampleRate > 0 && mrand.Float64() < s.requestLogSampleRate {
 		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		w = sw
 		defer func() {
 			// ctx is nil when populateContext rejected the request.
-			reqID, auth, remoteIP := "", "", s.clientIP(r)
+			reqID, auth := "", ""
 			if ctx != nil {
-				reqID, auth, remoteIP = GetReqID(ctx), GetAuthCtx(ctx), GetClientIP(ctx)
+				reqID, auth = GetReqID(ctx), GetAuthCtx(ctx)
 			}
 			log.Info("served RPC request",
 				"req_id", reqID,
 				"auth", auth,
-				"remote_ip", remoteIP,
+				"remote_ip", clientIP,
 				"method", methodLabel,
 				"status", sw.status,
 				"duration_ms", time.Since(start).Milliseconds(),
@@ -451,7 +452,7 @@ func (s *Server) HandleRPC(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	ctx = s.populateContext(w, r)
+	ctx = s.populateContext(w, r, clientIP)
 	if ctx == nil {
 		return
 	}
@@ -990,7 +991,7 @@ func (s *Server) handleBatchRPC(ctx context.Context, reqs []json.RawMessage, isL
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
-	ctx := s.populateContext(w, r)
+	ctx := s.populateContext(w, r, s.clientIP(r))
 	if ctx == nil {
 		return
 	}
@@ -1125,7 +1126,9 @@ func (s *Server) handleWSRPCInner(ctx context.Context, req *RPCReq, isLimited li
 	return res[0], servedBy
 }
 
-func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context.Context {
+// populateContext takes the already resolved client IP so that a fallback is
+// counted once per request.
+func (s *Server) populateContext(w http.ResponseWriter, r *http.Request, clientIP string) context.Context {
 	vars := mux.Vars(r)
 	authorization := vars["authorization"]
 	xff := s.forwardedChain(r)
@@ -1134,7 +1137,7 @@ func (s *Server) populateContext(w http.ResponseWriter, r *http.Request) context
 	}
 
 	ctx := context.WithValue(r.Context(), ContextKeyXForwardedFor, xff) // nolint:staticcheck
-	ctx = context.WithValue(ctx, ContextKeyClientIP, s.clientIP(r))     // nolint:staticcheck
+	ctx = context.WithValue(ctx, ContextKeyClientIP, clientIP)          // nolint:staticcheck
 	ctx = context.WithValue(ctx, ContextKeyReqReceivedAt, time.Now())   // nolint:staticcheck
 
 	opTxProxyAuth := r.Header.Get(DefaultOpTxProxyAuthHeader)
@@ -1189,7 +1192,8 @@ func (s *Server) forwardedChain(r *http.Request) string {
 
 // clientIP returns the caller's IP: the IP header entry immediately left of the
 // xffTrustedHops entries appended by trusted proxies, or the peer address when
-// the header is absent or too short to have passed through them.
+// the header is absent or too short to have passed through them. With
+// xffTrustedHops set, every fallback is counted and logged.
 func (s *Server) clientIP(r *http.Request) string {
 	if s.xffTrustedHops == nil {
 		header := r.Header.Get(s.rateLimitHeader)
@@ -1201,7 +1205,8 @@ func (s *Server) clientIP(r *http.Request) string {
 	hops := *s.xffTrustedHops
 	header := s.forwardedChain(r)
 	if header == "" {
-		return hostFromRemoteAddr(r.RemoteAddr)
+		// A trusted proxy always sets the header, so its absence is a fallback.
+		return s.clientIPFallback(r, header, "header_too_short")
 	}
 	entries := strings.Split(header, ",")
 	if len(entries) <= hops {
