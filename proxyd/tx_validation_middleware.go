@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -274,6 +276,14 @@ func validateTransactions(
 	start := time.Now()
 	validationResults, validationErr := validationFn(ctx, endpoint, payload)
 	duration := time.Since(start)
+	// The validation service leaves out of its response any transaction it
+	// could not parse, so a missing verdict means that transaction was never
+	// screened. Treat it like a service error so fail_open decides, rather than
+	// letting it pass silently. A definitive rejection of another transaction in
+	// the same request still wins and is handled below.
+	if validationErr == nil && !hasUnauthorized(validationResults) {
+		validationErr = missingVerdictsErr(txsWithSenders, validationResults)
+	}
 	if validationErr != nil {
 		if failOpen {
 			log.Warn("tx validation service error, allowing transactions through (fail_open=true)",
@@ -320,6 +330,39 @@ func validateTransactions(
 	)
 	txValidationResultsTotal.WithLabelValues(method, "passed").Inc()
 	return nil
+}
+
+// hasUnauthorized reports whether any transaction in the response is marked
+// unauthorized.
+func hasUnauthorized(verdicts map[string]bool) bool {
+	for _, isUnauthorized := range verdicts {
+		if isUnauthorized {
+			return true
+		}
+	}
+	return false
+}
+
+// missingVerdictsErr returns an error listing the transactions the validation
+// service returned no verdict for, or nil if every transaction has one. Hashes
+// are compared case-insensitively.
+func missingVerdictsErr(txs map[string]TransactionWithFrom, verdicts map[string]bool) error {
+	seen := make(map[string]struct{}, len(verdicts))
+	for txHash := range verdicts {
+		seen[strings.ToLower(txHash)] = struct{}{}
+	}
+	var missing []string
+	for txHash := range txs {
+		if _, ok := seen[strings.ToLower(txHash)]; !ok {
+			missing = append(missing, txHash)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("validation response has no verdict for %d of %d transactions: %s",
+		len(missing), len(txs), strings.Join(missing, ","))
 }
 
 // buildTxsWithSenders builds a map of tx hashes to TransactionWithFrom objects.

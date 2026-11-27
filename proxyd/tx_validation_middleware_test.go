@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,12 +134,70 @@ func TestValidateTransactions_SingleTx(t *testing.T) {
 	validationCalled := false
 	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
 		validationCalled = true
-		return map[string]bool{}, nil // empty map = no unauthorized txs
+		return map[string]bool{tx.Hash().Hex(): false}, nil
 	}
 
-	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, true)
+	// fail_open=false so a pass here can only come from the verdict itself.
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, false)
 	require.NoError(t, err)
 	require.True(t, validationCalled)
+}
+
+func TestValidateTransactions_MissingVerdict_FailOpen(t *testing.T) {
+	txs := []*types.Transaction{createSignedTestTransaction(t), createSignedTestTransaction(t)}
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		// The service could not parse the second tx and left it out.
+		return map[string]bool{txs[0].Hash().Hex(): false}, nil
+	}
+
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
+	require.NoError(t, err)
+}
+
+func TestValidateTransactions_MissingVerdict_FailClosed(t *testing.T) {
+	txs := []*types.Transaction{createSignedTestTransaction(t), createSignedTestTransaction(t)}
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return map[string]bool{txs[0].Hash().Hex(): false}, nil
+	}
+
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, false)
+	require.Equal(t, ErrTransactionRejected, err)
+}
+
+func TestValidateTransactions_EmptyResponse_FailClosed(t *testing.T) {
+	tx := createSignedTestTransaction(t)
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return map[string]bool{}, nil
+	}
+
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, false)
+	require.Equal(t, ErrTransactionRejected, err)
+}
+
+func TestValidateTransactions_UnauthorizedWinsOverMissingVerdict(t *testing.T) {
+	txs := []*types.Transaction{createSignedTestTransaction(t), createSignedTestTransaction(t)}
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		// One tx rejected, the other missing: must reject even with fail_open=true.
+		return map[string]bool{txs[0].Hash().Hex(): true}, nil
+	}
+
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", txs, "http://test", mockValidation, true)
+	require.Equal(t, ErrTransactionRejected, err)
+}
+
+func TestValidateTransactions_VerdictHashCaseInsensitive(t *testing.T) {
+	tx := createSignedTestTransaction(t)
+
+	mockValidation := func(ctx context.Context, endpoint string, payload []byte) (map[string]bool, error) {
+		return map[string]bool{"0x" + strings.ToUpper(tx.Hash().Hex()[2:]): false}, nil
+	}
+
+	err := validateTransactions(context.Background(), "eth_sendRawTransaction", []*types.Transaction{tx}, "http://test", mockValidation, false)
+	require.NoError(t, err)
 }
 
 func TestValidateTransactions_MultipleTxs(t *testing.T) {
